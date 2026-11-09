@@ -1,8 +1,9 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { validate } from './config/validate.js';
 import { HealthModule } from './health/health.module.js';
+import { ReferenceDataModule } from './modules/reference-data/reference-data.module.js';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { HealthModule } from './health/health.module.js';
       }),
     }),
     HealthModule,
+    ReferenceDataModule,
   ],
 })
 export class AppModule {}

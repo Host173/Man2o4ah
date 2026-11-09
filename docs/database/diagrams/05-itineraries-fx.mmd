@@ -1,0 +1,67 @@
+---
+title: itineraries and fx
+---
+classDiagram
+  direction LR
+  namespace itineraries {
+    class Itinerary {
+      ownerId : ObjectId
+      title : string
+      countryCodes : string[]
+      startDate : DateOnly
+      visibility : private/public
+      isHidden : boolean
+      authorDeactivated : boolean
+      clonedFrom : itineraryId, authorId
+      days : Day[0..60]
+      transportCosts : TransportCost[]
+      dayCount : int derived
+      cityIds : string[] derived
+    }
+    class Day {
+      <<embedded>>
+      cityId : string
+      notes : string?
+      activities : Activity[]
+      budgetEntries : BudgetEntry[]
+    }
+    class Activity {
+      <<embedded>>
+      name : string
+      description : string?
+      time : HH:mm?
+      cost : amountMinor, currency
+      images : ImageRef[0..5]
+      attractionId : string?
+    }
+    class BudgetEntry {
+      <<embedded>>
+      category : food/accommodation/in_city_transport/activities
+      amountMinor : int
+      currency : string
+      note : string?
+    }
+    class TransportCost {
+      <<embedded>>
+      dayId : ObjectId
+      mode : flight/train/bus/car/ferry/other
+      fromCityId : string
+      toCityId : string
+      amountMinor : int
+      currency : string
+    }
+  }
+  namespace fx {
+    class ExchangeRate {
+      rateDate : DateOnly unique
+      base : string
+      rates : Map~string, number~
+      fetchedAt : Date
+      source : string
+    }
+  }
+  Itinerary *-- "0..60" Day
+  Itinerary *-- "0..*" TransportCost
+  Day *-- "0..*" Activity
+  Day *-- "0..*" BudgetEntry
+  TransportCost ..> Day : dayId

@@ -1,0 +1,68 @@
+---
+title: accounts and reference-data
+---
+classDiagram
+  direction LR
+  namespace reference_data {
+    class Country {
+      _id : string (code)
+      name : string
+      currency : string
+    }
+    class City {
+      _id : string (city_id)
+      name : string
+      countryCode : string
+    }
+    class Airport {
+      _id : string (iata_code)
+      name : string
+      cityId : string
+      countryCode : string
+      timeZone : string (IANA)
+    }
+    class Attraction {
+      _id : string (attraction_id)
+      name : string
+      cityId : string
+    }
+    class Currency {
+      _id : string (ISO code)
+      name : string
+      minorUnits : int
+    }
+  }
+  namespace accounts {
+    class User {
+      name : string
+      email : string unique
+      passwordHash : string
+      role : user/admin/airline_moderator/hotel_moderator
+      status : active/suspended/deactivated
+      phone : string?
+      preferredCurrency : string
+      moderatorOf : ModeratorOf?
+      mustChangePassword : boolean
+      termsAcceptedAt : Date?
+      failedLoginAttempts : int
+      lockedUntil : Date?
+    }
+    class ModeratorOf {
+      <<embedded>>
+      providerType : airline/hotel
+      providerId : ObjectId
+    }
+    class Session {
+      userId : ObjectId
+      refreshTokenHash : string
+      lastActivityAt : Date
+      expiresAt : Date (TTL)
+    }
+  }
+  City --> Country : countryCode
+  Airport --> City : cityId
+  Attraction --> City : cityId
+  Country --> Currency : currency
+  User *-- "0..1" ModeratorOf
+  User ..> Currency : preferredCurrency
+  Session "*" --> "1" User : userId

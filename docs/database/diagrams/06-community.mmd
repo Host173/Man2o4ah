@@ -1,0 +1,64 @@
+---
+title: blog, moderation, notifications and audit
+---
+classDiagram
+  direction LR
+  namespace blog {
+    class Post {
+      authorId : ObjectId
+      title : string
+      body : string
+      tags : string[0..5]
+      images : ImageRef[0..5]
+      status : draft/published
+      publishedAt : Date?
+      likeCount : int
+      commentCount : int
+      isHidden : boolean
+      authorDeactivated : boolean
+    }
+    class Comment {
+      postId : ObjectId
+      authorId : ObjectId
+      body : string
+      isHidden : boolean
+    }
+    class Like {
+      postId : ObjectId
+      userId : ObjectId
+    }
+  }
+  namespace moderation {
+    class Report {
+      reporterId : ObjectId
+      targetType : post/comment/review/itinerary
+      targetId : ObjectId
+      reason : string
+      status : open/dismissed/content_hidden/content_deleted
+      resolvedBy : ObjectId?
+      resolvedAt : Date?
+    }
+  }
+  namespace notifications {
+    class Notification {
+      userId : ObjectId
+      type : string
+      title : string
+      message : string
+      entity : type, id
+      readAt : Date?
+    }
+  }
+  namespace audit {
+    class AuditLog {
+      actorId : ObjectId
+      action : string
+      target : type, id
+      details : object
+      createdAt : Date
+    }
+  }
+  Comment "*" --> "1" Post : postId
+  Like "*" --> "1" Post : postId (unique postId+userId)
+  Report ..> Post : targetType + targetId
+  Report ..> Comment : targetType + targetId

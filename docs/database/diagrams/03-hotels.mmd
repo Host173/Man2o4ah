@@ -1,0 +1,89 @@
+---
+title: hotels and hotel-bookings
+---
+classDiagram
+  direction LR
+  namespace hotels {
+    class Hotel {
+      name : string
+      address : string
+      cityId : string
+      countryCode : string
+      description : string?
+      photos : ImageRef[0..5]
+      starRating : int?
+      amenities : string[]
+      checkInTime : HH:mm
+      checkOutTime : HH:mm
+      cancellationPolicy.tiers : CancellationTier[]
+      isActive : boolean
+      ratingSummary : average, count
+    }
+    class Room {
+      hotelId : ObjectId
+      name : string unique in hotel
+      type : string
+      beds : int
+      maxOccupancy : int
+      pricePerNightMinor : int
+      isActive : boolean
+      availability : AvailabilityRange[]
+      hasEverBeenReserved : boolean
+      inventoryVersion : int
+    }
+    class AvailabilityRange {
+      <<embedded>>
+      fromDate : DateOnly
+      toDate : DateOnly inclusive
+    }
+    class RoomNight {
+      roomId : ObjectId
+      hotelId : ObjectId
+      date : DateOnly
+      kind : reservation/blocked
+      reservationId : ObjectId?
+      blockId : ObjectId?
+    }
+  }
+  namespace hotel_bookings {
+    class HotelReservation {
+      userId : ObjectId
+      hotelId : ObjectId
+      reference : string? unique
+      status : pending_payment/confirmed/completed/expired/cancelled
+      checkInDate : DateOnly
+      checkOutDate : DateOnly
+      nights : int
+      rooms : ReservedRoom[]
+      totalMinor : int
+      currency : string
+      policySnapshot : tiers, checkIn/Out times
+      holdExpiresAt : Date
+      cancellation : Cancellation?
+    }
+    class ReservedRoom {
+      <<embedded>>
+      roomId : ObjectId
+      roomName, roomType : snapshots
+      pricePerNightMinor : int snapshot
+      adults : int
+      childAges : int[]
+      subtotalMinor : int
+    }
+    class Review {
+      reservationId : ObjectId unique
+      hotelId : ObjectId
+      userId : ObjectId
+      rating : int 1-5
+      text : string?
+      isHidden : boolean
+    }
+  }
+  Room "*" --> "1" Hotel : hotelId
+  Room *-- "0..*" AvailabilityRange
+  RoomNight "*" --> "1" Room : roomId (unique roomId+date)
+  RoomNight ..> HotelReservation : reservationId
+  HotelReservation *-- "1..*" ReservedRoom
+  HotelReservation ..> Hotel : hotelId
+  ReservedRoom ..> Room : roomId
+  Review "0..1" --> "1" HotelReservation : reservationId

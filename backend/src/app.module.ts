@@ -7,6 +7,8 @@ import { ReferenceDataModule } from './modules/reference-data/reference-data.mod
 import { AccountsModule } from './modules/accounts/accounts.module.js';
 import { FlightsModule } from './modules/flights/flights.module.js';
 import { FlightBookingsModule } from './modules/flight-bookings/flight-bookings.module.js';
+import { HotelsModule } from './modules/hotels/hotels.module.js';
+import { HotelBookingsModule } from './modules/hotel-bookings/hotel-bookings.module.js';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { FlightBookingsModule } from './modules/flight-bookings/flight-bookings.
     AccountsModule,
     FlightsModule,
     FlightBookingsModule,
+    HotelsModule,
+    HotelBookingsModule,
   ],
 })
 export class AppModule {}

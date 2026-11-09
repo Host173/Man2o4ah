@@ -1,10 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import type { HydratedDocument } from 'mongoose';
 import {
-  CancellationTier,
-  CancellationTierSchema,
-  uniqueDaysBeforeValidator,
-} from '../../../common/database/cancellation-tier.schema.js';
+  CancellationPolicy,
+  CancellationPolicySchema,
+} from '../../../common/database/cancellation-policy.schema.js';
 import {
   ImageRef,
   ImageRefSchema,
@@ -35,16 +34,6 @@ export class BaggagePolicy {
 }
 
 export const BaggagePolicySchema = SchemaFactory.createForClass(BaggagePolicy);
-
-/** Airline cancellation policy (FLT-09). */
-@Schema({ _id: false })
-export class CancellationPolicy {
-  @Prop({ type: [CancellationTierSchema], validate: uniqueDaysBeforeValidator })
-  tiers!: CancellationTier[];
-}
-
-export const CancellationPolicySchema =
-  SchemaFactory.createForClass(CancellationPolicy);
 
 @Schema({ collection: 'airlines', timestamps: true })
 export class Airline {

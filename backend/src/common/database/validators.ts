@@ -5,6 +5,12 @@ export const integerValidator = {
   message: '{PATH} must be an integer.',
 };
 
+/** Number strictly greater than 0 (`min: 0` would allow 0). */
+export const positiveNumberValidator = {
+  validator: (value: unknown) => typeof value === 'number' && value > 0,
+  message: '{PATH} must be greater than 0.',
+};
+
 /** 24h time of day, HH 00-23, mm 00-59. */
 export const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 

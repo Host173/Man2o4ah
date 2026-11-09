@@ -5,6 +5,8 @@ import { validate } from './config/validate.js';
 import { HealthModule } from './health/health.module.js';
 import { ReferenceDataModule } from './modules/reference-data/reference-data.module.js';
 import { AccountsModule } from './modules/accounts/accounts.module.js';
+import { FlightsModule } from './modules/flights/flights.module.js';
+import { FlightBookingsModule } from './modules/flight-bookings/flight-bookings.module.js';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { AccountsModule } from './modules/accounts/accounts.module.js';
     HealthModule,
     ReferenceDataModule,
     AccountsModule,
+    FlightsModule,
+    FlightBookingsModule,
   ],
 })
 export class AppModule {}

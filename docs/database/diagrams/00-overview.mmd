@@ -1,0 +1,83 @@
+---
+title: "Data model overview — solid arrow = reference inside a module, dashed = reference to another module (most collections also hold a userId → users)"
+---
+classDiagram
+  direction TB
+  namespace reference_data {
+    class countries
+    class cities
+    class airports
+    class attractions
+    class currencies
+  }
+  namespace accounts {
+    class users
+    class sessions
+  }
+  namespace flights {
+    class airlines
+    class flights_["flights"]
+  }
+  namespace flight_bookings {
+    class flight_bookings_["flight_bookings"]
+  }
+  namespace hotels {
+    class hotels_["hotels"]
+    class rooms
+    class room_nights
+  }
+  namespace hotel_bookings {
+    class hotel_reservations
+    class reviews
+  }
+  namespace payments {
+    class payments_["payments"]
+    class refunds
+    class policy_acceptances
+    class stripe_webhook_events
+  }
+  namespace itineraries {
+    class itineraries_["itineraries"]
+  }
+  namespace fx {
+    class exchange_rates
+  }
+  namespace blog {
+    class posts
+    class comments
+    class likes
+  }
+  namespace moderation {
+    class reports
+  }
+  namespace notifications {
+    class notifications_["notifications"]
+  }
+  namespace audit {
+    class audit_logs
+  }
+
+  cities --> countries
+  airports --> cities
+  attractions --> cities
+  countries --> currencies
+  sessions --> users
+  flights_ --> airlines
+  flights_ ..> airports
+  rooms --> hotels_
+  room_nights --> rooms
+  room_nights ..> hotel_reservations
+  hotels_ ..> cities
+  flight_bookings_ ..> flights_
+  hotel_reservations ..> hotels_
+  hotel_reservations ..> rooms
+  reviews --> hotel_reservations
+  payments_ ..> flight_bookings_
+  payments_ ..> hotel_reservations
+  refunds --> payments_
+  policy_acceptances ..> flight_bookings_
+  policy_acceptances ..> hotel_reservations
+  itineraries_ ..> cities
+  comments --> posts
+  likes --> posts
+  reports ..> posts : target (post, comment, review, itinerary)

@@ -1,0 +1,49 @@
+---
+title: payments
+---
+classDiagram
+  direction LR
+  namespace payments {
+    class Payment {
+      bookingType : flight/hotel
+      bookingId : ObjectId
+      userId : ObjectId
+      stripePaymentIntentId : string unique
+      amountMinor : int
+      currency : string
+      status : pending/failed/succeeded/canceled
+    }
+    class Refund {
+      paymentId : ObjectId
+      bookingType : flight/hotel
+      bookingId : ObjectId
+      userId : ObjectId
+      stripeRefundId : string?
+      amountMinor : int
+      currency : string
+      reason : user_cancellation/provider_cancellation/late_payment
+      status : pending/refunded/failed
+    }
+    class PolicyAcceptance {
+      bookingType : flight/hotel
+      bookingId : ObjectId
+      userId : ObjectId
+      acceptedAt : Date
+    }
+    class StripeWebhookEvent {
+      _id : string (Stripe event id)
+      type : string
+      receivedAt : Date (TTL 30d)
+    }
+  }
+  class FlightBooking {
+    <<flight-bookings>>
+  }
+  class HotelReservation {
+    <<hotel-bookings>>
+  }
+  Refund "0..1" --> "1" Payment : paymentId
+  Payment ..> FlightBooking : bookingType + bookingId
+  Payment ..> HotelReservation : bookingType + bookingId
+  PolicyAcceptance ..> FlightBooking : bookingType + bookingId
+  PolicyAcceptance ..> HotelReservation : bookingType + bookingId

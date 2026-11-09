@@ -1,0 +1,100 @@
+---
+title: flights and flight-bookings
+---
+classDiagram
+  direction LR
+  namespace flights {
+    class Airline {
+      name : string
+      code : string unique
+      logo : ImageRef?
+      isActive : boolean
+      baggagePolicy : BaggagePolicy
+      cancellationPolicy.tiers : CancellationTier[]
+    }
+    class BaggagePolicy {
+      <<embedded>>
+      extraBagPriceMinor : int?
+      maxExtraBagsPerPassenger : int
+    }
+    class CancellationTier {
+      <<embedded>>
+      daysBefore : int unique in list
+      refundPercent : int 0-100
+    }
+    class Flight {
+      airlineId : ObjectId
+      flightNumber : string
+      departureAirportId : string
+      arrivalAirportId : string
+      departureAt : Date UTC
+      arrivalAt : Date UTC
+      departureLocalDate : YYYY-MM-DD
+      durationMinutes : int
+      status : scheduled/cancelled/departed
+      hasBookings : boolean
+      cabins : Cabin[]
+    }
+    class Cabin {
+      <<embedded>>
+      cabinClass : economy/premium_economy/business/first
+      totalSeats : int
+      availableSeats : int
+      heldSeats : int
+      bookedSeats : int
+      priceMinor : int
+      freeBags : int
+      maxBagWeightKg : number
+    }
+  }
+  namespace flight_bookings {
+    class FlightBooking {
+      userId : ObjectId
+      reference : string? unique
+      status : pending_payment/confirmed/completed/expired/cancelled
+      tripType : one_way/round_trip
+      segments : FlightSegment[]
+      passengers : Passenger[]
+      seatCount : int
+      pricing : Pricing
+      holdExpiresAt : Date
+      firstDepartureAt : Date
+      lastDepartureAt : Date
+      cancellation : Cancellation?
+    }
+    class FlightSegment {
+      <<embedded>>
+      direction : outbound/return
+      flightId : ObjectId
+      cabinId : ObjectId
+      cabinClass : string
+      airlineId, flightNumber : copies
+      departureAt, arrivalAt : synced copies
+      fareMinor : int snapshot
+      policy : SegmentPolicy snapshot
+    }
+    class Passenger {
+      <<embedded>>
+      type : adult/child/infant
+      fullName : string
+      dateOfBirth : DateOnly
+      documentNumber : string
+      extraBagCount : int
+      extraBagWeightKg : number
+    }
+    class Cancellation {
+      <<embedded>>
+      cancelledAt : Date
+      cancelledBy : user/provider
+      refundPercent : int
+      refundAmountMinor : int
+    }
+  }
+  Airline *-- BaggagePolicy
+  Airline *-- "0..*" CancellationTier
+  Flight "*" --> "1" Airline : airlineId
+  Flight *-- "0..4" Cabin
+  FlightBooking *-- "1..2" FlightSegment
+  FlightBooking *-- "1..*" Passenger
+  FlightBooking *-- "0..1" Cancellation
+  FlightSegment ..> Flight : flightId + cabinId

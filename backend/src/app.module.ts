@@ -10,6 +10,8 @@ import { FlightBookingsModule } from './modules/flight-bookings/flight-bookings.
 import { HotelsModule } from './modules/hotels/hotels.module.js';
 import { HotelBookingsModule } from './modules/hotel-bookings/hotel-bookings.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
+import { ItinerariesModule } from './modules/itineraries/itineraries.module.js';
+import { FxModule } from './modules/fx/fx.module.js';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
     HotelsModule,
     HotelBookingsModule,
     PaymentsModule,
+    ItinerariesModule,
+    FxModule,
   ],
 })
 export class AppModule {}

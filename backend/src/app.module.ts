@@ -9,6 +9,7 @@ import { FlightsModule } from './modules/flights/flights.module.js';
 import { FlightBookingsModule } from './modules/flight-bookings/flight-bookings.module.js';
 import { HotelsModule } from './modules/hotels/hotels.module.js';
 import { HotelBookingsModule } from './modules/hotel-bookings/hotel-bookings.module.js';
+import { PaymentsModule } from './modules/payments/payments.module.js';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { HotelBookingsModule } from './modules/hotel-bookings/hotel-bookings.mod
     FlightBookingsModule,
     HotelsModule,
     HotelBookingsModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

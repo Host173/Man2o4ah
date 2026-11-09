@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { integerValidator } from '../../../common/database/validators.js';
 import { dateOnlyValidator } from '../../../common/dates/date-only.js';
@@ -53,7 +53,7 @@ const nonOverlappingRangesValidator = {
 @Schema({ collection: 'rooms', timestamps: true })
 export class Room {
   /** → hotels */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   hotelId!: Types.ObjectId;
 
   /** Room number/name; unique within the hotel through the { hotelId, name } index (HTL-03). */

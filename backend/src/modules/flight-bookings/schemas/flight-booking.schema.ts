@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { CabinClass } from '../../../common/database/cabin-class.js';
 import {
@@ -85,18 +85,18 @@ export class FlightSegment {
   direction!: SegmentDirection;
 
   /** → flights */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   flightId!: Types.ObjectId;
 
   /** _id of the cabin inside that flight. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   cabinId!: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: Object.values(CabinClass) })
   cabinClass!: CabinClass;
 
   /** → airlines */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   airlineId!: Types.ObjectId;
 
   @Prop({ type: String, required: true })
@@ -205,7 +205,7 @@ function countByType(passengers: Passenger[], type: PassengerType): number {
 @Schema({ collection: 'flight_bookings', timestamps: true })
 export class FlightBooking {
   /** → users (owner, ACC-11) */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   /** Set on confirmation (FLT-23). Unique through a partial index (strings only). */

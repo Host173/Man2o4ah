@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { integerValidator } from '../../../common/database/validators.js';
 
@@ -7,15 +7,15 @@ import { integerValidator } from '../../../common/database/validators.js';
 @Schema({ collection: 'reviews', timestamps: true })
 export class Review {
   /** → hotel_reservations; unique through the { reservationId } index. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   reservationId!: Types.ObjectId;
 
   /** → hotels; copy. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   hotelId!: Types.ObjectId;
 
   /** → users; must own the reservation (checked by the service). */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   @Prop({

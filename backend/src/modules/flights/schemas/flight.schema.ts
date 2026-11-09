@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { CabinClass } from '../../../common/database/cabin-class.js';
 import {
@@ -70,7 +70,7 @@ export const CabinSchema = SchemaFactory.createForClass(Cabin);
 @Schema({ collection: 'flights', timestamps: true })
 export class Flight {
   /** → airlines */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   airlineId!: Types.ObjectId;
 
   @Prop({ type: String, required: true, trim: true, uppercase: true })

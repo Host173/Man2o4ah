@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { BookingType } from '../../../common/database/booking-type.js';
 
@@ -13,11 +13,11 @@ export class PolicyAcceptance {
   bookingType!: BookingType;
 
   /** → flight_bookings or hotel_reservations, depending on bookingType. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   bookingId!: Types.ObjectId;
 
   /** → users */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   /** PAY-02 timestamp. */

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { integerValidator } from '../../../common/database/validators.js';
 import { getPlatformCurrency } from '../../../common/money/platform-currency.js';
@@ -43,7 +43,7 @@ export class ModeratorOf {
   providerType!: ProviderType;
 
   /** → airlines or hotels, by providerType */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   providerId!: Types.ObjectId;
 }
 

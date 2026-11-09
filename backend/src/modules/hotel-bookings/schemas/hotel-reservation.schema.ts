@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import {
   Cancellation,
@@ -37,7 +37,7 @@ const RESERVATION_REFERENCE = /^HR[A-Z0-9]{6}$/;
 @Schema()
 export class ReservedRoom {
   /** → rooms */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   roomId!: Types.ObjectId;
 
   @Prop({ type: String, required: true })
@@ -87,11 +87,11 @@ export const PolicySnapshotSchema =
 @Schema({ collection: 'hotel_reservations', timestamps: true })
 export class HotelReservation {
   /** → users (owner) */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   /** → hotels; all rooms belong to this hotel (HTL-16, checked by the service). */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   hotelId!: Types.ObjectId;
 
   /** Set on confirmation (HTL-17). Unique through a partial index (strings only). */

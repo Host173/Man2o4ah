@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { dateOnlyValidator } from '../../../common/dates/date-only.js';
 
@@ -16,11 +16,11 @@ export type RoomNightKind = (typeof RoomNightKind)[keyof typeof RoomNightKind];
 @Schema({ collection: 'room_nights', timestamps: true })
 export class RoomNight {
   /** → rooms */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   roomId!: Types.ObjectId;
 
   /** → hotels; copy, for per-hotel queries. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   hotelId!: Types.ObjectId;
 
   /** The night. */
@@ -32,7 +32,7 @@ export class RoomNight {
 
   /** → hotel_reservations; required when kind = reservation, absent otherwise. */
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     required(this: RoomNight) {
       return this.kind === RoomNightKind.RESERVATION;
     },
@@ -47,7 +47,7 @@ export class RoomNight {
 
   /** Groups the nights of one blocked range (HTL-06); required when kind = blocked, absent otherwise. */
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     required(this: RoomNight) {
       return this.kind === RoomNightKind.BLOCKED;
     },

@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 
 /** One document per logged-in device (ACC-06, ACC-19). */
 @Schema({ collection: 'sessions', timestamps: true })
 export class Session {
   /** → users */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   /** SHA-256 of the refresh token; the token itself is never stored. */

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { BookingType } from '../../../common/database/booking-type.js';
 import { integerValidator } from '../../../common/database/validators.js';
@@ -24,18 +24,18 @@ export type RefundStatus = (typeof RefundStatus)[keyof typeof RefundStatus];
 @Schema({ collection: 'refunds', timestamps: true })
 export class Refund {
   /** → payments */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   paymentId!: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: Object.values(BookingType) })
   bookingType!: BookingType;
 
   /** → flight_bookings or hotel_reservations, depending on bookingType. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   bookingId!: Types.ObjectId;
 
   /** → users */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
   /** Set once Stripe accepts the request; unique when present (partial index). */

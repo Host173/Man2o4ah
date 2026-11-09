@@ -1,0 +1,24 @@
+AI prompt log — record every prompt that materially contributed to the project.
+
+Entry format:
+================================================
+Date: YYYY-MM-DD
+Student: <name>
+Tool: <AI tool used>
+Related Requirement: <requirement id or area>
+Prompt:
+<the prompt, verbatim or faithfully summarized>
+How the output was used:
+<what was kept, changed or discarded>
+================================================
+
+================================================
+Date: 2026-11-10
+Student: Kareem
+Tool: Claude Code
+Related Requirement: Project setup
+Prompt:
+Scaffold execution file: initialize the NestJS backend (Mongoose, Swagger, health check) and the Next.js frontend.
+How the output was used:
+Generated the initial project structure, reviewed before merging.
+================================================

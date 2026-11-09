@@ -12,6 +12,10 @@ import { HotelBookingsModule } from './modules/hotel-bookings/hotel-bookings.mod
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ItinerariesModule } from './modules/itineraries/itineraries.module.js';
 import { FxModule } from './modules/fx/fx.module.js';
+import { BlogModule } from './modules/blog/blog.module.js';
+import { ModerationModule } from './modules/moderation/moderation.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { AuditModule } from './modules/audit/audit.module.js';
 
 @Module({
   imports: [
@@ -32,6 +36,10 @@ import { FxModule } from './modules/fx/fx.module.js';
     PaymentsModule,
     ItinerariesModule,
     FxModule,
+    BlogModule,
+    ModerationModule,
+    NotificationsModule,
+    AuditModule,
   ],
 })
 export class AppModule {}

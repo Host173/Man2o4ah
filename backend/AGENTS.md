@@ -1,3 +1,5 @@
+> **Team rules take precedence.** Read `/README.md` ("Team rules") and `/docs/ai/skills/travel-platform/SKILL.md` first. Where this file conflicts with them, follow them.
+
 # AGENTS.md
 
 ## NestJS

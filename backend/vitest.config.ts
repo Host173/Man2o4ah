@@ -17,8 +17,10 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['**/*.spec.ts', '**/*.e2e-spec.ts'],
       thresholds: {
-        // Quality gate: business logic must stay well covered. No global
-        // threshold on purpose.
+        // Quality gate: every service must stay well covered, file by file, so
+        // a well-tested service can't hide an untested one. No global
+        // threshold on purpose, so perFile only affects the glob below.
+        perFile: true,
         'src/modules/**/*.service.ts': { lines: 80 },
       },
     },

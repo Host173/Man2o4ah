@@ -9,3 +9,16 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+
+# Personal AI agent files (see AGENTS.example.md)
+/AGENTS.md
+/CLAUDE.md
+/CLAUDE.local.md
+/GEMINI.md
+.claude/
+.codex/
+.cursor/
+.gemini/
+.windsurf/
+.agents/
+.aider*

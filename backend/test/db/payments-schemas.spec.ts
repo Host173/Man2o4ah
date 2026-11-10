@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import type { Model, Schema } from 'mongoose';
+import { getPlatformCurrency } from '../../src/common/money/platform-currency.js';
 import {
   Payment,
   PaymentSchema,
@@ -24,13 +25,13 @@ import {
 
 function paymentDoc(overrides: Record<string, unknown> = {}) {
   return {
-    bookingType: 'flight',
+    bookingType: 'flight' as const,
     bookingId: new Types.ObjectId(),
     userId: new Types.ObjectId(),
     stripePaymentIntentId: `pi_${new Types.ObjectId().toHexString()}`,
     amountMinor: 45_000,
     currency: 'USD',
-    status: 'pending',
+    status: 'pending' as const,
     ...overrides,
   };
 }
@@ -38,20 +39,20 @@ function paymentDoc(overrides: Record<string, unknown> = {}) {
 function refundDoc(overrides: Record<string, unknown> = {}) {
   return {
     paymentId: new Types.ObjectId(),
-    bookingType: 'hotel',
+    bookingType: 'hotel' as const,
     bookingId: new Types.ObjectId(),
     userId: new Types.ObjectId(),
     amountMinor: 18_000,
     currency: 'USD',
-    reason: 'user_cancellation',
-    status: 'pending',
+    reason: 'user_cancellation' as const,
+    status: 'pending' as const,
     ...overrides,
   };
 }
 
 function acceptanceDoc(overrides: Record<string, unknown> = {}) {
   return {
-    bookingType: 'flight',
+    bookingType: 'flight' as const,
     bookingId: new Types.ObjectId(),
     userId: new Types.ObjectId(),
     acceptedAt: new Date(),
@@ -102,13 +103,13 @@ describe('payments schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('payments');
-    payments = db.connection.model(Payment.name, PaymentSchema);
-    refunds = db.connection.model(Refund.name, RefundSchema);
-    acceptances = db.connection.model(
+    payments = db.connection.model<Payment>(Payment.name, PaymentSchema);
+    refunds = db.connection.model<Refund>(Refund.name, RefundSchema);
+    acceptances = db.connection.model<PolicyAcceptance>(
       PolicyAcceptance.name,
       PolicyAcceptanceSchema,
     );
-    events = db.connection.model(
+    events = db.connection.model<StripeWebhookEvent>(
       StripeWebhookEvent.name,
       StripeWebhookEventSchema,
     );
@@ -166,17 +167,28 @@ describe('payments schemas', () => {
       const payment = await payments.create(paymentDoc());
       expect(payment.currency).toBe('USD');
       expect(payment.status).toBe('pending');
-      expect(payment.createdAt).toBeInstanceOf(Date);
+      expect(payment.get('createdAt')).toBeInstanceOf(Date);
     });
 
-    it('requires every field, with no default for currency or status', async () => {
+    it('defaults currency to the platform currency when it is not given', async () => {
+      const payment = await payments.create(
+        paymentDoc({ currency: undefined }),
+      );
+      expect(payment.currency).toBe(getPlatformCurrency());
+      const stored = await payments.collection.findOne({ _id: payment._id });
+      expect(stored?.currency).toBe(getPlatformCurrency());
+      await expect(
+        new payments(paymentDoc({ currency: '' })).validate(),
+      ).rejects.toThrow(/currency.*required/);
+    });
+
+    it('requires every field, with no default for status', async () => {
       for (const field of [
         'bookingType',
         'bookingId',
         'userId',
         'stripePaymentIntentId',
         'amountMinor',
-        'currency',
         'status',
       ]) {
         await expect(
@@ -258,19 +270,28 @@ describe('payments schemas', () => {
       const refund = await refunds.create(refundDoc());
       expect(refund.stripeRefundId).toBeUndefined();
       expect(refund.currency).toBe('USD');
-      expect(refund.createdAt).toBeInstanceOf(Date);
+      expect(refund.get('createdAt')).toBeInstanceOf(Date);
       const stored = await refunds.collection.findOne({ _id: refund._id });
       expect(stored).not.toHaveProperty('stripeRefundId');
     });
 
-    it('requires every field but stripeRefundId, with no default for currency or status', async () => {
+    it('defaults currency to the platform currency when it is not given', async () => {
+      const refund = await refunds.create(refundDoc({ currency: undefined }));
+      expect(refund.currency).toBe(getPlatformCurrency());
+      const stored = await refunds.collection.findOne({ _id: refund._id });
+      expect(stored?.currency).toBe(getPlatformCurrency());
+      await expect(
+        new refunds(refundDoc({ currency: '' })).validate(),
+      ).rejects.toThrow(/currency.*required/);
+    });
+
+    it('requires every field but stripeRefundId, with no default for status', async () => {
       for (const field of [
         'paymentId',
         'bookingType',
         'bookingId',
         'userId',
         'amountMinor',
-        'currency',
         'reason',
         'status',
       ]) {
@@ -362,7 +383,7 @@ describe('payments schemas', () => {
     it('saves a valid acceptance', async () => {
       const acceptance = await acceptances.create(acceptanceDoc());
       expect(acceptance.acceptedAt).toBeInstanceOf(Date);
-      expect(acceptance.createdAt).toBeInstanceOf(Date);
+      expect(acceptance.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('requires every field and a valid bookingType', async () => {
@@ -409,9 +430,11 @@ describe('payments schemas', () => {
     it('saves an event with the Stripe event ID as its string _id', async () => {
       const event = await events.create(eventDoc({ _id: 'evt_1' }));
       expect(event._id).toBe('evt_1');
-      const stored = await events.collection.findOne({ _id: 'evt_1' });
+      const stored = await events.collection.conn.db
+        ?.collection<{ _id: string }>('stripe_webhook_events')
+        .findOne({ _id: 'evt_1' });
       expect(stored?._id).toBe('evt_1');
-      expect(event.createdAt).toBeInstanceOf(Date);
+      expect(event.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('requires _id, type and receivedAt', async () => {

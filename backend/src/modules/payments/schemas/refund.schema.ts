@@ -3,6 +3,7 @@ import { Schema as MongooseSchema, Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { BookingType } from '../../../common/database/booking-type.js';
 import { integerValidator } from '../../../common/database/validators.js';
+import { getPlatformCurrency } from '../../../common/money/platform-currency.js';
 
 /** `late_payment` = payment succeeded after the hold expired. */
 export const RefundReason = {
@@ -45,8 +46,8 @@ export class Refund {
   @Prop({ type: Number, required: true, min: 1, validate: integerValidator })
   amountMinor!: number;
 
-  /** → currencies (by ID); stored explicitly, no default. */
-  @Prop({ type: String, required: true })
+  /** → currencies (by ID); defaults to the platform currency. */
+  @Prop({ type: String, required: true, default: () => getPlatformCurrency() })
   currency!: string;
 
   @Prop({ type: String, required: true, enum: Object.values(RefundReason) })

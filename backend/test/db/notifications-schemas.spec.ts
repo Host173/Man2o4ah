@@ -25,7 +25,7 @@ const TYPES = [
 function notificationDoc(overrides: Record<string, unknown> = {}) {
   return {
     userId: new Types.ObjectId(),
-    type: 'booking_confirmed',
+    type: 'booking_confirmed' as const,
     title: 'Booking confirmed',
     message: 'Your flight CAI-LHR is confirmed.',
     ...overrides,
@@ -38,7 +38,10 @@ describe('notifications schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('notifications');
-    notifications = db.connection.model(Notification.name, NotificationSchema);
+    notifications = db.connection.model<Notification>(
+      Notification.name,
+      NotificationSchema,
+    );
     await notifications.init();
   }, HOOK_TIMEOUT);
 
@@ -67,8 +70,8 @@ describe('notifications schemas', () => {
     const notification = await notifications.create(notificationDoc());
     expect(notification.readAt).toBeUndefined();
     expect(notification.entity).toBeUndefined();
-    expect(notification.createdAt).toBeInstanceOf(Date);
-    expect(notification.updatedAt).toBeInstanceOf(Date);
+    expect(notification.get('createdAt')).toBeInstanceOf(Date);
+    expect(notification.get('updatedAt')).toBeInstanceOf(Date);
   });
 
   it('accepts readAt as null or a date', async () => {

@@ -1,4 +1,3 @@
-import type { Model } from 'mongoose';
 import { ALL_SCHEMAS } from '../support/all-schemas.js';
 import {
   HOOK_TIMEOUT,
@@ -195,7 +194,7 @@ describe('indexes match docs/database/data-model.md', () => {
       // The schema must name its collection explicitly, never rely on pluralising.
       expect(schema.get('collection')).toBe(name);
 
-      const model: Model<unknown> = db.connection.model(name, schema);
+      const model = db.connection.model(name, schema);
       await model.createCollection();
       await model.syncIndexes();
 

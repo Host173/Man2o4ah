@@ -20,7 +20,7 @@ function airlineDoc(overrides: Record<string, unknown> = {}) {
 
 function cabinDoc(overrides: Record<string, unknown> = {}) {
   return {
-    cabinClass: 'economy',
+    cabinClass: 'economy' as const,
     totalSeats: 100,
     availableSeats: 90,
     heldSeats: 4,
@@ -56,8 +56,8 @@ describe('flights schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('flights');
-    airlines = db.connection.model(Airline.name, AirlineSchema);
-    flights = db.connection.model(Flight.name, FlightSchema);
+    airlines = db.connection.model<Airline>(Airline.name, AirlineSchema);
+    flights = db.connection.model<Flight>(Flight.name, FlightSchema);
     await airlines.init();
     await flights.init();
   }, HOOK_TIMEOUT);
@@ -85,7 +85,7 @@ describe('flights schemas', () => {
       });
       expect(airline.cancellationPolicy.tiers).toHaveLength(0);
       expect(airline.logo).toBeUndefined();
-      expect(airline.createdAt).toBeInstanceOf(Date);
+      expect(airline.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('uppercases the code and validates its format', async () => {
@@ -251,7 +251,7 @@ describe('flights schemas', () => {
       expect(flight.hasBookings).toBe(false);
       expect(flight.cabins).toHaveLength(0);
       expect(flight.cancelledAt).toBeUndefined();
-      expect(flight.createdAt).toBeInstanceOf(Date);
+      expect(flight.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('trims and uppercases the flight number', async () => {

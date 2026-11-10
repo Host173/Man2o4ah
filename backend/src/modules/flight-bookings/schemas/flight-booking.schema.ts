@@ -17,6 +17,7 @@ import {
   positiveNumberValidator,
 } from '../../../common/database/validators.js';
 import { dateOnlyValidator } from '../../../common/dates/date-only.js';
+import { getPlatformCurrency } from '../../../common/money/platform-currency.js';
 
 export const FlightBookingStatus = {
   PENDING_PAYMENT: 'pending_payment',
@@ -189,8 +190,8 @@ export class FlightBookingPricing {
   @Prop({ type: Number, required: true, min: 0, validate: integerValidator })
   totalMinor!: number;
 
-  /** → currencies (by ID); the platform currency at hold time. */
-  @Prop({ type: String, required: true })
+  /** → currencies (by ID); defaults to the platform currency. */
+  @Prop({ type: String, required: true, default: () => getPlatformCurrency() })
   currency!: string;
 }
 

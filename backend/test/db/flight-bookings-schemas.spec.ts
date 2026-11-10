@@ -39,7 +39,7 @@ function segmentDoc(
     direction,
     flightId: new Types.ObjectId(),
     cabinId: new Types.ObjectId(),
-    cabinClass: 'economy',
+    cabinClass: 'economy' as const,
     airlineId: new Types.ObjectId(),
     flightNumber: outbound ? 'MS985' : 'MS986',
     departureAirportId: outbound ? 'CAI' : 'JFK',
@@ -75,8 +75,8 @@ function passengerDoc(
 function bookingDoc(overrides: Record<string, unknown> = {}) {
   return {
     userId: new Types.ObjectId(),
-    status: 'pending_payment',
-    tripType: 'one_way',
+    status: 'pending_payment' as const,
+    tripType: 'one_way' as const,
     segments: [segmentDoc('outbound')],
     passengers: [passengerDoc('adult')],
     seatCount: 1,
@@ -108,7 +108,10 @@ describe('flight-bookings schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('flight-bookings');
-    bookings = db.connection.model(FlightBooking.name, FlightBookingSchema);
+    bookings = db.connection.model<FlightBooking>(
+      FlightBooking.name,
+      FlightBookingSchema,
+    );
     await bookings.init();
   }, HOOK_TIMEOUT);
 
@@ -134,7 +137,7 @@ describe('flight-bookings schemas', () => {
     expect(oneWay.pricing.currency).toBe(getPlatformCurrency());
     expect(oneWay.segments[0]).toHaveProperty('_id');
     expect(oneWay.passengers[0]).toHaveProperty('_id');
-    expect(oneWay.createdAt).toBeInstanceOf(Date);
+    expect(oneWay.get('createdAt')).toBeInstanceOf(Date);
 
     const roundTrip = await bookings.create(roundTripDoc());
     expect(roundTrip.segments.map((segment) => segment.direction)).toEqual([
@@ -470,13 +473,27 @@ describe('flight-bookings schemas', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('validates pricing amounts and requires a currency', async () => {
+  it('defaults pricing.currency to the platform currency when it is not given', async () => {
+    const pricing = bookingDoc().pricing;
+    const booking = await bookings.create(
+      bookingDoc({ pricing: { ...pricing, currency: undefined } }),
+    );
+    expect(booking.pricing.currency).toBe(getPlatformCurrency());
+    const stored = await bookings.collection.findOne({ _id: booking._id });
+    expect(stored?.pricing.currency).toBe(getPlatformCurrency());
+    await expect(
+      new bookings(
+        bookingDoc({ pricing: { ...pricing, currency: '' } }),
+      ).validate(),
+    ).rejects.toThrow(/pricing\.currency.*required/);
+  });
+
+  it('validates pricing amounts', async () => {
     const pricing = bookingDoc().pricing;
     const invalid = [
       { ...pricing, fareTotalMinor: -1 },
       { ...pricing, baggageTotalMinor: 10.5 },
       { ...pricing, totalMinor: undefined },
-      { ...pricing, currency: undefined },
     ];
     for (const value of invalid) {
       await expect(

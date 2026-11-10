@@ -22,7 +22,7 @@ const ACTIONS = [
   'content_deleted',
 ];
 
-function auditDoc(overrides: Record<string, unknown> = {}) {
+function auditDoc(overrides: Record<string, unknown> = {}): Partial<AuditLog> {
   return {
     actorId: new Types.ObjectId(),
     action: 'account_suspended',
@@ -37,7 +37,7 @@ describe('audit schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('audit');
-    auditLogs = db.connection.model(AuditLog.name, AuditLogSchema);
+    auditLogs = db.connection.model<AuditLog>(AuditLog.name, AuditLogSchema);
     await auditLogs.init();
   }, HOOK_TIMEOUT);
 

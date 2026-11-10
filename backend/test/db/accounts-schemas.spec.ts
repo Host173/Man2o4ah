@@ -42,8 +42,8 @@ describe('accounts schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('accounts');
-    users = db.connection.model(User.name, UserSchema);
-    sessions = db.connection.model(Session.name, SessionSchema);
+    users = db.connection.model<User>(User.name, UserSchema);
+    sessions = db.connection.model<Session>(Session.name, SessionSchema);
     await users.init();
     await sessions.init();
   }, HOOK_TIMEOUT);
@@ -71,7 +71,7 @@ describe('accounts schemas', () => {
       expect(user.mustChangePassword).toBe(false);
       expect(user.failedLoginAttempts).toBe(0);
       expect(user.moderatorOf).toBeUndefined();
-      expect(user.createdAt).toBeInstanceOf(Date);
+      expect(user.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('trims and lowercases the email', async () => {

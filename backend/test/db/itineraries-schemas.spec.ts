@@ -24,7 +24,7 @@ function activityDoc(overrides: Record<string, unknown> = {}) {
 
 function budgetEntryDoc(overrides: Record<string, unknown> = {}) {
   return {
-    category: 'food',
+    category: 'food' as const,
     amountMinor: 1_500,
     currency: 'EGP',
     note: 'Lunch',
@@ -48,7 +48,7 @@ function transportCostDoc(
 ) {
   return {
     dayId,
-    mode: 'train',
+    mode: 'train' as const,
     fromCityId: 'cairo',
     toCityId: 'luxor',
     amountMinor: 30_000,
@@ -89,7 +89,10 @@ describe('itineraries schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('itineraries');
-    itineraries = db.connection.model(Itinerary.name, ItinerarySchema);
+    itineraries = db.connection.model<Itinerary>(
+      Itinerary.name,
+      ItinerarySchema,
+    );
     await itineraries.init();
   }, HOOK_TIMEOUT);
 
@@ -115,8 +118,8 @@ describe('itineraries schemas', () => {
     expect(itinerary.days).toEqual([]);
     expect(itinerary.transportCosts).toEqual([]);
     expect(itinerary.clonedFrom).toBeUndefined();
-    expect(itinerary.createdAt).toBeInstanceOf(Date);
-    expect(itinerary.updatedAt).toBeInstanceOf(Date);
+    expect(itinerary.get('createdAt')).toBeInstanceOf(Date);
+    expect(itinerary.get('updatedAt')).toBeInstanceOf(Date);
   });
 
   it('gives days, activities, budget entries, transport costs and images their own _id', async () => {

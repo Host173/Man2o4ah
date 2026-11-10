@@ -27,7 +27,10 @@ describe('fx schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('fx');
-    rates = db.connection.model(ExchangeRate.name, ExchangeRateSchema);
+    rates = db.connection.model<ExchangeRate>(
+      ExchangeRate.name,
+      ExchangeRateSchema,
+    );
     await rates.init();
   }, HOOK_TIMEOUT);
 
@@ -47,7 +50,7 @@ describe('fx schemas', () => {
     const saved = await rates.create(rateDoc());
     expect(saved.rates).toBeInstanceOf(Map);
     expect(saved.rates.get('EGP')).toBe(48.5);
-    expect(saved.createdAt).toBeInstanceOf(Date);
+    expect(saved.get('createdAt')).toBeInstanceOf(Date);
   });
 
   it('rejects a second document for the same rateDate', async () => {

@@ -13,7 +13,7 @@ import {
 function reportDoc(overrides: Record<string, unknown> = {}) {
   return {
     reporterId: new Types.ObjectId(),
-    targetType: 'post',
+    targetType: 'post' as const,
     targetId: new Types.ObjectId(),
     reason: 'Spam',
     ...overrides,
@@ -33,7 +33,7 @@ describe('moderation schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('moderation');
-    reports = db.connection.model(Report.name, ReportSchema);
+    reports = db.connection.model<Report>(Report.name, ReportSchema);
     await reports.init();
   }, HOOK_TIMEOUT);
 
@@ -65,8 +65,8 @@ describe('moderation schemas', () => {
     expect(report.status).toBe('open');
     expect(report.resolvedBy).toBeUndefined();
     expect(report.resolvedAt).toBeUndefined();
-    expect(report.createdAt).toBeInstanceOf(Date);
-    expect(report.updatedAt).toBeInstanceOf(Date);
+    expect(report.get('createdAt')).toBeInstanceOf(Date);
+    expect(report.get('updatedAt')).toBeInstanceOf(Date);
   });
 
   it('requires reporterId, targetType, targetId and reason', async () => {

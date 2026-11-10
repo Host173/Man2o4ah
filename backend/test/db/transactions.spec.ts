@@ -13,7 +13,7 @@ describe('in-memory test database', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('transactions');
-    const schema = new Schema({ name: String });
+    const schema = new Schema<{ name: string }>({ name: String });
     alpha = db.connection.model('Alpha', schema, 'alphas');
     beta = db.connection.model('Beta', schema, 'betas');
     await alpha.createCollection();

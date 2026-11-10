@@ -76,9 +76,9 @@ describe('hotels schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('hotels');
-    hotels = db.connection.model(Hotel.name, HotelSchema);
-    rooms = db.connection.model(Room.name, RoomSchema);
-    nights = db.connection.model(RoomNight.name, RoomNightSchema);
+    hotels = db.connection.model<Hotel>(Hotel.name, HotelSchema);
+    rooms = db.connection.model<Room>(Room.name, RoomSchema);
+    nights = db.connection.model<RoomNight>(RoomNight.name, RoomNightSchema);
     await Promise.all([hotels.init(), rooms.init(), nights.init()]);
   }, HOOK_TIMEOUT);
 
@@ -113,7 +113,7 @@ describe('hotels schemas', () => {
       expect(hotel.ratingSummary.count).toBe(0);
       expect(hotel.description).toBeUndefined();
       expect(hotel.starRating).toBeUndefined();
-      expect(hotel.createdAt).toBeInstanceOf(Date);
+      expect(hotel.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('trims and limits name and address', async () => {
@@ -270,7 +270,7 @@ describe('hotels schemas', () => {
       expect(room.availability).toHaveLength(0);
       expect(room.hasEverBeenReserved).toBe(false);
       expect(room.inventoryVersion).toBe(0);
-      expect(room.createdAt).toBeInstanceOf(Date);
+      expect(room.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('validates the room fields', async () => {
@@ -388,7 +388,7 @@ describe('hotels schemas', () => {
     it('saves a reservation night and a blocked night', async () => {
       const reserved = await nights.create(nightDoc('reservation'));
       expect(reserved.blockId).toBeUndefined();
-      expect(reserved.createdAt).toBeInstanceOf(Date);
+      expect(reserved.get('createdAt')).toBeInstanceOf(Date);
       const blocked = await nights.create(nightDoc('blocked'));
       expect(blocked.reservationId).toBeUndefined();
     });

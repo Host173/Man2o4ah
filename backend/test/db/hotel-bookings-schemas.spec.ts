@@ -33,7 +33,7 @@ function reservationDoc(overrides: Record<string, unknown> = {}) {
   return {
     userId: new Types.ObjectId(),
     hotelId: new Types.ObjectId(),
-    status: 'pending_payment',
+    status: 'pending_payment' as const,
     checkInDate: toDateOnly('2027-03-01'),
     checkOutDate: toDateOnly('2027-03-04'),
     nights: 3,
@@ -83,11 +83,11 @@ describe('hotel-bookings schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('hotel-bookings');
-    reservations = db.connection.model(
+    reservations = db.connection.model<HotelReservation>(
       HotelReservation.name,
       HotelReservationSchema,
     );
-    reviews = db.connection.model(Review.name, ReviewSchema);
+    reviews = db.connection.model<Review>(Review.name, ReviewSchema);
     await Promise.all([reservations.init(), reviews.init()]);
   }, HOOK_TIMEOUT);
 
@@ -118,7 +118,7 @@ describe('hotel-bookings schemas', () => {
       expect(reservation.rooms[0]).toHaveProperty('_id');
       expect(reservation.rooms[0].childAges).toEqual([]);
       expect(reservation.policySnapshot).not.toHaveProperty('_id');
-      expect(reservation.createdAt).toBeInstanceOf(Date);
+      expect(reservation.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('requires the status, with no default', async () => {
@@ -414,7 +414,7 @@ describe('hotel-bookings schemas', () => {
       const review = await reviews.create(reviewDoc());
       expect(review.isHidden).toBe(false);
       expect(review.text).toBeUndefined();
-      expect(review.createdAt).toBeInstanceOf(Date);
+      expect(review.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('validates rating and text', async () => {

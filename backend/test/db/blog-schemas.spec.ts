@@ -23,7 +23,7 @@ function postDoc(overrides: Record<string, unknown> = {}) {
     authorId: new Types.ObjectId(),
     title: 'Three days in Cairo',
     body: 'Start at the pyramids early.',
-    status: 'draft',
+    status: 'draft' as const,
     ...overrides,
   };
 }
@@ -64,9 +64,9 @@ describe('blog schemas', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase('blog');
-    posts = db.connection.model(Post.name, PostSchema);
-    comments = db.connection.model(Comment.name, CommentSchema);
-    likes = db.connection.model(Like.name, LikeSchema);
+    posts = db.connection.model<Post>(Post.name, PostSchema);
+    comments = db.connection.model<Comment>(Comment.name, CommentSchema);
+    likes = db.connection.model<Like>(Like.name, LikeSchema);
     await Promise.all([posts.init(), comments.init(), likes.init()]);
   }, HOOK_TIMEOUT);
 
@@ -114,8 +114,8 @@ describe('blog schemas', () => {
       expect(post.isHidden).toBe(false);
       expect(post.authorDeactivated).toBe(false);
       expect(post.publishedAt).toBeUndefined();
-      expect(post.createdAt).toBeInstanceOf(Date);
-      expect(post.updatedAt).toBeInstanceOf(Date);
+      expect(post.get('createdAt')).toBeInstanceOf(Date);
+      expect(post.get('updatedAt')).toBeInstanceOf(Date);
     });
 
     it('requires authorId, title, body and status, with no default status', async () => {
@@ -257,7 +257,7 @@ describe('blog schemas', () => {
     it('saves a valid comment, not hidden by default', async () => {
       const comment = await comments.create(commentDoc());
       expect(comment.isHidden).toBe(false);
-      expect(comment.createdAt).toBeInstanceOf(Date);
+      expect(comment.get('createdAt')).toBeInstanceOf(Date);
     });
 
     it('requires postId, authorId and body', async () => {

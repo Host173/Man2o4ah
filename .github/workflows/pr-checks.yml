@@ -1,0 +1,67 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  naming:
+    name: Branch name and PR title
+    # A develop -> main milestone release is exempt.
+    if: github.head_ref != 'develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch name and PR title
+        # Untrusted text goes through env, never into the script body.
+        env:
+          BRANCH: ${{ github.head_ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          branch_re='^(feature|fix|chore|docs|test|refactor)/[A-Z]{2,5}-[0-9]{2,3}[a-z]?-[a-z0-9][a-z0-9-]*$'
+          title_re='(^|[^A-Za-z0-9])[A-Z]{2,5}-[0-9]{2,3}[a-z]?([^A-Za-z0-9]|$)'
+          fail=0
+          if ! [[ "$BRANCH" =~ $branch_re ]]; then
+            echo "::error::Branch name '$BRANCH' is invalid. Expected <type>/<ID>-<description>, with type one of feature fix chore docs test refactor, e.g. feature/FLT-22-seat-hold or fix/ACC-07a-reset"
+            fail=1
+          fi
+          if ! [[ "$TITLE" =~ $title_re ]]; then
+            echo "::error::PR title '$TITLE' has no requirement ID. Include an ID like FLT-22, ACC-07a or PLT-01, e.g. 'FLT-22: seat hold'"
+            fail=1
+          fi
+          exit "$fail"
+
+  commits:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: commitlint.config.mjs
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

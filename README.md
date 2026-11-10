@@ -60,6 +60,37 @@ There is no root `package.json`. Each app has its own.
 - Never commit `.env` files.
 - Log material AI prompts in `AI_PROMPTS.txt`.
 
+## Quality gates
+
+Every pull request into `develop` or `main`, and every push to those branches, runs the CI pipeline (`.github/workflows/ci.yml`). Only the app(s) you changed are checked.
+
+| Gate | Backend | Frontend |
+| --- | --- | --- |
+| Format | Prettier check, never writes | Prettier check, never writes |
+| Lint | `oxlint`, 0 errors | ESLint, 0 errors |
+| Typecheck | `npm run typecheck` | `npm run typecheck` |
+| Tests and coverage | all tests pass; at least 80% line coverage on `src/modules/**/*.service.ts` | no tests yet |
+| Build | `npm run build` | `npm run build` |
+| Security | `npm audit --omit=dev --audit-level=high` | same |
+
+Checks on the whole repository, on pull requests only:
+
+- Every commit follows Conventional Commits.
+- The branch name is `<type>/<ID>-<description>`, with type one of `feature`, `fix`, `chore`, `docs`, `test`, `refactor`.
+- The PR title contains a requirement ID.
+- No secret is found in the PR's history (gitleaks).
+
+A PR from `develop` into `main` (a milestone release) is exempt from the branch name and title rules.
+
+**Run `npm run verify` in each app you changed before pushing.** It runs the same gates as CI, in the same order, and stops at the first failure. Use `npm run format` to fix formatting.
+
+Branch and PR title example:
+
+- Branch: `feature/FLT-22-seat-hold`
+- Title: `FLT-22: seat hold`
+
+**A PR merges only when CI is green and the team leader approves.**
+
 ## Database
 
 - The data model lives in `docs/database/` (`data-model.md` is the source of truth; class and ER diagrams are next to it). Mongoose schemas in `backend/src/modules/*/schemas/` are written from it, and `backend/test/db/indexes.spec.ts` fails if a collection's indexes drift from it.

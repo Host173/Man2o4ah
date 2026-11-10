@@ -1,0 +1,48 @@
+AI prompt log — Kareem Sayed Ahmed
+One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
+
+================================================
+Date: 2026-11-10
+Student: Kareem
+Tool: Claude Code
+Related Requirement: Project setup
+Prompt:
+Scaffold execution file: initialize the NestJS backend (Mongoose, Swagger, health check) and the Next.js frontend.
+How the output was used:
+Generated the initial project structure, reviewed before merging.
+================================================
+
+================================================
+Date: 2026-11-10
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-12, data model
+Prompt:
+Database schema execution file: implement docs/database/data-model.md as Mongoose schemas with seed and tests
+How the output was used:
+Generated the schemas, reference seed and schema tests; reviewed by the team leader before merging
+================================================
+
+================================================
+Date: 2026-11-10
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-01
+Prompt:
+CI execution file: add a GitHub Actions pipeline (format, lint, typecheck, tests with coverage, build, audit, commit/branch/title checks, gitleaks), the scripts it calls, a verify script and a PR template.
+How the output was used:
+Generated the workflows, scripts, PR template and README section; the pipeline's first real run happens when the PR is opened.
+================================================
+
+================================================
+Date: 2026-11-10 20:10
+Member: Kareem
+Tool: Claude Code (Sonnet 5.5)
+Branch: docs/PLT-03-ai-setup
+Related Requirement: PLT-03
+Prompt:
+exectue this [attached: AI_SETUP_EXECUTION.md, the PLT-03 execution file: put the AI setup, team rules and per-member prompt logs into the repo]
+(follow-up) for now work from the main
+Outcome:
+Added the project skill and DECISIONS.md unchanged, gitignored personal agent files with AGENTS.example.md, README team rules and AI setup sections, per-member prompt logs in ai-prompts/ and the new PR template. Branched from origin/main because PLT-01 is merged there but not yet in develop; the input files were moved from ai-setup-files/ to the repo root.
+================================================

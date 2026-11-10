@@ -1,21 +1,23 @@
 import { Schema } from 'mongoose';
-import type { Model } from 'mongoose';
 import {
   HOOK_TIMEOUT,
   startTestDatabase,
   type TestDatabase,
 } from '../support/mongo-memory.js';
 
+const nameSchema = new Schema<{ name: string }>({ name: String });
+const defineNameModel = (db: TestDatabase, name: string, collection: string) =>
+  db.connection.model(name, nameSchema, collection);
+
 describe('in-memory test database', () => {
   let db: TestDatabase;
-  let alpha: Model<{ name: string }>;
-  let beta: Model<{ name: string }>;
+  let alpha: ReturnType<typeof defineNameModel>;
+  let beta: ReturnType<typeof defineNameModel>;
 
   beforeAll(async () => {
     db = await startTestDatabase('transactions');
-    const schema = new Schema<{ name: string }>({ name: String });
-    alpha = db.connection.model('Alpha', schema, 'alphas');
-    beta = db.connection.model('Beta', schema, 'betas');
+    alpha = defineNameModel(db, 'Alpha', 'alphas');
+    beta = defineNameModel(db, 'Beta', 'betas');
     await alpha.createCollection();
     await beta.createCollection();
   }, HOOK_TIMEOUT);

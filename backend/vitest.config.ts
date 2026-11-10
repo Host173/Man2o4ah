@@ -8,5 +8,19 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'lcov'],
+      reportsDirectory: './coverage',
+      // List the source files explicitly so a service that no test imports
+      // counts as 0% instead of silently dropping out of the report.
+      include: ['src/**/*.ts'],
+      exclude: ['**/*.spec.ts', '**/*.e2e-spec.ts'],
+      thresholds: {
+        // Quality gate: business logic must stay well covered. No global
+        // threshold on purpose.
+        'src/modules/**/*.service.ts': { lines: 80 },
+      },
+    },
   },
 });

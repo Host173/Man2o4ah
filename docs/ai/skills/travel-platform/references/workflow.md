@@ -60,14 +60,14 @@ Types: `feat fix test refactor docs style chore ci perf build`. Never write `upd
 - **The agent appends one entry per prompt** to the current member's file, at the end of the turn. It knows the member from the line in their local agent file (see `AGENTS.example.md`). No secrets, tokens, connection strings or `.env` values, ever.
 ```
 ================================================
-Date: 2026-11-12 14:05
-Member: Pierre
-Tool: Claude Code (model name)
-Branch: feature/FLT-22-seat-hold
-Related Requirement: FLT-22
+Date: <YYYY-MM-DD HH:mm>
+Student: <first name>
+Tool: <tool and model>
+Branch: <current branch>
+Related Requirement: <IDs>
 Prompt:
-<the member's prompt, verbatim; secrets removed>
-Outcome:
+<verbatim, secrets removed>
+How the output was used:
 <one or two lines: what was done, files changed, commit if any>
 ================================================
 ```

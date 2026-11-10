@@ -173,7 +173,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 ## 16. AI prompt log
 
 - **Folder `ai-prompts/` with one file per member** (no merge conflicts between members): `kareem.txt`, `pierre.txt`, `mostafa.txt`, `aisha.txt`, `aya.txt`, `jana.txt`, `mokhtar.txt` (Mohamed Mokhtar Shaker).
-- **The agent logs every prompt**, appending one entry at the end of each turn to the current member's file: date and time, member, tool and model, branch, related requirement IDs, the prompt (verbatim, secrets and connection strings removed), and one or two lines on what was done (files changed, commit).
+- **The agent logs every prompt**, appending one entry at the end of each turn to the current member's file: date and time, student, tool and model, branch, related requirement IDs, the prompt (verbatim, secrets and connection strings removed), and "How the output was used" (one or two lines on what was done: files changed, commit).
 - **Who is the current member:** set once in the member's local agent file (`I am <name>; my prompt log is ai-prompts/<first name>.txt`). No command or lookup per prompt. If it isn't set, the agent asks once and tells the member to add it.
 - Chat tools without repo access: the member logs material prompts by hand (or asks the chat for a ready entry to paste).
 - Kareem handles the course's `AI_PROMPTS.txt` requirement (the course names a single root file).

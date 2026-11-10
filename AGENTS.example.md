@@ -1,6 +1,6 @@
 # Agent instructions (template)
 
-Template version: 2026-11-10
+Template version: 2026-11-10b
 
 Copy this file to your own tool's instruction file, then fill in "About me":
 - Claude Code: `CLAUDE.md` at the repo root
@@ -40,7 +40,7 @@ If the first lines of `AGENTS.example.md` in the repo show a newer template vers
 
 ## 4. Prompt log (every prompt)
 
-At the end of every turn, append one entry to my prompt log (see "About me"), in the format of `docs/ai/skills/travel-platform/references/workflow.md` §5: date and time, my name, tool and model, current branch, requirement IDs, my prompt verbatim (with any secret, token or connection string removed), and a one- or two-line outcome. Append only; never edit earlier entries. If "About me" isn't filled in, ask my name once and tell me to add it here.
+At the end of every turn, append one entry to my prompt log (see "About me"), in the format of `docs/ai/skills/travel-platform/references/workflow.md` §5: date and time, my name, tool and model, current branch, requirement IDs, my prompt verbatim (with any secret, token or connection string removed), and a one- or two-line "How the output was used". Append only; never edit earlier entries. If "About me" isn't filled in, ask my name once and tell me to add it here.
 
 ## My preferences (optional, personal)
 

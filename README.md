@@ -16,9 +16,14 @@ project-root/
 ├── backend/            NestJS app
 ├── frontend/           Next.js app
 ├── docs/
+│   ├── ai/             project skill for AI agents (skills/travel-platform/)
 │   ├── requirements/
-│   └── api/
-├── AI_PROMPTS.txt
+│   ├── api/
+│   ├── database/       data model, class and ER diagrams
+│   └── DECISIONS.md    every project decision
+├── ai-prompts/         one AI prompt log per member
+├── AGENTS.example.md   template for your own (gitignored) agent file
+├── AI_PROMPTS.txt      pointer to ai-prompts/
 ├── README.md
 ├── .env.example
 ├── .gitignore
@@ -54,11 +59,11 @@ There is no root `package.json`. Each app has its own.
 ## Workflow
 
 - `main` holds milestone releases; `develop` is for integration.
-- Work on `feature/<requirement-id>-<description>` branches created from `develop`.
+- Branch, commit and pull request rules: see [Team rules](#team-rules).
 - Open PRs into `develop`; the team leader reviews them.
 - Commits use Conventional Commits, for example `feat(flights): ...`.
 - Never commit `.env` files.
-- Log material AI prompts in `AI_PROMPTS.txt`.
+- AI prompts are logged per member: see [AI setup](#ai-setup).
 
 ## Quality gates
 
@@ -90,6 +95,43 @@ Branch and PR title example:
 - Title: `FLT-22: seat hold`
 
 **A PR merges only when CI is green and the team leader approves.**
+
+## Team rules
+
+These rules bind every change, by a person or an agent. The details are in the project skill (`docs/ai/skills/travel-platform/`), and every decision is in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+### Ownership
+- Each package (one per member) owns whole modules, backend and pages. You only change modules your package owns; another module's data is reached through its service, a port or an event. See the skill's `references/modules.md`.
+- The data model in [`docs/database/`](docs/database/) is frozen. A change goes through the team leader as its own PR (doc, diagram, schema and index test together).
+- If something isn't decided, ask the team leader. Don't guess.
+
+### Git
+1. Branch from the latest `develop`, one ticket per branch: `<type>/<ID>-<description>` (type: `feature`, `fix`, `chore`, `docs`, `test`, `refactor`), e.g. `feature/FLT-22-seat-hold`.
+2. Never commit or push to `develop` or `main` directly.
+3. Never branch from another ticket's branch. If you need another ticket's code, start after it's merged; if you only need its interface, start now against a fake.
+4. Keep your branch current by merging `develop` into it (no rebase, no force-push).
+5. Push your branch at least once a day.
+6. Commits: Conventional Commits ending in the requirement ID, e.g. `feat(flights): add seat hold (FLT-22)`.
+7. PRs target `develop`, titled `<ID>: <description>`, with the template filled in. They merge when CI is green and the team leader approves, with a merge commit (not squash). Delete the branch afterwards.
+8. At each milestone the team leader merges `develop` into `main` and tags `m1` / `m2`.
+
+### Tests
+- No PR without tests. The ticket lists the levels it needs: unit, integration (in-memory MongoDB), API (Supertest), E2E.
+- Test first (test commit before code commit) where the ticket says **TDD: required**: pricing, refunds, status changes, inventory, budgets, lockout, and every bug fix.
+- Tests never touch Atlas. Never weaken, skip or delete a test to make a suite pass.
+
+### AI
+- Copy `AGENTS.example.md` to your own tool's file (see "AI setup" below).
+- Every prompt is logged in your own file in `ai-prompts/` (your agent does it). Never paste secrets, tokens or connection strings into an AI tool.
+
+## AI setup
+
+1. **Instructions:** copy `AGENTS.example.md` to your tool's file at the repo root (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, Cursor, Copilot agents and most others, `GEMINI.md` for Gemini CLI) and fill in "About me". These files are gitignored, so they're yours.
+2. **Project skill:** `docs/ai/skills/travel-platform/`. Your agent reads `SKILL.md` first (your instruction file tells it to). Claude Code users can also install it as a native skill:
+   - Windows (cmd, repo root): `mkdir .claude\skills` then `mklink /J .claude\skills\travel-platform docs\ai\skills\travel-platform`
+   - macOS/Linux (repo root): `mkdir -p .claude/skills && ln -s ../../docs/ai/skills/travel-platform .claude/skills/travel-platform`
+3. **Prompt log:** `ai-prompts/<your first name>.txt`. Your agent appends one entry per prompt. For chat tools without access to the repo, add material prompts by hand.
+4. **Chat assistants** (Claude, ChatGPT, Gemini): use the project brief `docs/ai/PROJECT_BRIEF.md` once it exists.
 
 ## Database
 

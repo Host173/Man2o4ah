@@ -22,3 +22,14 @@ Scaffold execution file: initialize the NestJS backend (Mongoose, Swagger, healt
 How the output was used:
 Generated the initial project structure, reviewed before merging.
 ================================================
+
+================================================
+Date: 2026-11-10
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-12, data model
+Prompt:
+Database schema execution file: implement docs/database/data-model.md as Mongoose schemas with seed and tests
+How the output was used:
+Generated the schemas, reference seed and schema tests; reviewed by the team leader before merging
+================================================

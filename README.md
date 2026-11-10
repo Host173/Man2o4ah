@@ -59,3 +59,9 @@ There is no root `package.json`. Each app has its own.
 - Commits use Conventional Commits, for example `feat(flights): ...`.
 - Never commit `.env` files.
 - Log material AI prompts in `AI_PROMPTS.txt`.
+
+## Database
+
+- The data model lives in `docs/database/` (`data-model.md` is the source of truth; class and ER diagrams are next to it). Mongoose schemas in `backend/src/modules/*/schemas/` are written from it, and `backend/test/db/indexes.spec.ts` fails if a collection's indexes drift from it.
+- Seed the reference data (countries, cities, airports, attractions, currencies) from `backend/seed-data/*.csv`: with `MONGODB_URI` set in `backend/.env`, run `npm run seed:reference` in `backend/`. It validates every reference before writing and is safe to re-run.
+- Tests use an in-memory MongoDB replica set and never touch Atlas. The first test run downloads a MongoDB binary, so it can take a few minutes.

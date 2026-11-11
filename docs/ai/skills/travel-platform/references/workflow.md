@@ -57,21 +57,28 @@ Types: `feat fix test refactor docs style chore ci perf build`. Never write `upd
 ## 5. AI prompt log (graded)
 
 - One file per member in `ai-prompts/`: `kareem.txt`, `pierre.txt`, `mostafa.txt`, `aisha.txt`, `aya.txt`, `jana.txt`, `mokhtar.txt`.
-- **The agent appends one entry per prompt** to the current member's file, at the end of the turn. It knows the member from the line in their local agent file (see `AGENTS.example.md`). No secrets, tokens, connection strings or `.env` values, ever.
+- **The agent appends one entry per prompt** to the current member's file, at the end of the turn, in the course's format (PDF 11.1). **Copy, don't summarize**: the prompt is copied exactly and the other fields are mechanical, so the entry needs almost no thinking.
+- **Who the current member is:** the "About me" line in the member's own agent file (`I am Pierre. My prompt log is ai-prompts/pierre.txt.`), which their tool loads at the start of every session. If it's missing, ask once and tell them to add it.
 ```
 ================================================
-Date: <YYYY-MM-DD HH:mm>
-Student: <first name>
-Tool: <tool and model>
-Branch: <current branch>
-Related Requirement: <IDs>
+Date: 2026-11-12
+Student: Pierre
+Tool: Claude Code
+Related Requirement: HTL-06
+
 Prompt:
-<verbatim, secrets removed>
+<the member's message, copied exactly>
+
 How the output was used:
-<one or two lines: what was done, files changed, commit if any>
+<one line: what this turn did, e.g. "Changed hotels.service.ts and its test; committed 3f2a1c9" or "Answer only, no files changed">
 ================================================
 ```
-- Chat tools without repo access: log material prompts by hand (or ask the chat for an entry to paste).
+- **Related Requirement:** the requirement ID in the current branch name (`feature/HTL-06-room-block` → `HTL-06`). On a branch without an ID (`main`, `develop`), write `none`.
+- **How the output was used:** one line stating what this turn did: files changed and the commit if any, or "Answer only, no files changed". State it; don't explain it.
+- **Attached file** (e.g. an execution file): after the message, add a line `[Attached: <file name>]` and paste the file's full content, unchanged.
+- **Secrets:** replace any secret, token, connection string or `.env` value with `<removed>`. Change nothing else.
+- Append only; never edit earlier entries.
+- Chat tools without repo access: copy material prompts in by hand, same format.
 
 ## 6. Definition of done
 

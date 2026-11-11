@@ -46,3 +46,154 @@ exectue this [attached: AI_SETUP_EXECUTION.md, the PLT-03 execution file: put th
 How the output was used:
 Added the project skill and DECISIONS.md unchanged, gitignored personal agent files with AGENTS.example.md, README team rules and AI setup sections, per-member prompt logs in ai-prompts/ and the new PR template. Branched from origin/main because PLT-01 is merged there but not yet in develop; the input files were moved from ai-setup-files/ to the repo root.
 ================================================
+
+================================================
+Date: 2026-11-11
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-03
+
+Prompt:
+execute this
+[Attached: PLT03_FOLLOWUP_EXECUTION.md]
+# Execution — PLT-03 follow-up: final prompt-log format, chat skill, doc fixes
+
+Run in the root of the project repository, on the branch `docs/PLT-03-ai-setup`.
+
+## Goal
+
+Bring the PLT-03 branch up to date before its PR into `main`:
+1. The final prompt-log format in the coding skill and `AGENTS.example.md`.
+2. The updated `docs/DECISIONS.md` and the coding skill's `api-contract.md` (error-code fix).
+3. The data model's inventory error names aligned with the error-code enum.
+4. The chat skill (`docs/ai/chat-skill/`) and the README line that points to it.
+5. The team leader's local agent file re-copied from the new template.
+6. One prompt-log entry for this task.
+
+**Out of scope:** application code, `package.json` files, CI workflows, every file not named in this document.
+
+## Inputs
+
+The team leader has unzipped `plt03-followup-files.zip` at the repo root. That wrote these files directly into place:
+- `docs/DECISIONS.md`
+- `docs/database/data-model.md`
+- `docs/ai/skills/travel-platform/references/workflow.md`
+- `docs/ai/skills/travel-platform/references/api-contract.md`
+- `docs/ai/chat-skill/SKILL.md`
+- `docs/ai/chat-skill/chat-instructions.txt`
+
+It also created `_followup/` (not committed; delete at the end) with `AGENTS.example.md`, `readme-chat-skill.md` and `files.sha256`.
+
+**Never edit any of these input files.** If one looks wrong, report it.
+
+Earlier, the team leader also copied an older set of `docs/` files over the repo by hand. Some of those may still show as changed or untracked; the zip has overwritten the ones that matter. Pre-flight step 3 sorts out the rest.
+
+## Before you start
+
+1. `git branch --show-current` must print `docs/PLT-03-ai-setup`. If not, stop and report (don't switch branches with uncommitted changes).
+2. Record the starting commit: `git rev-parse HEAD`. It is `<START>` in the gates below.
+3. Run `git status --porcelain` and sort every line:
+   - **Modified or untracked files that are in the input list above, and `_followup/`:** expected.
+   - **Deleted tracked files under `docs/`** (status ` D`): restore each from the branch with `git restore --source=HEAD -- <path>`. List them in the report.
+   - **Modified tracked files under `docs/` that are not in the input list:** restore each with `git restore --source=HEAD -- <path>`. List them in the report.
+   - **Untracked files under `docs/` that are not in the input list:** stop and report them.
+   - **Anything outside `docs/` and `_followup/`** (other than the zip file itself): stop and report.
+4. Copy `_followup/AGENTS.example.md` to the repo root as `AGENTS.example.md` (overwrite).
+5. Verify every input: `sha256sum -c _followup/files.sha256` (Git Bash). In PowerShell, compare `Get-FileHash -Algorithm SHA256 <path>` for each line of `files.sha256`. Every file must print OK. If any doesn't, stop and report.
+6. Count the entries in `ai-prompts/kareem.txt` (lines that start with `Prompt:`). Note the number for gate G9.
+
+## Step 1: Prompt-log format
+
+Stage exactly `AGENTS.example.md` and `docs/ai/skills/travel-platform/references/workflow.md`.
+**Commit:** `docs(ai): final prompt-log format in the coding skill and the agent template (PLT-03)`
+
+## Step 2: Decisions and the error-code contract
+
+Stage exactly `docs/DECISIONS.md` and `docs/ai/skills/travel-platform/references/api-contract.md`.
+**Commit:** `docs: update the decisions and the API error-code list (PLT-03)`
+
+## Step 3: Data model error names
+
+1. Check: `grep -c '`RoomsUnavailable`' docs/database/data-model.md` prints `1`, and `grep -c '`RoomUnavailable`' docs/database/data-model.md` prints `0`.
+2. Stage exactly `docs/database/data-model.md`. If `git diff --cached --quiet` says nothing is staged (the branch already has this version), skip the commit and say so in the report.
+
+**Commit:** `docs(database): align inventory error names with the error-code enum (PLT-03)`
+
+## Step 4: Chat skill and README
+
+1. In `README.md`, find the line that mentions `docs/ai/PROJECT_BRIEF.md` (in the "AI setup" section; it starts with `4. **Chat assistants**`). Replace that whole line with the content of `_followup/readme-chat-skill.md`, unchanged. If there is no such line, or more than one, stop and report.
+2. In the README's repository structure, the `docs/ai/` entry must describe both skills: `skills/travel-platform/` for coding agents and `chat-skill/` for chat assistants. Edit only that entry's description, keeping the README's existing format.
+3. `grep -rn "PROJECT_BRIEF" README.md docs AGENTS.example.md` must print nothing.
+4. Stage exactly `docs/ai/chat-skill/SKILL.md`, `docs/ai/chat-skill/chat-instructions.txt` and `README.md`.
+
+**Commit:** `docs(ai): add the chat skill and its starter instructions (PLT-03)`
+
+## Step 5: The team leader's local agent file (not committed)
+
+1. Save the "About me" and "My preferences" sections of the root `AGENTS.md`.
+2. Copy `AGENTS.example.md` over the root `AGENTS.md`, then put the saved "About me" and "My preferences" sections back in place of the template's.
+3. Leave `CLAUDE.md` as it is (one line: `@AGENTS.md`).
+4. `git status` must not show `AGENTS.md` or `CLAUDE.md` (both are ignored).
+
+## Step 6: Prompt-log entry for this task
+
+Append **exactly one** entry for this task to the end of `ai-prompts/kareem.txt`, in the format of section 4 of the new `AGENTS.example.md`. This entry is the log for this whole run; don't add another one at the end of your turn.
+- `Date`: today. `Student`: Kareem. `Tool`: the name of the tool you're running in. `Related Requirement`: PLT-03.
+- `Prompt`: the team leader's message that started this run, copied exactly, then `[Attached: PLT03_FOLLOWUP_EXECUTION.md]` and this file's full content, unchanged.
+- `How the output was used`: one line listing the commits made (hashes and subjects, shortened if needed).
+- Change nothing above the new entry.
+
+**Commit:** `chore(ai): log the PLT-03 follow-up prompt (PLT-03)`
+
+## Step 7: Clean up
+
+Delete the `_followup/` folder (and the zip, if it's in the repo folder). `git status` must be clean.
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | the checksum check from pre-flight step 5, re-run before deleting `_followup/` | every file OK |
+| G2 | `grep -c '`RoomsUnavailable`' docs/database/data-model.md` and `grep -c '`RoomUnavailable`' docs/database/data-model.md` | `1` and `0` |
+| G3 | `git diff --name-only <START>..HEAD` | only: `AGENTS.example.md`, `README.md`, `ai-prompts/kareem.txt`, and the six input files under `docs/` (any of them may be missing if the branch already had that version) |
+| G4 | `git diff --stat <START>..HEAD -- backend frontend .github` | empty |
+| G5 | `git check-ignore AGENTS.md CLAUDE.md` and `git ls-files AGENTS.example.md` | both ignored files printed; `AGENTS.example.md` printed |
+| G6 | `head -5 AGENTS.md` and `grep -n "I am Kareem" AGENTS.md` | `Template version: 2026-11-11`; the About-me line is there |
+| G7 | `cd backend && npm run verify` and `cd frontend && npm run verify` | both exit 0 |
+| G8 | `git log --format=%s <START>..HEAD` | 4 or 5 commits, each matching `^(docs|chore)(\([a-z]+\))?: .+ \(PLT-03\)$` |
+| G9 | the count of `Prompt:` lines in `ai-prompts/kareem.txt`, and `git diff <START>..HEAD -- ai-prompts/kareem.txt \| grep '^-[^-]'` | the pre-flight count + 1; the grep prints nothing (only lines added) |
+| G10 | `grep -n "Related Requirement: PLT-03" ai-prompts/kareem.txt \| tail -1` and `grep -c "\[Attached: PLT03_FOLLOWUP_EXECUTION.md\]" ai-prompts/kareem.txt` | a line in the new entry; `1` |
+| G11 | `git status --porcelain` | empty; `_followup/` gone |
+
+## Constraints
+
+- Never edit the input files, `docs/ai/skills/travel-platform/SKILL.md`, the other skill references, or anything under `docs/database/` other than what the zip placed.
+- Stage files by name. Never `git add -A` or `git add .`.
+- No new packages, no script or config changes.
+- Don't push. Don't open or merge a PR.
+
+## Report
+
+When finished, report:
+- The commit list (hash and subject), and any commit skipped because nothing changed.
+- Each gate's result in one line.
+- The files restored in pre-flight step 3, if any.
+- The README lines you replaced, quoted before and after.
+
+
+How the output was used:
+Commits: 12517a7 docs(ai): final prompt-log format in the coding skill and the agent template; 4704d52 docs: update the decisions and the API error-code list; 4b4b7e6 docs(database): align inventory error names with the error-code enum; 2042950 docs(ai): add the chat skill and its starter instructions.
+================================================
+
+================================================
+Date: 2026-11-11
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-03
+
+Prompt:
+ok push and open a pr
+
+How the output was used:
+Pushed docs/PLT-03-ai-setup and opened a PR into main (PR #105 for this branch was already merged, so the new PR carries the follow-up commits only).
+================================================

@@ -706,7 +706,7 @@ Indexes: `{ createdAt: -1 }` · `{ actorId: 1, createdAt: -1 }` · `{ 'target.ty
 
 ## 4. Inventory operations
 
-These classes are the **only** code that changes inventory. Each method takes the caller's `session` and runs inside the caller's transaction. A method that cannot apply its change throws a domain error, which aborts the whole transaction.
+These classes are the **only** code that changes inventory. Each method takes the caller's `session` and runs inside the caller's transaction. A method that cannot apply its change throws a domain error, which aborts the whole transaction. "Fails with" names the `ErrorCode` enum key (PascalCase key, UPPER_SNAKE value: `SeatsUnavailable` = `'SEATS_UNAVAILABLE'`; the enum is in the API contract). `InventoryCorrupted` (500) means the counters' invariant broke, which should never happen.
 
 ### 4.1 `SeatInventory` (flights module)
 `items` = list of `{ flightId, cabinId, seats }`. Every update matches the cabin with `$elemMatch` and changes it with the positional `$`, so check + change happen in **one atomic document update**.
@@ -738,7 +738,7 @@ Two mechanisms together:
 
 | Method | Steps | Fails with |
 |---|---|---|
-| `reserve(hotelId, roomIds, checkIn, checkOut, reservationId)` | for each room: update `{ _id, hotelId, isActive: true, availability: { $elemMatch: { fromDate ≤ checkIn, toDate ≥ checkOut − 1 day } } }` with `$inc inventoryVersion`, `$set hasEverBeenReserved: true` (no match → fail); then `insertMany` one night per room per night (duplicate key → fail) | `RoomUnavailable` (whole request rejected, HTL-18) |
+| `reserve(hotelId, roomIds, checkIn, checkOut, reservationId)` | for each room: update `{ _id, hotelId, isActive: true, availability: { $elemMatch: { fromDate ≤ checkIn, toDate ≥ checkOut − 1 day } } }` with `$inc inventoryVersion`, `$set hasEverBeenReserved: true` (no match → fail); then `insertMany` one night per room per night (duplicate key → fail) | `RoomsUnavailable` (whole request rejected, HTL-18) |
 | `release(reservationId)` | `deleteMany({ reservationId })` | — |
 | `block(roomId, fromDate, toDate)` | touch room; `insertMany` nights `kind: blocked` with a new `blockId` (duplicate key → fail) | `OverlapsReservationOrBlock` (HTL-06) |
 | `unblock(blockId)` | touch room; `deleteMany({ blockId })` | — |

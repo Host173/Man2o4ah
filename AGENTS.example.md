@@ -1,6 +1,6 @@
 # Agent instructions (template)
 
-Template version: 2026-11-10b
+Template version: 2026-11-11
 
 Copy this file to your own tool's instruction file, then fill in "About me":
 - Claude Code: `CLAUDE.md` at the repo root
@@ -40,7 +40,27 @@ If the first lines of `AGENTS.example.md` in the repo show a newer template vers
 
 ## 4. Prompt log (every prompt)
 
-At the end of every turn, append one entry to my prompt log (see "About me"), in the format of `docs/ai/skills/travel-platform/references/workflow.md` §5: date and time, my name, tool and model, current branch, requirement IDs, my prompt verbatim (with any secret, token or connection string removed), and a one- or two-line "How the output was used". Append only; never edit earlier entries. If "About me" isn't filled in, ask my name once and tell me to add it here.
+At the end of every turn, append one entry to my prompt log (the file named in "About me"), in the course's format. Copy, don't summarize: the prompt is copied exactly and the other fields are mechanical.
+
+```
+================================================
+Date: <today, YYYY-MM-DD>
+Student: <my first name from "About me">
+Tool: <this tool's name>
+Related Requirement: <the ID in the current branch name, or none>
+
+Prompt:
+<my message, copied exactly>
+
+How the output was used:
+<one line: files changed and commit, or "Answer only, no files changed">
+================================================
+```
+
+- If my message attaches a file (e.g. an execution file), add a line `[Attached: <file name>]` after my message and paste the file's full content, unchanged.
+- Replace any secret, token, connection string or `.env` value with `<removed>`. Change nothing else.
+- Append only; never edit earlier entries.
+- If "About me" isn't filled in, ask my name once and tell me to add it there.
 
 ## My preferences (optional, personal)
 

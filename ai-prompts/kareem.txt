@@ -184,3 +184,16 @@ When finished, report:
 How the output was used:
 Commits: 12517a7 docs(ai): final prompt-log format in the coding skill and the agent template; 4704d52 docs: update the decisions and the API error-code list; 4b4b7e6 docs(database): align inventory error names with the error-code enum; 2042950 docs(ai): add the chat skill and its starter instructions.
 ================================================
+
+================================================
+Date: 2026-11-11
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-03
+
+Prompt:
+ok push and open a pr
+
+How the output was used:
+Pushed docs/PLT-03-ai-setup and opened a PR into main (PR #105 for this branch was already merged, so the new PR carries the follow-up commits only).
+================================================

@@ -1,39 +1,25 @@
 import { readFileSync } from 'node:fs';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   const config = app.get(ConfigService);
 
-  app.setGlobalPrefix('api');
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-  app.enableCors({
-    origin: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
-    credentials: true,
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
   });
 
   const { version } = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
   ) as { version: string };
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Travel Platform API')
-    .setVersion(version)
-    .build();
-  SwaggerModule.setup(
-    'api/docs',
-    app,
-    SwaggerModule.createDocument(app, swaggerConfig),
-  );
+  setupSwagger(app, version);
 
   await app.listen(config.get<number>('PORT', 4000));
 }

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { validate } from './config/validate.js';
 import { HealthModule } from './health/health.module.js';
 import { ReferenceDataModule } from './modules/reference-data/reference-data.module.js';
@@ -26,6 +28,8 @@ import { AuditModule } from './modules/audit/audit.module.js';
         uri: config.getOrThrow<string>('MONGODB_URI'),
       }),
     }),
+    EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
     HealthModule,
     ReferenceDataModule,
     AccountsModule,

@@ -110,7 +110,7 @@ Each package owns whole modules, backend (M1) and pages (M2).
 |---|---|---|---|
 | 1 | Platform & Payments | reference-data, common wiring (events, ports, jobs), storage, notifications, audit, fx, payments | Kareem (`Host173`; also reviews all PRs and finds extra features) |
 | 2 | Accounts & Auth | accounts | Aisha (`AishaAlRawahi`) |
-| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana (`janaelmenshawi`) |
+| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana (`janaelmenshawy`) |
 | 4 | Hotels | hotels (incl. `RoomNightInventory`, hotel search) | Pierre (`pierreofficial`) |
 | 5 | Bookings | flight-bookings, hotel-bookings (incl. reviews) | Aya (`Hestias-space`) |
 | 6 | Itineraries | itineraries | Mokhtar (`Mohamed-Mokhtar-Elalfy-16009527`) |

@@ -143,7 +143,7 @@ This is the one owner table. Each package is owned by one person from the backen
 |---|---|---|---|---|---|
 | 1 | Platform & Payments | reference-data, `common` wiring (events, ports, jobs, error filter), storage, notifications, audit, fx, payments | Kareem Sayed Ahmed (team leader) | `Host173` | `ai-prompts/kareem.txt` |
 | 2 | Accounts & Auth | accounts | Aisha Al Rawahi | `AishaAlRawahi` | `ai-prompts/aisha.txt` |
-| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana Elmenshawi | `janaelmenshawi` | `ai-prompts/jana.txt` |
+| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana Elmenshawi | `janaelmenshawy` | `ai-prompts/jana.txt` |
 | 4 | Hotels | hotels (incl. `RoomNightInventory`, hotel search) | Pierre Remon Raafat | `pierreofficial` | `ai-prompts/pierre.txt` |
 | 5 | Bookings | flight-bookings, hotel-bookings (incl. reviews) | Aya Amr | `Hestias-space` | `ai-prompts/aya.txt` |
 | 6 | Itineraries | itineraries | Mohamed Mokhtar Shaker ("Mokhtar") | `Mohamed-Mokhtar-Elalfy-16009527` | `ai-prompts/mokhtar.txt` |

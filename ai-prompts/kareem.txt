@@ -197,3 +197,277 @@ ok push and open a pr
 How the output was used:
 Pushed docs/PLT-03-ai-setup and opened a PR into main (PR #105 for this branch was already merged, so the new PR carries the follow-up commits only).
 ================================================
+
+================================================
+Date: 2026-11-11
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-05
+
+Prompt:
+execut this
+
+[Attached: PLT05_EXECUTION.md]
+# Execution — PLT-05: Common foundation
+
+Run in the root of the project repository.
+
+## Goal
+
+Build the shared base every module plugs into (issue #7, requirements GEN-02 backend, GEN-05, GEN-13, PAY-04):
+1. The error-code enum and the global exception filter (the one error shape for every non-2xx response).
+2. Pagination DTO and helper, regex escaping, money helpers, platform-currency validation.
+3. App wiring: cookie parser, raw body, event emitter, scheduler, static `/uploads`, Swagger cookie auth.
+4. The Next.js rewrite of `/api` and `/uploads` to `BACKEND_URL`.
+
+**Out of scope:** anything under `backend/src/modules/` (schemas, services), auth guards (CTR-01), the storage module (CTR-05, GEN-08), event names and test helpers (PLT-06), the frontend's fetch helpers (M2), CI workflows.
+
+## Context you need (from the project skill; follow it exactly)
+
+**Error shape** (`docs/ai/skills/travel-platform/references/api-contract.md` §3). Every non-2xx response:
+```json
+{ "statusCode": 409, "code": "SEATS_UNAVAILABLE", "message": "Not enough seats left in Economy",
+  "details": [{ "field": "passengers", "message": "..." }], "path": "/api/flight-bookings/hold",
+  "timestamp": "2026-11-20T10:00:00.000Z" }
+```
+- `details` is present only for validation errors (400 `VALIDATION_FAILED`): one entry per field.
+- No stack traces or raw Mongo errors in responses, ever.
+- Feature code throws Nest exceptions with a code: `throw new ConflictException({ code: ErrorCode.SeatsUnavailable, message: '…' })`.
+- Mongo duplicate key (`code === 11000`) becomes 409.
+
+**List shape:** `{ items, page, limit, total, totalPages }`. Query `page` (default 1) and `limit` (default 10, max 50). Run `find().skip().limit()` and `countDocuments()` with the same filter in `Promise.all`.
+
+**Keyword search:** case-insensitive regex on the **escaped** input (`escapeRegex`). Never pass client strings into a regex unescaped.
+
+**Money:** integer minor units (`1999` = $19.99). Rounding is half up.
+
+**Backend code rules:**
+- ESM: relative imports end in `.js`, matching existing files.
+- Type-only imports use `import type`.
+- No `any`, no `@ts-ignore` or `@ts-expect-error`, no lint-disable comments.
+- Read config through `ConfigService`; `process.env` only in `main.ts` and the existing `platform-currency.ts`.
+
+**Env** (`api-contract.md` §2): `UPLOAD_DIR=uploads` (backend) and `BACKEND_URL=http://localhost:4000` (frontend; replaces the scaffold's `NEXT_PUBLIC_API_URL`).
+
+## Before you start
+
+1. `git fetch origin`. `git status` must be clean. If not, stop and report.
+2. The PLT-03 follow-up must already be merged. Check: `git show origin/main:docs/ai/skills/travel-platform/references/api-contract.md | grep -c INVENTORY_CORRUPTED` prints `1`. If not, stop and report.
+3. Create `chore/PLT-05-common-foundation` from `origin/main` (the setup phase still works from `main`).
+4. `backend/.env` must exist with `MONGODB_URI` set (gate G6 starts the app). Don't print its value anywhere.
+
+## Step 1: Packages
+
+In `backend/`:
+```
+npm install @nestjs/event-emitter @nestjs/schedule cookie-parser
+npm install -D @types/cookie-parser
+```
+If npm reports a peer-dependency conflict, stop and report. Never use `--force` or `--legacy-peer-deps`.
+
+**Commit:** `build(backend): add cookie-parser, event-emitter and schedule (PLT-05)`
+
+## Step 2: Error codes and the exception filter
+
+Create `backend/src/common/errors/`:
+
+**`error-codes.ts`:** a `const` object plus a matching type. Keys are PascalCase; each value is the key in UPPER_SNAKE. It has exactly **33** entries, in this order: the contract's existing 30, then 3 new ones.
+- Existing: `VALIDATION_FAILED, NOT_AUTHENTICATED, TOKEN_EXPIRED, SESSION_EXPIRED, INVALID_CREDENTIALS, ACCOUNT_LOCKED, ACCOUNT_SUSPENDED, PASSWORD_CHANGE_REQUIRED, FORBIDDEN_ROLE, NOT_FOUND, EMAIL_TAKEN, SEATS_UNAVAILABLE, ROOMS_UNAVAILABLE, CAPACITY_BELOW_RESERVED, CONCURRENT_CHANGE, AVAILABILITY_HAS_RESERVATIONS, ROOM_HAS_RESERVATIONS, ROOM_WAS_RESERVED, OVERLAPS_RESERVATION_OR_BLOCK, HOLD_EXPIRED, INVALID_STATUS_TRANSITION, POLICIES_NOT_ACCEPTED, BAD_SIGNATURE, UNSUPPORTED_CURRENCY, RATES_UNAVAILABLE, ALREADY_REPORTED, ALREADY_REVIEWED, ACTIVE_BOOKINGS_EXIST, LIMIT_EXCEEDED, INVENTORY_CORRUPTED`
+- New: `CONFLICT` (409 with no specific code, including a duplicate key), `REQUEST_FAILED` (any other 4xx with no specific code), `INTERNAL_ERROR` (500, unexpected)
+
+```ts
+export const ErrorCode = {
+  ValidationFailed: 'VALIDATION_FAILED',
+  // … all 33, same order
+} as const;
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+```
+
+**`validation-exception.factory.ts`:** the `exceptionFactory` for the global `ValidationPipe`. It turns class-validator's `ValidationError[]` into
+`new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Validation failed', details })`.
+- One `details` entry per field: `{ field, message }`.
+- Nested errors (`children`) are flattened into dotted paths (`passengers.0.firstName`).
+- A field with several failed constraints gets one entry, its messages joined with `; `.
+
+**`error-body.ts`:** a pure function `toErrorBody(exception: unknown, path: string, now = new Date())` that returns `{ statusCode, body }`. The body has the shape above, with `details` only when present. The rules, in order:
+
+| Exception | Status | Code | Message | Details |
+|---|---|---|---|---|
+| `HttpException` whose response object has a string `code` | `getStatus()` | that code | its `message` | its `details`, if an array |
+| other `HttpException` | `getStatus()` | by status: 400 `VALIDATION_FAILED`, 401 `NOT_AUTHENTICATED`, 403 `FORBIDDEN_ROLE`, 404 `NOT_FOUND`, 409 `CONFLICT`, any other 4xx `REQUEST_FAILED`, 5xx `INTERNAL_ERROR` | the response's `message` (an array joined with `; `), else `exception.message` | none |
+| object with `code === 11000` (Mongo duplicate key) | 409 | `CONFLICT` | `Duplicate value` | one per key of `keyValue`: `{ field, message: 'already exists' }` (omit if no `keyValue`) |
+| Mongoose `Error.ValidationError` | 400 | `VALIDATION_FAILED` | `Validation failed` | one per key of `errors`: `{ field: key, message: errors[key].message }` |
+| Mongoose `Error.CastError` | 400 | `VALIDATION_FAILED` | `Invalid value` | `[{ field: path, message: 'invalid value' }]` |
+| anything else | 500 | `INTERNAL_ERROR` | `Internal server error` | none |
+
+`timestamp` is `now.toISOString()`. `path` is the argument.
+
+**`all-exceptions.filter.ts`:** `@Catch()` filter `AllExceptionsFilter`. It calls `toErrorBody(exception, request.originalUrl)` and sends the body with that status. For status ≥ 500 it logs the exception with Nest `Logger`, stack included. The log only, never the response, and nothing from request bodies, cookies or headers.
+
+**Docs, same PR (the contract rule: a new code goes into the enum and the list in the same PR):** in `docs/ai/skills/travel-platform/references/api-contract.md` §3, in the "Starting set" list, replace
+
+`` `LIMIT_EXCEEDED`, `INVENTORY_CORRUPTED` (500; an inventory invariant broke, should never happen). ``
+
+with
+
+`` `LIMIT_EXCEEDED`, `INVENTORY_CORRUPTED` (500; an inventory invariant broke, should never happen), `CONFLICT` (409 with no specific code, including a duplicate key), `REQUEST_FAILED` (any other 4xx with no specific code), `INTERNAL_ERROR` (500, unexpected). ``
+
+Change nothing else in that file.
+
+**Tests** (next to the code):
+- `error-codes.spec.ts`: 33 entries; every value is its key in UPPER_SNAKE; values are unique.
+- `error-body.spec.ts`: one case per table row. Add a 400 from a plain `BadRequestException('x')` (code `VALIDATION_FAILED`, no `details`), a 403 and a 429 (`REQUEST_FAILED`), and a check that the 500 body contains no `stack` and not the original error's message.
+- `validation-exception.factory.spec.ts`: a flat error, a nested error (dotted path) and a field with two constraints (joined).
+
+**Commits:**
+1. `feat(common): add the error-code enum and the global exception filter (PLT-05)` (code and tests)
+2. `docs(api): add the CONFLICT, REQUEST_FAILED and INTERNAL_ERROR codes (PLT-05)` (`api-contract.md` only)
+
+## Step 3: Pagination, regex escaping, money, platform currency
+
+**`backend/src/common/pagination/`**
+- `pagination-query.dto.ts`: `PaginationQueryDto` with `page` (default 1, `@Min(1)`) and `limit` (default 10, `@Min(1)`, `@Max(50)`). Both use `@IsOptional() @Type(() => Number) @IsInt()` and `@ApiPropertyOptional` (with default, min and max). Feature DTOs will extend it.
+- `paginated.ts`: `export interface Paginated<T> { items: T[]; page: number; limit: number; total: number; totalPages: number }`, and `toPage<T>(items, total, page, limit): Paginated<T>`. `totalPages` is `Math.ceil(total / limit)`, which is 0 when `total` is 0.
+- `paginate.ts`: `paginate<T>(model, filter, { page, limit }, options?: { sort?, projection? })`. It runs `model.find(filter, projection).sort(sort).skip((page - 1) * limit).limit(limit).lean()` and `model.countDocuments(filter)` in `Promise.all`, and returns `toPage(...)`. Use Mongoose 9's own types for `model`, `filter` and `sort`; check `node_modules/mongoose/types` for their names. No `any`.
+
+**`backend/src/common/text/escape-regex.ts`**
+- `escapeRegex(input: string): string` escapes ``. * + ? ^ $ { } ( ) | [ ] \``.
+- `keywordRegex(input: string): RegExp` returns `new RegExp(escapeRegex(input.trim()), 'i')`.
+
+**`backend/src/common/money/money.ts`** (next to the existing `platform-currency.ts`, which stays unchanged)
+- `assertMinor(n)`: throws a plain `Error` unless `Number.isSafeInteger(n) && n >= 0`. It's a programming error, not a client error.
+- `sumMinor(...amounts)`: asserts each, returns the sum.
+- `multiplyMinor(amountMinor, quantity)`: `quantity` must be a non-negative safe integer.
+- `percentOfMinor(amountMinor, percent)`: `Math.round(amountMinor * percent / 100)` (half up for non-negative values). `percent` is between 0 and 100. Used for the infant 10% and refund tiers.
+
+**Platform currency** (`backend/src/config/validate.ts`): keep the `MONGODB_URI` check. Add one: if `PLATFORM_CURRENCY` is set, it must match `/^[A-Z]{3}$/`, otherwise throw an `Error` that names the variable. Don't change `platform-currency.ts`.
+
+**Tests:**
+- `paginate.spec.ts`: an integration test on the in-memory replica set (`backend/test/support/mongo-memory.ts`; use its exported helpers and `HOOK_TIMEOUT`) with a throwaway schema defined in the test. Cover:
+  - 25 documents with page 1 / limit 10 → 10 items, total 25, totalPages 3
+  - page 3 → 5 items
+  - page 4 → 0 items, still total 25
+  - a filter that matches nothing → `{ items: [], total: 0, totalPages: 0 }`
+  - sort is applied
+- `pagination-query.dto.spec.ts`: use `plainToInstance` + `validate`. Defaults are 1/10; `'2'` becomes 2; `limit` 50 passes and 51 fails; `page` 0 fails; `'abc'` fails.
+- `escape-regex.spec.ts`: `a.b*c` matches only literally; `(` doesn't throw; matching ignores case.
+- `money.spec.ts`:
+  - `percentOfMinor(15, 10)` is 2 (1.5 rounds up)
+  - `percentOfMinor(14, 10)` is 1
+  - `percentOfMinor(0, 50)` is 0
+  - `sumMinor` of three amounts
+  - `assertMinor` throws for `1.5`, `-1` and `NaN`
+- `validate.spec.ts`: `USD` passes, unset passes, `usd` throws, `US` throws, a missing `MONGODB_URI` still throws.
+
+**Commit:** `feat(common): add pagination, regex escaping, money helpers and currency validation (PLT-05)`
+
+## Step 4: App wiring
+
+**`backend/src/app.setup.ts`:** export `configureApp(app: NestExpressApplication, options: { uploadDir: string; frontendUrl: string }): void`. It does, in this order:
+1. `app.use(cookieParser())`
+2. `app.setGlobalPrefix('api')`
+3. `app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true, exceptionFactory }))`, with the factory from step 2
+4. `app.useGlobalFilters(new AllExceptionsFilter())`
+5. `app.enableCors({ origin: options.frontendUrl, credentials: true })` (kept for direct tools, per the contract)
+6. Create `options.uploadDir` if missing (`mkdirSync(…, { recursive: true })`), then `app.useStaticAssets(resolve(options.uploadDir), { prefix: '/uploads/' })`
+
+Give it a JSDoc saying that the app must be created with `{ rawBody: true }` (needed for Stripe webhook signatures), and that tests call `configureApp` so they run with the same wiring as production.
+
+Also export `setupSwagger(app, version)`. It has the existing `DocumentBuilder` (title, version) plus `.addCookieAuth('access_token')`, and keeps `SwaggerModule.setup('api/docs', …)`.
+
+**`backend/src/main.ts`:**
+- Create the app with `NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true })`.
+- Read `UPLOAD_DIR` (default `uploads`) and `FRONTEND_URL` (default `http://localhost:3000`) through `ConfigService` and call `configureApp`.
+- Keep the existing `package.json` version read, then call `setupSwagger` and `listen`.
+- Remove the inline code that `configureApp` and `setupSwagger` now do.
+
+**`backend/src/app.module.ts`:** add `EventEmitterModule.forRoot()` and `ScheduleModule.forRoot()` to `imports`. Change nothing else.
+
+**Repo files:**
+- In the root `.gitignore`, add `uploads/` (under the build-output entries).
+- In the root `.env.example`:
+  - under `# backend/.env`, add `UPLOAD_DIR=uploads`
+  - under `# frontend/.env.local`, replace `NEXT_PUBLIC_API_URL=http://localhost:4000/api` with `BACKEND_URL=http://localhost:4000`
+
+**Tests:** `backend/src/app.setup.api.spec.ts` (Supertest). Build the app from a testing module with one test-only controller defined in the spec file (no database). Use `createNestApplication<NestExpressApplication>({ rawBody: true })`, then `configureApp(app, { uploadDir: <a temp dir>, frontendUrl: 'http://localhost:3000' })`, then `init()`. Cover:
+
+| Scenario | Expected |
+|---|---|
+| A POST with a DTO (`@IsString() @MaxLength(5) name`) and a body `{ name: 'toolong', extra: 1 }` | 400. `code` is `VALIDATION_FAILED`. `details` has entries for `name` and `extra`. `path` is `/api/…` and `timestamp` is present |
+| GET an unknown route | 404, `code` `NOT_FOUND`, full shape |
+| A route throwing `new NotFoundException({ code: ErrorCode.NotFound, message: 'Flight not found' })` | 404 with that message |
+| A route throwing `new ConflictException({ code: ErrorCode.SeatsUnavailable, message: 'x' })` | 409 `SEATS_UNAVAILABLE` |
+| A route throwing an object `{ code: 11000, keyValue: { email: 'a@b.c' } }` | 409 `CONFLICT`, `details[0].field` is `email` |
+| A route throwing `new Error('secret detail')` | 500 `INTERNAL_ERROR`. The body has no `stack` and no `secret detail` |
+| A route returning `req.cookies`, called with `Cookie: a=1` | `{ a: '1' }` |
+| A POST route returning `req.rawBody?.length`, with a JSON body | the body's byte length |
+| A file written to the temp upload dir, then `GET /uploads/<name>` | 200 with its content |
+
+Delete the temp dir in `afterAll`.
+
+**Commit:** `feat(app): wire cookies, raw body, events, scheduler, static uploads and Swagger cookie auth (PLT-05)`
+
+## Step 5: Frontend rewrite
+
+In `frontend/next.config.ts`:
+- Keep the existing options (`cacheComponents`, `partialPrefetching`).
+- Add `async rewrites()` returning `/api/:path*` → `${backendUrl}/api/:path*` and `/uploads/:path*` → `${backendUrl}/uploads/:path*`, where `const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:4000'`.
+- Keep the file's existing quote style.
+
+**Commit:** `feat(frontend): rewrite /api and /uploads to BACKEND_URL (PLT-05)`
+
+## Step 6: Prompt log
+
+Append this run's entry to your member's prompt log as your agent file (section 4) says. One entry for the whole run.
+**Commit:** `chore(ai): log the PLT-05 prompt (PLT-05)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `cd frontend && npm run verify` | exit 0 |
+| G3 | `cd backend && npx vitest run src/common src/config src/app.setup.api.spec.ts` | every listed spec file runs; 0 failed; at least 40 tests passed |
+| G4 | `cd backend && npm audit --omit=dev --audit-level=high` | exit 0 |
+| G5 | the enum matches the contract list (command below) | `SAME 33` |
+| G6 | Start the backend (`npm run start:dev` in `backend/`) and the frontend (`npm run dev` in `frontend/`) in the background and wait until both answer. Note both PIDs. | both start |
+| G7 | `curl -s http://localhost:3000/api/health` | JSON with `"status":"ok"` (through the rewrite) |
+| G8 | `curl -s http://localhost:4000/api/nope` | JSON with `"statusCode":404`, `"code":"NOT_FOUND"`, `"path":"/api/nope"` |
+| G9 | the Swagger spec has the cookie scheme (command below); then stop both processes by their PIDs | at least `1` |
+| G10 | `git diff --name-only origin/main...HEAD` | only files under `backend/src/common/`, `backend/src/config/`, plus `backend/src/app.setup.ts`, `backend/src/app.setup.api.spec.ts`, `backend/src/main.ts`, `backend/src/app.module.ts`, `backend/package.json`, `backend/package-lock.json`, `frontend/next.config.ts`, `.env.example`, `.gitignore`, `docs/ai/skills/travel-platform/references/api-contract.md`, and your prompt-log file |
+| G11 | `git diff --stat origin/main...HEAD -- backend/src/modules backend/test .github` | empty |
+| G12 | `git log --format=%s origin/main..HEAD` | 7 commits, Conventional Commits, each ending in `(PLT-05)` |
+| G13 | `git status --porcelain` | empty (no `uploads/` content, no stray files) |
+
+G5, run in `backend/`:
+```bash
+node -e "const fs=require('fs');const a=new Set([...fs.readFileSync('src/common/errors/error-codes.ts','utf8').matchAll(/'([A-Z_]+)'/g)].map(m=>m[1]));const s=fs.readFileSync('../docs/ai/skills/travel-platform/references/api-contract.md','utf8');const sec=s.slice(s.indexOf('Starting set'),s.indexOf('A new code'));const b=new Set([...sec.matchAll(/\x60([A-Z_]{4,})\x60/g)].map(m=>m[1]));const d=[...a].filter(x=>!b.has(x)).concat([...b].filter(x=>!a.has(x)));console.log(d.length?'DIFF '+d:'SAME '+a.size)"
+```
+G9:
+```bash
+curl -s http://localhost:4000/api/docs-json | grep -c '"access_token"'
+```
+
+## Constraints
+
+- Don't touch `backend/src/modules/`, schemas, `backend/test/`, CI workflows or the skill files (except the one `api-contract.md` line in step 2).
+- Don't change `platform-currency.ts` or `common/dates`.
+- No packages beyond step 1. No changes to lint, Prettier, TypeScript or Vitest config.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+When finished, report:
+- The branch and the commit list.
+- Each gate's result in one line (G3 with the test count).
+- The installed versions of the three packages.
+- Any decision you had to make that this file didn't settle, with the reason.
+
+
+Follow-up message sent during the run:
+make sure you work from the leat's main
+
+How the output was used:
+Branch chore/PLT-05-common-foundation from origin/main (7708a0b, re-fetched). Commits: 70f4fec build(backend) packages; 7c3f318 feat(common) error codes and filter; 9c2be5f docs(api) three new codes; 9d9295a feat(common) pagination, regex, money, currency validation; 0f67310 feat(app) app wiring; 211bc07 feat(frontend) rewrites; plus this log commit.
+================================================

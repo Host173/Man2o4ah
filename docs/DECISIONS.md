@@ -3,7 +3,7 @@
 Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
 If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
 
-Last updated: 2026-11-10
+Last updated: 2026-11-11 (prompt-log format: course fields, copy-only prompt)
 
 ---
 
@@ -100,21 +100,21 @@ Infrastructure (not domain modules):
 - **Mongoose references:** declare ObjectId fields with `@Prop({ type: MongooseSchema.Types.ObjectId })`, never `Types.ObjectId` (NestJS turns that into an untyped Mixed field). No `ref` on any prop. A test enforces both.
 - **Files are UTF-8 without BOM** (Windows PowerShell can add one).
 - Backend runs on port 4000, frontend on 3000. Swagger at `/api/docs`.
-- Branches: `main` (milestone releases) and `develop` (integration); work on `feature/<requirement-id>-<description>` from `develop`. Conventional Commits.
+- Branches: `main` (milestone releases) and `develop` (integration); work on `<type>/<ID>-<description>` branches (§18). Conventional Commits.
 
 ## 11. Work split (7 packages, one owner each)
 
-Each package owns whole modules, backend (M1) and pages (M2). Owners choose packages 2–7.
+Each package owns whole modules, backend (M1) and pages (M2).
 
 | # | Package | Modules | Owner |
 |---|---|---|---|
-| 1 | Platform & Payments | reference-data, common wiring (events, ports, jobs), storage, notifications, audit, fx, payments | Kareem (also reviews all PRs and finds extra features) |
-| 2 | Accounts & Auth | accounts | open |
-| 3 | Flights | flights (incl. `SeatInventory`, flight search) | open |
-| 4 | Hotels | hotels (incl. `RoomNightInventory`, hotel search) | open |
-| 5 | Bookings | flight-bookings, hotel-bookings (incl. reviews) | open |
-| 6 | Itineraries | itineraries | open |
-| 7 | Community & Admin | blog, moderation, admin | open |
+| 1 | Platform & Payments | reference-data, common wiring (events, ports, jobs), storage, notifications, audit, fx, payments | Kareem (`Host173`; also reviews all PRs and finds extra features) |
+| 2 | Accounts & Auth | accounts | Aisha (`AishaAlRawahi`) |
+| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana (`janaelmenshawi`) |
+| 4 | Hotels | hotels (incl. `RoomNightInventory`, hotel search) | Pierre (`pierreofficial`) |
+| 5 | Bookings | flight-bookings, hotel-bookings (incl. reviews) | Aya (`Hestias-space`) |
+| 6 | Itineraries | itineraries | Mokhtar (`Mohamed-Mokhtar-Elalfy-16009527`) |
+| 7 | Community & Admin | blog, moderation, admin | Mostafa (`mostafa-elsahy`) |
 
 Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al Rawahi, Aya Amr, Jana Elmenshawi, Mohamed Mokhtar Shaker.
 
@@ -158,13 +158,13 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 | Tests + coverage | all levels pass, coverage reported | minimum 80% lines on `*.service.ts` in business modules |
 | Build | backend and frontend build | |
 | Commit messages | Conventional Commits | checked in CI on the PR's commits |
-| PR title / branch | requirement ID present | branch `feature/<ID>-<description>`, PR title contains the ID (e.g. `FLT-22`) |
+| PR title / branch | requirement ID present | branch `<type>/<ID>-<description>`, PR title `<ID>: <title>` (e.g. `FLT-22: Flight seat hold`) |
 | Security | no high/critical vulnerable dependencies; no committed secrets | `npm audit --omit=dev --audit-level=high`; gitleaks |
 
 ## 15. AI setup in the repo
 
 - **Coding skill (folder, committed)** at `docs/ai/skills/travel-platform/`: every detail coding agents need (modules, routes, data model, rules, workflow). Any tool can use it.
-- **Chat brief (one Markdown file)** at `docs/ai/PROJECT_BRIEF.md`, for chat platforms: general knowledge of the project, the modules and packages, the plan, the key decisions, and the tickets. Built **last**, after the tickets exist. It stays general so it rarely changes; it is updated when tickets or major decisions change.
+- **Chat skill (one Markdown file)** at `docs/ai/chat-skill/SKILL.md` (also uploaded as a skill on chat platforms): the complete project knowledge in one file, with a numbered outline so a model can jump to the right section. It holds every decision and its reason, the modules, the full data model, endpoints, rules, workflow, tickets, the course PDF summary and the requirements, plus an explicit list of what isn't decided. It answers only from that knowledge and tells the user to ask the team leader when something isn't decided or isn't covered. It is regenerated whenever tickets, decisions or the data model change.
 - **Shared rules live in the README ("Team rules")**, the single source for humans and agents. CI enforces what can be checked.
 - **`AGENTS.example.md` (committed)** points to the README rules and the project skill, adds agent-only behaviours (no push/PR unless asked, follow `DESIGN.md` for UI, stop and tell the user to ask the team leader when something isn't decided, prompt logging), and ends with a personal section. Each member copies it to their own tool's file.
 - **Gitignored (personal):** root `/AGENTS.md`, `/CLAUDE.md`, `/GEMINI.md`, `.claude/`, `.codex/`, `.cursor/`, `.gemini/`, personal skills.
@@ -173,7 +173,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 ## 16. AI prompt log
 
 - **Folder `ai-prompts/` with one file per member** (no merge conflicts between members): `kareem.txt`, `pierre.txt`, `mostafa.txt`, `aisha.txt`, `aya.txt`, `jana.txt`, `mokhtar.txt` (Mohamed Mokhtar Shaker).
-- **The agent logs every prompt**, appending one entry at the end of each turn to the current member's file: date and time, student, tool and model, branch, related requirement IDs, the prompt (verbatim, secrets and connection strings removed), and "How the output was used" (one or two lines on what was done: files changed, commit).
+- **The agent logs every prompt in the course's format** (PDF 11.1: `Date`, `Student`, `Tool`, `Related Requirement`, `Prompt`, `How the output was used`), with as little model thinking as possible: `Prompt` is the member's message copied exactly (an attached file, e.g. an execution file, is added as `[Attached: <file name>]` plus its full content, unchanged); `Related Requirement` is the ID in the current branch name, or `none`; `How the output was used` is one line stating what the turn did (files changed and commit, or "Answer only, no files changed"). Secrets, tokens and connection strings are replaced with `<removed>`. Append only; earlier entries are never edited.
 - **Who is the current member:** set once in the member's local agent file (`I am <name>; my prompt log is ai-prompts/<first name>.txt`). No command or lookup per prompt. If it isn't set, the agent asks once and tells the member to add it.
 - Chat tools without repo access: the member logs material prompts by hand (or asks the chat for a ready entry to paste).
 - Kareem handles the course's `AI_PROMPTS.txt` requirement (the course names a single root file).
@@ -198,8 +198,19 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 9. If B needs A's code, wait for A's merge; if B only needs A's interface, start now against a fake.
 10. Agents never push, open PRs, force-push, or touch `develop`/`main` unless the member explicitly asks; never commit `.env` files.
 11. Releases: at each milestone Kareem merges `develop` → `main` and tags `m1` / `m2`.
+12. **Setup phase works from `main`.** Just before the tickets start, Kareem fast-forwards `develop` to `main`, makes `develop` the default branch, and protects `develop` and `main`. From then on, all work branches from `develop`.
+
+## 19. Tickets (M1, backend)
+
+- **Sprint 1, contracts and foundation:** every package publishes the interface others call (stub + fake: `CTR-01`…`CTR-07`), plus the Platform foundation (`PLT-04` data model review and freeze, `PLT-05` common foundation, `PLT-06` event contracts and test support).
+- **Sprint 2, features:** one ticket per requirement (tiny linked ones grouped). Every ticket depends only on Sprint 1 tickets or on its own package's tickets; other packages are used through fakes until merged.
+- **Integration, end of Sprint 2 (Kareem):** demo seed (`PLT-08`), backend E2E journeys (`TST-01`), M1 release (`PLT-07`).
+- **Backlog:** bonus requirements, the Azure runner (`PLT-02`), cloud deployment (`PLT-09`).
+- **Keys:** the requirement ID where one fits; otherwise `CTR` (contract), `INV` (inventory), `PLT` (platform), `TST` (cross-module tests). Branch `<type>/<KEY>-<slug>`, PR title `<KEY>: <title>`.
+- Tickets say **what** to build, the test levels, TDD, branch, PR title and dependencies; **how** is up to the owner. Dates are set by Kareem.
+- Frontend tickets (M2) come later, once `DESIGN.md` is decided.
 
 ## Open items to discuss
 
-- **The team works from `develop` now.** To do: make `develop` the default branch on GitHub, then protect `develop` and `main` once CI is merged.
-- **Git rule already agreed (Kareem's message to the team):** one branch per ticket, always created from the latest `develop`, never from another ticket's branch. If ticket B needs A's code, B starts after A is merged. To refine when writing the rules: B may start earlier against a fake when it only needs A's interface (already defined in the data model).
+- **Reminder for Kareem:** re-check the prompt-log instructions in `AGENTS.example.md` (format follow-up on PLT-03).
+- **GitHub:** Aisha, Jana and Mokhtar have pending invites; once they accept, assign their packages' issues (Sprint 1 + 2).

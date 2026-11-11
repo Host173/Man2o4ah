@@ -16,7 +16,7 @@ project-root/
 ├── backend/            NestJS app
 ├── frontend/           Next.js app
 ├── docs/
-│   ├── ai/             project skill for AI agents (skills/travel-platform/)
+│   ├── ai/             AI skills: skills/travel-platform/ (coding agents), chat-skill/ (chat assistants)
 │   ├── requirements/
 │   ├── api/
 │   ├── database/       data model, class and ER diagrams
@@ -131,7 +131,7 @@ These rules bind every change, by a person or an agent. The details are in the p
    - Windows (cmd, repo root): `mkdir .claude\skills` then `mklink /J .claude\skills\travel-platform docs\ai\skills\travel-platform`
    - macOS/Linux (repo root): `mkdir -p .claude/skills && ln -s ../../docs/ai/skills/travel-platform .claude/skills/travel-platform`
 3. **Prompt log:** `ai-prompts/<your first name>.txt`. Your agent appends one entry per prompt. For chat tools without access to the repo, add material prompts by hand.
-4. **Chat assistants** (Claude, ChatGPT, Gemini): use the project brief `docs/ai/PROJECT_BRIEF.md` once it exists.
+4. **Chat assistants** (Claude, ChatGPT, Gemini): use the chat skill `docs/ai/chat-skill/SKILL.md`, one file with all the project knowledge. Paste `docs/ai/chat-skill/chat-instructions.txt` into the tool's instructions field (custom GPT, Gemini Gem, Claude project) and upload `SKILL.md` as knowledge. On Claude you can also add it as a skill.
 
 ## Database
 

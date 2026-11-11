@@ -1,0 +1,4263 @@
+---
+name: travel-platform-knowledge
+description: Complete knowledge base for Man2o4ah, the GIU Software Project I "Travel Planning and Booking Platform" (repo Host173/Man2o4ah; team leader Kareem; members Aisha, Jana, Pierre, Aya, Mokhtar, Mostafa; NestJS 12 + Mongoose 9 on MongoDB Atlas, Next.js 16, Stripe test mode, FXRatesAPI). Use for ANY question about Man2o4ah, "our project", "the team" or the travel platform - decisions and why they were made, architecture, modules, packages and owners, the data model, endpoints, auth, holds, bookings, payments, refunds, itineraries, blog, moderation, admin, testing, CI, git rules, the AI prompt log, tickets, sprints, milestones, requirements (ACC-, FLT-, HTL-, PAY-, ITN-, BLG-, GEN- IDs) and what is still undecided. Answers only from this file for project facts and tells the user to ask the team leader (Kareem) when something is not decided or not covered.
+---
+
+# Man2o4ah: the complete project knowledge
+
+This one file holds everything the team has decided for Man2o4ah, the GIU Software Project I "Travel Planning and Booking Platform" (repo `Host173/Man2o4ah`): every decision with its reason, the modules, the full data model, the endpoints, the rules, the workflow, every ticket and the official requirements. **Snapshot date: 2026-11-11.**
+
+## 0. How to use this skill (read this first)
+
+### 0.1 Who you are when you answer
+
+You are the project's technical lead assistant. You answer the team leader (Kareem) or any of the 7 members. Answer the way a senior engineer who designed this project with them would:
+
+1. **Answer first, then the why.** Give the direct answer in the first line or two, then the reason in one to three sentences. Every decision has a recorded reason (§3 “Decisions and their reasons”, under "Why"). Members must explain every choice in the oral defense, so the "why" matters as much as the "what".
+2. **Be concise and plain.** Short sentences, everyday words, no filler. Use a list or table only when the content really is a list or a comparison.
+3. **Be honest.** If a member's idea conflicts with a decision, say so plainly and name the decision. If you think a decision has a real problem, you may say so once, briefly, and say that changing it is Kareem's call. Don't reopen settled decisions on your own.
+4. **Point to the source.** Name the section and its title, or the requirement ID ("§8.2 “Flight hold”", "FLT-22"), so the member can check it.
+5. **Stick to the project's stack** (NestJS 12 ESM, Mongoose 9, Vitest, Next.js 16 App Router, …) when answering programming questions too.
+6. **Code in this file is illustrative.** Snippets show the agreed pattern; they are not tested code. When you show one, say so, and say that the merged code in the repo wins if they differ.
+7. **General knowledge is fine** where it can't conflict with a team decision: how a JavaScript feature works, what an HTTP status means, how MongoDB indexes behave. Project facts come only from this file.
+
+### 0.2 Never assume. When you don't know, send them to Kareem
+
+This is the most important rule in this file.
+
+- **If a project fact isn't in this file, or §19 “Not decided yet: ask Kareem” lists it as not decided, don't guess and don't pick an option.** Say clearly: *"This isn't decided yet (or: this isn't covered in the project knowledge). Ask Kareem, the team leader."* You may list the options recorded here, clearly labelled as undecided, without recommending one.
+- **Don't fill gaps with "typical" choices.** Tailwind or a UI kit, the deployment provider, frontend testing tools, sprint dates and extra or bonus features are **not decided**.
+- **Live status goes stale.** Issue state, PR merges, assignments and invites may have changed since 2026-11-11. Give the snapshot fact with its date (§2.2 “Status snapshot”) and tell them to check GitHub (`Host173/Man2o4ah`) or ask Kareem.
+- **Conflicts.** If two sections seem to disagree, follow this order and mention the conflict: the official requirements (§17 “Official requirements”) → the decisions (§3 “Decisions and their reasons”) → the data model (§5 “Data model”) → everything else. Never resolve a conflict silently.
+- **Also send them to Kareem when** a question would change a shared contract (data model, ports, events, error codes, auth cookies, `common/`, `DESIGN.md`), needs a new package, collection or module, needs a change in a module the asker's package doesn't own, or a requirement is ambiguous in a way that changes data, money or a status.
+- **If you can only see parts of this file** (some platforms show search results instead of the whole file), search for the topic before answering, and treat "not found" as "not covered": send them to Kareem rather than guessing.
+
+### 0.3 How to find things fast
+
+Every section and subsection is numbered and titled. Cross-references give the number and the title ("§5.4.1 “`SeatInventory`”"), so you can search for either. The outline below also gives each section's line range in this file.
+
+**Question router**
+
+| If the question is about… | Read |
+|---|---|
+| Why we chose something, or the exact rule that was decided | §3 “Decisions and their reasons” (each subsection: the decision, then "Why") |
+| Who owns what, GitHub usernames, prompt-log file | §2.1 “Team and packages” |
+| Project status: what's done, what's pending (dated, goes stale) | §2.2 “Status snapshot” |
+| Which module owns a collection; folder layout; where an endpoint lives | §4 “Modules, folder layout and where things live” |
+| Why a module is designed the way it is, its tricky parts | §4.6 “Module design notes” |
+| Who may call whom, ports, events, background jobs | §5.6 “Cross-module contracts”, §5.7 “Background jobs” |
+| A collection, field, index, enum, lifecycle, inventory operation | §5 “Data model” |
+| Schema code pattern, changing the data model, seeding | §5.9 “Schema pattern”, §5.10 “Changing the data model”, §5.11 “Seeding” |
+| An endpoint: URL, method, role, module | §6 “Endpoints” |
+| Login, cookies, sessions, lockout, roles, ownership, moderator scope | §7 “Auth, sessions, roles, ownership” |
+| Holds, booking lifecycle, Stripe, webhooks, refunds, expiry, concurrency proof | §8 “Bookings, holds, payments, refunds” |
+| Flights/hotels management and search, itineraries, FX, blog, reports, notifications, admin | §9 “Domain rules” |
+| Error shape and **the error-code list**, env variables, pagination, types, how the frontend calls the backend | §10 “API contract and error codes” |
+| NestJS conventions: module recipe, DTOs, transactions, Swagger, uploads, don'ts | §11 “Backend conventions” |
+| Next.js pages, route map, rendering choices, forms, styling, Stripe page (M2) | §12 “Frontend” |
+| Tests: levels, TDD, techniques, in-memory DB, fakes, E2E | §13 “Testing” |
+| Branches, commits, PRs, CI gates, prompt log, definition of done, milestones | §14 “Workflow” |
+| A ticket: owner, issue number, output, tests, branch, PR title, dependencies | §15 “Tickets” |
+| What the course requires beyond that (deliverables, AI rules, bonus, deployment bonus) | §16 “The course project description” |
+| The exact text of a requirement ID | §17 “Official requirements” (search for `**FLT-22**`) |
+| Lab code that differs from ours, oral-defense "why" answers | §18 “Course labs vs. this project” |
+| Anything not decided yet | §19 “Not decided yet: ask Kareem” |
+| A term (port, snapshot, hold, minor units…) | §20 “Glossary” |
+
+**Outline**
+
+- **§0 How to use this skill (read this first)** (lines 10–104)
+- **§1 Project at a glance** (lines 105–135)
+- **§2 Team, packages and status** (lines 136–173): 2.1 Team and packages · 2.2 Status snapshot (2026-11-11; goes stale, check GitHub for the live state)
+- **§3 Decisions and their reasons** (lines 174–579): 3.1 Architecture · 3.2 Modules · 3.3 Module rules · 3.4 Data access · 3.5 Database process · 3.6 Reference data · 3.7 Hosting · 3.8 Local databases · 3.9 Data conventions (from the data model) · 3.10 Toolchain (from the scaffold) · 3.11 Work split (7 packages, one owner each) · 3.12 Testing (backend; frontend testing is decided before M2) · 3.13 CI · 3.14 CI quality gates (every PR to `develop`/`main`) · 3.15 AI setup in the repo · 3.16 AI prompt log · 3.17 API contract · 3.18 Git rules · 3.19 Tickets (M1, backend)
+- **§4 Modules, folder layout and where things live** (lines 580–931): 4.1 Packages and owners · 4.2 Modules · 4.3 Folder layout (backend) · 4.4 Contracts: who calls whom, ports, events, jobs · 4.5 Where an endpoint lives · 4.6 Module design notes: purpose, why, tricky parts, conflicts
+- **§5 Data model** (lines 932–1819): 5.1 Global conventions · 5.2 Collections at a glance · 5.3 Collections by module · 5.4 Inventory operations · 5.5 Lifecycles · 5.6 Cross-module contracts · 5.7 Background jobs (`@nestjs/schedule`) · 5.8 Decisions to confirm in team review · 5.9 Schema pattern (how a schema file looks) · 5.10 Changing the data model · 5.11 Seeding
+- **§6 Endpoints** (lines 1820–1986): 6.1 Auth & accounts · 6.2 Admin (all Adm) · 6.3 Reference & supporting (added) · 6.4 Airlines & flights · 6.5 Flight bookings · 6.6 Hotels & rooms · 6.7 Hotel bookings & reviews · 6.8 Payments & refunds · 6.9 Itineraries (Own unless noted) · 6.10 Blog
+- **§7 Auth, sessions, roles, ownership** (lines 1987–2079): 7.1 Roles and account fields · 7.2 Cookies and tokens · 7.3 Sessions · 7.4 Login, lockout, register, passwords · 7.5 Guards and decorators · 7.6 Ownership and moderator scope (ACC-11) · 7.7 Frontend side (details in §12 and §10) · 7.8 Account events and checks (ACC-12, ACC-15, ACC-16)
+- **§8 Bookings, holds, payments, refunds** (lines 2080–2230): 8.1 Lifecycle · 8.2 Flight hold · 8.3 Hotel hold · 8.4 Policies and payment · 8.5 Expiry (booking modules' jobs, every 30 s) · 8.6 Stripe webhook and confirmation · 8.7 Cancellations and refunds · 8.8 References, e-ticket, completion · 8.9 Frontend flow · 8.10 Proving concurrency (required test)
+- **§9 Domain rules (everything except bookings and payments)** (lines 2231–2326): 9.1 Time zones and dates · 9.2 Exchange rates (ITN-18), module fx · 9.3 Flights, module flights · 9.4 Hotels, modules hotels and hotel-bookings · 9.5 Itineraries, module itineraries · 9.6 Blog, module blog · 9.7 Reports, moderation, audit · 9.8 Notifications (GEN-01) · 9.9 Accounts and providers, admin side
+- **§10 API contract and error codes** (lines 2327–2455): 10.1 Topology · 10.2 Environment variables · 10.3 Response shapes · 10.4 Types · 10.5 Frontend fetch helpers (the only two ways to call the backend) · 10.6 Uploaded images
+- **§11 Backend conventions (NestJS 12 ESM + Mongoose 9)** (lines 2456–2620): 11.1 Commands (run in `backend/`) · 11.2 ESM and Mongoose 9 gotchas · 11.3 App setup · 11.4 Module recipe · 11.5 Validation and DTO rules · 11.6 Errors · 11.7 Pagination, filtering, sorting · 11.8 Transactions · 11.9 Ports and events · 11.10 Scheduled jobs · 11.11 File uploads (GEN-08) · 11.12 Swagger (Milestone 1 is graded here) · 11.13 Don'ts
+- **§12 Frontend (Next.js 16 App Router, Milestone 2)** (lines 2621–2805): 12.1 Setup and commands · 12.2 Route map · 12.3 Server vs Client Components · 12.4 Getting data · 12.5 Auth in the frontend · 12.6 Rendering strategy per page (project PDF §9) · 12.7 Forms and validation · 12.8 UI states and shared components · 12.9 Styling and DESIGN.md · 12.10 Metadata · 12.11 Stripe payment page · 12.12 Don'ts
+- **§13 Testing** (lines 2806–2891): 13.1 The four levels · 13.2 When TDD is required · 13.3 Test design techniques · 13.4 Integration tests on the in-memory database · 13.5 Faking other modules and external services · 13.6 API tests · 13.7 E2E flows · 13.8 Files, names, commands, coverage
+- **§14 Workflow: git, PRs, CI, AI prompt log, definition of done** (lines 2892–2988): 14.1 Branches · 14.2 Commits · 14.3 Pull requests · 14.4 CI gates (every PR into `develop`/`main`) · 14.5 AI prompt log (graded) · 14.6 Definition of done · 14.7 Milestones
+- **§15 Tickets (M1 backend)** (lines 2989–3856): 15.1 How the tickets are organized · 15.2 Package 1 · Platform & Payments (Kareem): ticket details · 15.3 Package 2 · Accounts & Auth (Aisha): ticket details · 15.4 Package 3 · Flights (Jana): ticket details · 15.5 Package 4 · Hotels (Pierre): ticket details · 15.6 Package 5 · Bookings (Aya): ticket details · 15.7 Package 6 · Itineraries (Mokhtar): ticket details · 15.8 Package 7 · Community & Admin (Mostafa): ticket details · 15.9 Requirement → ticket map
+- **§16 The course project description: what isn't covered elsewhere** (lines 3857–4012): 16.1 Course 1.1: Technology Stack and MVC Architecture · 16.2 Course 2: Official Requirements and User Stories · 16.3 Course 7.1: Milestone 1: Backend & API - Deadline ( 20/11) · 16.4 Course 7.2: Milestone 2: Frontend & Integration - Deadline ( 11/12) · 16.5 Course 7.3: Optional Cloud Deployment Bonus · 16.6 Course 11.2: AI Usage Regulations · 16.7 Course 12: Optional Bonus Requirements · 16.8 Course 13: Milestone Deliverables · 16.9 Course 13.1: Milestone 1: Backend · 16.10 Course 13.2: Milestone 2: Frontend and Final Integration · 16.11 Course 14: Important Notes
+- **§17 Official requirements (verbatim from the course workbook)** (lines 4013–4156): 17.1 Accounts & Admin · 17.2 Flights · 17.3 Hotels · 17.4 Payments & Policies · 17.5 Itineraries · 17.6 Blog · 17.7 Cross-cutting
+- **§18 Course labs vs. this project** (lines 4157–4210): 18.1 Lab 1: MERN recap · 18.2 Lab 2: Figma, Swagger, TypeScript · 18.3 Lab 3: AI workflow · 18.4 Lab 4: Decorators + NestJS intro · 18.5 Lab 5: NestJS CRUD + auth · 18.6 Lab 6: Next.js
+- **§19 Not decided yet: ask Kareem** (lines 4211–4231)
+- **§20 Glossary** (lines 4232–4262)
+
+### 0.4 Examples of good answers
+
+**Q: Why don't we use a separate holds collection?**
+A: A hold is just a booking in `pending_payment`; there's no separate collection. That gives one collection and one lifecycle (`pending_payment` → `confirmed` or `expired`), so nothing has to be kept in sync, and FLT-22 itself says the hold creates a Pending Payment booking. The expiry job turns unpaid holds into `expired` and releases the inventory. (§3.9 “Data conventions”, §5.5.1 “Flight booking and hotel reservation”, FLT-22)
+
+**Q: Should I use Tailwind for the booking pages?**
+A: That isn't decided yet. Ask Kareem. No Tailwind or UI kit may be added until `DESIGN.md` decides the styling stack; until then the guidance is plain CSS modules with semantic HTML. (§12.9 “Styling and DESIGN.md”, §19 “Not decided yet: ask Kareem”)
+
+**Q: Is Jana's CTR-02 assigned yet?**
+A: As of the 2026-11-11 snapshot, no: Jana's GitHub invite was still pending, and her issues get assigned once she accepts. Check issue #11 on GitHub or ask Kareem for the current state. (§2.2 “Status snapshot”)
+
+**Q: How do I check for a duplicate review in hotel-bookings?** (a general-knowledge plus project question)
+A: Rely on the unique index on `reviews.reservationId`, not a read-then-write check: HTL-23 allows one review per completed reservation, and a check-then-insert can let two parallel requests through. A second insert fails with a duplicate-key error; answer 409 with `ALREADY_REVIEWED` from the error-code list (§10.3 “Response shapes”). Fields and indexes: §5.3 “Collections by module”, under `reviews`. Any snippet I show is illustrative; the repo's code wins.
+
+## 1. Project at a glance
+
+- **What we build:** one web platform where travelers search and book flights and hotels, plan day-by-day itineraries with budgets, publish itineraries, and write blog posts. Airline and hotel moderators manage their one assigned provider (flights or rooms, prices, policies). Admins manage accounts, moderators, providers, bookings and reported content.
+- **Course:** German International University, Software Project I, Winter 2026 (Dr. Nada Sharaf). The official requirements workbook is copied verbatim in §17 “Official requirements”; the parts of the course PDF not covered elsewhere are in §16 “The course project description”.
+- **Milestones:**
+  - **M1, backend and API: 20 Nov 2026.** NestJS backend on the shared Atlas database; every mandatory endpoint documented and runnable in Swagger UI (graders test it there with the course datasets).
+  - **M2, frontend and integration: 11 Dec 2026.** Next.js frontend; every mandatory workflow per role works end to end.
+  - Optional bonus: cloud deployment of both apps (graded only on the deployed version), and bonus requirements `[B]` in the workbook.
+- **Oral defense:** every member must explain their code and the design choices. That is why the code stays plain and conventional, and why every decision has a recorded reason.
+- **Stack (fixed):**
+
+| Area | Choice |
+|---|---|
+| Runtime | Node.js 26 LTS (`.nvmrc`) |
+| Backend | NestJS 12 (ESM), Vitest, oxlint, Prettier |
+| Database | MongoDB Atlas (one shared team database) via `@nestjs/mongoose` + Mongoose 9 |
+| Tests | Vitest + `@nestjs/testing` + `mongodb-memory-server` (replica set) + Supertest |
+| Validation | `class-validator` + `class-transformer` DTOs, global `ValidationPipe` |
+| API docs | `@nestjs/swagger` at `/api/docs` |
+| Auth | `@nestjs/jwt` + bcrypt, httpOnly cookies, custom guards (no Passport) |
+| Events, jobs | `@nestjs/event-emitter`, `@nestjs/schedule` |
+| Payments | Stripe, test mode only |
+| Exchange rates | FXRatesAPI, called by the backend only |
+| Time zones | `luxon` (backend), `Intl.DateTimeFormat` (frontend) |
+| Frontend | Next.js 16 App Router, TypeScript, `src/`, ESLint, Prettier. **No Tailwind or UI kit until `DESIGN.md` decides** (not decided, §19 “Not decided yet: ask Kareem”) |
+| Forms (M2) | `react-hook-form` + `zod` (UX only; the backend is the authority) |
+| CI | GitHub Actions (GitHub-hosted runners) |
+
+- Ports: backend `4000`, frontend `3000`. Every backend route starts with `/api`. Packages beyond this list need a reason in the PR and Kareem's approval.
+- **Repository:** `Host173/Man2o4ah` on GitHub. Folders: `backend/`, `frontend/`, `docs/` (database docs, decisions, AI skills, API export), `ai-prompts/`, `AI_PROMPTS.txt`, `README.md`, `.env.example`.
+
+## 2. Team, packages and status
+
+### 2.1 Team and packages
+
+This is the one owner table. Each package is owned by one person from the backend (M1) through its pages (M2). A member changes only the modules their package owns.
+
+| # | Package | Modules | Owner | GitHub | Prompt log |
+|---|---|---|---|---|---|
+| 1 | Platform & Payments | reference-data, `common` wiring (events, ports, jobs, error filter), storage, notifications, audit, fx, payments | Kareem Sayed Ahmed (team leader) | `Host173` | `ai-prompts/kareem.txt` |
+| 2 | Accounts & Auth | accounts | Aisha Al Rawahi | `AishaAlRawahi` | `ai-prompts/aisha.txt` |
+| 3 | Flights | flights (incl. `SeatInventory`, flight search) | Jana Elmenshawi | `janaelmenshawi` | `ai-prompts/jana.txt` |
+| 4 | Hotels | hotels (incl. `RoomNightInventory`, hotel search) | Pierre Remon Raafat | `pierreofficial` | `ai-prompts/pierre.txt` |
+| 5 | Bookings | flight-bookings, hotel-bookings (incl. reviews) | Aya Amr | `Hestias-space` | `ai-prompts/aya.txt` |
+| 6 | Itineraries | itineraries | Mohamed Mokhtar Shaker ("Mokhtar") | `Mohamed-Mokhtar-Elalfy-16009527` | `ai-prompts/mokhtar.txt` |
+| 7 | Community & Admin | blog, moderation, admin | Mostafa Elsahy | `mostafa-elsahy` | `ai-prompts/mostafa.txt` |
+
+**Kareem's role:** team leader. He owns package 1, reviews and merges every PR, sets the sprint dates, decides anything not decided, finds extra features, and handles the course's root `AI_PROMPTS.txt` requirement. Whenever this file says "ask Kareem", it means him.
+
+Cross-package needs: use a fake of the other side until it's merged (§13.5 “Faking other modules and external services”). If you need a change inside someone else's module, ask its owner; never edit it yourself.
+
+### 2.2 Status snapshot (2026-11-11; goes stale, check GitHub for the live state)
+
+Everything in this file that changes day to day is in this block only.
+
+Done:
+- **Scaffold:** NestJS 12 backend and Next.js 16 frontend initialized with their CLIs (health check, Mongoose, Swagger wired).
+- **Database:** every collection in §5 “Data model” implemented as Mongoose schemas, with the reference-data seed and schema tests (index drift test, ObjectId/`ref` guard test).
+- **Database documents:** `docs/database/data-model.md` (§5 “Data model” here), UML class diagrams (`docs/database/class-diagrams.md`, `docs/database/diagrams/00-overview.mmd` … `06-community.mmd` with SVGs), the team review PDF "Database Design Team Review", and the work split PDF.
+- **CI (PLT-01):** merged into `main` (PR #3).
+- **GitHub issues:** 101 tickets created as issues #4–#104 with labels, milestones ("Sprint 1 — Contracts", "Sprint 2 — Features", "Backlog") and 180 native "blocked by" links. Project board "Travel Platform — M1" with a "Board" view and a "Sprints" view grouped by milestone; new open issues are added automatically.
+
+Pending:
+- **PLT-03 (AI setup):** on branch `docs/PLT-03-ai-setup`; a follow-up applies the final prompt-log format (course fields, prompt copied exactly) (§14.5 “AI prompt log”) and the chat skill; then a PR into `main`.
+- **Assignments:** Kareem's, Pierre's, Aya's and Mostafa's issues are assigned. Aisha, Jana and Mokhtar had pending GitHub invites; their packages' issues get assigned once they accept.
+- **`develop` not prepared yet:** setup works from `main` until just before the tickets start (§3.18 “Git rules”, rule 12).
+- **Sprint dates** not set yet (Kareem sets them).
+- **PLT-04, the data model review:** the 15 design calls in §5.8 “Decisions to confirm in team review” still need the team's confirmation.
+
+## 3. Decisions and their reasons
+
+Every decision the team has locked (from `docs/DECISIONS.md` (§3 “Decisions and their reasons” here)), each followed by **Why**: the agreed reasoning a member needs for code reviews and the oral defense. Section numbers match `docs/DECISIONS.md` (§3 “Decisions and their reasons” here) (§3.3 “Module rules”.k here = DECISIONS §k).
+
+Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
+If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
+
+Last updated: 2026-11-11 (prompt-log format: course fields, copy-only prompt)
+
+### 3.1 Architecture
+
+- **Course terms:** MVC. Model = MongoDB Atlas + NestJS schemas/services, View = Next.js, Controller = NestJS controllers.
+- **What it really is:** a layered client-server system. Inside the backend it is a **modular monolith**: one NestJS app, split into feature modules, each with the same layers (controller → service → schema).
+- In docs and the evaluation we use the course's MVC terms; if asked, it is "MVC at the system level, implemented as a layered modular monolith".
+- Business rules live in services, never in controllers.
+
+**Why:**
+
+- **Why do we call it MVC when it's really a modular monolith?**
+  The course (course PDF 1.1, §16 “The course project description”) requires MVC: Model = MongoDB Atlas + NestJS schemas and services, View = Next.js, Controller = NestJS controllers. At the system level that is exactly what we have. Inside the backend we organize by feature module, which the course also asks for ("feature-based modules"). The one-line answer for the defense: *"MVC at the system level, implemented as a layered modular monolith."* Business rules live in services, never in controllers.
+
+- **Why not microservices?**
+  The course requires one NestJS backend, one Next.js frontend and one shared database. Microservices would add network calls, separate deployments and data-consistency problems with no benefit for a 7-person student project.
+
+### 3.2 Modules
+
+The module list, with each module's purpose and collections: §4.2 “Modules”.
+
+Infrastructure (not domain modules):
+- **storage:** a NestJS module that validates and saves uploaded images (GEN-08). Owns no collection; modules store image references (`{ _id, key }`) on their own documents. Files are stored on the server's disk and served by URL (GEN-08). How uploads persist in the cloud deployment is open (deployment topic).
+- **common:** shared guards (roles, ownership), error filter, pagination helper, decorators. No business logic.
+
+### 3.3 Module rules
+
+- **One owner per collection.** Each collection belongs to exactly one module.
+- **Cross-module access goes through the owning module's exported service.** A module never queries another module's collections directly.
+- **No populate across modules.** Mongoose populate only within a module.
+- **Inventory belongs to the provider modules:** seats to flights, room-nights to hotels. Booking modules call their services (e.g. `holdSeats`, `reserveNights`).
+- **Background jobs live in the module that owns the data:** hold expiry and completion in flight-bookings and hotel-bookings (they own the pending bookings), marking flights departed in flights, rate refresh in fx. No separate jobs module.
+- **A hold is a pending booking.** There is no separate holds collection; the inventory counters/nights live in the provider modules.
+- **Modules talk through services, ports and events.** Lower modules never import higher ones; when they must, the lower module owns an interface (port) or emits an event. The allowed imports, ports and events are listed in §5.6 “Cross-module contracts”.
+- **Endpoints that combine provider and booking data live in the booking module** (FLT-29 in flight-bookings; HTL-08 and HTL-22 in hotel-bookings), whatever their URL.
+- **New features:** if a feature fits an existing module's data and rules, it extends that module. A new module is created only for a feature totally different from all current modules (new data no existing module owns).
+- Bonus features that would likely become new modules: favourites, admin analytics. Email notifications would be a channel inside notifications.
+
+**Why:**
+
+- **Why one owner module per collection?**
+  So each member can change their module without breaking anyone else, and so everyone knows who answers for which data in the defense. A module reads or writes only its own collections; anything else goes through the owner's exported service, a port or an event.
+
+- **Why no cross-module `populate` and no `ref` in schemas?**
+  `populate` across modules makes one module depend on another module's schema, so a field rename in one breaks the other. Leaving out `ref` removes the temptation. A module that needs another module's data asks that module's service for it.
+
+- **Why ports?**
+  To keep dependencies one-way and avoid import cycles (dependency inversion). Example: booking modules call payments to start a payment, but after Stripe succeeds payments must confirm the booking. If payments imported the booking modules, that would be a cycle. So payments owns an interface, `PayableBooking`, and both booking modules implement it. The same pattern gives `ReportableContent` (owned by moderation, implemented by blog, hotel-bookings for reviews, and itineraries, so moderation can check, hide or delete content it doesn't own) and `ActiveBookingsCheck` (owned by accounts, implemented by both booking modules, so ACC-12 can block deactivation while a user has upcoming confirmed bookings).
+
+- **Why events?**
+  For side effects the emitting module shouldn't know about: notifications, the audit log, and reactions like "a flight was cancelled, so cancel and refund its bookings". Adding a listener never changes the emitter's code. Handlers are idempotent so processing the same event twice does no harm.
+
+- **Why do background jobs live in the module that owns the data?**
+  Only the owner may write its collections. Hold expiry and completion are in flight-bookings and hotel-bookings, marking flights departed is in flights, and the daily rate refresh is in fx. There is no separate jobs module.
+
+- **Why does admin own no data?**
+  Admin is a set of endpoints that call other modules' services (accounts, flights, hotels, both booking modules, moderation). Its actions are recorded by the audit module through events.
+
+- **Why do endpoints that mix provider and booking data live in the booking module?**
+  Because the booking module already depends on the provider module, not the other way round. For example, the moderator's booking view for a flight (FLT-29) lives in flight-bookings, and the room status view (HTL-08) and the hotel's reservations (HTL-22) live in hotel-bookings, whatever their URL looks like.
+
+- **How do we add a new feature?**
+  If it fits an existing module's data and rules, it extends that module. A new module is created only for something totally different, with data no existing module owns (likely examples: favourites, admin analytics). Email notifications would be a channel inside notifications.
+
+### 3.4 Data access
+
+- **No repository layer in general.** Services use the injected Mongoose model directly.
+- **Exception, inventory:** `SeatInventory` (flights) and `RoomNightInventory` (hotels) are the only classes that change inventory. Every caller (booking holds, hold expiry, moderator capacity changes) uses them; nobody rewrites those queries.
+
+**Why:**
+
+- **Why no repository layer?**
+  A Mongoose model already is the data-access layer, and NestJS injects it straight into services. A repository layer would add files to write, test and explain in the defense with nothing gained.
+
+- **Then why are `SeatInventory` and `RoomNightInventory` the exception?**
+  Inventory is where overbooking happens. The queries that change seat counts and room nights must be written once, correctly, and used by every caller (holds, expiry, confirmation, cancellation, moderator capacity changes). If several places wrote their own version, one subtle mistake would let two travelers buy the same seat.
+
+- **Why do we need inventory at all?**
+  FLT-22 and HTL-18 require that a hold takes seats or rooms "only if enough remain", atomically, even when many users book at the same moment. Inventory is the data that the database can check and change in one step.
+
+- **Why counters for seats but documents for rooms?**
+  Seats in a cabin are interchangeable, so a counter per cabin is enough. The four counters (`totalSeats = availableSeats + heldSeats + bookedSeats`) sit inside the flight document, so "take 3 seats only if 3 are available" is one atomic `$elemMatch` + `$inc` update. Rooms are booked night by night and each night differs, so there is one `room_nights` document per room per night with a unique index on `{roomId, date}`: the database itself rejects a second booking of the same room on the same night.
+
+### 3.5 Database process
+
+- Kareem (with Claude) drafts the schema → the team reviews it in one meeting (each module owner signs off on their own collections) → the schema is frozen.
+- After the freeze, a schema change goes through the team leader as a small PR.
+- Order: module boundaries first, then the schema, then the people split.
+- **Documentation, two artifacts kept in sync in the same PR:**
+  - **UML class diagrams** (Mermaid, `docs/database/class-diagrams.md` and `docs/database/diagrams/`), for the team. Composition (filled diamond) = embedded; association (arrow) = reference by ID. Grouped by module.
+  - **`docs/database/data-model.md` (§5 “Data model” here)**, for coding agents and the source of truth: per collection, the owning module, fields and types, required/optional, embedded vs referenced, indexes, validation. Mongoose schemas are written from it.
+
+- **Deliverables of the database design:** the data model doc, the class diagram(s), an execution file for Claude Code to build the Mongoose schemas, and a team PDF explaining each module (purpose, choices and why, tricky parts, possible future conflicts).
+- **Team review:** each member evaluates their own modules from the PDF and takes responsibility for them. Changes are requested now, before the freeze.
+- **The project skill must contain all module and data model details,** so members can ask it when they want to understand more.
+
+**Why:**
+
+- **Why freeze the schema after one review meeting?**
+  Every package builds against the data model at the same time. Changing it later breaks other people's work, so each owner reviews and signs off on their own collections once (PLT-04), and after the freeze a change goes through Kareem as a small PR.
+
+### 3.6 Reference data
+
+- The course's CSV datasets (countries, cities, airports, attractions) are used in the final evaluation through Swagger.
+- Their identifiers are kept exactly as given; the API must accept them as written.
+- The seed script imports them exactly (no renaming, filtering or cleaning) and is safe to re-run without creating duplicates.
+
+**Why:**
+
+- **Why are dataset IDs used as string `_id`s (`'CAI'`, `'cairo'`, `'EG'`, `'att-1'`)?**
+  The graders test the API in Swagger with the course CSVs. A grader can paste an ID from the CSV and it works. The seed imports the rows exactly, never renames or cleans them, and is safe to re-run (upsert by `_id`).
+
+### 3.7 Hosting
+
+- **MongoDB Atlas,** the shared team database required by the course (section 8.11). No self-hosted MongoDB.
+
+**Why:**
+
+- **Why MongoDB Atlas?**
+  The course requires one shared Atlas database for the team (PDF 8.11). The team leader creates it and shares the connection string privately; everyone keeps it in a local `.env`.
+
+### 3.8 Local databases
+
+- **Tests:** `mongodb-memory-server` in replica-set mode (transactions need it). Each test run gets a fresh in-memory MongoDB. Tests never touch Atlas.
+- **Load/concurrency tests:** run locally on the memory server, not on Atlas (the free tier's throughput cap would distort results).
+- **Offline development (optional):** MongoDB in Docker, started as a single-node replica set. Switching between local and Atlas is only a change to `MONGODB_URI` in `.env`.
+
+**Why:**
+
+- **Why `mongodb-memory-server` for tests and not Docker?**
+  No member needs Docker installed, every test run starts from an empty database, CI runs it easily, and replica-set mode gives us transactions. Tests never touch the shared Atlas data. Docker is only an optional choice for offline development (switching is just `MONGODB_URI`).
+
+- **Why run load and concurrency tests locally?**
+  The Atlas free tier caps throughput, which would distort the results.
+
+### 3.9 Data conventions (from the data model)
+
+- **Money:** integers in minor units (`priceMinor`). **Platform currency: USD** (PAY-04; to be confirmed in the team review).
+- **Times:** instants in UTC; calendar dates stored as midnight UTC (`DateOnly`); "today" for date-only rules is the UTC date. Flight times are entered and shown in the airport's local time.
+- **Snapshots:** bookings copy prices and provider policies at hold time; refunds use the snapshot.
+- **Concurrency:** seats are held with one atomic conditional update on the cabin; rooms are held with one `room_nights` document per room per night (unique index). Status changes are conditional updates (`{ _id, status: from }`).
+- The full list of design calls awaiting team confirmation is in §5.8 “Decisions to confirm in team review”.
+
+**Why:**
+
+- **Why is a hold a `pending_payment` booking and not a separate holds collection?**
+  One collection and one lifecycle: `pending_payment` → `confirmed` → `completed`, `pending_payment` → `expired`, `confirmed` → `cancelled` (GEN-11). Nothing has to be kept in sync between a holds collection and bookings. The expiry job turns an unpaid hold into `expired` and releases its inventory.
+
+- **Why is every status change a conditional update?**
+  `updateOne({ _id, status: 'pending_payment' }, …)` only succeeds if the booking is still in the expected state. If the expiry job and a payment confirmation race, exactly one wins and the other sees that nothing changed.
+
+- **Why snapshots of prices and policies?**
+  Providers can change prices and cancellation rules after someone books. The traveler pays and is refunded according to what they accepted at hold time, so the booking copies the price and policy then and never recomputes them.
+
+- **Why money in integer minor units?**
+  Floating-point numbers can't represent cents exactly (0.1 + 0.2 isn't 0.3). Storing 1999 for $19.99 keeps every sum and refund exact. Field names end in `Minor` (`priceMinor`, `totalMinor`).
+
+- **Why USD as the platform currency?**
+  PAY-04 requires one platform currency for all prices, payments and refunds. USD was chosen (to be confirmed in the team review, §5.8 “Decisions to confirm in team review”). Only itinerary budgets are converted to the user's preferred currency (ITN-18).
+
+- **Why UTC instants and `DateOnly` dates?**
+  Instants in UTC compare correctly everywhere. Calendar dates (check-in, itinerary start, date of birth) have no time zone, so they're stored as midnight UTC, and "today" is the UTC date. Flight times are entered and shown in each airport's local time (FLT-03, GEN-06) and converted with the airport's IANA zone.
+
+- **Why store `departureLocalDate` as a string?**
+  Search by date means "the date at the departure airport". Storing it as `'YYYY-MM-DD'` makes the search an exact equality match, with no time-zone arithmetic inside queries.
+
+- **When do we embed and when do we reference?**
+  Embed when the child never exists alone and is always read with the parent (cabins in a flight, policies in an airline or hotel, days and activities in an itinerary, segments and passengers in a booking). Reference by ID when the data grows without limit, is queried on its own, or belongs to another module.
+
+- **Why a `sessions` collection?**
+  Logout must revoke the refresh token on the server, and a session expires after 30 idle minutes (ACC-06). A TTL index deletes expired sessions automatically.
+
+### 3.10 Toolchain (from the scaffold)
+
+- **Node 26** (LTS; `.nvmrc`), **NestJS 12** (ESM), **Mongoose 9**, **Next.js 16** (App Router).
+- **Backend tests: Vitest.** **Backend lint: oxlint.**
+- **Vitest doesn't type-check**, so `npm run typecheck` (`tsc --noEmit`, covering `src` and `test`) is a required gate next to lint, test and build.
+- **Mongoose references:** declare ObjectId fields with `@Prop({ type: MongooseSchema.Types.ObjectId })`, never `Types.ObjectId` (NestJS turns that into an untyped Mixed field). No `ref` on any prop. A test enforces both.
+- **Files are UTF-8 without BOM** (Windows PowerShell can add one).
+- Backend runs on port 4000, frontend on 3000. Swagger at `/api/docs`.
+- Branches: `main` (milestone releases) and `develop` (integration); work on `<type>/<ID>-<description>` branches (§3.18 “Git rules”). Conventional Commits.
+
+**Why:**
+
+- **Why `MongooseSchema.Types.ObjectId` and never `Types.ObjectId` in `@Prop`?**
+  NestJS turns `Types.ObjectId` into an untyped Mixed field. We hit this bug while building the schemas, so a test now fails if anyone uses it (or adds a `ref`).
+
+- **Why Vitest and oxlint?**
+  They are what the NestJS 12 scaffold set up (ESM-native, fast). We kept the framework defaults instead of fighting them.
+
+- **Why is `typecheck` a separate gate?**
+  Vitest strips types without checking them, so a test suite can pass with type errors. `tsc --noEmit` over `src` and `test` catches them.
+
+### 3.11 Work split (7 packages, one owner each)
+
+Owners, GitHub usernames and prompt-log files: §2.1 “Team and packages”.
+
+Each package owns whole modules, backend (M1) and pages (M2).
+
+
+
+- **First days:** Kareem's foundation (events, ports, storage, notifications stub), Accounts' auth guards and `@CurrentUser`, and the inventory classes from Flights and Hotels.
+- **Until then, build against fakes;** tests override the auth guard. Requirements that need another package's finished work go last (ACC-17, ITN-25/26, ACC-12's booking check).
+
+**Why:**
+
+- **Why does each package own whole modules, backend through pages?**
+  One person can explain a feature end to end in the defense, and nobody waits for someone else to finish "their half" of a feature.
+
+- **Why are both booking modules in one package?**
+  They share the same hold → pay → confirm → expire/cancel → refund pattern and the same ports, so one owner keeps them consistent.
+
+- **Why is Platform & Payments Kareem's package?**
+  It holds the shared foundation everyone plugs into (common wiring, events, ports, storage, error filter, reference data) and payments, which touches both booking modules. The team leader reviews all PRs anyway.
+
+### 3.12 Testing (backend; frontend testing is decided before M2)
+
+The four test levels (unit, integration, API, E2E) with tools and timing: §13.1 “The four levels”.
+
+- **No PR without tests.**
+- **TDD (test commit before code commit) is required** for precise business rules: pricing, refund tiers, booking status transitions, inventory, budget totals and conversion, lockout, and every bug fix (a failing test that reproduces the bug comes first). **Tickets mark this as "TDD: required".**
+- **Every ticket states its tests:** which levels it needs (unit, integration, API, E2E), whether TDD is required, and the test design techniques that apply (e.g. boundary values for limits, a decision table for refund tiers, state transitions for statuses).
+- Elsewhere, tests come in the same PR as the code.
+- Test design techniques: boundary values, equivalence classes, decision tables, state-transition tests, negative tests.
+- Integration tests: wipe collections in `beforeEach`; `await Model.init()` before relying on unique indexes; assert invariants, never the order of concurrent results; use only your own module for real and fake the others.
+- External services (Stripe, FXRatesAPI) are faked behind their adapter in tests.
+
+**Why:**
+
+- **Why four test levels?**
+  Each catches a different kind of bug: unit tests check a rule in isolation, integration tests check real queries, indexes, transactions and concurrency on an in-memory MongoDB, API tests check the HTTP contract (status, error code, response shape), and E2E tests check a whole user journey across modules.
+
+- **Why are E2E tests written at the end of each sprint?**
+  A journey needs several modules merged. They're written once the flows exist, then kept as regression tests on every PR.
+
+- **Why TDD only for some tickets?**
+  Test-first pays off where a rule is exact and easy to get subtly wrong: pricing, refund tiers, status transitions, inventory, budget totals and conversion, lockout, and every bug fix. For CRUD and wiring it adds ceremony without much gain. The test commit comes before the code commit so the TDD order is visible in git history. Tickets say "TDD: required".
+
+- **Why 80% line coverage per service file?**
+  Business rules live in services. Measuring per file stops one well-tested file from hiding an untested one.
+
+- **Why do tests assert the error code and not the message?**
+  Messages get reworded; codes are the contract the frontend relies on.
+
+- **Why fake the other modules in tests?**
+  So your tests don't break when someone else changes their module, and so you can start before they finish. The fakes are written from the contracts in §5.4 “Inventory operations” and §5.6 “Cross-module contracts”.
+
+### 3.13 CI
+
+- **GitHub-hosted Actions** for now, with savings: run on pull requests and on merges to `develop`/`main` only; cancel superseded runs; path filters per app; cache npm and the MongoDB test binary.
+- **CI is ticket PLT-01** (branch `chore/PLT-01-ci-pipeline`). The single required status check is `ci-ok`, plus the PR checks (naming, commits, secrets).
+- **Plan B (PLT-02):** a self-hosted runner on an Azure VM, switched on by changing `runs-on`, if usage approaches the monthly minutes.
+- Required checks on `develop` and `main`: CI green + team leader approval. Tests need no secrets.
+- Local habit: `npm run verify` runs the same checks before pushing.
+
+**Why:**
+
+- **Why GitHub-hosted runners?**
+  No setup, and the free minutes are enough if we're careful: CI runs only on pull requests and merges to `develop`/`main`, cancels superseded runs, uses path filters per app, and caches npm and the MongoDB test binary. Plan B is a self-hosted runner on an Azure VM (PLT-02, backlog), switched on by changing `runs-on` if usage gets close to the monthly limit.
+
+- **Why one aggregate `ci-ok` check?**
+  Path filters skip jobs that aren't affected, so the required check can't be a specific job. `ci-ok` passes when every job that ran passed.
+
+### 3.14 CI quality gates (every PR to `develop`/`main`)
+
+The gates and their exact rules: §14.4 “CI gates”.
+
+**These constraints must appear in three places: the project skill, `AGENTS.md`, and the README.**
+
+**Why:**
+
+- **Why check the branch name and PR title for a requirement ID?**
+  The course asks for traceability: requirement IDs in issues, branches, PRs and commits (course PDF sections 2 and 10).
+
+- **Why gitleaks and `npm audit`?**
+  No secrets may ever be committed or shared (course AI rule 11.2 d), and no high or critical vulnerable production dependency should ship.
+
+- **Why is the PR title passed to the shell through `env:`?**
+  A PR title is user input. Putting it straight into a shell command would allow shell injection.
+
+### 3.15 AI setup in the repo
+
+- **Coding skill (folder, committed)** at `docs/ai/skills/travel-platform/`: every detail coding agents need (modules, routes, data model, rules, workflow). Any tool can use it.
+- **Chat skill (one Markdown file)** at `docs/ai/chat-skill/SKILL.md` (also uploaded as a skill on chat platforms): the complete project knowledge in one file, with a numbered outline so a model can jump to the right section. It holds every decision and its reason, the modules, the full data model, endpoints, rules, workflow, tickets, the course PDF summary and the requirements, plus an explicit list of what isn't decided. It answers only from that knowledge and tells the user to ask the team leader when something isn't decided or isn't covered. It is regenerated whenever tickets, decisions or the data model change.
+- **Shared rules live in the README ("Team rules")**, the single source for humans and agents. CI enforces what can be checked.
+- **`AGENTS.example.md` (committed)** points to the README rules and the project skill, adds agent-only behaviours (no push/PR unless asked, follow `DESIGN.md` for UI, stop and tell the user to ask the team leader when something isn't decided, prompt logging), and ends with a personal section. Each member copies it to their own tool's file.
+- **Gitignored (personal):** root `/AGENTS.md`, `/CLAUDE.md`, `/GEMINI.md`, `.claude/`, `.codex/`, `.cursor/`, `.gemini/`, personal skills.
+- **Kept committed:** the framework-generated `backend/AGENTS.md` and `frontend/AGENTS.md` (pointers to version-matched framework docs). If anything in them conflicts with our rules, the README rules and the project skill win.
+
+**Why:**
+
+- **Why is the coding skill committed to the repo?**
+  Every member's coding agent then works from the same knowledge and rules, whatever tool they use.
+
+- **Why are personal agent files gitignored, with a committed `AGENTS.example.md`?**
+  Members use different tools and preferences. Each copies the example into their own tool's file (`AGENTS.md`, `CLAUDE.md`, …) and adds a personal section, without conflicts in git.
+
+### 3.16 AI prompt log
+
+- **Folder `ai-prompts/` with one file per member** (no merge conflicts between members): `kareem.txt`, `pierre.txt`, `mostafa.txt`, `aisha.txt`, `aya.txt`, `jana.txt`, `mokhtar.txt` (Mohamed Mokhtar Shaker).
+- **The agent logs every prompt in the course's format** (PDF 11.1: `Date`, `Student`, `Tool`, `Related Requirement`, `Prompt`, `How the output was used`), with as little model thinking as possible: `Prompt` is the member's message copied exactly (an attached file, e.g. an execution file, is added as `[Attached: <file name>]` plus its full content, unchanged); `Related Requirement` is the ID in the current branch name, or `none`; `How the output was used` is one line stating what the turn did (files changed and commit, or "Answer only, no files changed"). Secrets, tokens and connection strings are replaced with `<removed>`. Append only; earlier entries are never edited.
+- **Who is the current member:** set once in the member's local agent file (`I am <name>; my prompt log is ai-prompts/<first name>.txt`). No command or lookup per prompt. If it isn't set, the agent asks once and tells the member to add it.
+- Chat tools without repo access: the member logs material prompts by hand (or asks the chat for a ready entry to paste).
+- Kareem handles the course's `AI_PROMPTS.txt` requirement (the course names a single root file).
+
+**Why:**
+
+- **Why one prompt-log file per member?**
+  The course requires a prompt log (PDF 11.1). Seven people appending to one file would cause constant merge conflicts. The course names a single root `AI_PROMPTS.txt`, so that file points to the `ai-prompts/` folder, and Kareem handles that requirement.
+
+- **Why this log format (course fields, prompt copied exactly)?**
+  It's the format the course PDF recommends (11.1), so graders see what they expect. The prompt is copied, never summarized, so nothing is lost or distorted and the agent spends almost no thinking on it; the other fields are mechanical (the requirement comes from the branch name, the outcome is one line of what the turn did). Attached execution files are pasted in full so the log shows exactly what the AI was told.
+
+- **Why do agents never push or open PRs on their own?**
+  The member stays in control, and the course says AI output must be reviewed before it's integrated (11.2 c).
+
+- **Why never paste secrets into an AI tool?**
+  Course rule 11.2 d. Connection strings, tokens and `.env` values never go into a chat or a prompt log.
+
+### 3.17 API contract
+
+- **Next.js rewrite:** the browser calls `/api/*` and `/uploads/*` on the frontend's own origin; Next forwards them to the backend (`BACKEND_URL`). Cookies stay same-origin. Server Components call the backend directly and forward the cookie header.
+- **One error shape** for every non-2xx response, produced by one global exception filter (Platform package): `{ statusCode, code, message, details?, path, timestamp }`. `details` lists field errors for validation (GEN-02).
+- **Calendar dates** (`DateOnly` in the database) travel as `YYYY-MM-DD` strings in requests and responses. **Money** keeps the data model's names and minor units (`totalMinor`), formatted by the frontend.
+- **Error codes live in one enum** (`common/errors/error-codes.ts`). New codes are added there in the same PR that uses them. Tests assert the status and the code, never the message wording.
+
+**Why:**
+
+- **Why does the frontend call `/api` on its own origin (Next.js rewrite)?**
+  The browser talks only to the frontend's origin, and Next forwards `/api/*` and `/uploads/*` to the backend. Cookies stay first-party, so httpOnly cookies just work and there is no CORS trouble.
+
+- **Why httpOnly cookies and never `localStorage`?**
+  ACC-19 requires it, and JavaScript (including injected scripts) can't read an httpOnly cookie.
+
+- **Why a 15-minute access token plus a server-side session with a refresh token?**
+  ACC-06 requires logout to revoke the refresh token on the server and sessions to expire after 30 idle minutes. Short access tokens limit the damage if one leaks.
+
+- **Why no Passport?**
+  Fewer moving parts. A custom guard is short, easy to explain in the defense, and it's what the labs actually teach.
+
+- **Why global guards with a `@Public()` opt-out?**
+  A new endpoint is protected by default. Forgetting a decorator can't open it up.
+
+- **Why one error shape and one error-code enum?**
+  The frontend can react to `code` reliably, tests assert codes, and every endpoint looks the same in Swagger: `{ statusCode, code, message, details?, path, timestamp }`.
+
+- **Why do calendar dates travel as `YYYY-MM-DD`?**
+  They have no time zone. Sending them as plain dates avoids the off-by-one-day bugs that full timestamps cause in other time zones.
+
+### 3.18 Git rules
+
+1. Branch from the latest `develop`; one ticket per branch: `<type>/<ID>-<description>`.
+2. Never commit or push to `develop` or `main` directly (protected).
+3. Keep your branch current by **merging** `develop` into it (no rebase, so no force-push).
+4. Push your branch at least once a day; open a draft PR early if you like.
+5. Before marking a PR ready: `npm run verify` passes in every app you changed, the template is filled, the title has the ID.
+6. Kareem approves and merges. A PR needs CI green and his approval.
+7. Merge with a **merge commit** (not squash), to keep TDD order and authorship in history.
+8. Delete the branch after the merge.
+9. If B needs A's code, wait for A's merge; if B only needs A's interface, start now against a fake.
+10. Agents never push, open PRs, force-push, or touch `develop`/`main` unless the member explicitly asks; never commit `.env` files.
+11. Releases: at each milestone Kareem merges `develop` → `main` and tags `m1` / `m2`.
+12. **Setup phase works from `main`.** Just before the tickets start, Kareem fast-forwards `develop` to `main`, makes `develop` the default branch, and protects `develop` and `main`. From then on, all work branches from `develop`.
+
+**Why:**
+
+- **Why merge commits instead of squash?**
+  Squash would hide the test-first order and each member's individual commits. The graders look at every member's git history.
+
+- **Why merge `develop` into your branch instead of rebasing?**
+  No rewritten history, so no force-push, which is safer for a team new to git.
+
+- **Why one ticket per branch, always from the latest `develop`?**
+  Small PRs are easy to review, and branching from another ticket's branch drags unreviewed code along. If ticket B needs A's code, B waits for A's merge; if B only needs A's interface, B starts now against a fake.
+
+- **Why does Kareem approve and merge every PR?**
+  One reviewer keeps the shared contracts consistent across the seven packages.
+
+- **Why is the setup phase on `main` and `develop` prepared later?**
+  During setup only Kareem works on the repo. Just before the tickets start he fast-forwards `develop` to `main`, makes it the default branch and protects both. That was Kareem's decision.
+
+### 3.19 Tickets (M1, backend)
+
+How the tickets are organized (sprints, contract tickets, keys, branch and PR naming, what a ticket contains): §15.1 “How the tickets are organized”.
+
+**Why:**
+
+- **Why two sprints, with contracts first?**
+  Goal: nobody depends on another member's work inside the same sprint. In Sprint 1 every package publishes the interface others call, as a stub plus a fake (CTR-01…CTR-07), and Kareem builds the foundation (PLT-04, PLT-05, PLT-06). In Sprint 2 every feature ticket depends only on Sprint 1 tickets or on its own package's tickets; other packages are used through fakes until merged. Requirements that need another package's finished work go last (ACC-17, ITN-25/26, ACC-12's booking check).
+
+- **Why do tickets say what to build but not how?**
+  The owner decides the implementation. A ticket gives the expected output, the test levels, whether TDD is required, the branch and PR title, and the dependencies.
+
+- **Why are bonus requirements in the backlog?**
+  The course says mandatory requirements come first and optional features must not replace required ones.
+
+- **What do ticket keys mean?**
+  The requirement ID where one fits (e.g. `FLT-22`); otherwise `CTR` (contract), `INV` (inventory), `PLT` (platform) and `TST` (cross-module tests). A letter suffix on a ticket key marks a second ticket for the same requirement (`GEN-01b`). Careful: some requirement IDs have their own letter in the workbook (`ACC-07a` is a requirement).
+
+## 4. Modules, folder layout and where things live
+
+Which module owns what, the folder layout, and where an endpoint lives. The cross-module contracts are in §5.6 “Cross-module contracts”–§5.7 “Background jobs”.
+
+### 4.1 Packages and owners
+
+The owner table (packages, modules, owners, GitHub usernames, prompt logs) is §2.1 “Team and packages”. Cross-package needs: use a fake of the other side until it's merged (§13.5 “Faking other modules and external services”). If you need a change inside someone else's module, ask its owner; never edit it yourself.
+
+### 4.2 Modules
+
+| Module | Purpose | Owns (collections) |
+|---|---|---|
+| reference-data | Course datasets, read-only | countries, cities, airports, attractions, currencies |
+| accounts | Register, login, lockout, sessions, profile, roles, moderator assignment | users, sessions |
+| flights | Airlines, policies, flights, cabins, seat inventory (`SeatInventory`), flight search | airlines, flights |
+| flight-bookings | Flight bookings, passengers, hold, confirm, cancel, e-ticket, moderator booking views | flight_bookings |
+| hotels | Hotels, rooms, availability, blocks, room-night inventory (`RoomNightInventory`), hotel search | hotels, rooms, room_nights |
+| hotel-bookings | Reservations, hold, confirm, cancel, reviews, room status view | hotel_reservations, reviews |
+| payments | Stripe payments, webhook, refunds, policy acceptance | payments, refunds, policy_acceptances, stripe_webhook_events |
+| itineraries | Days, cities, activities, images, budgets, transport, sharing, cloning | itineraries |
+| fx | Daily exchange rates and conversion | exchange_rates |
+| blog | Posts, tags, images, comments, likes, author page | posts, comments, likes |
+| moderation | Reports on posts, comments, reviews, itineraries | reports |
+| notifications | In-app notifications (listens to events) | notifications |
+| audit | Append-only admin action log (listens to events) | audit_logs |
+| admin | Admin endpoints; calls other modules' services | **none** |
+| storage (infra) | Image upload validation, files on disk (GEN-08) | none |
+| `common` (infra) | Guards, decorators, error filter and codes, pagination, dates, money | none |
+
+A new feature extends the module whose data and rules it fits. A new module is created only for something totally different (new data no module owns), and only with the team leader's approval.
+
+### 4.3 Folder layout (backend)
+
+```
+backend/src/
+  main.ts  app.module.ts
+  config/                 env validation
+  common/                 database/ (shared embedded schemas) dates/ money/ errors/ guards/ decorators/ pagination/
+  modules/<module>/
+    <module>.module.ts  <module>.controller.ts  <module>.service.ts
+    schemas/<name>.schema.ts
+    dto/create-x.dto.ts  update-x.dto.ts  x-query.dto.ts  x.response.dto.ts
+    ports/                (only the module that owns a port)
+    <name>.spec.ts        tests next to the code they test
+backend/test/support/     in-memory MongoDB helper, shared test fixtures
+backend/seed-data/        course CSVs (never edit)
+```
+
+### 4.4 Contracts: who calls whom, ports, events, jobs
+
+The tables are kept in one place, the data model: who may call whom §5.6.1 “Who calls whom”, ports §5.6.2 “Ports”, events §5.6.3 “Events”, background jobs §5.7 “Background jobs”. The rules that go with them:
+- A module exports **only its service** (and its port implementations), never its models. If you need something from a module that isn't on your allowed list, that's a design question for Kareem.
+- Ports are registered with injection tokens defined in the owning module; implementers provide them. Until the implementer exists, the owner tests against a fake.
+- Events carry the recipients' user IDs, so listeners don't look them up. Emit **after** the transaction commits. Handlers are idempotent (conditional updates), because an event can be handled twice.
+- Jobs live in the module that owns the data and only use conditional updates (safe if two app instances run them).
+
+### 4.5 Where an endpoint lives
+
+The URL doesn't decide the module; ownership does. Endpoints that combine provider and booking data live in the **booking** module: `GET /api/flights/:id/bookings` and `/passengers/export` (FLT-29) in flight-bookings; `GET /api/hotels/:id/availability` (HTL-08), `/reservations` (HTL-22) and `/reviews` (HTL-24) in hotel-bookings. §6 “Endpoints” gives the module for every endpoint.
+
+### 4.6 Module design notes: purpose, why, tricky parts, conflicts
+
+From the team review PDF ("Database Design Team Review"). Each owner evaluated their own modules from it.
+
+#### 4.6.1 reference-data
+
+**Purpose:** Holds the course datasets (countries, cities, airports, attractions) and the supported currencies. The graders test the API in Swagger using these exact IDs.
+
+**Collections:** `countries` (8 countries, each with its currency); `cities` (8 cities); `airports` (8 airports with IANA time zones); `attractions` (8 attractions); `currencies` (7 supported currencies, derived from the countries file)
+
+**Why it is designed this way:**
+- **The dataset ID is the document's `_id`** (`'CAI'`, `'cairo'`, `'EG'`). A grader can type an ID from the CSV into Swagger and it just works. Other modules store these IDs as plain strings.
+- **Read-only.** No endpoint writes to these collections, so no feature can corrupt the data the graders rely on.
+- **Currencies come from the countries file.** GEN-12 asks us to seed supported currencies; the dataset already names one per country. Each currency stores its `minorUnits` (JPY has none).
+
+**Tricky parts:**
+- The seed must import rows **exactly**, be safe to re-run (upsert by `_id`), and check every reference before writing anything.
+- Airport time zones drive every flight time in the system (FLT-03, GEN-06).
+
+**Possible future conflicts:**
+- If the course publishes new CSVs, re-run the seed. The seed never deletes, so removing a row that is already used can't break anything silently.
+
+**How it talks to other modules:** Read by accounts, flights, hotels, itineraries and fx through its service.
+
+**Requirements:** GEN-12, FLT-02
+
+#### 4.6.2 accounts
+
+**Purpose:** Who you are and what you may do: registration, login, lockout, sessions, profile, roles, and which provider a moderator manages.
+
+**Collections:** `users` (every account: users, admins, airline and hotel moderators); `sessions` (one per logged-in device; refresh token hash and idle expiry)
+
+**Why it is designed this way:**
+- **One `users` collection for every role**, with a `role` field. One login flow, one lockout rule, one password rule.
+- **Moderator assignment is embedded** (`moderatorOf`) because a moderator manages exactly one provider (ACC-13).
+- **A `sessions` collection** is needed because logout must revoke the refresh token on the server and sessions expire after 30 idle minutes (ACC-06). A TTL index deletes expired sessions automatically.
+
+**Tricky parts:**
+- **Lockout counter must be atomic** (`$inc`). Read-then-write lets five parallel wrong passwords slip past the limit.
+- Every authenticated request checks the session and slides its expiry. Password change, admin reset, suspension and deactivation delete **all** the user's sessions.
+- **Deactivation is blocked while the user has upcoming confirmed bookings** (ACC-12), but accounts can't import the booking modules (that would be a cycle). So accounts defines an `ActiveBookingsCheck` port and the booking modules implement it.
+- Tokens live only in httpOnly cookies (ACC-19). Nothing auth-related goes to localStorage.
+
+**Possible future conflicts:**
+- The auth guard and the role/ownership guards are needed by everyone, so they must be built first, in the shared foundation.
+- Bonus email verification would add fields (for example `emailVerifiedAt`). That is an additive change.
+
+**How it talks to other modules:** Emits `user.deactivated`, `user.reactivated`, `account.suspended`, `account.reactivated`. Its auth guards are used by every module.
+
+**Requirements:** ACC-01 – ACC-19, GEN-13
+
+#### 4.6.3 flights
+
+**Purpose:** The airline moderator's world: airline profile, baggage and cancellation policies, flights, cabins, and the seat inventory.
+
+**Collections:** `airlines` (profile, logo, active flag, baggage policy, cancellation tiers); `flights` (schedule, status and embedded cabins with seat counters)
+
+**Why it is designed this way:**
+- **Cabins are embedded in the flight.** A flight has at most 4, and they never exist alone. Because the seat counters live inside one document, "take 3 seats only if 3 are free" is **one atomic update**. That is what makes overselling impossible (FLT-22).
+- **Four counters per cabin**: total, available, held, booked, always `total = available + held + booked`. Search shows available seats directly (FLT-11), and a capacity cut can be checked in the same atomic way (FLT-05).
+- **Times are stored in UTC**, plus `departureLocalDate` (the date at the departure airport). Search by local date and the "same flight number on the same date" rule become simple equality checks.
+- **Policies are embedded in the airline:** there is one of each, and they're always read with it.
+- **`hasBookings` flag:** airports can't change once a flight is booked (FLT-05). The flag is set when seats are first held, so flights never has to ask flight-bookings, which would be a cycle.
+
+**Tricky parts:**
+- **`SeatInventory` is the only code that changes seat counters.** Every hold, confirm, release, cancellation and capacity change goes through it.
+- Time zones: local input → UTC, and `departureLocalDate` recomputed whenever the time changes.
+- Cancelling a flight (FLT-06) must cancel its bookings with a 100% refund, but flights doesn't own bookings. It emits `flight.cancelled` and flight-bookings does the rest.
+
+**Possible future conflicts:**
+- The flight-bookings owner builds on `SeatInventory`. Its method list (§5.4.1 “`SeatInventory`”) is the contract between the two owners; agree on it before either starts.
+
+**How it talks to other modules:** Emits `flight.rescheduled`, `flight.cancelled`. Used by flight-bookings (`SeatInventory`, flight details) and itineraries (search reuse, ITN-26).
+
+**Requirements:** FLT-01 – FLT-17, FLT-30, GEN-06
+
+#### 4.6.4 flight-bookings
+
+**Purpose:** A traveler's flight bookings: passengers, baggage, the seat hold, confirmation, e-ticket and cancellation.
+
+**Collections:** `flight_bookings` (booking with embedded segments (1–2), passengers, pricing, policy snapshot and status)
+
+**Why it is designed this way:**
+- **A hold is a `pending_payment` booking.** FLT-22 says the hold creates a booking in Pending Payment, and GEN-11 starts the lifecycle there. A separate holds collection would duplicate that state.
+- **Segments and passengers are embedded:** they belong to the booking and are bounded.
+- **Snapshots.** The fare and the airline's policies are copied into the booking at hold time. A later price change doesn't touch it (FLT-05), and refunds use the policy the user actually accepted (PAY-02).
+- **Synced copies of departure times** let us list Upcoming/Past and check "before departure" without querying another module. They're updated by the `flight.rescheduled` event.
+- **The reference is set on confirmation** (FLT-23). A partial unique index lets many pending bookings have none.
+
+**Tricky parts:**
+- **Booking and seat counters change in one transaction**, so a crash can't leave seats held with no booking. A round trip holds both segments or nothing.
+- **The expiry job and the payment webhook can hit the same booking at the same moment.** Both use a conditional update ("only if still `pending_payment`"), so exactly one wins.
+- A payment that succeeds **after** expiry must not confirm; it gets a full automatic refund.
+- Passenger type is checked against age on the departure date. Infants take no seat and pay 10%. Extra baggage is charged per segment at that airline's price.
+- FLT-29 (bookings per flight, passenger CSV) lives here even though its URL starts with `/flights`, because only this module can read bookings.
+
+**Possible future conflicts:**
+- Agree on the `PayableBooking` port and the `payment.succeeded` payload with the payments owner first.
+- The admin booking list (ACC-17) reads from here through the service.
+
+**How it talks to other modules:** Uses flights (`SeatInventory`) and payments (refunds). Implements the `PayableBooking` and `ActiveBookingsCheck` ports. Listens to `payment.succeeded`, `flight.rescheduled`, `flight.cancelled`. Emits confirmed / cancelled / expired / rescheduled events.
+
+**Requirements:** FLT-12, FLT-19 – FLT-29, GEN-11
+
+#### 4.6.5 hotels
+
+**Purpose:** The hotel moderator's world: hotel profile, policies, rooms, availability, blocked dates, and the room-night inventory.
+
+**Collections:** `hotels` (profile, photos, amenities, times, cancellation tiers, rating summary); `rooms` (bookable units with price, occupancy and availability ranges); `room_nights` (one document per taken room per night (reserved or blocked))
+
+**Why it is designed this way:**
+- **`room_nights` is the double-booking guarantee.** One document per room per night, with a unique index on (room, date). Two reservations for the same night can't both be saved, even at the exact same millisecond. Date-range overlap checks in code can't promise that.
+- **Blocked dates use the same documents** (`kind: blocked`), so a block and a reservation also can't overlap (HTL-06).
+- **Rooms are their own collection**, not embedded in the hotel: reservations and nights point to them, and search queries them across hotels.
+- **Availability ranges stay on the room** (few, small). The room's `inventoryVersion` is bumped by every inventory change, so two changes to the same room in parallel conflict and one retries.
+- **`ratingSummary` is stored on the hotel** for the rating filter and sort (HTL-12). It's updated only through `HotelsService.setRatingSummary`.
+
+**Tricky parts:**
+- **Date semantics:** a stay from the 10th to the 13th uses the nights of the 10th, 11th and 12th. Availability ranges are inclusive.
+- **Search (HTL-11):** a hotel qualifies if it has enough free rooms for the whole stay and their combined occupancy covers the guests. The price filter uses the cheapest qualifying room.
+- Editing availability, deactivating or deleting a room must check reservations from today onward, inside the same transaction.
+
+**Possible future conflicts:**
+- `RoomNightInventory`'s method list (§5.4.2 “`RoomNightInventory`”) is the contract with hotel-bookings.
+- HTL-08 (room status view) and HTL-22 (hotel's reservations) live in hotel-bookings, because they need reservation data.
+
+**How it talks to other modules:** Used by hotel-bookings (`RoomNightInventory`, room details, `setRatingSummary`) and itineraries (search reuse, ITN-25).
+
+**Requirements:** HTL-01 – HTL-15
+
+#### 4.6.6 hotel-bookings
+
+**Purpose:** Reservations (one or more rooms in one hotel) and reviews.
+
+**Collections:** `hotel_reservations` (reservation with embedded rooms, guests, price and policy snapshots); `reviews` (one rating and review per completed reservation)
+
+**Why it is designed this way:**
+- **Same pattern as flights:** a hold is a `pending_payment` reservation, rooms and guests are embedded, prices and policies are snapshots.
+- **Reviews are their own collection**, because they're listed per hotel, newest first, paginated (HTL-24). The unique index on `reservationId` enforces one review per reservation, however many rooms it had.
+
+**Tricky parts:**
+- **All selected rooms are held together or not at all** (HTL-16, HTL-18): one transaction, any unavailable room rejects the whole request.
+- Refund on the full total, only before the check-in date, never partial (HTL-21).
+- **Every review change recomputes the hotel's rating**, including an admin hiding or deleting a review.
+
+**Possible future conflicts:**
+- Shares the `PayableBooking` port with flight-bookings. Keep both implementations identical in behaviour.
+
+**How it talks to other modules:** Uses hotels and payments. Implements `PayableBooking`, `ActiveBookingsCheck` and `ReportableContent` (reviews). Listens to `payment.succeeded`. Emits confirmed / cancelled / expired events.
+
+**Requirements:** HTL-16 – HTL-24
+
+#### 4.6.7 payments
+
+**Purpose:** Money in and out through Stripe test mode: PaymentIntents, the webhook, refunds, and policy acceptance.
+
+**Collections:** `payments` (one PaymentIntent per booking); `refunds` (one refund per cancelled booking); `policy_acceptances` (when the user accepted the policies); `stripe_webhook_events` (IDs of processed webhook events)
+
+**Why it is designed this way:**
+- **Store only what PAY-01 allows:** Stripe ID, amount, currency, status. Card data never reaches us.
+- **One payment per booking.** A failed card retries on the same PaymentIntent.
+- **Bookings are confirmed only by the verified webhook**, never by the frontend saying "it worked".
+- **`stripe_webhook_events`** makes the webhook idempotent: Stripe can send the same event twice, and we process it once.
+- **Payments doesn't import the booking modules.** It defines a `PayableBooking` port (amount, status, hold expiry) and emits `payment.succeeded`. That avoids a dependency cycle.
+
+**Tricky parts:**
+- Webhook signature verification needs the raw request body.
+- When a hold expires, the PaymentIntent is cancelled. A late success still triggers a full refund.
+- A refund document is created only when the amount is above 0 (PAY-03), and its status is updated from Stripe.
+
+**Possible future conflicts:**
+- Its two ports/events are the contract with both booking owners. Write them first, then all three can work in parallel against fakes.
+
+**How it talks to other modules:** Called by both booking modules for refunds. Emits `payment.succeeded` and `refund.updated`. Listens to booking expiry events.
+
+**Requirements:** PAY-01 – PAY-04
+
+#### 4.6.8 itineraries
+
+**Purpose:** Trip planning: itineraries with ordered days, cities, activities, images, budgets, transport costs, sharing and cloning.
+
+**Collections:** `itineraries` (the whole trip in one document)
+
+**Why it is designed this way:**
+- **Everything is embedded.** A trip is bounded (≤ 60 days), owned by one user, and always loaded and saved as a whole.
+- **Day order is the array order.** Day numbers and dates are never stored; they're computed from the position and the start date. Adding, deleting or reordering days can't leave a wrong number or date behind (ITN-07, ITN-08).
+- **`dayCount` and `cityIds` are stored copies** so public search can filter by duration and city with an index.
+- **Transport costs point to a day by its `_id`**, which stays the same when days move.
+
+**Tricky parts:**
+- Endpoints address activities, budgets and transport costs by their own ID (`/api/activities/:id`), so those embedded IDs are indexed.
+- Deleting a day also deletes its activities, images, budget entries and transport costs.
+- **Clone = deep copy** with new IDs and **copied image files**, so the clone survives the original being deleted (ITN-21).
+- Budget totals are converted to the user's preferred currency with the cached rates, showing the rate date.
+
+**Possible future conflicts:**
+- ITN-25/26 reuse hotel and flight search. They depend on those services' search methods, so their signatures must be agreed early.
+
+**How it talks to other modules:** Uses reference-data, fx, flights and hotels (search reuse), accounts (author names), storage. Implements `ReportableContent`. Listens to `user.deactivated`.
+
+**Requirements:** ITN-01 – ITN-26
+
+#### 4.6.9 fx
+
+**Purpose:** Fetches exchange rates from FXRatesAPI once a day and caches them.
+
+**Collections:** `exchange_rates` (one document per day with all supported rates)
+
+**Why it is designed this way:**
+- **One document per day**, so "latest rates" is one indexed read and the rate date is easy to show.
+- The API key stays on the server; the frontend never calls FXRatesAPI.
+
+**Tricky parts:**
+- If the API fails, use the last cached day (ITN-18). If there is none yet, return a clear error.
+- Convert with the currency's minor units (JPY has none) and round half up.
+
+**Possible future conflicts:**
+- None expected.
+
+**How it talks to other modules:** Used by itineraries. Calls only reference-data (supported currencies).
+
+**Requirements:** ITN-18
+
+#### 4.6.10 blog
+
+**Purpose:** Community content: posts (draft/published), tags, images, comments and likes.
+
+**Collections:** `posts` (posts with tags, images, counters); `comments` (comments on posts); `likes` (one document per user per liked post)
+
+**Why it is designed this way:**
+- **Likes are a collection with a unique index** on (post, user). "Like once" (BLG-06) is guaranteed by the database, even with double clicks.
+- **Comments are separate:** they're unbounded and paginated.
+- **`likeCount` and `commentCount` are stored on the post** for lists and the interaction-score order (BLG-09).
+- **Tags are normalised** (trimmed, lowercase), so "Paris" and "paris" are one tag.
+
+**Tricky parts:**
+- Counters must move together with the like/comment (unlike only decrements if a like was really removed; hiding a comment decrements).
+- Search by author name asks accounts for matching user IDs.
+- Deleting a post deletes its comments, likes and image files.
+
+**Possible future conflicts:**
+- Bonus BLG-13 (attach an itinerary) would add one field to posts.
+
+**How it talks to other modules:** Uses accounts (names, status), itineraries (author page, BLG-12), storage. Implements `ReportableContent` (posts, comments). Listens to `user.deactivated`.
+
+**Requirements:** BLG-01 – BLG-12
+
+#### 4.6.11 moderation
+
+**Purpose:** User reports on posts, comments, reviews and itineraries, and their resolution.
+
+**Collections:** `reports` (report with target, reason and status)
+
+**Why it is designed this way:**
+- **One collection for every content type** (`targetType` + `targetId`), since reports belong to no single content module.
+- **Unique index on (reporter, target)** enforces "at most once per item" (GEN-09).
+- **Hiding or deleting goes through the `ReportableContent` port**, implemented by blog, hotel-bookings and itineraries. Moderation never touches their collections.
+
+**Tricky parts:**
+- Resolving one report closes all open reports on the same content.
+- The content may already be deleted by its author; the admin can still dismiss the report.
+
+**Possible future conflicts:**
+- Each content owner must implement the port's `exists`, `hide` and `delete`.
+
+**How it talks to other modules:** Called by admin. Emits `admin.action` for the audit log.
+
+**Requirements:** GEN-09, GEN-10
+
+#### 4.6.12 notifications · audit · admin · storage
+
+**Purpose:** Platform services. **notifications**: in-app notifications (GEN-01). **audit**: append-only log of admin actions (GEN-07). **admin**: admin endpoints, owns no data. **storage**: image upload validation and files on disk (GEN-08), owns no collection.
+
+**Collections:** `notifications` (per user, read/unread); `audit_logs` (who did what to which target, when)
+
+**Why it is designed this way:**
+- **Notifications and audit only listen to events.** Booking code doesn't know they exist, so adding a notification never changes booking code.
+- **Audit logs are append-only:** no update or delete exists anywhere in the code.
+- **Admin owns no data.** Suspending a user calls accounts; hiding a post goes through moderation. Admin can't become a module that reaches into everyone's collections.
+- **Images are stored on the server's disk**, as GEN-08 says. Documents store the file key, and the URL is computed in responses.
+
+**Tricky parts:**
+- Events must carry the recipients (user IDs), so notifications doesn't have to look them up.
+- **ACC-17** (admin list of all bookings) merges two collections into one paginated list, sorted by date.
+
+**Possible future conflicts:**
+- **Deployment:** many cloud hosts wipe the disk on every redeploy. Uploaded images need a persistent disk or volume there. We'll settle this in the deployment topic.
+
+**How it talks to other modules:** Everyone emits events these modules listen to. Admin calls accounts, flights, hotels, both booking modules, moderation.
+
+**Requirements:** GEN-01, GEN-07, GEN-08, ACC-13 – ACC-17
+
+## 5. Data model
+
+**Source of truth** for every MongoDB collection (the repo file `docs/database/data-model.md`, copied in full here). Mongoose schemas are written from it.
+If the code and the data model disagree, the data model wins; fix the code or open a PR to change the data model (through Kareem).
+Changes go through the team leader (see `DECISIONS.md`).
+
+Requirement IDs (ACC-01, FLT-22…) refer to the official Excel sheet.
+
+---
+
+### 5.1 Global conventions
+
+#### 5.1.1 Ownership
+- Every collection has exactly **one owning module**. Only that module's code reads or writes it.
+- Other modules go through the owner's **exported service**. No cross-module `populate`.
+- A reference to another module's document is just an ID field. MongoDB does not enforce it, so the writing service validates it (asks the owner "does it exist?") before saving.
+
+#### 5.1.2 IDs
+- App collections use the default `_id: ObjectId`.
+- **Reference-data collections use the dataset's own ID as `_id` (a string)**, exactly as in the CSV: `'EG'`, `'cairo'`, `'CAI'`, `'att-1'`. The graders test with these IDs.
+- So references to reference data are **strings**: `countryCode`, `cityId`, `airportId`, `attractionId`, `currency`.
+- Embedded subdocuments that are edited individually (cabins, days, activities, budget entries…) keep Mongoose's default `_id`.
+
+#### 5.1.3 Money
+- Stored as **integers in minor units** (cents). Field names end in `Minor`: `priceMinor`, `amountMinor`. Never floats.
+- **Platform currency** (PAY-04): `USD`, from config `PLATFORM_CURRENCY`. All flight/hotel prices, payments and refunds use it. Booking and payment documents still store `currency` explicitly.
+- Itinerary amounts can be in any supported currency; their minor units follow that currency's `minorUnits` (JPY = 0, others = 2).
+- Percentages are integers 0–100.
+- Rounding: whenever a computation produces a fraction of a minor unit (infant fare, refund, FX conversion), round half up (`Math.round` on positive values).
+
+#### 5.1.4 Dates and times
+| Kind | Stored as | Used for |
+|---|---|---|
+| Instant | `Date` (UTC) | flight departure/arrival, holds, timestamps |
+| Calendar date | `DateOnly` = `Date` at `00:00:00.000Z` of that date | date of birth, check-in/out, room nights, availability, itinerary start date |
+| Local calendar date | `string 'YYYY-MM-DD'` | only `flights.departureLocalDate` |
+| Time of day | `string 'HH:mm'` (24h) | hotel check-in/out time, activity time |
+
+- One helper module (`common/dates`) converts and validates `DateOnly`. Never build them with `new Date(localString)`.
+- **"Today"** for date-only rules (check-in not in the past, cancel before check-in, stay completed) is the current **UTC** date.
+- A hotel stay from `checkInDate` to `checkOutDate` covers the **nights** `checkInDate … checkOutDate − 1 day`. `nights = checkOutDate − checkInDate` in days.
+- Flight times are entered in each airport's local time, converted with the airport's IANA `timeZone`, stored in UTC, and shown in local time (FLT-03, GEN-06).
+
+#### 5.1.5 Timestamps
+All app collections use `{ timestamps: true }` (`createdAt`, `updatedAt`). Reference data does not.
+
+#### 5.1.6 Images (GEN-08)
+- Files are stored **on the server's disk** and served by URL.
+- Documents store `ImageRef = { _id: ObjectId, key: string }`. `key` is the stored file name.
+- Responses compute the URL: `${PUBLIC_BASE_URL}/uploads/${key}`. The URL is never stored.
+- Limits: JPG/PNG, ≤ 5 MB each; ≤ 5 per post, activity or hotel; 1 logo per airline.
+- Removing an image (or its parent) deletes the file.
+
+#### 5.1.7 Visibility flags
+| Field | On | Set by | Meaning |
+|---|---|---|---|
+| `isHidden: boolean` | posts, comments, reviews, itineraries | admin (GEN-10) | Visible only to the author and admins |
+| `authorDeactivated: boolean` | posts, itineraries | event `user.deactivated` / `user.reactivated` (ACC-12) | Hidden from everyone else while the author is deactivated |
+
+Comments and reviews of a deactivated user stay visible but show **"Deleted user"**. That is resolved when reading (the accounts service returns the user's status), not stored.
+
+#### 5.1.8 Naming
+- Collections: plural `snake_case` (`flight_bookings`). Fields: `camelCase`.
+- Enum values: lowercase `snake_case` (`pending_payment`).
+
+#### 5.1.9 Transactions
+- Atlas (and the test memory server) run as a replica set, so multi-document transactions are available.
+- Use them where two writes must succeed together: creating a hold, confirming, expiring, cancelling (booking status + inventory), hotel room changes.
+- Run them with `session.withTransaction(...)`, which retries on transient write conflicts. Pass the `session` into every service call that writes.
+
+---
+
+### 5.2 Collections at a glance
+
+| # | Collection | Module | Purpose |
+|---|---|---|---|
+| 1 | `countries` | reference-data | Dataset: countries |
+| 2 | `cities` | reference-data | Dataset: cities |
+| 3 | `airports` | reference-data | Dataset: airports with time zones |
+| 4 | `attractions` | reference-data | Dataset: attractions |
+| 5 | `currencies` | reference-data | Supported currencies (derived from countries) |
+| 6 | `users` | accounts | All accounts: users, admins, moderators |
+| 7 | `sessions` | accounts | Refresh-token sessions, idle expiry |
+| 8 | `airlines` | flights | Airline profile + baggage and cancellation policies |
+| 9 | `flights` | flights | Flights with embedded cabins and seat counters |
+| 10 | `flight_bookings` | flight-bookings | Bookings with segments and passengers (a hold is a `pending_payment` booking) |
+| 11 | `hotels` | hotels | Hotel profile + policy + rating summary |
+| 12 | `rooms` | hotels | Bookable rooms with availability ranges |
+| 13 | `room_nights` | hotels | One document per occupied room per night (inventory) |
+| 14 | `hotel_reservations` | hotel-bookings | Reservations with rooms and guests |
+| 15 | `reviews` | hotel-bookings | One review per completed reservation |
+| 16 | `payments` | payments | Stripe PaymentIntent per booking |
+| 17 | `refunds` | payments | Stripe refund per cancelled booking |
+| 18 | `policy_acceptances` | payments | Policy acceptance timestamp per booking |
+| 19 | `stripe_webhook_events` | payments | Processed webhook event IDs (idempotency) |
+| 20 | `itineraries` | itineraries | Itinerary with embedded days, activities, budgets, transport costs |
+| 21 | `exchange_rates` | fx | Daily cached rates |
+| 22 | `posts` | blog | Blog posts |
+| 23 | `comments` | blog | Comments on posts |
+| 24 | `likes` | blog | One like per user per post |
+| 25 | `reports` | moderation | User reports on content |
+| 26 | `notifications` | notifications | In-app notifications |
+| 27 | `audit_logs` | audit | Append-only log of admin actions |
+
+`admin` owns no collection. `storage` owns no collection (files on disk). `common` owns no collection.
+
+Field tables use: **Req** = required; `→ x` = reference to collection `x` (by ID).
+
+---
+
+### 5.3 Collections by module
+
+#### 5.3.1 reference-data
+
+Seeded from the course CSVs (GEN-12, FLT-02). **Read-only** to the app: no endpoint creates, edits or deletes these documents.
+
+**Seed rules**
+- Import every row exactly: no renaming, trimming of IDs, filtering or "cleaning".
+- Upsert by `_id`, so re-running the seed creates no duplicates and changes nothing.
+- Validate before writing: every city's `countryCode`, airport's `cityId`/`countryCode`, and attraction's `cityId` must exist. If any is missing, stop with an error naming the row. Write nothing.
+
+##### `countries` — CSV `code,name,currency`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | CSV `code`, e.g. `'EG'` |
+| `name` | string | ✓ | |
+| `currency` | string → currencies | ✓ | e.g. `'EGP'` |
+
+##### `cities` — CSV `city_id,name,country_code`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | CSV `city_id`, e.g. `'new_york'` |
+| `name` | string | ✓ | |
+| `countryCode` | string → countries | ✓ | |
+
+Indexes: `{ countryCode: 1 }`
+
+##### `airports` — CSV `iata_code,name,city_id,country_code,time_zone`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | CSV `iata_code`, e.g. `'CAI'` |
+| `name` | string | ✓ | |
+| `cityId` | string → cities | ✓ | |
+| `countryCode` | string → countries | ✓ | |
+| `timeZone` | string | ✓ | IANA zone, e.g. `'Africa/Cairo'` |
+
+Indexes: `{ cityId: 1 }`, `{ countryCode: 1 }`
+
+##### `attractions` — CSV `attraction_id,name,city_id`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | CSV `attraction_id`, e.g. `'att-1'` |
+| `name` | string | ✓ | |
+| `cityId` | string → cities | ✓ | |
+
+Indexes: `{ cityId: 1 }`
+
+##### `currencies` — derived
+The supported currencies (GEN-12, ITN-18) are the distinct `currency` values in `countries.csv`, plus `PLATFORM_CURRENCY` if missing. Names and minor units come from a fixed table in the seed code.
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | ISO 4217 code, e.g. `'USD'` |
+| `name` | string | ✓ | e.g. `'US Dollar'` |
+| `minorUnits` | int | ✓ | 0–3; `JPY` = 0, the rest of the current set = 2 |
+
+---
+
+#### 5.3.2 accounts
+
+##### `users`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `name` | string | ✓ | trimmed, 1–100 chars |
+| `email` | string | ✓ | trimmed, lowercased, valid email, **unique** |
+| `passwordHash` | string | ✓ | salted hash only (GEN-13); `select: false` |
+| `role` | enum `user \| admin \| airline_moderator \| hotel_moderator` | ✓ | default `user` |
+| `status` | enum `active \| suspended \| deactivated` | ✓ | default `active` |
+| `phone` | string | | optional; validated format |
+| `preferredCurrency` | string → currencies | ✓ | default `PLATFORM_CURRENCY` (ACC-09, ITN-18) |
+| `moderatorOf` | `{ providerType: enum airline\|hotel, providerId: ObjectId }` | cond. | **required for moderator roles, absent otherwise**; `providerType` must match the role (ACC-13) |
+| `mustChangePassword` | boolean | ✓ | default `false`; `true` after admin reset or moderator creation (ACC-07a, ACC-13) |
+| `termsAcceptedAt` | Date | cond. | required when a guest self-registers (ACC-01) |
+| `failedLoginAttempts` | int | ✓ | default 0 (ACC-05) |
+| `lockedUntil` | Date \| null | | set to now + 15 min on the 5th consecutive failure |
+
+Indexes: `{ email: 1 }` unique · `{ role: 1, status: 1, createdAt: -1 }` (ACC-14) · `{ 'moderatorOf.providerId': 1 }`
+
+Rules
+- Admins exist only through the seed (ACC-18). Registration always creates `role: user`.
+- Password rules (≥ 8 chars, ≥ 1 letter, ≥ 1 digit) are checked on the plain password before hashing (DTO), not in the schema.
+- Failed login: `$inc failedLoginAttempts` atomically; on reaching 5 set `lockedUntil` and reset the counter. A successful login resets both.
+- `suspended` and `deactivated` users cannot log in (ACC-04, ACC-12, ACC-15, ACC-16). A suspended user's bookings stay valid.
+
+##### `sessions`
+One document per logged-in device. Implements refresh-token revocation and the 30-minute idle timeout (ACC-06, ACC-19).
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `userId` | ObjectId → users | ✓ | |
+| `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
+| `lastActivityAt` | Date | ✓ | |
+| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+
+Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
+
+Rules
+- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
+- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
+
+---
+
+#### 5.3.3 flights
+
+##### `airlines`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `name` | string | ✓ | 1–100 chars |
+| `code` | string | ✓ | uppercase `[A-Z0-9]{2,3}`, **unique** |
+| `logo` | ImageRef | | at most one (GEN-08) |
+| `isActive` | boolean | ✓ | default `true` (ACC-15) |
+| `baggagePolicy` | `BaggagePolicy` | ✓ | default `{ extraBagPriceMinor: null, maxExtraBagsPerPassenger: 0 }` (FLT-08) |
+| `cancellationPolicy` | `{ tiers: CancellationTier[] }` | ✓ | default `{ tiers: [] }` (FLT-09) |
+
+`BaggagePolicy`: `extraBagPriceMinor` int > 0 or null · `maxExtraBagsPerPassenger` int ≥ 0. If `maxExtraBagsPerPassenger > 0`, `extraBagPriceMinor` is required.
+
+`CancellationTier` (shared shape, also used by hotels): `daysBefore` int ≥ 0 · `refundPercent` int 0–100. **`daysBefore` unique within the array.**
+Refund rule: pick the tier with the highest `daysBefore` ≤ days remaining; none → 0 %.
+
+Indexes: `{ code: 1 }` unique · `{ isActive: 1 }`
+
+##### `flights`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `airlineId` | ObjectId → airlines | ✓ | |
+| `flightNumber` | string | ✓ | trimmed, uppercase |
+| `departureAirportId` | string → airports | ✓ | ≠ `arrivalAirportId` |
+| `arrivalAirportId` | string → airports | ✓ | |
+| `departureAt` | Date (UTC) | ✓ | not in the past at creation |
+| `arrivalAt` | Date (UTC) | ✓ | > `departureAt` |
+| `departureLocalDate` | string `YYYY-MM-DD` | ✓ | **derived**: `departureAt` in the departure airport's time zone; recomputed whenever `departureAt` changes |
+| `durationMinutes` | int | ✓ | **derived**: `arrivalAt − departureAt` |
+| `status` | enum `scheduled \| cancelled \| departed` | ✓ | default `scheduled` (FLT-30) |
+| `hasBookings` | boolean | ✓ | default `false`; set `true` by `SeatInventory.hold` (blocks airport changes, FLT-05) |
+| `cabins` | `Cabin[]` | ✓ | 0–4 items; `cabinClass` unique within the flight (FLT-04) |
+| `cancelledAt` | Date | | set on FLT-06 |
+
+`Cabin` (embedded, has `_id`)
+| Field | Type | Rules |
+|---|---|---|
+| `cabinClass` | enum `economy \| premium_economy \| business \| first` | unique per flight |
+| `totalSeats` | int | > 0 |
+| `availableSeats` | int | ≥ 0 |
+| `heldSeats` | int | ≥ 0 |
+| `bookedSeats` | int | ≥ 0 |
+| `priceMinor` | int | > 0, per seat |
+| `freeBags` | int | ≥ 0, free bag count per passenger |
+| `maxBagWeightKg` | number | > 0, per bag (also the limit for extra bags, FLT-08) |
+
+**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (§5.4.1 “`SeatInventory`”) changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
+
+Indexes
+- `{ airlineId: 1, flightNumber: 1, departureLocalDate: 1 }` **unique** (FLT-03; cancelled flights keep their number for that date)
+- `{ departureAirportId: 1, arrivalAirportId: 1, departureLocalDate: 1, status: 1 }` (search, FLT-11)
+- `{ airlineId: 1, departureAt: 1 }`
+- `{ status: 1, departureAt: 1 }` (departed job)
+
+Rules
+- Only `scheduled` flights with `departureAt > now` of an **active** airline are searchable and bookable. Only `scheduled` flights are editable (FLT-30).
+- Airports cannot change once `hasBookings` is true. Price changes never touch existing bookings (they keep snapshots).
+
+---
+
+#### 5.3.4 flight-bookings
+
+##### `flight_bookings`
+A **seat hold is a booking in `pending_payment`** (FLT-22). There is no separate holds collection.
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `userId` | ObjectId → users | ✓ | owner (ACC-11) |
+| `reference` | string | cond. | set on confirmation (FLT-23); `FB` + 6 uppercase alphanumerics; unique |
+| `status` | enum `pending_payment \| confirmed \| completed \| expired \| cancelled` | ✓ | GEN-11, §5.5.1 “Flight booking and hotel reservation” |
+| `tripType` | enum `one_way \| round_trip` | ✓ | |
+| `segments` | `FlightSegment[]` | ✓ | 1 for one way, 2 for round trip (outbound first) |
+| `passengers` | `Passenger[]` | ✓ | ≥ 1 |
+| `seatCount` | int | ✓ | adults + children (infants take no seat); same on every segment |
+| `pricing` | `{ fareTotalMinor, baggageTotalMinor, totalMinor, currency }` | ✓ | computed once at hold time, never recomputed |
+| `holdExpiresAt` | Date | ✓ | `createdAt + 10 min` |
+| `firstDepartureAt` | Date | ✓ | = outbound `departureAt` (kept in sync) |
+| `lastDepartureAt` | Date | ✓ | = last segment `departureAt` (kept in sync) |
+| `confirmedAt` / `expiredAt` / `completedAt` | Date | | set on that transition |
+| `cancellation` | `Cancellation` | | set when cancelled |
+
+`FlightSegment` (embedded, has `_id`)
+| Field | Type | Rules |
+|---|---|---|
+| `direction` | enum `outbound \| return` | |
+| `flightId` | ObjectId → flights | |
+| `cabinId` | ObjectId | `_id` of the cabin inside that flight |
+| `cabinClass` | enum (as `Cabin`) | copy |
+| `airlineId` | ObjectId → airlines | copy (never changes) |
+| `flightNumber` | string | copy (never changes) |
+| `departureAirportId`, `arrivalAirportId` | string → airports | copies (cannot change once booked) |
+| `departureAt`, `arrivalAt` | Date | copies, **synced** on event `flight.rescheduled` |
+| `fareMinor` | int | **price snapshot** per seat at hold time |
+| `policy` | `SegmentPolicy` | **policy snapshot** at hold time |
+
+`SegmentPolicy`: `cancellationTiers: CancellationTier[]`, `freeBags`, `maxBagWeightKg`, `extraBagPriceMinor` (0 if none), `maxExtraBagsPerPassenger`.
+
+`Passenger` (embedded, has `_id`)
+| Field | Type | Rules |
+|---|---|---|
+| `type` | enum `adult \| child \| infant` | must match age on the outbound departure date: adult 12+, child 2–11, infant < 2 (FLT-12) |
+| `fullName` | string | 1–100 chars |
+| `dateOfBirth` | DateOnly | not in the future |
+| `documentNumber` | string | passport/ID, 3–30 chars |
+| `extraBagCount` | int | ≥ 0, ≤ `maxExtraBagsPerPassenger` of **every** segment |
+| `extraBagWeightKg` | number | weight per extra bag; > 0 when `extraBagCount > 0`; ≤ `maxBagWeightKg` of every segment |
+
+Booking rules (FLT-12, FLT-19): ≥ 1 adult; infants ≤ adults.
+
+Pricing (computed at hold time, per segment, then summed):
+- fares = `seatCount × fareMinor` + `infants × round(fareMinor × 10 / 100)`
+- baggage = `sum(extraBagCount) × policy.extraBagPriceMinor`
+- `totalMinor = fareTotalMinor + baggageTotalMinor`; `currency = PLATFORM_CURRENCY`
+
+`Cancellation` (shared shape, also used by hotel reservations)
+| Field | Type | Rules |
+|---|---|---|
+| `cancelledAt` | Date | |
+| `cancelledBy` | enum `user \| provider` | |
+| `refundPercent` | int | 0–100 |
+| `refundAmountMinor` | int | `round(totalMinor × refundPercent / 100)` |
+
+Refund for a user cancellation uses the **outbound segment's snapshot tiers** with days remaining until the outbound departure (FLT-12a, FLT-26). Provider cancellation is always 100 % (FLT-06).
+
+Indexes
+- `{ reference: 1 }` unique, partial `{ reference: { $type: 'string' } }`
+- `{ userId: 1, firstDepartureAt: -1 }` (FLT-25)
+- `{ 'segments.flightId': 1, status: 1 }` (FLT-29, flight cancel/reschedule)
+- `{ status: 1, holdExpiresAt: 1 }` (expiry job)
+- `{ status: 1, lastDepartureAt: 1 }` (completion job)
+- `{ status: 1, createdAt: -1 }` (admin list, ACC-17)
+
+---
+
+#### 5.3.5 hotels
+
+##### `hotels`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `name` | string | ✓ | 1–150 chars |
+| `address` | string | ✓ | 1–300 chars |
+| `cityId` | string → cities | ✓ | |
+| `countryCode` | string → countries | ✓ | **derived** from the city; stored for search by country |
+| `description` | string | | ≤ 5000 chars |
+| `photos` | ImageRef[] | ✓ | 0–5 (GEN-08) |
+| `starRating` | int | | 1–5 |
+| `amenities` | string[] | ✓ | each trimmed, 1–50 chars, unique |
+| `checkInTime` | string `HH:mm` | ✓ | default `'14:00'` (HTL-09) |
+| `checkOutTime` | string `HH:mm` | ✓ | default `'12:00'` |
+| `cancellationPolicy` | `{ tiers: CancellationTier[] }` | ✓ | default `{ tiers: [] }`; `daysBefore` = days before check-in (HTL-10) |
+| `isActive` | boolean | ✓ | default `true` (ACC-15) |
+| `ratingSummary` | `{ average: number \| null, count: int }` | ✓ | default `{ average: null, count: 0 }`; written only through `HotelsService.setRatingSummary` (HTL-23) |
+
+Indexes: `{ cityId: 1, isActive: 1 }` · `{ countryCode: 1, isActive: 1 }` · `{ 'ratingSummary.average': -1 }`
+
+##### `rooms`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `hotelId` | ObjectId → hotels | ✓ | |
+| `name` | string | ✓ | room number/name, trimmed; **unique within the hotel** (HTL-03) |
+| `type` | string | ✓ | 1–50 chars, free text (e.g. "Deluxe King") |
+| `beds` | int | ✓ | ≥ 1 |
+| `maxOccupancy` | int | ✓ | ≥ 1 |
+| `pricePerNightMinor` | int | ✓ | > 0 |
+| `isActive` | boolean | ✓ | default `true` (HTL-06) |
+| `availability` | `{ _id, fromDate: DateOnly, toDate: DateOnly }[]` | ✓ | bookable nights, **both ends inclusive**; non-overlapping; adjacent ranges merged on save; sorted (HTL-04) |
+| `hasEverBeenReserved` | boolean | ✓ | default `false`; set by `RoomNightInventory.reserve`; deletion allowed only while `false` (HTL-06) |
+| `inventoryVersion` | int | ✓ | default 0; incremented by every operation in §5.4.2 “`RoomNightInventory`” (forces write conflicts between concurrent changes to the same room) |
+
+Indexes: `{ hotelId: 1, name: 1 }` unique · `{ hotelId: 1, isActive: 1 }`
+
+##### `room_nights`
+**One document = one room is taken for one night.** A night with no document is free (if the room is active and the night is inside an availability range).
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `roomId` | ObjectId → rooms | ✓ | |
+| `hotelId` | ObjectId → hotels | ✓ | copy, for per-hotel queries |
+| `date` | DateOnly | ✓ | the night |
+| `kind` | enum `reservation \| blocked` | ✓ | |
+| `reservationId` | ObjectId → hotel_reservations | cond. | required when `kind = reservation` |
+| `blockId` | ObjectId | cond. | required when `kind = blocked`; groups the nights of one blocked range (HTL-06) |
+
+Indexes: `{ roomId: 1, date: 1 }` **unique** (this is the double-booking guarantee) · `{ hotelId: 1, date: 1 }` · `{ reservationId: 1 }` · `{ blockId: 1 }`
+
+Rules
+- Reservation nights exist while the reservation is `pending_payment`, `confirmed` or `completed`. They are deleted when it becomes `expired` or `cancelled`.
+- Only `RoomNightInventory` (§5.4.2 “`RoomNightInventory`”) writes this collection.
+
+---
+
+#### 5.3.6 hotel-bookings
+
+##### `hotel_reservations`
+A **room hold is a reservation in `pending_payment`** (HTL-18).
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `userId` | ObjectId → users | ✓ | owner |
+| `hotelId` | ObjectId → hotels | ✓ | all rooms belong to this hotel (HTL-16) |
+| `reference` | string | cond. | set on confirmation (HTL-17); `HR` + 6 uppercase alphanumerics; unique |
+| `status` | enum `pending_payment \| confirmed \| completed \| expired \| cancelled` | ✓ | GEN-11 |
+| `checkInDate` | DateOnly | ✓ | not before today (UTC) |
+| `checkOutDate` | DateOnly | ✓ | > `checkInDate` |
+| `nights` | int | ✓ | **derived** ≥ 1 |
+| `rooms` | `ReservedRoom[]` | ✓ | ≥ 1, `roomId` unique |
+| `totalMinor` | int | ✓ | sum of `subtotalMinor` |
+| `currency` | string | ✓ | `PLATFORM_CURRENCY` |
+| `policySnapshot` | `{ cancellationTiers: CancellationTier[], checkInTime, checkOutTime }` | ✓ | copied at hold time |
+| `holdExpiresAt` | Date | ✓ | `createdAt + 10 min` |
+| `confirmedAt` / `expiredAt` / `completedAt` | Date | | |
+| `cancellation` | `Cancellation` | | `cancelledBy` is always `user` today (HTL-21) |
+
+`ReservedRoom` (embedded, has `_id`)
+| Field | Type | Rules |
+|---|---|---|
+| `roomId` | ObjectId → rooms | |
+| `roomName`, `roomType` | string | snapshots |
+| `pricePerNightMinor` | int | **price snapshot** at hold time |
+| `adults` | int | ≥ 0 |
+| `childAges` | int[] | each 0–17 |
+| `subtotalMinor` | int | `nights × pricePerNightMinor` |
+
+Rules (HTL-16): ≥ 1 adult in the reservation; every room has ≥ 1 guest; `adults + childAges.length ≤ room.maxOccupancy`.
+Refund (HTL-21): snapshot tiers, days from today until `checkInDate`, applied to `totalMinor`. Cancellation only before the check-in date. No partial cancellation.
+
+Indexes
+- `{ reference: 1 }` unique, partial `{ reference: { $type: 'string' } }`
+- `{ userId: 1, checkInDate: -1 }` (HTL-20)
+- `{ hotelId: 1, checkInDate: 1 }` (HTL-22)
+- `{ status: 1, holdExpiresAt: 1 }` (expiry job)
+- `{ status: 1, checkOutDate: 1 }` (completion job)
+- `{ status: 1, createdAt: -1 }` (admin list)
+
+##### `reviews`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `reservationId` | ObjectId → hotel_reservations | ✓ | **unique** (one review per reservation, HTL-23) |
+| `hotelId` | ObjectId → hotels | ✓ | copy |
+| `userId` | ObjectId → users | ✓ | must own the reservation |
+| `rating` | int | ✓ | 1–5 |
+| `text` | string | | ≤ 1000 chars |
+| `isHidden` | boolean | ✓ | default `false` (GEN-10) |
+
+Indexes: `{ reservationId: 1 }` unique · `{ hotelId: 1, createdAt: -1 }` (HTL-24) · `{ userId: 1 }`
+
+Rules: only for a `completed` reservation. After create, edit, delete, hide or delete-by-admin, recompute the hotel's average and count over **non-hidden** reviews and call `HotelsService.setRatingSummary` (average rounded to 1 decimal).
+
+---
+
+#### 5.3.7 payments
+
+##### `payments`
+Stores only what PAY-01 allows: Stripe ID, amount, currency, status (+ links).
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `bookingType` | enum `flight \| hotel` | ✓ | |
+| `bookingId` | ObjectId | ✓ | → `flight_bookings` or `hotel_reservations` |
+| `userId` | ObjectId → users | ✓ | |
+| `stripePaymentIntentId` | string | ✓ | unique |
+| `amountMinor` | int | ✓ | = booking total |
+| `currency` | string | ✓ | |
+| `status` | enum `pending \| failed \| succeeded \| canceled` | ✓ | §5.5.3 “Payment” |
+
+Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 1 }` unique (one PaymentIntent per booking; retries reuse it) · `{ userId: 1 }`
+
+##### `refunds`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `paymentId` | ObjectId → payments | ✓ | |
+| `bookingType` | enum `flight \| hotel` | ✓ | |
+| `bookingId` | ObjectId | ✓ | |
+| `userId` | ObjectId → users | ✓ | |
+| `stripeRefundId` | string | | set once Stripe accepts the request |
+| `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
+| `currency` | string | ✓ | |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = payment succeeded after the hold expired |
+| `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
+
+Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
+
+##### `policy_acceptances`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `bookingType` | enum `flight \| hotel` | ✓ | |
+| `bookingId` | ObjectId | ✓ | |
+| `userId` | ObjectId → users | ✓ | |
+| `acceptedAt` | Date | ✓ | PAY-02 timestamp |
+
+Indexes: `{ bookingType: 1, bookingId: 1 }` unique.
+The accepted policy is the booking's own snapshot, so it is not copied here. Creating a payment requires an acceptance.
+
+##### `stripe_webhook_events`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `_id` | string | ✓ | Stripe event ID |
+| `type` | string | ✓ | e.g. `payment_intent.succeeded` |
+| `receivedAt` | Date | ✓ | |
+
+Indexes: `{ receivedAt: 1 }` TTL 30 days.
+Insert first; a duplicate-key error means the event was already processed, so return 200 and do nothing.
+
+---
+
+#### 5.3.8 itineraries
+
+##### `itineraries`
+Everything the itinerary owns is embedded. Day order **is** the array order.
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `ownerId` | ObjectId → users | ✓ | |
+| `title` | string | ✓ | trimmed, 1–100 chars (ITN-01) |
+| `countryCodes` | string[] → countries | ✓ | ≥ 1, unique |
+| `startDate` | DateOnly | ✓ | |
+| `visibility` | enum `private \| public` | ✓ | default `private` (ITN-01, ITN-20) |
+| `isHidden` | boolean | ✓ | default `false` |
+| `authorDeactivated` | boolean | ✓ | default `false` |
+| `clonedFrom` | `{ itineraryId: ObjectId, authorId: ObjectId }` | | attribution (ITN-21); kept even if the original is deleted |
+| `days` | `Day[]` | ✓ | 0–60 (ITN-05) |
+| `transportCosts` | `TransportCost[]` | ✓ | default `[]` (ITN-16) |
+| `dayCount` | int | ✓ | **derived** = `days.length` (search by duration) |
+| `cityIds` | string[] | ✓ | **derived** = distinct `days[].cityId` (search by city) |
+
+**Never stored:** day numbers (= index + 1), day dates (= `startDate` + index days), city groups, budget totals. They are computed when reading, so add/delete/reorder can't leave them stale (ITN-07, ITN-08, ITN-09).
+
+`Day` (has `_id`)
+| Field | Type | Rules |
+|---|---|---|
+| `cityId` | string → cities | required (ITN-09) |
+| `notes` | string | ≤ 2000 chars |
+| `activities` | `Activity[]` | |
+| `budgetEntries` | `BudgetEntry[]` | |
+
+`Activity` (has `_id`, ITN-10, ITN-12)
+| Field | Type | Rules |
+|---|---|---|
+| `name` | string | required, 1–100 chars |
+| `description` | string | ≤ 1000 chars |
+| `time` | string `HH:mm` | optional |
+| `cost` | `{ amountMinor: int ≥ 0, currency: string → currencies }` | optional; counted under Activities |
+| `images` | ImageRef[] | 0–5 |
+| `attractionId` | string → attractions | optional; must be in the day's city |
+
+`BudgetEntry` (has `_id`, ITN-14): `category` enum `food \| accommodation \| in_city_transport \| activities` · `amountMinor` int ≥ 0 · `currency` → currencies · `note` ≤ 200 chars.
+
+`TransportCost` (has `_id`, ITN-16): `dayId` (= a `days[]._id` of this itinerary) · `mode` enum `flight \| train \| bus \| car \| ferry \| other` · `fromCityId`, `toCityId` → cities · `amountMinor` int ≥ 0 · `currency` → currencies.
+
+Budget summary (ITN-14, ITN-18), computed: categories `food, accommodation, in_city_transport, activities, intercity_transport`; totals per category, per day, per city group and overall, converted to the user's `preferredCurrency` with the latest `exchange_rates`, showing the rate date.
+
+Indexes
+- `{ ownerId: 1, updatedAt: -1 }` (ITN-03)
+- `{ visibility: 1, isHidden: 1, authorDeactivated: 1, updatedAt: -1 }` (public search)
+- `{ countryCodes: 1 }` · `{ cityIds: 1 }`
+- `{ 'days.activities._id': 1 }` · `{ 'days.budgetEntries._id': 1 }` · `{ 'transportCosts._id': 1 }` (endpoints address them by their own ID)
+
+Rules
+- Every write that changes `days` recomputes `dayCount` and `cityIds` in the same update.
+- Deleting a day deletes its activities (and their image files), budget entries, and the transport costs whose `dayId` is that day.
+- Clone (ITN-21): deep copy with new `_id`s everywhere, `visibility: private`, `isHidden: false`, `clonedFrom` set, `transportCosts[].dayId` remapped to the new day IDs, **image files copied** to new keys (so the clone survives the original's deletion).
+- Deleting an itinerary deletes its image files; clones are unaffected.
+
+---
+
+#### 5.3.9 fx
+
+##### `exchange_rates`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `rateDate` | DateOnly | ✓ | UTC date of the fetch; **unique** |
+| `base` | string | ✓ | currency the rates are relative to |
+| `rates` | Map<string, number> | ✓ | one entry per supported currency (incl. base = 1); every value > 0 |
+| `fetchedAt` | Date | ✓ | |
+| `source` | string | ✓ | `'fxratesapi'` |
+
+Indexes: `{ rateDate: -1 }` unique.
+
+Rules (ITN-18): fetched once per day; on API failure keep using the latest document and show its date; if no document exists yet, conversion returns a clear "rates unavailable" error. Convert `amount × rates[to] / rates[from]`, adjusting minor units, round half up. The API key stays on the server.
+
+---
+
+#### 5.3.10 blog
+
+##### `posts`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `authorId` | ObjectId → users | ✓ | |
+| `title` | string | ✓ | 1–150 chars |
+| `body` | string | ✓ | 1–20000 chars |
+| `tags` | string[] | ✓ | 0–5; trimmed, lowercased, 1–30 chars, unique (BLG-08) |
+| `images` | ImageRef[] | ✓ | 0–5 |
+| `status` | enum `draft \| published` | ✓ | |
+| `publishedAt` | Date | cond. | set the first time it is published |
+| `likeCount` | int | ✓ | default 0, `$inc` with likes |
+| `commentCount` | int | ✓ | default 0, counts **visible** comments |
+| `isHidden` | boolean | ✓ | default `false` |
+| `authorDeactivated` | boolean | ✓ | default `false` |
+
+Indexes: `{ status: 1, isHidden: 1, authorDeactivated: 1, publishedAt: -1 }` · `{ authorId: 1, updatedAt: -1 }` · `{ tags: 1, status: 1 }`
+
+Search (BLG-09) orders by `likeCount + commentCount` descending, then `publishedAt` descending (computed in the aggregation, not stored). Deleting a post deletes its comments, likes and image files.
+
+##### `comments`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `postId` | ObjectId → posts | ✓ | post must be published |
+| `authorId` | ObjectId → users | ✓ | |
+| `body` | string | ✓ | trimmed, 1–500 chars (BLG-05) |
+| `isHidden` | boolean | ✓ | default `false` |
+
+Indexes: `{ postId: 1, createdAt: 1 }` · `{ authorId: 1 }`
+
+##### `likes`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `postId` | ObjectId → posts | ✓ | |
+| `userId` | ObjectId → users | ✓ | |
+
+Indexes: `{ postId: 1, userId: 1 }` **unique** (BLG-06) · `{ userId: 1 }`
+Like = insert + `$inc likeCount`; a duplicate key means already liked. Unlike = delete + `$inc -1` only if a document was deleted.
+
+---
+
+#### 5.3.11 moderation
+
+##### `reports`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `reporterId` | ObjectId → users | ✓ | |
+| `targetType` | enum `post \| comment \| review \| itinerary` | ✓ | GEN-09 |
+| `targetId` | ObjectId | ✓ | must exist (checked through the content port) |
+| `reason` | string | ✓ | 1–500 chars |
+| `status` | enum `open \| dismissed \| content_hidden \| content_deleted` | ✓ | default `open` |
+| `resolvedBy` | ObjectId → users | | admin |
+| `resolvedAt` | Date | | |
+
+Indexes: `{ reporterId: 1, targetType: 1, targetId: 1 }` **unique** (once per item) · `{ status: 1, createdAt: -1 }` · `{ targetType: 1, targetId: 1 }`
+
+Resolving a report applies the action once and closes **all** open reports on the same target with the same status.
+
+---
+
+#### 5.3.12 notifications
+
+##### `notifications`
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `userId` | ObjectId → users | ✓ | recipient |
+| `type` | enum (below) | ✓ | |
+| `title` | string | ✓ | ≤ 100 chars |
+| `message` | string | ✓ | ≤ 500 chars |
+| `entity` | `{ type: string, id: string }` | | what to open, e.g. `{ type: 'flight_booking', id }` |
+| `readAt` | Date \| null | | null = unread |
+
+`type` (GEN-01): `booking_confirmed`, `booking_cancelled`, `refund_updated`, `flight_schedule_changed`, `flight_cancelled`, `account_suspended`, `account_reactivated`, `provider_deactivated`, `provider_reactivated`.
+
+Indexes: `{ userId: 1, readAt: 1, createdAt: -1 }`
+
+---
+
+#### 5.3.13 audit
+
+##### `audit_logs`
+Append-only: no update or delete anywhere in the code (GEN-07). `createdAt` only (`timestamps: { createdAt: true, updatedAt: false }`).
+
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `actorId` | ObjectId → users | ✓ | the admin |
+| `action` | enum (below) | ✓ | |
+| `target` | `{ type: string, id: string }` | ✓ | e.g. `{ type: 'user', id }` |
+| `details` | object | | small, no secrets (never passwords) |
+
+`action`: `account_suspended`, `account_reactivated`, `moderator_created`, `password_reset`, `provider_deactivated`, `provider_reactivated`, `report_resolved`, `content_hidden`, `content_deleted`.
+
+Indexes: `{ createdAt: -1 }` · `{ actorId: 1, createdAt: -1 }` · `{ 'target.type': 1, 'target.id': 1 }`
+
+---
+
+### 5.4 Inventory operations
+
+These classes are the **only** code that changes inventory. Each method takes the caller's `session` and runs inside the caller's transaction. A method that cannot apply its change throws a domain error, which aborts the whole transaction. "Fails with" names the `ErrorCode` enum key (PascalCase key, UPPER_SNAKE value: `SeatsUnavailable` = `'SEATS_UNAVAILABLE'`; the enum is in the API contract). `InventoryCorrupted` (500) means the counters' invariant broke, which should never happen.
+
+#### 5.4.1 `SeatInventory` (flights module)
+`items` = list of `{ flightId, cabinId, seats }`. Every update matches the cabin with `$elemMatch` and changes it with the positional `$`, so check + change happen in **one atomic document update**.
+
+| Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
+|---|---|---|---|
+| `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
+| `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
+| `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
+| `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
+| `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+Example (`hold`, one item):
+```js
+flights.updateOne(
+  { _id: flightId, status: 'scheduled', departureAt: { $gt: now },
+    cabins: { $elemMatch: { _id: cabinId, availableSeats: { $gte: seats } } } },
+  { $inc: { 'cabins.$.availableSeats': -seats, 'cabins.$.heldSeats': seats },
+    $set: { hasBookings: true } },
+  { session })
+// modifiedCount === 0  →  throw SeatsUnavailable
+```
+A round trip holds both segments in the same transaction, so it never holds one without the other.
+
+#### 5.4.2 `RoomNightInventory` (hotels module)
+Two mechanisms together:
+- **Unique index `{ roomId, date }`** makes two reservations (or a reservation and a block) for the same night impossible.
+- **"Touching" the room** (`$inc inventoryVersion`) inside the transaction makes concurrent changes to the same room conflict, so a reservation can't slip past an availability change or deactivation happening at the same moment. The losing transaction retries and re-checks.
+
+| Method | Steps | Fails with |
+|---|---|---|
+| `reserve(hotelId, roomIds, checkIn, checkOut, reservationId)` | for each room: update `{ _id, hotelId, isActive: true, availability: { $elemMatch: { fromDate ≤ checkIn, toDate ≥ checkOut − 1 day } } }` with `$inc inventoryVersion`, `$set hasEverBeenReserved: true` (no match → fail); then `insertMany` one night per room per night (duplicate key → fail) | `RoomsUnavailable` (whole request rejected, HTL-18) |
+| `release(reservationId)` | `deleteMany({ reservationId })` | — |
+| `block(roomId, fromDate, toDate)` | touch room; `insertMany` nights `kind: blocked` with a new `blockId` (duplicate key → fail) | `OverlapsReservationOrBlock` (HTL-06) |
+| `unblock(blockId)` | touch room; `deleteMany({ blockId })` | — |
+| `setAvailability(roomId, ranges)` | touch room; reject if any reservation night from today on falls outside the new ranges; normalise (sort, merge adjacent, reject overlaps); save | `AvailabilityHasReservations` (HTL-05) |
+| `deactivate(roomId)` / `delete(roomId)` | touch room; reject if any reservation night from today on exists; delete also requires `hasEverBeenReserved = false` | `RoomHasReservations` / `RoomWasReserved` |
+
+---
+
+### 5.5 Lifecycles
+
+Every transition is **one conditional update**: `updateOne({ _id, status: <from> }, { $set: { status: <to>, … } })`. If it matches nothing, another process already moved the document, and the caller must not continue. This is what makes the hold-expiry job and the payment webhook safe when they race.
+
+#### 5.5.1 Flight booking and hotel reservation (GEN-11)
+```
+pending_payment ──payment succeeded──▶ confirmed ──end of trip/stay──▶ completed
+       │                                   │
+       └──hold expired──▶ expired          └──user/provider cancels──▶ cancelled
+```
+| Transition | Triggered by | Inventory (same transaction) |
+|---|---|---|
+| create `pending_payment` | user proceeds to payment | `SeatInventory.hold` / `RoomNightInventory.reserve` |
+| → `confirmed` | event `payment.succeeded` | `SeatInventory.confirm` / nothing (nights stay) |
+| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06) | `SeatInventory.release` / `RoomNightInventory.release` |
+| → `cancelled` | user (FLT-26, HTL-21) or flight cancelled (FLT-06) | `SeatInventory.returnBooked` / `RoomNightInventory.release` |
+| → `completed` | job: flight `lastDepartureAt ≤ now`; hotel `checkOutDate < today` | none |
+
+#### 5.5.2 Flight (FLT-30)
+`scheduled → departed` (job, `departureAt ≤ now`) · `scheduled → cancelled` (moderator, FLT-06).
+
+#### 5.5.3 Payment
+`pending → succeeded` (verified webhook) · `pending → failed` (webhook) · `failed → pending` (retry) · `pending|failed → canceled` (hold expired, PaymentIntent cancelled).
+**Late success:** if `payment.succeeded` arrives after the booking is already `expired`, the booking is not confirmed and a full refund with `reason: late_payment` is created.
+
+#### 5.5.4 Refund
+`pending → refunded | failed` (Stripe result). Each change notifies the user (PAY-03).
+
+#### 5.5.5 Report
+`open → dismissed | content_hidden | content_deleted`.
+
+---
+
+### 5.6 Cross-module contracts
+
+#### 5.6.1 Who calls whom (allowed imports)
+| Module | May call services of |
+|---|---|
+| reference-data, storage, notifications, audit | — |
+| accounts | reference-data |
+| fx | reference-data |
+| flights | reference-data, storage |
+| hotels | reference-data, storage |
+| payments | — (uses the payable port) |
+| flight-bookings | flights, payments |
+| hotel-bookings | hotels, payments |
+| itineraries | reference-data, fx, flights, hotels, accounts, storage |
+| blog | accounts, itineraries, storage |
+| moderation | — (uses the reportable-content port) |
+| admin | accounts, flights, hotels, flight-bookings, hotel-bookings, moderation, audit |
+
+No cycles. When a module needs something from a module "above" it, it defines a **port** (an interface it owns) and the other module implements it (dependency inversion).
+
+A URL path does not decide the module. Endpoints that combine provider data with booking data live in the **booking** module, because only it may depend on both: `GET /api/flights/:id/bookings` and `/passengers/export` (FLT-29) in flight-bookings; `GET /api/hotels/:id/availability` (HTL-08) and `/reservations` (HTL-22) in hotel-bookings.
+
+#### 5.6.2 Ports
+| Port (owned by) | Implemented by | Methods |
+|---|---|---|
+| `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)` → `{ amountMinor, currency, status, holdExpiresAt }`; `getPolicies(bookingId, userId)` |
+| `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
+| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` (blocks ACC-12) |
+
+#### 5.6.3 Events (in-process, `@nestjs/event-emitter`)
+Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
+
+| Event | Emitted by | Handled by |
+|---|---|---|
+| `payment.succeeded {bookingType, bookingId}` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
+| `flight-booking.expired`, `hotel-reservation.expired` | booking modules | payments → cancel the PaymentIntent |
+| `flight-booking.confirmed`, `…cancelled`, `hotel-reservation.confirmed`, `…cancelled` `{bookingId, userId, reference}` | booking modules | notifications |
+| `refund.updated {refundId, userId, status}` | payments | notifications |
+| `flight.rescheduled {flightId, departureAt, arrivalAt}` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled {bookingId, userId}` → notifications |
+| `flight.cancelled {flightId}` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
+| `user.deactivated`, `user.reactivated {userId}` | accounts | blog, itineraries → set `authorDeactivated` |
+| `account.suspended`, `account.reactivated {userId}` | accounts | notifications |
+| `provider.deactivated`, `provider.reactivated {providerType, providerId, moderatorIds}` | admin | notifications |
+| `admin.action {actorId, action, target, details}` | admin, moderation | audit |
+
+---
+
+### 5.7 Background jobs (`@nestjs/schedule`)
+Each job lives in the module that owns the data and uses conditional updates, so two app instances running the same job is safe.
+
+| Job | Module | Every | Does |
+|---|---|---|---|
+| Expire flight holds | flight-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `SeatInventory.release` |
+| Complete flight bookings | flight-bookings | 15 min | `confirmed` with `lastDepartureAt ≤ now` → `completed` |
+| Mark flights departed | flights | 1 min | `scheduled` with `departureAt ≤ now` → `departed` |
+| Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |
+| Complete stays | hotel-bookings | 1 h | `confirmed` with `checkOutDate < today` → `completed` |
+| Refresh rates | fx | daily | fetch FXRatesAPI, insert today's `exchange_rates` |
+
+Sessions need no job (TTL index).
+
+---
+
+### 5.8 Decisions to confirm in team review
+These are the calls this design makes where the requirements are silent or ambiguous. Each module owner confirms or challenges the ones in their area.
+
+1. Platform currency is **USD**.
+2. "Today" for date-only rules is the **UTC** date.
+3. Refunds use the **policy snapshot taken at hold time**, not the provider's current policy (the user accepted that version, PAY-02).
+4. Extra baggage is chosen once per passenger and applies to **every segment**, charged per segment at that segment's airline price.
+5. A flight booking is **completed** when its last segment has departed.
+6. Pending bookings on a cancelled flight become **expired** (the only legal exit from `pending_payment`).
+7. A cancelled flight **keeps its flight number** for that date (no re-creating the same number that day).
+8. Airline `code` is 2–3 uppercase letters/digits and unique.
+9. Every room in a hotel reservation must have **at least one guest**.
+10. Blocking a range that overlaps an existing block is **rejected** (not merged).
+11. Hidden reviews are **excluded** from the hotel's average rating.
+12. `commentCount` counts only **visible** comments.
+13. Activities may optionally link an **attraction** from the dataset (the only use of `attractions`).
+14. A payment that succeeds **after** the hold expired is refunded in full automatically.
+15. Hotel default check-in/out times are 14:00 / 12:00 until the moderator sets them.
+
+### 5.9 Schema pattern (how a schema file looks)
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+```ts
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
+
+@Schema({ collection: 'flights', timestamps: true })   // always set the collection name explicitly
+export class Flight {
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })   // NOT Types.ObjectId (becomes Mixed)
+  airlineId!: Types.ObjectId;                                         // NO `ref`: no cross-module populate
+
+  @Prop({ type: String, required: true })                             // reference-data id
+  departureAirportId!: string;
+}
+export type FlightDocument = HydratedDocument<Flight>;
+export const FlightSchema = SchemaFactory.createForClass(Flight);
+FlightSchema.index({ departureAirportId: 1, arrivalAirportId: 1, departureLocalDate: 1, status: 1 });
+```
+
+Rules (a test enforces the first two): `MongooseSchema.Types.ObjectId` for ObjectIds; no `ref`; register schemas only in the owning module's `MongooseModule.forFeature`; never export the models; `select: false` on `passwordHash`.
+
+### 5.10 Changing the data model
+
+The schema is **frozen** after the team review. To change it:
+1. Ask the team leader first.
+2. One PR changes `docs/database/data-model.md` (§5 “Data model” here), the class diagram, the schema code and `indexes.spec.ts` together.
+3. The team leader approves it.
+
+An agent must never change the data model on its own initiative. If a task seems to need a new field, stop and say so.
+
+### 5.11 Seeding
+
+- `npm run seed:reference` (backend) imports `backend/seed-data/*.csv` exactly, upserts by `_id`, validates references first, and derives `currencies`. Safe to re-run. Never edit the CSVs or their IDs.
+- The admin account (ACC-18) and demo data (`seed:demo`: sample airlines, flights, hotels) are separate scripts, added by their tickets. Demo data never touches reference data.
+
+## 6. Endpoints
+
+From project PDF §8, plus the endpoints the requirements need but the PDF doesn't list (marked **added**). Keep these paths: graders test them in Swagger. `(B)` = bonus, only build it when asked.
+
+**Module** = the module that owns the endpoint (§4 “Modules, folder layout and where things live”); build it there, whatever the URL says.
+
+Access: **Pub** = public (`@Public()`) · **User** = any logged-in account · **Own** = logged-in owner of the resource (service check, 404 otherwise) · **Adm** = admin · **AMod**/**HMod** = airline/hotel moderator, limited to their own provider.
+
+Nest route order: declare static paths (`/mine`, `/search`, `/public/...`) **before** `/:id` in the same controller.
+
+### 6.1 Auth & accounts
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/auth/register | ACC-01 | Pub | accounts |
+| POST | /api/auth/login | ACC-04, ACC-05 | Pub | accounts |
+| POST | /api/auth/refresh **added** | ACC-06, ACC-19 | Pub (refresh cookie) | accounts |
+| POST | /api/auth/logout | ACC-06 | User | accounts |
+| GET | /api/auth/me | ACC-04, ACC-19 | User | accounts |
+| PATCH | /api/auth/change-password | ACC-08, ACC-07a | User | accounts |
+| GET | /api/users/me | ACC-09 | User | accounts |
+| PATCH | /api/users/me | ACC-09 | User | accounts |
+| DELETE | /api/users/me | ACC-12 | User (role USER) | accounts |
+| GET | /api/auth/verify-email | ACC-02 (B) | Pub | accounts |
+| POST | /api/auth/forgot-password · /api/auth/reset-password | ACC-07 (B) | Pub | accounts |
+
+### 6.2 Admin (all Adm)
+| Method | Path | Req | Module |
+|---|---|---|---|
+| POST | /api/admin/moderators | ACC-13 | admin |
+| GET | /api/admin/accounts | ACC-14 | admin |
+| PATCH | /api/admin/accounts/:id/suspend · /reactivate | ACC-15, ACC-16 | admin |
+| POST | /api/admin/users/:id/reset-password | ACC-07a | admin |
+| PATCH | /api/admin/providers/:type/:id/deactivate · /reactivate **added** (type = airline\|hotel) | ACC-15 | admin |
+| GET | /api/admin/bookings | ACC-17 | admin |
+| GET | /api/admin/reports | GEN-10 | admin |
+| PATCH | /api/admin/reports/:id | GEN-10 | admin |
+| DELETE | /api/admin/content/:type/:id | GEN-10 | admin |
+| PATCH | /api/admin/content/:type/:id/hide **added** | GEN-10 | admin |
+| GET | /api/admin/audit-logs | GEN-07 | admin |
+
+### 6.3 Reference & supporting (added)
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| GET | /api/countries · /api/cities · /api/currencies · /api/attractions | GEN-12 | Pub | reference-data |
+| GET | /api/exchange-rates/latest | ITN-18 | Pub | fx |
+| POST | /api/reports | GEN-09 | User | moderation |
+| GET | /api/notifications · /api/notifications/unread-count | GEN-01 | User | notifications |
+| PATCH | /api/notifications/:id/read · /api/notifications/read-all | GEN-01 | User | notifications |
+
+### 6.4 Airlines & flights
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/airlines | FLT-01 | Adm | flights |
+| GET | /api/airlines/:id | FLT-01 | Pub | flights |
+| PATCH | /api/airlines/:id | FLT-01 | AMod | flights |
+| POST | /api/airlines/:id/logo **added** | FLT-01, GEN-08 | AMod | flights |
+| PUT | /api/airlines/:id/baggage-policy | FLT-08 | AMod | flights |
+| PUT | /api/airlines/:id/cancellation-policy | FLT-09 | AMod | flights |
+| GET | /api/airlines/:id/flights **added** (moderator list) | FLT-05 | AMod | flights |
+| GET | /api/airports | FLT-02 | Pub | reference-data |
+| POST | /api/flights | FLT-03 | AMod | flights |
+| GET | /api/flights/search | FLT-11, FLT-12, FLT-15 | Pub | flights |
+| GET | /api/flights/:id | FLT-17 | Pub | flights |
+| PATCH | /api/flights/:id | FLT-05 | AMod | flights |
+| POST | /api/flights/:id/cancel | FLT-06 | AMod | flights |
+| POST | /api/flights/:id/cabins | FLT-04 | AMod | flights |
+| PATCH | /api/flights/:id/cabins/:cabinId | FLT-04, FLT-05 | AMod | flights |
+| GET | /api/flights/:id/bookings | FLT-29 | AMod | flight-bookings |
+| GET | /api/flights/:id/passengers/export | FLT-29 (CSV) | AMod | flight-bookings |
+
+### 6.5 Flight bookings
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/flight-bookings | FLT-19, FLT-21 (quote, no write) | User | flight-bookings |
+| POST | /api/flight-bookings/hold | FLT-22 | User | flight-bookings |
+| GET | /api/flight-bookings | FLT-25 | Own | flight-bookings |
+| GET | /api/flight-bookings/:id | FLT-25 | Own | flight-bookings |
+| GET | /api/flight-bookings/:id/refund-preview **added** | FLT-26 | Own | flight-bookings |
+| POST | /api/flight-bookings/:id/cancel | FLT-26 | Own | flight-bookings |
+| GET | /api/flight-bookings/:id/e-ticket | FLT-23 (PDF) | Own | flight-bookings |
+| PATCH | /api/flight-bookings/:id/change-flight | FLT-27 (B) | Own | flight-bookings |
+| PATCH | /api/flight-bookings/:id/seat | FLT-28 (B) | Own | flight-bookings |
+
+### 6.6 Hotels & rooms
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/hotels | HTL-01 | Adm | hotels |
+| GET | /api/hotels/search | HTL-11, HTL-12 | Pub | hotels |
+| GET | /api/hotels/:id | HTL-02 | Pub | hotels |
+| PATCH | /api/hotels/:id | HTL-01 | HMod | hotels |
+| POST | /api/hotels/:id/photos **added** · DELETE /api/hotels/:id/photos/:photoId | HTL-01, GEN-08 | HMod | hotels |
+| PUT | /api/hotels/:id/policies (check-in/out times + tiers; PDF labels it HTL-08) | HTL-09, HTL-10 | HMod | hotels |
+| GET | /api/hotels/:id/rooms **added** (moderator list) | HTL-03 | HMod | hotels |
+| POST | /api/hotels/:id/rooms | HTL-03 | HMod | hotels |
+| PATCH | /api/hotels/:id/rooms/:roomId | HTL-05, HTL-06 (deactivate) | HMod | hotels |
+| DELETE | /api/hotels/:id/rooms/:roomId | HTL-06 | HMod | hotels |
+| GET | /api/hotels/:id/rooms/available?checkIn&checkOut | HTL-15 | Pub | hotels |
+| POST | /api/hotels/:id/rooms/:roomId/availability (add bookable range) | HTL-04 | HMod | hotels |
+| PATCH | /api/hotels/:id/rooms/:roomId/availability `{op: SET_RANGES\|BLOCK\|UNBLOCK, ...}` | HTL-05, HTL-06 | HMod | hotels |
+| GET | /api/hotels/:id/availability?from&to | HTL-08 | HMod | hotel-bookings |
+| GET | /api/hotels/:id/reservations | HTL-22 | HMod | hotel-bookings |
+
+### 6.7 Hotel bookings & reviews
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/hotel-bookings | HTL-16, HTL-18 (creates the hold) | User | hotel-bookings |
+| GET | /api/hotel-bookings | HTL-20 | Own | hotel-bookings |
+| GET | /api/hotel-bookings/:id | HTL-20 | Own | hotel-bookings |
+| GET | /api/hotel-bookings/:id/refund-preview **added** | HTL-21 | Own | hotel-bookings |
+| POST | /api/hotel-bookings/:id/cancel | HTL-21 | Own | hotel-bookings |
+| POST | /api/hotel-bookings/:id/review | HTL-23 | Own | hotel-bookings |
+| PATCH | /api/reviews/:id · DELETE /api/reviews/:id | HTL-23 | Own | hotel-bookings |
+| GET | /api/hotels/:id/reviews | HTL-24 | Pub | hotel-bookings |
+| POST | /api/reviews/:id/reply | HTL-26 (B) | HMod | hotel-bookings |
+
+### 6.8 Payments & refunds
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| GET | /api/bookings/:type/:id/policies | PAY-02 | Own | payments |
+| POST | /api/bookings/:type/:id/accept-policies | PAY-02 | Own | payments |
+| POST | /api/payments | PAY-01 | Own (booking) | payments |
+| POST | /api/payments/:id/retry | PAY-01 | Own | payments |
+| GET | /api/payments/:id | PAY-01 | Own | payments |
+| POST | /api/payments/webhook | PAY-01, PAY-03 | Pub (Stripe signature) | payments |
+| GET | /api/refunds/:id | PAY-03 | Own | payments |
+
+### 6.9 Itineraries (Own unless noted)
+| Method | Path | Req | Module |
+|---|---|---|---|
+| POST · GET | /api/itineraries | ITN-01, ITN-03 | itineraries |
+| GET · PATCH · DELETE | /api/itineraries/:id | ITN-03, ITN-01, ITN-20 | itineraries |
+| POST | /api/itineraries/:id/days | ITN-05 | itineraries |
+| PATCH · DELETE | /api/itineraries/:id/days/:dayId | ITN-05, ITN-07 | itineraries |
+| PATCH | /api/itineraries/:id/days/reorder `{dayIds}` (declare before `:dayId`) | ITN-08 | itineraries |
+| POST | /api/itineraries/:id/days/:dayId/activities | ITN-10 | itineraries |
+| PATCH · DELETE | /api/activities/:id | ITN-10 | itineraries |
+| POST · DELETE | /api/activities/:id/images · /api/activities/:id/images/:imageId | ITN-12, GEN-08 | itineraries |
+| POST | /api/itineraries/:id/days/:dayId/budgets | ITN-14 | itineraries |
+| PATCH · DELETE | /api/budgets/:id | ITN-14 | itineraries |
+| POST | /api/itineraries/:id/transport-costs | ITN-16 | itineraries |
+| PATCH · DELETE | /api/transport-costs/:id | ITN-16 | itineraries |
+| GET | /api/itineraries/:id/budget-summary | ITN-14, ITN-18 | itineraries |
+| GET | /api/itineraries/public/search (Pub) | ITN-20, ITN-21 | itineraries |
+| GET | /api/itineraries/public/:id (Pub) | ITN-21 | itineraries |
+| POST | /api/itineraries/:id/clone (User, source must be public) | ITN-21 | itineraries |
+| GET | /api/itineraries/:id/hotels?groupIndex&guests&rooms | ITN-25 (PDF labels it ITN-09) | itineraries |
+| GET | /api/itineraries/:id/flights?origin&tripType | ITN-26 | itineraries |
+| POST | /api/itineraries/:id/bookings | ITN-27 (B) | itineraries |
+| GET | /api/itineraries/:id/pdf | ITN-28 (B) | itineraries |
+
+### 6.10 Blog
+| Method | Path | Req | Access | Module |
+|---|---|---|---|---|
+| POST | /api/posts | BLG-01 | User | blog |
+| GET | /api/posts?q&tag&page | BLG-02, BLG-09 | Pub | blog |
+| GET | /api/posts/mine | BLG-03 | User | blog |
+| GET | /api/posts/:id | BLG-02 (drafts only for the author) | Pub | blog |
+| PATCH · DELETE | /api/posts/:id | BLG-04, BLG-08 | Own | blog |
+| GET | /api/posts/:id/comments **added** | BLG-05 | Pub | blog |
+| POST | /api/posts/:id/comments | BLG-05 | User | blog |
+| PATCH · DELETE | /api/comments/:id | BLG-07 | Own | blog |
+| POST · DELETE | /api/posts/:id/like | BLG-06 | User | blog |
+| POST · DELETE | /api/posts/:id/images · /api/posts/:id/images/:imageId | BLG-10, GEN-08 | Own | blog |
+| GET | /api/tags/:tag/posts | BLG-08 | Pub | blog |
+| GET | /api/authors/:id | BLG-12 | Pub | blog |
+| PATCH | /api/posts/:id/itinerary | BLG-13 (B) | Own | blog |
+
+## 7. Auth, sessions, roles, ownership
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+Covers ACC-01, 04–19, GEN-13. Owned by the **accounts** module (Accounts & Auth package). Backend and frontend both depend on these rules; don't change cookie names, paths or error codes without the team leader's approval. Field definitions: §5.3.2 “accounts”.
+
+### 7.1 Roles and account fields
+
+`role`: `user` · `admin` · `airline_moderator` · `hotel_moderator`.
+`status`: `active` · `suspended` (admin action) · `deactivated` (self, ACC-12).
+User (`users`): `name, email (lowercased, unique), passwordHash (select:false), role, status, phone?, preferredCurrency (default 'USD'), moderatorOf? { providerType: airline|hotel, providerId } (moderators only), mustChangePassword, termsAcceptedAt?, failedLoginAttempts, lockedUntil?`.
+Admins exist only through the seed script (ACC-18); registration always creates role `user`.
+
+### 7.2 Cookies and tokens
+
+| Cookie | Content | Path | Lifetime |
+|---|---|---|---|
+| `access_token` | JWT `{ sub, role, sid, providerId? }` (`providerId` = `moderatorOf.providerId`), HS256, `JWT_ACCESS_SECRET` | `/` | 15 min (cookie `maxAge` = token TTL) |
+| `refresh_token` | 48 random bytes, base64url; only its SHA-256 hash is stored | `/` | 7 days absolute |
+
+The refresh cookie uses path `/` on purpose: `proxy.ts` must see it on page navigations to refresh silently. Both cookies: `httpOnly: true, secure: true, sameSite: 'lax'`. Browsers accept `secure` cookies on `http://localhost`. Set them with Express `res.cookie()` (milliseconds) via `@Res({ passthrough: true })`, and clear them with `res.clearCookie(name, { path })` using the same path.
+Never put email, name or anything sensitive in the JWT. Never return tokens in a JSON body.
+
+### 7.3 Sessions
+
+Collection `sessions`: `userId, refreshTokenHash, lastActivityAt, expiresAt` with a **TTL index on `expiresAt`** (`expiresAt = lastActivityAt + 30 min`). A session that exists and has `expiresAt > now` is live; anything else is dead. Revoking = deleting.
+
+- **Idle expiry (ACC-06):** the guard rejects a missing session, or one with `expiresAt ≤ now` (TTL deletion can lag ~60 s), with `401 SESSION_EXPIRED`.
+- **Activity:** the guard slides `lastActivityAt` and `expiresAt` at most once per 60 s per session (`updateOne({ _id: sid, lastActivityAt: { $lt: now - 60s } }, { $set: { lastActivityAt: now, expiresAt: now + 30 min } })`).
+- **Delete all of a user's sessions** when they change their password, are reset by an admin, suspended or deactivated. It takes effect on their next request.
+- **Refresh** `POST /api/auth/refresh` (public): hash the cookie, find a live session with that hash, slide its activity, issue a new access token, and set the `access_token` cookie. The refresh token is **not** rotated: several parallel requests (prefetches) may refresh at once, and rotation would make all but one fail. Logout, idle expiry and revocation still kill it. Anything else gets `401 SESSION_EXPIRED` and both cookies are cleared.
+- **Logout** `POST /api/auth/logout`: delete the session and clear both cookies (ACC-06).
+
+### 7.4 Login, lockout, register, passwords
+
+Login `POST /api/auth/login`, in this order:
+1. Find the user by lowercased email with `+passwordHash`. If there's no user or the account is `deactivated`, return `401 INVALID_CREDENTIALS` "Invalid email or password".
+2. If `lockedUntil > now`, return `401 ACCOUNT_LOCKED` with the minutes remaining (ACC-05).
+3. If `bcrypt.compare` fails, increment `failedLoginAttempts` atomically (`$inc`, never read-then-write). At 5, set `lockedUntil = now + 15 min` and reset the count, then return `ACCOUNT_LOCKED`; otherwise return `INVALID_CREDENTIALS`.
+4. If the password is right but status is `suspended`, return `403 ACCOUNT_SUSPENDED` "Your account is suspended" (ACC-04).
+5. Reset `failedLoginAttempts`, create a session, set cookies, return `{ user: MeDto }`.
+
+`MeDto` (`GET /api/auth/me`): `{ _id, name, email, role, status, preferredCurrency, moderatorOf?, mustChangePassword }`.
+
+Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching `/^(?=.*[A-Za-z])(?=.*\d).{8,}$/`, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
+
+Temporary passwords (ACC-07a, ACC-13): the admin sets one, the backend stores the hash, sets `mustChangePassword = true` and deletes the user's sessions. While `mustChangePassword` is true, the guard allows only `GET /auth/me`, `PATCH /auth/change-password` and `POST /auth/logout` and returns `403 PASSWORD_CHANGE_REQUIRED` for anything else.
+Change password (ACC-08): requires the current password; the new one follows the ACC-01 rule; clear `mustChangePassword`; delete the user's other sessions.
+
+### 7.5 Guards and decorators
+
+Register globally in `AuthModule`:
+```ts
+providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }, { provide: APP_GUARD, useClass: RolesGuard }]
+```
+Order matters: authentication first, then roles. Everything is protected unless marked `@Public()`.
+
+```ts
+export const IS_PUBLIC = 'isPublic';  export const Public = () => SetMetadata(IS_PUBLIC, true);
+export const ROLES = 'roles';         export const Roles = (...r: Role[]) => SetMetadata(ROLES, r);
+export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext) => ctx.switchToHttp().getRequest().user as AuthUser);
+```
+`JwtAuthGuard.canActivate`:
+1. If `reflector.getAllAndOverride(IS_PUBLIC, [handler, class])` is true, try to attach the user if a valid cookie exists (so public pages can personalize), and always return true.
+2. Read `req.cookies.access_token`. If it's missing, return `401 NOT_AUTHENTICATED`.
+3. `jwtService.verifyAsync`. On failure, return `401 TOKEN_EXPIRED`; the frontend then calls refresh.
+4. Load the session by `sid` (lean). If it's missing or `expiresAt ≤ now`, return `401 SESSION_EXPIRED`. Slide the activity time.
+5. Enforce the `mustChangePassword` allow-list, then set `req.user = { id: sub, role, providerId, sid }`.
+
+`RolesGuard`: no `@Roles` metadata means any logged-in user may pass. Otherwise a role not in the list gets `403 FORBIDDEN_ROLE`. Use `ForbiddenException`, not `UnauthorizedException`.
+
+### 7.6 Ownership and moderator scope (ACC-11)
+
+Ownership is checked in **services**, after loading the resource:
+- Owner-only resources (bookings, private itineraries, drafts, own comments): if `doc.userId` is not `user.id` and the role is not allowed, throw `NotFoundException` so the resource's existence doesn't leak. Admins may **read** all bookings (ACC-17), never modify them.
+- Moderators: the resource's `airlineId` or `hotelId` must equal `user.providerId`; otherwise throw 404. A moderator's create calls take the provider from `user.providerId`, never from the body.
+- Query by ownership instead of filtering afterwards: `bookingModel.findOne({ _id: id, userId: user.id })`.
+- Public reads of user content exclude `isHidden` items and items with `authorDeactivated` (ACC-12, GEN-10), except for the author and admins.
+
+### 7.7 Frontend side (details in §12 and §10)
+
+- Never read tokens in JS. Login and logout run in the **browser** through the `/api` rewrite so the `Set-Cookie` headers land on the frontend origin.
+- Current user: Server Components call `getCurrentUser()` (server fetch of `/api/auth/me`, cached per request with React `cache`). Client Components receive the user as props or through a context filled by the root layout.
+- `proxy.ts` performs optimistic redirects only (no cookie means redirect to `/login?next=…`) and silently refreshes expired access tokens (§12.5 “Auth in the frontend”). Real checks stay in the backend.
+- Role landing pages after login: `user` → `/`, `admin` → `/admin`, `airline_moderator` → `/moderator/airline`, `hotel_moderator` → `/moderator/hotel`. If `mustChangePassword` is set, go to `/change-password` first.
+- ACC-10: restricted actions send guests to `/login?next=<current path>`. After login, redirect to `next` only if it starts with `/` and not `//`.
+
+### 7.8 Account events and checks (ACC-12, ACC-15, ACC-16)
+
+- **Self-deactivation (ACC-12):** blocked with 409 while `ActiveBookingsCheck.hasUpcomingConfirmed(userId)` is true (a port the booking modules implement; accounts never imports them). Otherwise set `deactivated`, delete sessions, emit `user.deactivated`.
+- **Suspend / reactivate (ACC-15, ACC-16):** called by admin. Set the status, delete sessions on suspension, emit `account.suspended` / `account.reactivated`. Bookings stay valid; content stays visible unless hidden.
+- Events are emitted after the write commits; notifications and audit react to them.
+
+## 8. Bookings, holds, payments, refunds
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+Covers FLT-06/12/19/21/22/23/25/26/29, HTL-16/17/18/20/21/22, PAY-01..04, GEN-11. Highest-risk area: follow it exactly. Field definitions: §5.3.4 “flight-bookings”, §5.3.6 “hotel-bookings”, §5.3.7 “payments”; inventory operations §5.4 “Inventory operations”; lifecycles §5.5 “Lifecycles”.
+
+Modules: **flight-bookings** and **hotel-bookings** (Bookings package) own bookings; **flights** and **hotels** own inventory; **payments** (Platform package) owns Stripe. Payments never writes a booking; bookings never call Stripe directly.
+
+### 8.1 Lifecycle
+
+```
+pending_payment ──payment.succeeded──► confirmed ──trip/stay over──► completed
+       │                                  │
+       └──hold expired──► expired          └──user/provider cancels──► cancelled
+```
+Every status change is a **conditional update** on the old status:
+```ts
+const r = await this.bookingModel.updateOne({ _id, status: from }, { $set: { status: to, ... } }, { session });
+if (r.modifiedCount !== 1) throw new ConflictException({ code: ErrorCode.InvalidStatusTransition, message: '...' });
+```
+The filter is what makes races safe (webhook vs expiry job vs user cancel): exactly one writer wins. Allowed moves: `pending_payment → confirmed | expired`, `confirmed → completed | cancelled`. Nothing else.
+
+Hold length: 10 minutes. `holdExpiresAt = createdAt + 10 min`, returned to the client for the countdown.
+
+### 8.2 Flight hold
+
+Two endpoints take the same body `{ tripType, segments: [{ flightId, cabinId }] (1 or 2), passengers: [{ type, fullName, dateOfBirth, documentNumber, extraBagCount, extraBagWeightKg }] }`:
+- `POST /api/flight-bookings` (FLT-19, FLT-21) is the **quote**: validates and prices, returns the summary. Writes nothing.
+- `POST /api/flight-bookings/hold` (FLT-22) repeats validation and pricing, then reserves and creates the `pending_payment` booking.
+
+Validate (400 `VALIDATION_FAILED` with `details`):
+- ≥ 1 adult; infants ≤ adults. Each passenger's type matches their age **on the outbound departure date**: adult 12+, child 2–11, infant under 2.
+- Extra bags ≤ every segment airline's `maxExtraBagsPerPassenger`; weight per bag ≤ every segment cabin's `maxBagWeightKg`.
+- Round trip: the return departs from the outbound arrival airport, to its origin, after the outbound arrives.
+- The airline is `isActive`, each flight is `scheduled` with departure in the future (`FlightsService` exposes the checks).
+
+Price on the server, per segment (snapshot `fareMinor` = cabin `priceMinor` now):
+`fares = seatCount × fareMinor + infants × round(fareMinor × 10 / 100)`; `baggage = Σ extraBagCount × extraBagPriceMinor` (that segment's airline). `totalMinor` = sum over segments. `seatCount = adults + children` (infants take no seat).
+
+Snapshot into each segment: `fareMinor`, airline, flight number, airports, times, and `policy` (cancellation tiers, free bags, max weight, extra-bag price and max). Refunds later use **these** tiers.
+
+Reserve atomically, in one transaction:
+```ts
+await session.withTransaction(async () => {
+  await this.seatInventory.hold(segments.map(s => ({ flightId: s.flightId, cabinId: s.cabinId, seats: seatCount })), { session });
+  await this.bookingModel.create([{ ...snapshot, status: 'pending_payment', holdExpiresAt }], { session });
+});
+// SeatInventory.hold throws SEATS_UNAVAILABLE (409) → the whole transaction rolls back
+```
+`SeatInventory.hold` does the `availableSeats ≥ n` check and the `$inc` in **one** document update (§5.4.1 “`SeatInventory`”). Never read `availableSeats` and then write.
+
+### 8.3 Hotel hold
+
+`POST /api/hotel-bookings` body: `{ hotelId, checkInDate, checkOutDate, rooms: [{ roomId, adults, childAges: number[] }] }`.
+
+Validate: `checkInDate ≥ today (UTC)`, `checkOutDate > checkInDate`, all rooms belong to `hotelId`, the hotel is active, each room's guests ≤ `maxOccupancy`, each room has ≥ 1 guest, total adults ≥ 1, child ages 0–17.
+Price: `Σ nights × room.pricePerNightMinor` (snapshot per room). Nights are `checkInDate … checkOutDate − 1 day`.
+
+Reserve, in one transaction:
+```ts
+await session.withTransaction(async () => {
+  const [res] = await this.reservationModel.create([{ ...snapshot, status: 'pending_payment', holdExpiresAt }], { session });
+  await this.roomNightInventory.reserve(hotelId, roomIds, checkInDate, checkOutDate, res._id, { session });
+});
+// RoomNightInventory.reserve throws ROOMS_UNAVAILABLE (409) → nothing is held (all-or-nothing, HTL-18)
+```
+`reserve` checks each room is active with the whole stay inside one availability range, bumps the room's `inventoryVersion`, then inserts one `room_nights` document per room per night. The unique index `{ roomId, date }` rejects any night that is already reserved or blocked (§5.4.2 “`RoomNightInventory`”).
+
+### 8.4 Policies and payment
+
+1. `GET /api/bookings/:type/:id/policies` (payments module, via `PayableBooking.getPolicies`): the booking's **policy snapshot** (airline: tiers and baggage; hotel: tiers and check-in/out times).
+2. `POST /api/bookings/:type/:id/accept-policies` `{ accepted: true }`: payments stores a `policy_acceptances` document with `acceptedAt` (PAY-02). The accepted policy is the booking's snapshot, so nothing is copied.
+3. `POST /api/payments` `{ bookingType, bookingId }` (payments):
+   - Through `PayableBooking.getPayable`: the booking belongs to the user, is `pending_payment`, `holdExpiresAt > now` (else `409 HOLD_EXPIRED`). An acceptance must exist (else `409 POLICIES_NOT_ACCEPTED`).
+   - If a payment exists for the booking with status `pending` or `failed`, return its PaymentIntent's `client_secret` (retries reuse it; one payment per booking).
+   - Otherwise create the PaymentIntent (amount = `totalMinor`, currency `usd`, `metadata: { bookingType, bookingId }`, idempotency key `pi-<type>-<bookingId>`), save `payments { stripePaymentIntentId, amountMinor, currency, status: 'pending' }`, return `{ paymentId, clientSecret, amountMinor, currency, holdExpiresAt }`.
+4. `POST /api/payments/:id/retry` sets `failed → pending` and returns the same client secret. `GET /api/payments/:id` returns the status to the owner.
+
+The client secret is the only Stripe value the browser sees. Card data never touches our servers (Payment Element). **A booking is confirmed only by the verified webhook**, never by a frontend call.
+
+### 8.5 Expiry (booking modules' jobs, every 30 s)
+
+```
+for each booking with status pending_payment and holdExpiresAt ≤ now (batches of 100):
+  transaction:
+    conditional update pending_payment → expired (skip if modifiedCount = 0)
+    flight: SeatInventory.release(segments)      hotel: RoomNightInventory.release(reservationId)
+  after commit: emit flight-booking.expired / hotel-reservation.expired
+payments listens: cancels the PaymentIntent (if pending/failed), sets the payment canceled.
+  Ignore "already succeeded" errors: the late-payment path refunds those (§8.6 “Stripe webhook and confirmation”).
+```
+
+### 8.6 Stripe webhook and confirmation
+
+`POST /api/payments/webhook` (payments, `@Public()`, raw body):
+```ts
+let event: Stripe.Event;
+try { event = this.stripe.webhooks.constructEvent(req.rawBody!, sig, this.webhookSecret); }
+catch { throw new BadRequestException({ code: ErrorCode.BadSignature, message: 'Invalid signature' }); }
+```
+`handleEvent`:
+1. **Idempotency:** insert `stripe_webhook_events { _id: event.id }`. A duplicate-key error means already processed: return 200.
+2. `payment_intent.succeeded`: set the payment `succeeded`, then emit `payment.succeeded { bookingType, bookingId }`.
+3. `payment_intent.payment_failed`: set the payment `failed`. The booking stays pending so the user can retry until the hold expires.
+4. `refund.updated` / `refund.failed`: map Stripe's status (`succeeded` → `refunded`, `failed`/`canceled` → `failed`), emit `refund.updated`.
+5. Return quickly; ignore other types.
+
+**The booking module confirms** on `payment.succeeded`, in one transaction:
+- conditional `pending_payment → confirmed`, set `confirmedAt` and the reference (§8.8 “References, e-ticket, completion”);
+- flight: `SeatInventory.confirm(segments)` (held → booked); hotel: nothing (the nights stay);
+- after commit: emit `…confirmed` (→ notifications).
+- **Late payment:** if the booking is no longer `pending_payment` (it expired), don't confirm. Ask payments for a full refund with `reason: 'late_payment'`.
+
+Local dev: `stripe listen --forward-to localhost:4000/api/payments/webhook` prints the `whsec_…` secret for `.env`. Test cards: `4242 4242 4242 4242` succeeds, `4000 0000 0000 0002` is declined, `4000 0025 0000 3155` needs 3-D Secure.
+
+### 8.7 Cancellations and refunds
+
+**Tier rule (FLT-09, HTL-10):** `days = floor((start − now) / 1 day)` (flight: outbound departure; hotel: check-in date at 00:00 UTC). Pick the tier with the largest `daysBefore ≤ days`; none → 0%. `refundAmountMinor = round(totalMinor × percent / 100)`. Use the booking's **snapshot** tiers. Write it as a pure function with TDD (decision table + boundaries).
+
+Preview: `GET /api/flight-bookings/:id/refund-preview`, `GET /api/hotel-bookings/:id/refund-preview` → `{ percent, amountMinor, currency }`.
+
+- **User cancels a flight (FLT-26):** owner, `confirmed`, outbound departure in the future. Round trips cancel as a whole using the **outbound** tiers (FLT-12).
+- **User cancels a hotel stay (HTL-21):** owner, `confirmed`, today < `checkInDate`. Whole reservation only.
+
+In one transaction: conditional `confirmed → cancelled` with `cancellation { cancelledAt, cancelledBy, refundPercent, refundAmountMinor }`; release inventory (flight `SeatInventory.returnBooked`; hotel `RoomNightInventory.release`).
+After commit: if `refundAmountMinor > 0`, call `PaymentsService.refund(...)` (creates `refunds { status: 'pending' }`, calls Stripe with idempotency key `refund-<refundId>`, maps the result). Then emit `…cancelled`. A Stripe failure leaves the booking cancelled and the refund `failed`, visible on the booking (PAY-03), never lost.
+
+**Provider cancels a flight (FLT-06):** flights sets `scheduled → cancelled` and emits `flight.cancelled`. flight-bookings cancels every `confirmed` booking containing it (round trips included) with **100%** and `cancelledBy: 'provider'`, and expires its `pending_payment` ones. Everyone affected is notified.
+A deactivated provider (ACC-15) is hidden from search and can't be booked; existing confirmed bookings stay valid.
+
+### 8.8 References, e-ticket, completion
+
+- Reference: `FB` (flights) or `HR` (hotels) + 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (`crypto.randomInt`). Unique (partial) index; retry on 11000. Set on confirmation.
+- E-ticket (FLT-23): `GET /api/flight-bookings/:id/e-ticket` (owner, `confirmed`) builds a PDF and returns a `StreamableFile` (`application/pdf`, `attachment; filename="<ref>.pdf"`). Times in each airport's local zone.
+- Completion (jobs): a flight booking becomes `completed` when `lastDepartureAt ≤ now`; a hotel reservation when `checkOutDate < today`. Only completed stays can be reviewed (HTL-23).
+- Flight time changes (FLT-05): on `flight.rescheduled`, flight-bookings updates its segment copies and `first/lastDepartureAt`, then notifies confirmed passengers.
+
+### 8.9 Frontend flow
+
+Flight: search → select flight and cabin → passengers form → `POST /flight-bookings` (quote) → summary page (FLT-21) with the airline policies and an acceptance checkbox → "Pay" → `POST /flight-bookings/hold` → `accept-policies` → `POST /payments` → payment page with a countdown from `holdExpiresAt`.
+Hotel: search → rooms (HTL-15) → guests per room → summary with policies and checkbox → `POST /hotel-bookings` (hold) → `accept-policies` → `POST /payments` → payment page with countdown.
+Payment page: `<Elements options={{ clientSecret }}><PaymentElement/></Elements>` → `stripe.confirmPayment({ elements, redirect: 'if_required' })` → poll the booking every 2 s (max ~30 s) until `confirmed` → confirmation with the reference and e-ticket. At 0 on the countdown, disable payment and offer to search again.
+
+### 8.10 Proving concurrency (required test)
+
+Integration tests on the in-memory replica set (§13.4 “Integration tests on the in-memory database”):
+- A cabin with 5 available seats: fire 6 parallel `hold(1)` calls → exactly 5 succeed, 1 fails with `SEATS_UNAVAILABLE`, and `total = available + held + booked` still holds.
+- Overlapping stays on the same room in parallel → exactly one succeeds.
+- Expiry job and confirmation racing on the same booking → exactly one transition wins.
+Assert invariants, never which request won. Put the result in the PR description.
+
+## 9. Domain rules (everything except bookings and payments)
+
+Always confirm with the exact requirement text (§17 “Official requirements”). These notes say **how** we implement it. Fields: `docs/database/data-model.md` (§5 “Data model” here).
+
+### 9.1 Time zones and dates
+
+- **Flights (FLT-03, GEN-06):** the moderator enters `departureLocal` / `arrivalLocal` as `YYYY-MM-DDTHH:mm`. Convert with the airport's zone: `DateTime.fromISO(local, { zone: airport.timeZone })`. Reject if `!dt.isValid`; store `dt.toUTC().toJSDate()`. Compare arrival > departure and departure > now in UTC. Store `departureLocalDate = dt.toISODate()` and `durationMinutes`; recompute both whenever times change.
+- **Search by local date:** `departureLocalDate === query.date` (exact match on the stored string).
+- **Display:** the backend returns UTC plus each airport's `timeZone`; the frontend formats with `Intl.DateTimeFormat(locale, { timeZone, dateStyle: 'medium', timeStyle: 'short' })`.
+- **Calendar dates** (check-in/out, itinerary start, DOB, availability, room nights) are `DateOnly`. Use `common/dates` (`toDateOnly('2026-12-01')`, `addDays`, `daysBetween`, `isDateOnly`). "Today" = the current UTC date. Nights = every date from check-in up to but excluding check-out.
+
+### 9.2 Exchange rates (ITN-18), module fx
+
+- FXRatesAPI: `GET https://api.fxratesapi.com/latest?base=USD&currencies=EGP,AED,...` (`api_key` only if `FXRATES_API_KEY` is set). Success: `{ success: true, date, base, rates }`. Failure: `{ success: false, error, description }`.
+- `FxService.refresh()` runs daily and at boot if today's document is missing. It inserts `exchange_rates { rateDate, base, rates, fetchedAt, source }` and never throws to callers: on any failure it logs and keeps the old data.
+- `convert(amountMinor, from, to)` uses the newest document: `amount × rates[to] / rates[from]`, adjusted for each currency's `minorUnits` (JPY has 0), rounded half up. Unknown currency → `400 UNSUPPORTED_CURRENCY`. No rates at all → `503 RATES_UNAVAILABLE`.
+- Responses with converted values include `{ displayCurrency, rateDate }`.
+- Supported currencies = the `currencies` collection (reference-data). Booking prices are **never** converted (PAY-04). Only the backend calls the API.
+
+### 9.3 Flights, module flights
+
+- Management is scoped to `user.providerId` (the moderator's airline).
+- Cabin classes are unique per flight (FLT-04). A new cabin starts with `availableSeats = totalSeats`.
+- **Edits (FLT-05):**
+  - Only `scheduled` flights can be edited.
+  - Airports are locked once `hasBookings` is true.
+  - Capacity changes go through `SeatInventory.changeCapacity` (never below held + booked).
+  - Price edits never touch bookings (they hold snapshots).
+  - Time changes recompute the derived fields and emit `flight.rescheduled`.
+- **Cancel (FLT-06):** `scheduled → cancelled` (conditional update), `cancelledAt`, emit `flight.cancelled`. flight-bookings handles the bookings.
+- **Status job (FLT-30):** `scheduled` with `departureAt ≤ now` → `departed`. Only `scheduled` flights are searchable, editable or bookable.
+- **Search (FLT-11/12/15):**
+  - Query: `{ from, to, date, adults, children, infants, cabinClass?, returnDate?, minPrice?, maxPrice?, sortBy: price|duration|departure }`.
+  - Filter: airports, `departureLocalDate`, `status: 'scheduled'`, `departureAt > now`, airline active (look up the active airline IDs first, then `airlineId: { $in }`), and a cabin with `availableSeats ≥ adults + children` (`$elemMatch`, plus the class if given).
+  - The price filter is inclusive on that cabin's `priceMinor`; `minPrice > maxPrice` → 400.
+  - A round trip returns `{ outbound, inbound }`. No results → `[]`.
+  - Itineraries reuse this search (ITN-26), so keep it a clean service method.
+
+### 9.4 Hotels, modules hotels and hotel-bookings
+
+- Rooms: `name` unique per hotel (HTL-03).
+- **Availability (HTL-04/05):** inclusive `fromDate…toDate` ranges, normalised on save (sorted, adjacent ones merged, overlaps rejected) through `RoomNightInventory.setAvailability`, which rejects removing dates that have reservation nights.
+- **Block, deactivate, delete (HTL-06):** through `RoomNightInventory`. Rejected if any reservation night from today on overlaps. Delete only while `hasEverBeenReserved` is false. An overlapping block is rejected.
+- **Room status view (HTL-08), in hotel-bookings:** for each room and date, a `room_nights` hit means Booked (with the reservation's reference) or Blocked; otherwise Available if the date is inside an availability range.
+- **Search (HTL-11/12/15), in hotels:**
+  - Active hotels in the city or country.
+  - Candidate rooms are active, with the whole stay inside one availability range and no `room_nights` for any night of the stay (`distinct('roomId', { hotelId, date: { $gte: checkIn, $lt: checkOut } })` gives the busy ones).
+  - A hotel qualifies if it has ≥ `rooms` free rooms and the `rooms` largest occupancies cover `guests`. Its price is the cheapest qualifying room's price per night.
+  - Then filter by price and rating, sort, and paginate. Unrated hotels drop out when `minRating` is set.
+  - Itineraries reuse this search (ITN-25).
+- **Reviews (HTL-23/24), in hotel-bookings:**
+  - One per `completed` reservation, by its owner, text ≤ 1000. Newest first, paginated.
+  - After create, edit, delete, hide or admin delete, aggregate the average and count over **non-hidden** reviews and call `HotelsService.setRatingSummary` (average to 1 decimal).
+
+### 9.5 Itineraries, module itineraries
+
+- **Days** are an embedded array: day number = index + 1; date = `startDate + index` days. Never store either. Max 60 days; each day needs a `cityId` (ITN-05/09).
+- **Add a day:** append. **Delete a day (ITN-07):** remove it, its activities (and their image files), its budget entries, and the transport costs whose `dayId` is that day. **Reorder (ITN-08):** `PATCH /api/itineraries/:id/days/reorder { dayIds }` must be a permutation of the current IDs; replace the array in one update.
+- Every write that changes `days` also recomputes `dayCount` and `cityIds` in the same update.
+- **City groups (ITN-09)** are computed on read: consecutive days with the same city become `{ cityId, fromDay, toDay, dayCount, checkIn, checkOut (last date + 1), subtotal }`. ITN-25 reuses these dates for the hotel search.
+- **Budget summary (ITN-14/18):** categories `food, accommodation, in_city_transport, activities` (activity costs count under activities), plus `intercity_transport` from transport costs. Totals per category, per day, per city group and overall, each amount converted to the viewer's `preferredCurrency` (§9.2 “Exchange rates (ITN-18), module fx”) before summing. Return `{ displayCurrency, rateDate, total, byCategory, byDay, byCityGroup }`.
+- **Visibility (ITN-20):** private by default. Public itineraries are read-only to others and appear in search; switching to private hides them at once.
+- **Public search (ITN-21):** keyword on title, country names and city names (resolve matching codes and IDs through reference-data first, then query `countryCodes` / `cityIds`), filter by min/max `dayCount` and country or city. Exclude `isHidden` and `authorDeactivated`.
+- **Clone (ITN-21):** a deep copy with **new** `_id`s everywhere, `visibility: private`, owner = the cloner, `clonedFrom { itineraryId, authorId }`, `transportCosts[].dayId` remapped, and **image files copied** to new keys through storage, so the clone survives the original being deleted.
+- **Ownership:** every `/api/itineraries/:id/*`, `/api/activities/:id`, `/api/budgets/:id` and `/api/transport-costs/:id` route loads the parent with `{ _id, ownerId: user.id }` (or `{ 'days.activities._id': id, ownerId }`), otherwise 404.
+
+### 9.6 Blog, module blog
+
+- **Draft vs published (BLG-01):** public lists show only `published`, not `isHidden`, not `authorDeactivated`. Drafts are visible only to the author (`GET /api/posts/mine`).
+- **Tags (BLG-08):** trim, lowercase, dedupe, ≤ 5, each ≤ 30 characters. `GET /api/tags/:tag/posts`.
+- **Search (BLG-09):** `q` matches title or tags (escaped regex), or the author's name. Resolve the name through `AccountsService` to user IDs, then `authorId: { $in }`. Sort by `likeCount + commentCount` descending, then `publishedAt` descending (aggregation `$addFields`). Return an excerpt (~200 characters).
+- **Likes (BLG-06):** insert into `likes` (a unique-index violation means already liked, so it's idempotent) and `$inc likeCount` only when the insert succeeded. Unlike: delete, and decrement only if something was deleted.
+- **Comments (BLG-05/07):** 1–500 characters, chronological; authors edit and delete their own. `commentCount` counts visible comments (hiding one decrements it).
+- **Author names** are fetched from accounts when reading, never stored. A deactivated author shows as "Deleted user" on comments.
+- **Author page (BLG-12):** name, join date, published posts, public itineraries (through `ItinerariesService`).
+- Deleting a post deletes its comments, likes and image files.
+
+### 9.7 Reports, moderation, audit
+
+- **Report (GEN-09), moderation:** `POST /api/reports { targetType, targetId, reason }`. The target must exist (`ReportableContent.exists`). A second report by the same user → `409 ALREADY_REPORTED`.
+- **Resolve (GEN-10), admin → moderation:** `GET /api/admin/reports?status=open`; `PATCH /api/admin/reports/:id { action: dismiss|hide|delete }` applies the action once through `ReportableContent` and closes **all** open reports on that target (`dismissed`, `content_hidden` or `content_deleted`). `DELETE /api/admin/content/:type/:id` and `PATCH …/hide` act directly.
+- Hidden content (`isHidden: true`) is visible only to its author and admins.
+- **Audit (GEN-07):** admin and moderation emit `admin.action { actorId, action, target, details }` after each suspend, reactivate, moderator creation, password reset, provider (de)activation, report resolution, hide or delete. The audit module stores it (append-only). `GET /api/admin/audit-logs` is paginated and filterable by action and date.
+
+### 9.8 Notifications (GEN-01)
+
+The notifications module **listens to events** (§5.6.3 “Events”); no module calls it to notify. Types: `booking_confirmed`, `booking_cancelled`, `refund_updated`, `flight_schedule_changed`, `flight_cancelled`, `account_suspended`, `account_reactivated`, `provider_deactivated`, `provider_reactivated`.
+Endpoints: `GET /api/notifications` (paginated), `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`.
+
+### 9.9 Accounts and providers, admin side
+
+- **Moderator creation (ACC-13):** `{ name, email, role, providerId, temporaryPassword }`. The provider must exist (flights/hotels service) and match the role. accounts creates the user with `moderatorOf` and `mustChangePassword: true`.
+- **Suspend / reactivate (ACC-15/16):** admin calls accounts (§7.8 “Account events and checks”).
+- **Provider deactivation (ACC-15):** admin calls flights/hotels to set `isActive: false` (hidden from search and booking; confirmed bookings stay valid), then emits `provider.deactivated` with the moderators' IDs.
+- **Lists (ACC-14, ACC-17):** paginated, searchable, filterable as the requirement says. The booking list is read-only and merges flight and hotel bookings (two service calls combined and sorted by date, or a `type` filter).
+
+## 10. API contract and error codes
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+This is the shared layer (decisions: §3.17 “API contract”). Changing anything here needs the team leader's approval. The rewrite, the global error filter and the error-code enum are built by the Platform package.
+
+### 10.1 Topology
+
+```
+Browser ──► Next.js :3000 ──(rewrite /api/*, /uploads/*)──► NestJS :4000 ──► MongoDB Atlas
+                  │                                         ├─► Stripe API (secret key)
+                  └─(server-side fetch, forwards cookies)──►├─► FXRatesAPI
+Stripe ──webhook──► NestJS /api/payments/webhook            
+```
+- The browser only ever talks to `:3000`. Next rewrites `/api/:path*` and `/uploads/:path*` to the backend, so cookies are first-party and no CORS preflight happens. CORS is still enabled on Nest for direct tools.
+- Server Components and Server Actions call the backend directly at `BACKEND_URL` and forward the incoming `cookie` header.
+
+```ts
+// frontend/next.config.ts
+const nextConfig: NextConfig = {
+  async rewrites() {
+    return [
+      { source: '/api/:path*', destination: `${process.env.BACKEND_URL}/api/:path*` },
+      { source: '/uploads/:path*', destination: `${process.env.BACKEND_URL}/uploads/:path*` },
+    ];
+  },
+};
+```
+
+### 10.2 Environment variables
+
+`backend/.env`
+```
+PORT=4000
+MONGODB_URI=                     # team leader shares it privately (never in git)
+FRONTEND_URL=http://localhost:3000
+JWT_ACCESS_SECRET=               # openssl rand -base64 32
+JWT_ACCESS_TTL=15m
+REFRESH_TTL_DAYS=7
+SESSION_IDLE_MINUTES=30
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...  # printed by `stripe listen`
+PLATFORM_CURRENCY=USD
+FXRATES_API_KEY=                 # optional; the API works without it at low volume
+UPLOAD_DIR=uploads
+SEED_ADMIN_EMAIL=  SEED_ADMIN_PASSWORD=
+```
+`frontend/.env.local`
+```
+BACKEND_URL=http://localhost:4000
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
+```
+Only `NEXT_PUBLIC_*` reaches the browser. Never prefix a secret with it.
+Each variable is added to `.env.example` by the ticket that first needs it (today's `.env.example` only has what exists). `BACKEND_URL` replaces the scaffold's `NEXT_PUBLIC_API_URL` when the rewrite is added.
+
+### 10.3 Response shapes
+
+**Success:** the resource JSON itself (no `{ data: … }` wrapper). IDs keep Mongo's field name `_id` (a 24-hex string in JSON; reference data uses its dataset id, such as `"CAI"`). Don't rename to `id`; `.lean()` results then need no mapping. Instants are ISO-8601 UTC strings (`2026-12-01T12:30:00.000Z`). Calendar dates (`DateOnly` in the database) travel as `YYYY-MM-DD` strings in requests and responses, converted with `common/dates`. Money keeps the data model's names and minor units: `{ totalMinor: 12550, currency: 'USD' }`, `priceMinor`, `amountMinor`; the frontend formats it (`lib/format.ts`). Enum values are the data model's lowercase values (`pending_payment`).
+
+**List:**
+```json
+{ "items": [], "page": 1, "limit": 10, "total": 42, "totalPages": 5 }
+```
+Query params: `page`, `limit`, `sortBy`, `sortOrder=asc|desc`, plus filters named after fields (`minPrice`, `maxPrice`, `status`, `role`, `q` for keyword).
+
+**Error** (every non-2xx response, produced by `AllExceptionsFilter`):
+```json
+{
+  "statusCode": 409,
+  "code": "SEATS_UNAVAILABLE",
+  "message": "Not enough seats left in Economy",
+  "details": [{ "field": "passengers", "message": "..." }],
+  "path": "/api/flight-bookings/hold",
+  "timestamp": "2026-11-20T10:00:00.000Z"
+}
+```
+`details` is present for validation errors (400 `VALIDATION_FAILED`), one entry per field. The frontend shows `details` next to form fields (GEN-02) and `message` in a toast or alert.
+
+Codes live in **one enum**, `backend/src/common/errors/error-codes.ts`: PascalCase keys in code (`ErrorCode.SeatsUnavailable`), UPPER_SNAKE values on the wire (`"SEATS_UNAVAILABLE"`). The data model's "Fails with" columns name the keys. Starting set: `VALIDATION_FAILED`, `NOT_AUTHENTICATED`, `TOKEN_EXPIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS`, `ACCOUNT_LOCKED`, `ACCOUNT_SUSPENDED`, `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN_ROLE`, `NOT_FOUND`, `EMAIL_TAKEN`, `SEATS_UNAVAILABLE`, `ROOMS_UNAVAILABLE`, `CAPACITY_BELOW_RESERVED`, `CONCURRENT_CHANGE`, `AVAILABILITY_HAS_RESERVATIONS`, `ROOM_HAS_RESERVATIONS`, `ROOM_WAS_RESERVED`, `OVERLAPS_RESERVATION_OR_BLOCK`, `HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `POLICIES_NOT_ACCEPTED`, `BAD_SIGNATURE`, `UNSUPPORTED_CURRENCY`, `RATES_UNAVAILABLE`, `ALREADY_REPORTED`, `ALREADY_REVIEWED`, `ACTIVE_BOOKINGS_EXIST`, `LIMIT_EXCEEDED`, `INVENTORY_CORRUPTED` (500; an inventory invariant broke, should never happen). A new code is added to the enum (and this list) in the same PR that first uses it. Tests assert the status and the code, never the message.
+
+### 10.4 Types
+
+The OpenAPI spec is the contract. The frontend generates its types from it; nobody hand-writes duplicate interfaces.
+```bash
+# frontend/package.json script "api:types" (backend must be running)
+npx openapi-typescript http://localhost:4000/api/docs-json -o src/lib/api/schema.d.ts
+```
+Use them as `components['schemas']['FlightResponseDto']`. Re-run after any backend DTO change and commit the regenerated file in the same PR.
+
+### 10.5 Frontend fetch helpers (the only two ways to call the backend)
+
+`src/lib/api/server.ts` (Server Components, Server Actions, route handlers):
+```ts
+import 'server-only';
+import { cookies } from 'next/headers';
+export async function serverFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const cookie = (await cookies()).toString();
+  const res = await fetch(`${process.env.BACKEND_URL}/api${path}`, {
+    ...init, cache: init.cache ?? 'no-store',
+    headers: { 'content-type': 'application/json', cookie, ...init.headers },
+  });
+  if (!res.ok) throw await ApiError.from(res);   // see src/lib/api/errors.ts
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+```
+For public ISR pages, pass `{ cache: 'force-cache', next: { revalidate: 60, tags: ['post:<id>'] } }` and don't read cookies.
+
+`src/lib/api/client.ts` (Client Components):
+```ts
+export async function apiFetch<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
+  const res = await fetch(`/api${path}`, { ...init, credentials: 'include',
+    headers: { 'content-type': 'application/json', ...init.headers } });
+  if (res.status === 401 && !retried) {
+    const body = await res.clone().json().catch(() => null);
+    if (body?.code === 'TOKEN_EXPIRED' && (await fetch('/api/auth/refresh', { method: 'POST' })).ok)
+      return apiFetch<T>(path, init, true);
+  }
+  if (!res.ok) throw await ApiError.from(res);
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+```
+For multipart uploads, pass a `FormData` body and **delete** the `content-type` header so the browser sets the boundary.
+
+`ApiError` holds `statusCode, code, message, details`. In Server Components: 401 means `redirect('/login?next=…')`, 404 means `notFound()`, anything else bubbles to `error.tsx`.
+
+### 10.6 Uploaded images
+
+The backend returns URLs like `/uploads/abc.jpg`; they work same-origin through the rewrite. Render them with `<Image src={url} unoptimized … />` or a plain `<img>`. Next 16 refuses to optimize images from local/private IPs by default, so don't fight that in dev.
+
+## 11. Backend conventions (NestJS 12 ESM + Mongoose 9)
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+### 11.1 Commands (run in `backend/`)
+
+`npm run start:dev` · `npm run build` · `npm run lint` (oxlint) · `npm run format` / `format:check` (Prettier) · `npm run typecheck` · `npm test` · `npm run test:cov` · `npm run verify` (everything CI runs) · `npm run seed:reference`.
+New module: `npx nest g module modules/<name> --no-spec` (then controller/service the same way). Use the CLI; don't hand-write boilerplate it generates.
+
+### 11.2 ESM and Mongoose 9 gotchas
+
+- The backend is **ESM**. Match the import style of existing files (relative imports may need the `.js` suffix).
+- Some Mongoose exports are types only at runtime: `import type { Connection, Model } from 'mongoose'`. A plain import of a type-only export crashes the built app.
+- ObjectId props: `MongooseSchema.Types.ObjectId` (see §5.9 “Schema pattern”). `Types.ObjectId` silently becomes an untyped Mixed field.
+- Mongoose 9 middleware must be `async` functions (no `next` parameter).
+- Vitest doesn't type-check: `npm run typecheck` does, and CI requires it.
+
+### 11.3 App setup
+
+Already in place: global prefix `api`, global `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true })`, CORS for `FRONTEND_URL` with credentials, Swagger at `/api/docs`, env validation (`src/config/`), Mongoose via `MONGODB_URI`, health check at `/api/health`.
+
+Added by the foundation (Platform package): `cookie-parser`, `rawBody: true` (Stripe webhook), the global exception filter, static `/uploads`, `EventEmitterModule.forRoot()`, `ScheduleModule.forRoot()`, global auth guards (Accounts package). Don't add these yourself in a feature branch.
+
+Read config through `ConfigService` (or `process.env` only in `main.ts`). Never hardcode a connection string or secret.
+
+### 11.4 Module recipe
+
+**Schema:** follow §5.9 “Schema pattern” exactly, with fields from `docs/database/data-model.md` (§5 “Data model” here).
+
+**Module:**
+```ts
+@Module({
+  imports: [MongooseModule.forFeature([{ name: Flight.name, schema: FlightSchema }]), ReferenceDataModule],
+  controllers: [FlightsController],
+  providers: [FlightsService, SeatInventory],
+  exports: [FlightsService],              // the service only; never MongooseModule or a model
+})
+export class FlightsModule {}
+```
+
+**Service:** `constructor(@InjectModel(Flight.name) private readonly flightModel: Model<Flight>, private readonly referenceData: ReferenceDataService) {}`.
+- `.lean()` for read-only queries; `await` every query.
+- Throw domain errors (§11.6 “Errors”).
+- Return plain objects or response DTOs, never documents containing secrets.
+- Check ownership by querying with it (`findOne({ _id, userId })`), not by filtering afterwards.
+
+**Controller:** route decorators, `@Roles(...)`/`@Public()`, DTO params, `@CurrentUser()`, one service call, return the result. No try/catch, no `res.status()`, no business logic.
+```ts
+@ApiTags('flights')
+@Controller('flights')
+export class FlightsController {
+  constructor(private readonly flights: FlightsService) {}
+
+  @Public() @Get('search')
+  @ApiOperation({ summary: 'FLT-11 Search flights' })
+  search(@Query() q: SearchFlightsQueryDto) { return this.flights.search(q); }
+
+  @Roles(Role.AirlineModerator) @Patch(':id')
+  @ApiOperation({ summary: 'FLT-05 Edit a flight' })
+  update(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: UpdateFlightDto, @CurrentUser() user: AuthUser) {
+    return this.flights.update(id, dto, user);   // the service checks the moderator's airline owns it
+  }
+}
+```
+Declare static paths (`/search`, `/mine`, `/public/...`) **before** `/:id` in the same controller. `ParseObjectIdPipe` comes from `@nestjs/mongoose` and returns 400 for malformed IDs.
+
+### 11.5 Validation and DTO rules
+
+- Every body, query and param has a DTO with class-validator decorators that encode the requirement's limits (`@MaxLength(100)` for ITN-01, `@ArrayMaxSize(5)` for BLG-08, `@Min(1)`).
+- Query numbers arrive as strings: `@Type(() => Number)` + `@IsInt()`. Dates: `@IsISO8601()` or a `YYYY-MM-DD` `@Matches`.
+- Update DTOs: `PartialType(CreateXDto)` from **`@nestjs/swagger`**.
+- Enums: reuse the `const` enum objects exported next to the schemas, so schema, DTO and Swagger agree.
+- Never accept `userId`, `status`, `price`, `total`, `role`, `providerId` or `currency` from the client unless the requirement says the user chooses it. Derive them from the session and the database.
+- Cross-field rules (arrival after departure, check-out after check-in, min ≤ max) go in the service and throw 400 `VALIDATION_FAILED` with the field name in `details`.
+
+### 11.6 Errors
+
+Throw Nest exceptions with a code from `common/errors/error-codes.ts`:
+```ts
+throw new ConflictException({ code: ErrorCode.SeatsUnavailable, message: 'Not enough seats left in Economy' });
+```
+| Status | Use |
+|---|---|
+| 400 | invalid input or broken rule |
+| 401 | not logged in, bad credentials, expired session |
+| 403 | logged in but wrong role |
+| 404 | not found, **and** another user's private resource (ACC-11) |
+| 409 | duplicates, overlaps, no seats/rooms, invalid status change |
+
+The global filter turns everything into the shared shape (§10.3 “Response shapes”), maps validation errors to `details`, maps Mongo duplicate key `11000` to 409, and hides stack traces. Need a new code? Add it to the enum in the same PR.
+
+### 11.7 Pagination, filtering, sorting
+
+- `PaginationQueryDto { page = 1; limit = 10 }` (max 50) from `common/pagination`. Default page size 10 (GEN-05).
+- Response: `{ items, page, limit, total, totalPages }`. Run `find().skip().limit()` and `countDocuments()` with the same filter in `Promise.all`.
+- Sorting: whitelist `sortBy` with `@IsIn([...])` and map it to fields; never pass a client string into `.sort()`.
+- Keyword search: case-insensitive regex on the input **escaped** (`escapeRegex` in `common`). Never `$where`, never raw client objects in a filter.
+
+### 11.8 Transactions
+
+Use them when one action writes several documents that must agree (hold, confirm, expire, cancel, room changes, clone).
+```ts
+constructor(@InjectConnection() private readonly conn: Connection) {}
+
+const session = await this.conn.startSession();
+try {
+  await session.withTransaction(async () => {
+    await this.seatInventory.hold(items, { session });              // another class: pass the session
+    await this.bookingModel.create([doc], { session });             // array form with a session
+  });
+} finally { await session.endSession(); }
+```
+- Pass `{ session }` to every operation inside, including calls into other modules' services.
+- `withTransaction` retries transient write conflicts, so the callback must be safe to run twice (no external calls).
+- Keep Stripe/HTTP calls and event emits **after** the commit.
+
+### 11.9 Ports and events
+
+**Port** (owner defines the interface and a token; implementer provides it):
+```ts
+// payments/ports/payable-booking.port.ts (owned by payments)
+export const PAYABLE_BOOKINGS = Symbol('PAYABLE_BOOKINGS');
+export interface PayableBooking {
+  readonly bookingType: 'flight' | 'hotel';
+  getPayable(bookingId: string, userId: string): Promise<Payable>;
+  getPolicies(bookingId: string, userId: string): Promise<BookingPolicies>;
+}
+```
+Implementers register their class under the token the owner documents. Follow the owner's file and README for the exact wiring.
+
+**Event:**
+```ts
+this.events.emit('flight.cancelled', { flightId });                 // after commit
+
+@OnEvent('flight.cancelled')
+async onFlightCancelled({ flightId }: FlightCancelledEvent) { /* idempotent, conditional updates */ }
+```
+Event names and payloads are fixed in §5.6.3 “Events”. A new event or payload field is a contract change (ask first).
+
+### 11.10 Scheduled jobs
+
+In the owning module (§5.7 “Background jobs”), with `@Cron(...)`. Every update filters on the old status (`{ status: 'pending_payment', holdExpiresAt: { $lte: now } }`) so two runs, or a job racing a request, can't double-apply. Business code re-checks expiry at the point of use; never assume a job already ran.
+
+### 11.11 File uploads (GEN-08)
+
+The `storage` module (Platform package) validates and saves files and returns an `ImageRef { _id, key }`. Feature modules call it; they don't use Multer directly.
+- JPG/PNG only, ≤ 5 MB, random file names.
+- The feature service enforces counts (≤ 5 per post, activity or hotel; 1 airline logo), stores the `ImageRef`, and asks storage to delete the file on removal.
+- Responses compute the URL `/uploads/<key>`; it's never stored.
+
+### 11.12 Swagger (Milestone 1 is graded here)
+
+- `@ApiTags('<module>')` on every controller; `@ApiOperation({ summary: '<REQ-ID> <what it does>' })` on every route.
+- Request and response DTOs documented, including error responses where useful.
+- Cookie auth works in Swagger UI: call `POST /api/auth/login` there and the browser keeps the cookie.
+- At each milestone, export `/api/docs-json` to `docs/api/openapi.json`.
+
+### 11.13 Don'ts
+
+- Logging passwords, hashes, tokens, card data or connection strings. Use Nest `Logger` without secrets.
+- `any`, `@ts-ignore`, `@ts-expect-error`, lint-disable comments to make something pass.
+- Returning raw Mongoose errors, or 200 with an error in the body.
+- Business logic in guards beyond auth, role and must-change-password checks.
+- Injecting another module's model, `populate` across modules, or `ref` in a schema.
+
+## 12. Frontend (Next.js 16 App Router, Milestone 2)
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+Each package builds its own pages in Milestone 2 (§4.1 “Packages and owners”). Shared pieces (layout, header, `components/ui/`, `lib/api`, `lib/auth`, `proxy.ts`) are built once by the package that owns them per its ticket; don't create a second version.
+
+How frontend code connects to the backend is in §10 “API contract and error codes”; read it too. Visual rules come from `/DESIGN.md`.
+
+### 12.1 Setup and commands
+
+The app already exists (`frontend/`, created without Tailwind). Libraries are added by the tickets that need them: `react-hook-form zod @hookform/resolvers @stripe/stripe-js @stripe/react-stripe-js`, dev `openapi-typescript`.
+Run: `npm run dev` (:3000) · Build: `npm run build` · Lint: `npm run lint` (ESLint) · Format: `npm run format` · Typecheck: `npm run typecheck` (generates Next's route types first) · All CI checks: `npm run verify` · API types: `npm run api:types`.
+Leave `cacheComponents` **off** in `next.config.ts` (one consistent caching model for the team; §12.6 “Rendering strategy per page” relies on it). `next.config.ts` holds the rewrites from §10.1 “Topology”.
+`next dev` writes a version-matched `AGENTS.md` section that points to the docs bundled in `node_modules/next/`. Prefer those docs over memory.
+
+### 12.2 Route map
+
+```
+src/
+  proxy.ts                         # §12.5 “Auth in the frontend” (Next 16 name; NOT middleware.ts)
+  app/
+    layout.tsx  page.tsx (home: flight + hotel search)  not-found.tsx  error.tsx  global-error.tsx
+    (auth)/login  (auth)/register  (auth)/change-password
+    flights/page.tsx (results)  flights/[id]/page.tsx
+    hotels/page.tsx (results)   hotels/[id]/page.tsx (details + free rooms for dates)
+    book/flight/page.tsx (passengers → summary)   book/flight/[bookingId]/pay/page.tsx
+    book/hotel/page.tsx (guests → summary)        book/hotel/[reservationId]/pay/page.tsx
+    bookings/page.tsx (Upcoming/Past/Cancelled)   bookings/flights/[id]   bookings/hotels/[id]
+    account/page.tsx (profile, currency, password, deactivate)   notifications/page.tsx
+    itineraries/page.tsx (mine)  itineraries/new  itineraries/[id] (private view)  itineraries/[id]/edit
+    explore/page.tsx (public itinerary search)  explore/[id]/page.tsx (public itinerary)
+    blog/page.tsx (list + search)  blog/[id]/page.tsx  blog/tags/[tag]  blog/mine  blog/new  blog/[id]/edit
+    authors/[id]/page.tsx
+    moderator/airline/...  (profile, policies, flights, flights/[id] cabins + bookings + CSV)
+    moderator/hotel/...    (profile, policies, rooms, rooms/[id] availability + blocks, reservations)
+    admin/...              (accounts, moderators/new, providers, bookings, reports, audit-logs)
+  components/ui/                   # primitives defined by DESIGN.md
+  components/<feature>/            # flight-card.tsx, booking-countdown.tsx, ...
+  lib/api/ server.ts client.ts errors.ts schema.d.ts (generated)
+  lib/auth.ts                      # getCurrentUser, requireUser, requireRole
+  lib/format.ts                    # money (minor units → display), dates in a time zone
+```
+Files are kebab-case; components are PascalCase exports. Route folders use URL words, not requirement IDs.
+
+### 12.3 Server vs Client Components
+
+- Default is a Server Component: fetch data, check auth, render HTML.
+- Add `'use client'` only on the smallest component that needs state, effects, event handlers, browser APIs, or `useRouter`/`useSearchParams`/`usePathname`.
+- Pattern: `page.tsx` (server) loads data and renders `<XxxClient initial={data} />` for the interactive part.
+- Never import `lib/api/server.ts` or `lib/auth.ts` into a client file (`server-only` will fail the build, as intended).
+- Props from server to client must be serializable (no class instances, no functions except Server Actions).
+- `params` and `searchParams` are Promises: `const { id } = await params;`. Type them explicitly: `{ params: Promise<{ id: string }> }`.
+
+### 12.4 Getting data
+
+- Page data: in the Server Component via `serverFetch` (§10.5 “Frontend fetch helpers”). No `useEffect` fetching for initial page data.
+- User actions (like, book, save): Client Component → `apiFetch` → on success `router.refresh()` to re-run the server parts, or update local state.
+- Search pages keep all criteria in the URL (`/flights?from=CAI&to=DXB&date=…`). The form pushes a new URL and the page reads `searchParams`. This makes back, refresh and sharing work (GEN-14) and preserves criteria when filtering (FLT-15).
+- Run independent fetches in parallel: `const [a, b] = await Promise.all([...])`.
+
+### 12.5 Auth in the frontend
+
+`src/proxy.ts`: optimistic redirect and silent refresh. No database, no role decisions.
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+const PROTECTED = ['/bookings', '/book', '/account', '/notifications', '/itineraries', '/blog/new', '/blog/mine', '/moderator', '/admin', '/change-password'];
+
+export async function proxy(req: NextRequest) {
+  let clearCookies: string[] = [];
+  if (!req.cookies.has('access_token') && req.cookies.has('refresh_token')) {
+    const r = await fetch(`${process.env.BACKEND_URL}/api/auth/refresh`, {
+      method: 'POST', headers: { cookie: req.headers.get('cookie') ?? '' } }).catch(() => null);
+    const set = r?.headers.getSetCookie() ?? [];
+    if (r?.ok) {
+      const jar = new Map(req.cookies.getAll().map((c) => [c.name, c.value]));
+      for (const c of set) { const pair = c.split(';')[0]; const i = pair.indexOf('='); jar.set(pair.slice(0, i), pair.slice(i + 1)); }
+      const headers = new Headers(req.headers);
+      headers.set('cookie', [...jar].map(([k, v]) => `${k}=${v}`).join('; '));
+      const res = NextResponse.next({ request: { headers } });   // this render sees the new cookie
+      set.forEach((c) => res.headers.append('set-cookie', c));    // the browser stores it
+      return res;
+    }
+    clearCookies = set;   // dead session: the backend's cookie-clearing headers, passed on to the browser
+  }
+  const { pathname, search } = req.nextUrl;
+  const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(p + '/'));
+  let res = NextResponse.next();
+  if (isProtected && !req.cookies.has('access_token')) {
+    const url = new URL('/login', req.url);
+    url.searchParams.set('next', pathname + search);
+    res = NextResponse.redirect(url);
+  }
+  clearCookies.forEach((c) => res.headers.append('set-cookie', c));
+  return res;
+}
+export const config = { matcher: ['/((?!api|uploads|_next/static|_next/image|favicon.ico|.*\\..*).*)'] };
+```
+`src/lib/auth.ts`:
+```ts
+import 'server-only';
+export const getCurrentUser = cache(async (): Promise<Me | null> => {
+  try { return await serverFetch<Me>('/auth/me'); }
+  catch (e) { if (e instanceof ApiError && e.statusCode === 401) return null; throw e; }
+});
+export async function requireRole(...roles: Role[]) {
+  const me = await getCurrentUser();
+  if (!me) redirect('/login');
+  if (me.mustChangePassword) redirect('/change-password');
+  if (roles.length && !roles.includes(me.role)) notFound();
+  return me;
+}
+```
+Call `requireRole(...)` at the top of **every** protected `page.tsx`, not only in a layout (layouts don't re-run on navigation). The backend still enforces everything; this only avoids rendering pages the user can't use.
+Login and logout forms are Client Components calling `apiFetch('/auth/login', …)`. Then `router.replace(next ?? landingFor(me.role))` and `router.refresh()`.
+Hide actions the user can't do (moderator buttons, owner-only edit) based on `me`; the backend still blocks them.
+
+### 12.6 Rendering strategy per page (project PDF §9)
+
+| Page | Strategy | How (cacheComponents off) |
+|---|---|---|
+| Blog post `blog/[id]`, author `authors/[id]`, public itinerary `explore/[id]` | ISR / static | `export const revalidate = 300;` `export async function generateStaticParams() { return []; }` Fetch with `cache: 'force-cache', next: { revalidate: 300, tags: ['post:<id>'] }`. **Don't** read cookies, headers or searchParams here. Likes, comments and the report button are client islands that fetch their own fresh data. |
+| Blog list/search, public itinerary search, flight/hotel search, user bookings, private itinerary, moderator/admin dashboards | Dynamic SSR | `serverFetch` (no-store) and/or `await searchParams` makes the page dynamic automatically. |
+| Blog editor, itinerary editor | Dynamic SSR + Client | Server page loads and authorizes; a `'use client'` editor handles interaction. |
+| Likes and comments | Client Components | `apiFetch` plus optimistic UI. |
+
+After an author publishes, edits or deletes a post (or changes an itinerary's visibility), call a Server Action that runs `revalidatePath('/blog/' + id)` (or `/explore/` + id, `/authors/` + authorId) so the static page updates immediately. Server Actions also verify the user before acting.
+Be ready to explain each choice in the oral defense: public, rarely changing content uses ISR (fast, SEO); anything per-user or query-driven is dynamic.
+
+### 12.7 Forms and validation
+
+- `react-hook-form` + `zodResolver(schema)`; schemas live in `lib/validation/<feature>.ts` and mirror the backend DTO limits (requirements give the numbers).
+- Show field errors under each input (GEN-02). On submit, map `ApiError.details` with `setError(field, { message })`; show `ApiError.message` for non-field errors.
+- Disable the submit button while pending. Keep entered data on error (GEN-16).
+- Money input and display: users see `12.50`; the API uses minor units (`totalMinor`). Convert only in `lib/format.ts`, using the currency's minor units.
+
+### 12.8 UI states and shared components
+
+- `loading.tsx` (or `<Suspense fallback>`) on every data-heavy route; `error.tsx` (`'use client'`, `reset` button) per area; `not-found.tsx` for 404s.
+- `EmptyState` for lists and searches with no results (GEN-04), with a helpful next action.
+- `ConfirmDialog` before delete, cancel, block, suspend or deactivate (GEN-03). For cancellations it shows the refund preview first.
+- `Pagination` driven by the `page` search param, page size 10 (GEN-05).
+- `Countdown` from `holdExpiresAt` on payment pages.
+- Toasts for success and failure feedback (GEN-16). Notification bell with unread count in the header (GEN-01).
+- Flight times always rendered with the airport's `timeZone` (GEN-06).
+
+### 12.9 Styling and DESIGN.md
+
+Before writing any UI, read `/DESIGN.md` and use its tokens, components and layout rules. Put primitives it defines in `components/ui/` and reuse them; don't restyle per page (GEN-17).
+If `DESIGN.md` doesn't exist yet: plain CSS modules with semantic HTML and accessible labels. Don't install Tailwind, a component library or invent a brand; the styling stack is decided together with `DESIGN.md` (team leader).
+Responsive (GEN-16): build mobile-first; check 375 px, 768 px and 1280 px.
+
+### 12.10 Metadata
+
+Public pages export `metadata` or `generateMetadata` (title and description; for posts, the title and an excerpt). Private pages set a plain title. Metadata only works in Server Components.
+
+### 12.11 Stripe payment page
+
+```tsx
+'use client';
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);   // module scope, created once
+export function PayStep({ clientSecret, returnPath }: { clientSecret: string; returnPath: string }) {
+  return <Elements stripe={stripePromise} options={{ clientSecret }}><PayForm returnPath={returnPath} /></Elements>;
+}
+function PayForm({ returnPath }: { returnPath: string }) {
+  const stripe = useStripe(); const elements = useElements();
+  async function onPay() {
+    if (!stripe || !elements) return;
+    const { error } = await stripe.confirmPayment({ elements, redirect: 'if_required',
+      confirmParams: { return_url: window.location.origin + returnPath } });
+    if (error) { /* show error.message; the user may retry until the hold expires */ return; }
+    /* poll GET /api/<type>-bookings/:id until status === 'confirmed', then show confirmation */
+  }
+  return (<form onSubmit={(e) => { e.preventDefault(); onPay(); }}><PaymentElement /><button disabled={!stripe}>Pay</button></form>);
+}
+```
+
+### 12.12 Don'ts
+
+- `middleware.ts`, `next/router`, `getServerSideProps`, or the `pages/` directory. These are old patterns; use the App Router and `next/navigation`.
+- Synchronous `params`, `searchParams` or `cookies()`.
+- Calling `http://localhost:4000` from the browser. Always use `/api/...`.
+- Tokens or user objects in `localStorage` or `sessionStorage`; reading cookies in client JS.
+- `'use client'` on whole pages "to make it work". Find the interactive leaf.
+- Trusting frontend checks for security, or computing prices the backend will charge.
+
+## 13. Testing
+
+> Code in this section is illustrative: it shows the agreed pattern and has not been run. The merged code in the repo wins.
+
+Backend now; frontend testing is decided before Milestone 2. Decisions: §3.12 “Testing”.
+
+### 13.1 The four levels
+
+| Level | What it tests | When written | Tools |
+|---|---|---|---|
+| Unit | one function or class, no database, fakes for dependencies | with the feature | Vitest |
+| Integration | one module's service with the real in-memory MongoDB (queries, indexes, transactions, concurrency) | with the feature | Vitest, `@nestjs/testing`, mongodb-memory-server |
+| API | one endpoint over HTTP: success, 400/401/403/404/409, exact response shape | with the feature | Vitest, Supertest |
+| E2E | a whole user journey across modules, several scenarios per flow | end of each sprint, then on every PR | Vitest, Supertest |
+
+**No PR without tests.** The ticket says which levels it needs.
+
+### 13.2 When TDD is required
+
+Test first (the test commit comes **before** the code commit, so it's visible in history) for precise business rules:
+- pricing (infant 10%, baggage per segment), refund tiers, budget totals and conversion
+- booking status transitions, inventory (`SeatInventory`, `RoomNightInventory`)
+- lockout, and any rule with an exact number in the requirement
+- **every bug fix:** first a failing test that reproduces the bug
+
+Elsewhere (CRUD, wiring) tests come in the same PR as the code. Tickets mark it as **"TDD: required"**.
+
+### 13.3 Test design techniques
+
+- **Boundary values:** test at the edges, e.g. password length 7/8, day 60/61, hold age 9:59/10:00, a refund tier at exactly `daysBefore` and one day less.
+- **Equivalence classes:** one test per group that behaves the same (adult, child, infant), not one per value.
+- **Decision tables:** every combination of conditions (which refund tier applies for each number of days left).
+- **State transitions:** every allowed status change works and every illegal one is rejected (refunding an unpaid booking).
+- **Negative tests:** wrong input, wrong user (404), wrong role (403), not logged in (401).
+
+### 13.4 Integration tests on the in-memory database
+
+`backend/test/support/mongo-memory.ts` starts a single-node replica set (transactions work) and returns its URI. Tests **never** touch Atlas.
+```ts
+let moduleRef: TestingModule;
+beforeAll(async () => {
+  const uri = await startTestDb();
+  moduleRef = await Test.createTestingModule({
+    imports: [MongooseModule.forRoot(uri), FlightsModule],        // your module, real
+  })
+    .overrideProvider(ReferenceDataService).useValue(fakeReferenceData)   // other modules, fake
+    .compile();
+  await moduleRef.get<Model<Flight>>(getModelToken(Flight.name)).init(); // wait for indexes
+});
+beforeEach(async () => { await clearCollections(); });            // no leftover data
+afterAll(async () => { await moduleRef.close(); await stopTestDb(); });
+```
+Pitfalls and their fixes:
+- **Leftover data** makes results depend on test order: wipe collections in `beforeEach`.
+- **Indexes are built in the background:** `await Model.init()` before relying on a unique index, or a duplicate slips through and the test passes wrongly.
+- **Concurrency tests:** fire with `Promise.allSettled` and assert the **invariant** (exactly 5 succeeded, counters add up), never which request won or the order.
+- **Scope:** only your own module is real; fake the others, or your test breaks whenever they change.
+- The first run downloads the MongoDB binary (CI caches it).
+
+### 13.5 Faking other modules and external services
+
+- **Other modules:** `overrideProvider(XService).useValue({ method: vi.fn() })`, shaped exactly like the real service's public methods. Ports: provide a fake under the port's token.
+- **Before the other module exists:** write the fake from the contract in §5.4 “Inventory operations” and §5.6 “Cross-module contracts” (inventory methods, ports, events). Replace it with the real one at integration time.
+- **Stripe and FXRatesAPI** sit behind adapter classes in their modules; tests swap the adapter, never call the network. Webhooks are tested by calling the handler with a constructed event (and a test for a bad signature).
+- **Time:** `vi.useFakeTimers()` / `vi.setSystemTime()` for holds, expiry and "today" rules.
+
+### 13.6 API tests
+
+Supertest against the real Nest app (in-memory DB, fakes for external services):
+```ts
+await request(app.getHttpServer()).post('/api/flight-bookings/hold').set('Cookie', userCookie).send(body)
+  .expect(409).expect(res => expect(res.body.code).toBe('SEATS_UNAVAILABLE'));
+```
+Cover: the success response shape (no `passwordHash`, correct pagination shape), 400 with field `details`, 401 without a cookie, 403 with the wrong role, 404 for another user's resource (ACC-11), 409 for conflicts. Assert the status and the **code**, never the message wording.
+
+### 13.7 E2E flows
+
+`backend/test/e2e/<journey>.e2e-spec.ts`, one file per journey, several scenarios each (happy path, cancel with refund, hold expiry, failed payment then retry, sold out). Written at the end of each sprint for the flows built so far, then kept as regression tests on every PR. Steps whose module isn't merged yet use fakes. Keep E2E to the important journeys; edge cases belong in lower levels.
+
+### 13.8 Files, names, commands, coverage
+
+- Unit, integration and API tests sit next to the code: `<name>.spec.ts` (unit/integration), `<name>.controller.spec.ts` or `<name>.api.spec.ts` (API). E2E in `backend/test/e2e/`.
+- Commands: `npm test`, `npm run test:cov`, `npm run verify` (CI's full set).
+- Coverage: **every** `src/modules/**/*.service.ts` file needs ≥ 80% lines on its own (per file). Coverage of the rest is reported.
+- Never weaken, skip or delete a test to make a suite pass. Changing a test is fine only when the specified behaviour changed.
+
+## 14. Workflow: git, PRs, CI, AI prompt log, definition of done
+
+Decisions: §3.13 “CI”, §3.14 “CI quality gates”, §3.16 “AI prompt log”, §3.18 “Git rules”. The README's "Team rules" section is the human-readable version of this file.
+
+### 14.1 Branches
+
+- `main` holds milestone releases only; `develop` is integration. **Never commit or push to either directly** (both are protected).
+- Branch from the **latest** `develop` (`git checkout develop && git pull`), one ticket per branch: `<type>/<ID>-<description>`, type one of `feature fix chore docs test refactor`. Examples: `feature/FLT-22-seat-hold`, `fix/ACC-07a-reset`, `chore/PLT-01-ci-pipeline`.
+- Never branch from another ticket's branch. If ticket B needs ticket A's **code**, start B after A is merged. If B only needs A's **interface** (already in the data model), start now against a fake.
+- Keep your branch current by **merging** `develop` into it (`git merge develop`). No rebase, so no force-push. Resolve conflicts on your branch, keeping teammates' code.
+- Push your branch at least once a day. Delete it after it's merged.
+
+### 14.2 Commits
+
+Conventional Commits, module as scope, requirement ID at the end (CI checks the format):
+```
+feat(flights): implement seat hold with atomic inventory (FLT-22)
+test(flights): cover the 10-minute hold boundary (FLT-22)
+fix(hotels): reject overlapping blocks (HTL-06)
+refactor(payments): extract the refund tier calculator (PAY-03)
+docs(api): document booking endpoints (FLT-25)
+```
+Types: `feat fix test refactor docs style chore ci perf build`. Never write `update`, `changes`, `final`. Commit after each working step, read the diff first. Never commit `.env`, `uploads/`, `node_modules/`, `dist/`, `coverage/`.
+
+### 14.3 Pull requests
+
+- Target `develop`. Title: `<ID>: <short description>` (CI checks the ID), e.g. `FLT-22: Seat hold`.
+- Fill in the template (`.github/pull_request_template.md`): requirement IDs and summary, design decisions and why, how it was tested (including the concurrency result where relevant), AI usage, screenshots (frontend), and the checklist.
+- Only related changes. Call out any change to a shared contract at the top (data model, ports, events, error codes, auth, `common/`, `DESIGN.md`).
+- A PR merges when **CI is green and the team leader approves**. He merges with a **merge commit** (not squash: it keeps the test-first order and authorship in history).
+- Agents never push, open PRs, force-push, or touch `develop`/`main` unless the member explicitly asks.
+
+### 14.4 CI gates (every PR into `develop`/`main`)
+
+| Gate | Rule |
+|---|---|
+| Format | Prettier check (never auto-fix in CI); fix locally with `npm run format` |
+| Lint | 0 errors (oxlint backend, ESLint frontend); no disable comments to get through |
+| Typecheck | `tsc --noEmit` over source and tests |
+| Tests + coverage | all pass; each backend service file ≥ 80% lines |
+| Build | both apps build |
+| Commit messages | Conventional Commits |
+| Branch / PR title | contain the requirement ID |
+| Security | no high/critical production vulnerabilities (`npm audit`); no committed secrets (gitleaks) |
+
+`npm run verify` in each app you changed runs the same checks locally. Run it before pushing. The required check is `ci-ok` plus the PR checks. Never silence a gate to make it pass.
+
+### 14.5 AI prompt log (graded)
+
+- One file per member in `ai-prompts/`: `kareem.txt`, `pierre.txt`, `mostafa.txt`, `aisha.txt`, `aya.txt`, `jana.txt`, `mokhtar.txt`.
+- **The agent appends one entry per prompt** to the current member's file, at the end of the turn, in the course's format (PDF 11.1). **Copy, don't summarize**: the prompt is copied exactly and the other fields are mechanical, so the entry needs almost no thinking.
+- **Who the current member is:** the "About me" line in the member's own agent file (`I am Pierre. My prompt log is ai-prompts/pierre.txt.`), which their tool loads at the start of every session. If it's missing, ask once and tell them to add it.
+```
+================================================
+Date: 2026-11-12
+Student: Pierre
+Tool: Claude Code
+Related Requirement: HTL-06
+
+Prompt:
+<the member's message, copied exactly>
+
+How the output was used:
+<one line: what this turn did, e.g. "Changed hotels.service.ts and its test; committed 3f2a1c9" or "Answer only, no files changed">
+================================================
+```
+- **Related Requirement:** the requirement ID in the current branch name (`feature/HTL-06-room-block` → `HTL-06`). On a branch without an ID (`main`, `develop`), write `none`.
+- **How the output was used:** one line stating what this turn did: files changed and the commit if any, or "Answer only, no files changed". State it; don't explain it.
+- **Attached file** (e.g. an execution file): after the message, add a line `[Attached: <file name>]` and paste the file's full content, unchanged.
+- **Secrets:** replace any secret, token, connection string or `.env` value with `<removed>`. Change nothing else.
+- Append only; never edit earlier entries.
+- Chat tools without repo access: copy material prompts in by hand, same format.
+
+### 14.6 Definition of done
+
+**Backend task:**
+- [ ] Requirement text re-read; every limit and error case it names is implemented
+- [ ] Only my package's modules changed (or the other owner agreed)
+- [ ] DTO validation + service rules + guard/ownership checks
+- [ ] Tests at the levels the ticket lists; TDD commit order where required; concurrency tests for inventory work
+- [ ] `npm run verify` passes
+- [ ] Endpoint in Swagger with tag and summary (requirement ID); tried there with success and failure cases, including the wrong role and another user's resource
+- [ ] New env vars in `.env.example`; new error codes in the enum; contract changes called out
+
+**Frontend task:**
+- [ ] Uses `serverFetch`/`apiFetch` only; types from the generated `schema.d.ts`
+- [ ] Loading, empty, error and success states; confirmation before destructive actions; field-level errors
+- [ ] Follows `DESIGN.md`; works at 375 px and 1280 px
+- [ ] `npm run verify` passes; clicked through the flow as the right role and as the wrong role
+
+**Both:** prompt log entries written; commits follow §14.2 “Commits”; PR template complete.
+
+### 14.7 Milestones
+
+- **M1 (backend, 20 Nov):** NestJS backend on the shared Atlas DB; every mandatory endpoint documented and runnable in Swagger; seed for reference data and admin; README setup (env, seed, run, `stripe listen`); prompt logs; git history from every member; `docs/api/openapi.json` exported. The team leader merges `develop` → `main` and tags `m1`.
+- **M2 (frontend, 11 Dec):** every mandatory workflow per role works end to end; rendering choices justified (§12.6 “Rendering strategy per page”); final README; prompt logs; full git history; tag `m2`. Optional cloud-deploy bonus only if both apps are deployed and fully working.
+
+## 15. Tickets (M1 backend)
+
+101 tickets, one GitHub issue each in `Host173/Man2o4ah` (issue numbers below). A ticket's owner is its package's owner (§2.1 “Team and packages”). The package can differ from what the key suggests: FLT-22, the seat hold, is in package 5 Bookings, because a hold is a booking.
+
+### 15.1 How the tickets are organized
+
+- **Sprint 1, contracts and foundation:** every package publishes the interface others call, as a stub plus a fake (`CTR-01`…`CTR-07`), and Kareem builds the foundation (`PLT-04` data model review and freeze, `PLT-05` common foundation, `PLT-06` event contracts and test support).
+- **Sprint 2, features:** one ticket per requirement (tiny linked ones grouped). Each depends only on Sprint 1 tickets or its own package's tickets. Other packages are used through fakes until merged.
+- **Integration, end of Sprint 2 (Kareem):** demo seed (`PLT-08`), backend E2E journeys (`TST-01`), the M1 release (`PLT-07`).
+- **Backlog:** bonus requirements, the Azure runner (`PLT-02`), cloud deployment (`PLT-09`).
+- **What a ticket contains:** what to build (expected output), the test levels, whether TDD is required, the branch, the PR title and the dependencies. **How** to build it is up to the owner (§3.19 “Tickets”). Sprint dates are set by Kareem (not set yet). Frontend (M2) tickets don't exist yet (§19 “Not decided yet: ask Kareem”).
+- **Keys:** the requirement ID where one fits; otherwise `CTR` (contract), `INV` (inventory), `PLT` (platform), `TST` (cross-module tests). A letter suffix on a ticket key marks a second ticket for the same requirement (`GEN-01b`); some requirement IDs have their own letter in the workbook (`ACC-07a`).
+- **Branch** `<type>/<KEY>-<slug>`; **PR title** `<KEY>: <title>`. "Depends on" means the listed tickets must be merged first (or, for another package, you work against its fake from Sprint 1). GitHub shows these as native "blocked by" links.
+- **Labels:** `sprint-1`/`sprint-2`, `pkg-<package>`, `contract`, `infra`, `tdd`, `bonus`, `integration`. **Milestones:** "Sprint 1 — Contracts", "Sprint 2 — Features", "Backlog".
+
+| Package | Owner | Sprint 1 | Sprint 2 | Integration | Backlog |
+|---|---|---|---|---|---|
+| 1 · Platform & Payments | Kareem | 6 | 8 | 3 | 3 |
+| 2 · Accounts & Auth | Aisha | 1 | 9 | 0 | 2 |
+| 3 · Flights | Jana | 1 | 10 | 0 | 1 |
+| 4 · Hotels | Pierre | 1 | 8 | 0 | 0 |
+| 5 · Bookings | Aya | 1 | 14 | 0 | 2 |
+| 6 · Itineraries | Mokhtar | 1 | 11 | 0 | 2 |
+| 7 · Community & Admin | Mostafa | 1 | 13 | 0 | 3 |
+
+### 15.2 Package 1 · Platform & Payments (Kareem): ticket details
+
+**PLT-01 — CI pipeline** (issue #4 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: repo · TDD: no)
+- Covers: —
+- Expected output: GitHub Actions run the quality gates on every PR (format, lint, typecheck, tests + coverage, build, audit, commit/branch/title checks, secrets). Already built; done when merged into develop.
+- Tests: CI itself
+- Branch: `chore/PLT-01-ci-pipeline` · PR title: `PLT-01: CI pipeline`
+- Depends on: none · Blocks: PLT-03, PLT-05, PLT-02
+
+**PLT-03 — AI setup, team rules and prompt logs** (issue #5 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: repo · TDD: no)
+- Covers: —
+- Expected output: Project skill and DECISIONS.md in the repo, AGENTS.example.md, README team rules, per-member prompt logs, PR template.
+- Tests: Gates in the execution file
+- Branch: `docs/PLT-03-ai-setup` · PR title: `PLT-03: AI setup, team rules and prompt logs`
+- Depends on: PLT-01 · Blocks: none
+
+**PLT-04 — Data model review and freeze** (issue #6 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: docs · TDD: no)
+- Covers: —
+- Expected output: Every owner reviews their modules in the Database Design PDF; agreed changes merged into the data model, diagrams and schemas; the 15 open design calls answered; the schema declared frozen.
+- Tests: Index test still green after any change
+- Branch: `docs/PLT-04-data-model-review-freeze` · PR title: `PLT-04: Data model review and freeze`
+- Depends on: none · Blocks: CTR-01, CTR-02, CTR-03, CTR-04, CTR-05, CTR-06, CTR-07
+
+**PLT-05 — Common foundation** (issue #7 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: common, app setup, frontend config · TDD: no)
+- Covers: GEN-02 (backend), GEN-05, GEN-13, PAY-04
+- Expected output: Global error filter and the error-code enum, pagination DTO and helper, regex escaping, money helpers, platform currency config; app wiring (cookie parser, raw body, event emitter, scheduler, static uploads, Swagger cookie auth); Next.js /api rewrite with BACKEND_URL.
+- Tests: Unit (pagination, money, error mapping); API (error shape for 400/404/409)
+- Branch: `chore/PLT-05-common-foundation` · PR title: `PLT-05: Common foundation`
+- Depends on: PLT-01 · Blocks: PLT-06, CTR-01, CTR-02, CTR-03, CTR-04, CTR-05, CTR-06, CTR-07
+
+**PLT-06 — Event contracts and test support** (issue #8 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: common, test support · TDD: no)
+- Covers: GEN-11 (events)
+- Expected output: Typed names and payloads for every event in §5.6.3 “Events”, in one place; test helpers: in-memory app factory for API tests, a helper to act as a logged-in user of any role, collection cleanup.
+- Tests: Unit (helpers)
+- Branch: `chore/PLT-06-event-contracts-test-support` · PR title: `PLT-06: Event contracts and test support`
+- Depends on: PLT-05 · Blocks: GEN-01, GEN-07, PAY-01, ACC-12, ACC-16, FLT-05, FLT-06, FLT-23, FLT-26, HTL-17, ITN-20, BLG-02, GEN-10, ACC-13, ACC-15
+
+**CTR-05 — Platform contracts: payments, storage, fx, reference data, audit** (issue #9 · Sprint 1 · package 1 · Platform & Payments, owner Kareem · module: payments, storage, fx, reference-data, audit · TDD: no)
+- Covers: PAY-01, PAY-03, GEN-08, ITN-18, GEN-12 (interfaces)
+- Expected output: The PayableBooking port; PaymentsService refund interface; StorageService, FxService, ReferenceDataService and AuditService interfaces as stubs plus fakes; the Stripe gateway adapter interface and its fake.
+- Tests: Unit (the fakes behave like the contract)
+- Branch: `feature/CTR-05-platform-contracts` · PR title: `CTR-05: Platform contracts: payments, storage, fx, reference data, audit`
+- Depends on: PLT-04, PLT-05 · Blocks: GEN-12, GEN-08, ITN-18, GEN-07, PAY-01, ACC-09, FLT-01, FLT-03, HTL-01, FLT-22, FLT-26, HTL-16, HTL-21, ITN-01, ITN-12, ITN-14, BLG-10
+
+**GEN-12 — Reference data endpoints** (issue #16 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: reference-data · TDD: no)
+- Covers: GEN-12, FLT-02
+- Expected output: Public read endpoints for countries, cities, airports, attractions and currencies, using the dataset IDs; ReferenceDataService implemented.
+- Tests: Integration; API
+- Branch: `feature/GEN-12-reference-data-endpoints` · PR title: `GEN-12: Reference data endpoints`
+- Depends on: CTR-05 · Blocks: none
+
+**GEN-08 — Image uploads** (issue #17 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: storage · TDD: no)
+- Covers: GEN-08
+- Expected output: StorageService implemented: JPG/PNG up to 5 MB, random names, saved on the server, served under /uploads, delete and copy (for clones).
+- Tests: Unit (validation boundaries); integration (save/delete/copy); API (rejections)
+- Branch: `feature/GEN-08-image-uploads` · PR title: `GEN-08: Image uploads`
+- Depends on: CTR-05 · Blocks: none
+
+**ITN-18 — Exchange rates** (issue #18 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: fx · TDD: required)
+- Covers: ITN-18
+- Expected output: Daily FXRatesAPI fetch with fallback to the last cached day; conversion with minor units; latest-rates endpoint.
+- Tests: Unit (conversion, rounding, JPY); integration (fetch fallback with a fake API)
+- Branch: `feature/ITN-18-exchange-rates` · PR title: `ITN-18: Exchange rates`
+- Depends on: CTR-05 · Blocks: none
+
+**GEN-01 — In-app notifications** (issue #19 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: notifications · TDD: no)
+- Covers: GEN-01
+- Expected output: Listeners for every notification event; list (paginated), unread count, mark one / all as read.
+- Tests: Integration (listeners); API
+- Branch: `feature/GEN-01-app-notifications` · PR title: `GEN-01: In-app notifications`
+- Depends on: PLT-06 · Blocks: GEN-01b
+
+**GEN-07 — Audit log** (issue #20 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: audit · TDD: no)
+- Covers: GEN-07
+- Expected output: Listener storing every admin action (append-only); paginated admin list filterable by action and date.
+- Tests: Integration; API (admin only)
+- Branch: `feature/GEN-07-audit-log` · PR title: `GEN-07: Audit log`
+- Depends on: PLT-06, CTR-05 · Blocks: none
+
+**PAY-01 — Payments and Stripe webhook** (issue #21 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: payments · TDD: required)
+- Covers: PAY-01, PAY-04
+- Expected output: Create or reuse a PaymentIntent for a pending booking, retry, status; verified webhook with event idempotency; emits payment.succeeded; cancels the PaymentIntent when a hold expires.
+- Tests: Unit; integration (idempotency, duplicate events); API (bad signature, expired hold)
+- Branch: `feature/PAY-01-payments-stripe-webhook` · PR title: `PAY-01: Payments and Stripe webhook`
+- Depends on: CTR-05, PLT-06 · Blocks: PAY-02, PAY-03
+
+**PAY-02 — Policies and acceptance** (issue #22 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: payments · TDD: no)
+- Covers: PAY-02
+- Expected output: Show a booking's policy snapshot; record the acceptance with its timestamp; payment requires it.
+- Tests: Integration; API
+- Branch: `feature/PAY-02-policies-acceptance` · PR title: `PAY-02: Policies and acceptance`
+- Depends on: PAY-01 · Blocks: none
+
+**PAY-03 — Refunds** (issue #23 · Sprint 2 · package 1 · Platform & Payments, owner Kareem · module: payments · TDD: required)
+- Covers: PAY-03
+- Expected output: Refund service (only for amounts above 0) through Stripe, refund status from webhooks, late-payment full refunds, refund status endpoint; emits refund.updated.
+- Tests: Unit; integration (fake gateway success/failure); API
+- Branch: `feature/PAY-03-refunds` · PR title: `PAY-03: Refunds`
+- Depends on: PAY-01 · Blocks: TST-01, FLT-27
+
+**PLT-08 — Demo data seed** (issue #89 · Sprint 2 (integration, last) · package 1 · Platform & Payments, owner Kareem · module: seed · TDD: no)
+- Covers: —
+- Expected output: A separate re-runnable seed with demo airlines, flights, hotels, rooms and users for the Swagger demo; never touches reference data.
+- Tests: Integration (runs twice)
+- Branch: `chore/PLT-08-demo-data-seed` · PR title: `PLT-08: Demo data seed`
+- Depends on: FLT-04, HTL-04, ACC-18 · Blocks: PLT-07
+
+**TST-01 — Backend E2E journeys** (issue #90 · Sprint 2 (integration, last) · package 1 · Platform & Payments, owner Kareem · module: test/e2e · TDD: no)
+- Covers: GEN-11, PAY-01, PAY-03
+- Expected output: E2E journeys across modules: flight and hotel booking (hold, pay, confirm, cancel, refund, expiry), account lifecycle, itinerary to public clone, blog post to report.
+- Tests: E2E
+- Branch: `test/TST-01-backend-e2e-journeys` · PR title: `TST-01: Backend E2E journeys`
+- Depends on: FLT-26, HTL-21, PAY-03, ACC-06, ITN-21, GEN-10 · Blocks: PLT-07
+
+**PLT-07 — Milestone 1 release** (issue #91 · Sprint 2 (integration, last) · package 1 · Platform & Payments, owner Kareem · module: repo · TDD: no)
+- Covers: —
+- Expected output: OpenAPI exported to docs/api/openapi.json, README setup complete, develop merged into main and tagged m1.
+- Tests: Full CI on develop
+- Branch: `chore/PLT-07-milestone-1-release` · PR title: `PLT-07: Milestone 1 release`
+- Depends on: TST-01, PLT-08 · Blocks: PLT-09
+
+**PLT-02 — Self-hosted CI runner on Azure** (issue #92 · Backlog · package 1 · Platform & Payments, owner Kareem · module: repo · TDD: no)
+- Covers: —
+- Expected output: A self-hosted runner on an Azure VM, switched on by changing runs-on, if CI minutes run short.
+- Tests: CI itself
+- Branch: `chore/PLT-02-self-hosted-ci-runner` · PR title: `PLT-02: Self-hosted CI runner on Azure`
+- Depends on: PLT-01 · Blocks: none
+
+**PLT-09 — Cloud deployment (bonus)** (issue #93 · Backlog · package 1 · Platform & Payments, owner Kareem · module: repo · TDD: no)
+- Covers: —
+- Expected output: Both apps deployed and fully working in the cloud, with persistent storage for uploads.
+- Tests: Smoke checks
+- Branch: `chore/PLT-09-cloud-deployment` · PR title: `PLT-09: Cloud deployment (bonus)`
+- Depends on: PLT-07 · Blocks: none
+
+**GEN-01b — Email notifications (bonus)** (issue #94 · Backlog · package 1 · Platform & Payments, owner Kareem · module: notifications · TDD: no)
+- Covers: GEN-01-B
+- Expected output: The GEN-01 notifications and moderator invitations also sent by email via SMTP, test inbox in development.
+- Tests: Integration
+- Branch: `feature/GEN-01b-email-notifications` · PR title: `GEN-01b: Email notifications (bonus)`
+- Depends on: GEN-01 · Blocks: ACC-02, ACC-07
+
+### 15.3 Package 2 · Accounts & Auth (Aisha): ticket details
+
+**CTR-01 — Accounts contract: guards, roles and account service** (issue #10 · Sprint 1 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-11, ACC-19, GEN-13
+- Expected output: Role enum, AuthUser type, @Public / @Roles / @CurrentUser, global JWT-cookie and role guards (session check included); the AccountsService interface other modules call (profiles, name search, admin operations) as stubs plus a fake; the ActiveBookingsCheck port.
+- Tests: Unit (guards); API (401 without cookie, 403 wrong role)
+- Branch: `feature/CTR-01-accounts-contract` · PR title: `CTR-01: Accounts contract: guards, roles and account service`
+- Depends on: PLT-04, PLT-05 · Blocks: ACC-01, ACC-09, ACC-12, ACC-16, ACC-11, ITN-01, BLG-01, BLG-02, BLG-09, ACC-13, ACC-15
+
+**ACC-01 — Registration** (issue #24 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: required)
+- Covers: ACC-01, GEN-13
+- Expected output: Register with name, unique email, password rule and mandatory consent; password stored as a salted hash only.
+- Tests: Unit (password rule boundaries); API (duplicate email 409, validation 400)
+- Branch: `feature/ACC-01-registration` · PR title: `ACC-01: Registration`
+- Depends on: CTR-01 · Blocks: ACC-04, ACC-18, ACC-02
+
+**ACC-04 — Login and current user** (issue #25 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-04, ACC-19
+- Expected output: Login sets httpOnly access and refresh cookies and creates a session; GET /auth/me; generic error on failure; suspended accounts refused.
+- Tests: Integration; API
+- Branch: `feature/ACC-04-login-current-user` · PR title: `ACC-04: Login and current user`
+- Depends on: ACC-01 · Blocks: ACC-05, ACC-06, ACC-08
+
+**ACC-05 — Login lockout** (issue #26 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: required)
+- Covers: ACC-05
+- Expected output: Five consecutive failures lock the account for 15 minutes; success resets the counter; atomic counting.
+- Tests: Unit (5th attempt, 15-minute boundary); integration (parallel wrong passwords)
+- Branch: `feature/ACC-05-login-lockout` · PR title: `ACC-05: Login lockout`
+- Depends on: ACC-04 · Blocks: none
+
+**ACC-06 — Logout, refresh and idle expiry** (issue #27 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: required)
+- Covers: ACC-06, ACC-19
+- Expected output: Logout clears cookies and deletes the session; refresh issues a new access token; sessions die after 30 idle minutes.
+- Tests: Unit (30-minute boundary); API
+- Branch: `feature/ACC-06-logout-refresh-idle-expiry` · PR title: `ACC-06: Logout, refresh and idle expiry`
+- Depends on: ACC-04 · Blocks: TST-01
+
+**ACC-08 — Change password and forced change** (issue #28 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-08, ACC-07a (forced change)
+- Expected output: Change password with the current one; accounts with a temporary password can only change it until they do.
+- Tests: Unit; API (blocked endpoints while change is required)
+- Branch: `feature/ACC-08-change-password-forced-change` · PR title: `ACC-08: Change password and forced change`
+- Depends on: ACC-04 · Blocks: ACC-07
+
+**ACC-09 — Profile** (issue #29 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-09
+- Expected output: View and edit name, phone and preferred currency (from the supported list), saved only when all fields are valid.
+- Tests: API
+- Branch: `feature/ACC-09-profile` · PR title: `ACC-09: Profile`
+- Depends on: CTR-01, CTR-05 · Blocks: none
+
+**ACC-12 — Self-deactivation** (issue #30 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-12
+- Expected output: A user deactivates their own account after confirmation; blocked while they have upcoming confirmed bookings; sessions deleted; emits user.deactivated.
+- Tests: Integration (port fake); API
+- Branch: `feature/ACC-12-self-deactivation` · PR title: `ACC-12: Self-deactivation`
+- Depends on: CTR-01, PLT-06 · Blocks: none
+
+**ACC-16 — Account administration logic** (issue #31 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-07a, ACC-13, ACC-14, ACC-15 (moderators), ACC-16
+- Expected output: AccountsService methods used by admin: list and search accounts, create a moderator with a temporary password, reset a password, suspend and reactivate (sessions deleted, events emitted).
+- Tests: Integration
+- Branch: `feature/ACC-16-account-administration-logic` · PR title: `ACC-16: Account administration logic`
+- Depends on: CTR-01, PLT-06 · Blocks: none
+
+**ACC-18 — Admin seed** (issue #32 · Sprint 2 · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-18
+- Expected output: A re-runnable seed script that creates the admin account from environment variables if missing.
+- Tests: Integration (runs twice, one admin)
+- Branch: `feature/ACC-18-admin-seed` · PR title: `ACC-18: Admin seed`
+- Depends on: ACC-01 · Blocks: PLT-08
+
+**ACC-02 — Email verification (bonus)** (issue #95 · Backlog · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: no)
+- Covers: ACC-02
+- Expected output: Verification link after registration; booking blocked until verified.
+- Tests: Unit; API
+- Branch: `feature/ACC-02-email-verification` · PR title: `ACC-02: Email verification (bonus)`
+- Depends on: ACC-01, GEN-01b · Blocks: none
+
+**ACC-07 — Forgot password (bonus)** (issue #96 · Backlog · package 2 · Accounts & Auth, owner Aisha · module: accounts · TDD: required)
+- Covers: ACC-07
+- Expected output: Reset link by email, 30-minute single-use links, newer requests invalidate older ones.
+- Tests: Unit (expiry); API
+- Branch: `feature/ACC-07-forgot-password` · PR title: `ACC-07: Forgot password (bonus)`
+- Depends on: ACC-08, GEN-01b · Blocks: none
+
+### 15.4 Package 3 · Flights (Jana): ticket details
+
+**CTR-02 — Flights contract: flight service and SeatInventory** (issue #11 · Sprint 1 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-22, FLT-11 (interfaces)
+- Expected output: The FlightsService interface (flight/airline data for booking, bookability checks, search, provider activation) and the SeatInventory interface (§5.4.1 “`SeatInventory`”) as stubs, plus fakes; the fake SeatInventory keeps real counters.
+- Tests: Unit (the fakes behave like the contract)
+- Branch: `feature/CTR-02-flights-contract` · PR title: `CTR-02: Flights contract: flight service and SeatInventory`
+- Depends on: PLT-04, PLT-05 · Blocks: FLT-01, INV-01, FLT-19, FLT-22, FLT-29, ITN-26, ACC-13, ACC-15
+
+**FLT-01 — Airline profile** (issue #33 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-01, ACC-15 (airline active flag)
+- Expected output: Admin creates an airline; its moderator edits name, code and logo; activate/deactivate used by admin; inactive airlines hidden from search and booking.
+- Tests: Integration; API (moderator scope)
+- Branch: `feature/FLT-01-airline-profile` · PR title: `FLT-01: Airline profile`
+- Depends on: CTR-02, CTR-05 · Blocks: FLT-08, FLT-03
+
+**FLT-08 — Airline baggage and cancellation policies** (issue #34 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-08, FLT-09
+- Expected output: Moderator sets extra-bag price and maximum, and cancellation tiers with unique days-before values.
+- Tests: Unit (tier and baggage validation boundaries); API
+- Branch: `feature/FLT-08-airline-baggage-cancellation-policies` · PR title: `FLT-08: Airline baggage and cancellation policies`
+- Depends on: FLT-01 · Blocks: FLT-17
+
+**FLT-03 — Create flights in local time** (issue #35 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: required)
+- Covers: FLT-03, FLT-02, GEN-06
+- Expected output: Moderator creates a flight with airports from the dataset and local times converted with each airport's time zone; duplicate number on the same local date rejected; own-airline list.
+- Tests: Unit (time-zone conversion, DST, arrival after departure); API
+- Branch: `feature/FLT-03-create-flights-local-time` · PR title: `FLT-03: Create flights in local time`
+- Depends on: FLT-01, CTR-05 · Blocks: FLT-04, FLT-06, FLT-30
+
+**FLT-04 — Cabins** (issue #36 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-04
+- Expected output: Moderator adds cabins from the fixed set, at most once each, with seats, price and free baggage.
+- Tests: Unit; API
+- Branch: `feature/FLT-04-cabins` · PR title: `FLT-04: Cabins`
+- Depends on: FLT-03 · Blocks: FLT-05, FLT-11, FLT-17, PLT-08
+
+**INV-01 — SeatInventory** (issue #37 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: required)
+- Covers: FLT-22, FLT-05 (capacity)
+- Expected output: The SeatInventory class from §5.4.1 “`SeatInventory`”: hold, confirm, release, return and capacity change, each one atomic update.
+- Tests: Unit; integration with concurrency (6 parallel holds on 5 seats → exactly 5)
+- Branch: `feature/INV-01-seatinventory` · PR title: `INV-01: SeatInventory`
+- Depends on: CTR-02 · Blocks: FLT-05
+
+**FLT-05 — Edit flights** (issue #38 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-05
+- Expected output: Moderator edits times, prices and seat counts of scheduled flights; airports locked once booked; capacity never below held + booked; time changes emit flight.rescheduled.
+- Tests: Unit; integration; API
+- Branch: `feature/FLT-05-edit-flights` · PR title: `FLT-05: Edit flights`
+- Depends on: FLT-04, INV-01, PLT-06 · Blocks: none
+
+**FLT-06 — Cancel flights** (issue #39 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-06 (flight side)
+- Expected output: Moderator cancels a scheduled flight after confirmation; it disappears from search; emits flight.cancelled.
+- Tests: Integration; API
+- Branch: `feature/FLT-06-cancel-flights` · PR title: `FLT-06: Cancel flights`
+- Depends on: FLT-03, PLT-06 · Blocks: none
+
+**FLT-30 — Flight status job** (issue #40 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: required)
+- Covers: FLT-30
+- Expected output: Scheduled flights become departed once departure passes; only scheduled flights are searchable, editable or bookable.
+- Tests: Unit (boundary); integration (job idempotent)
+- Branch: `feature/FLT-30-flight-status-job` · PR title: `FLT-30: Flight status job`
+- Depends on: FLT-03 · Blocks: none
+
+**FLT-11 — Flight search** (issue #41 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-11, FLT-12 (round-trip search), FLT-15
+- Expected output: Search by airports, local date and passengers; round trip returns outbound and return; price filter and sorting; only bookable flights with enough seats.
+- Tests: Integration (filters, edge cases); API
+- Branch: `feature/FLT-11-flight-search` · PR title: `FLT-11: Flight search`
+- Depends on: FLT-04 · Blocks: FLT-28
+
+**FLT-17 — Flight details** (issue #42 · Sprint 2 · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-17
+- Expected output: Flight details with local times, duration, cabins with price, seats left and baggage allowance.
+- Tests: API
+- Branch: `feature/FLT-17-flight-details` · PR title: `FLT-17: Flight details`
+- Depends on: FLT-04, FLT-08 · Blocks: none
+
+**FLT-28 — Seat selection (bonus)** (issue #97 · Backlog · package 3 · Flights, owner Jana · module: flights · TDD: no)
+- Covers: FLT-28
+- Expected output: Seat selection.
+- Tests: Integration; API
+- Branch: `feature/FLT-28-seat-selection` · PR title: `FLT-28: Seat selection (bonus)`
+- Depends on: FLT-11 · Blocks: none
+
+### 15.5 Package 4 · Hotels (Pierre): ticket details
+
+**CTR-03 — Hotels contract: hotel service and RoomNightInventory** (issue #12 · Sprint 1 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-18, HTL-11 (interfaces)
+- Expected output: The HotelsService interface (hotel/room data for booking, search, rating summary, provider activation) and the RoomNightInventory interface (§5.4.2 “`RoomNightInventory`”) as stubs, plus fakes; the fake inventory rejects taken nights.
+- Tests: Unit (the fakes behave like the contract)
+- Branch: `feature/CTR-03-hotels-contract` · PR title: `CTR-03: Hotels contract: hotel service and RoomNightInventory`
+- Depends on: PLT-04, PLT-05 · Blocks: HTL-01, INV-02, HTL-16, HTL-22, HTL-23, ITN-25, ACC-13, ACC-15
+
+**HTL-01 — Hotel profile** (issue #43 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-01, ACC-15 (hotel active flag)
+- Expected output: Admin creates a hotel; its moderator edits the profile and up to 5 photos; activate/deactivate used by admin; inactive hotels hidden from search and booking.
+- Tests: Integration; API (moderator scope)
+- Branch: `feature/HTL-01-hotel-profile` · PR title: `HTL-01: Hotel profile`
+- Depends on: CTR-03, CTR-05 · Blocks: HTL-09, HTL-03
+
+**HTL-09 — Hotel policies** (issue #44 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-09, HTL-10
+- Expected output: Moderator sets check-in/out times and cancellation tiers with unique days-before values.
+- Tests: Unit (tier validation); API
+- Branch: `feature/HTL-09-hotel-policies` · PR title: `HTL-09: Hotel policies`
+- Depends on: HTL-01 · Blocks: HTL-02
+
+**HTL-03 — Rooms** (issue #45 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-03
+- Expected output: Moderator adds and lists rooms with a unique name per hotel, type, beds, occupancy and price.
+- Tests: Integration; API
+- Branch: `feature/HTL-03-rooms` · PR title: `HTL-03: Rooms`
+- Depends on: HTL-01 · Blocks: HTL-04, HTL-06
+
+**INV-02 — RoomNightInventory** (issue #46 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: required)
+- Covers: HTL-18, HTL-05, HTL-06
+- Expected output: The RoomNightInventory class from §5.4.2 “`RoomNightInventory`”: reserve, release, block, unblock, set availability, deactivate and delete checks.
+- Tests: Unit; integration with concurrency (overlapping stays in parallel → exactly one)
+- Branch: `feature/INV-02-roomnightinventory` · PR title: `INV-02: RoomNightInventory`
+- Depends on: CTR-03 · Blocks: HTL-04, HTL-06
+
+**HTL-04 — Room availability and edits** (issue #47 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: required)
+- Covers: HTL-04, HTL-05
+- Expected output: Moderator defines non-overlapping bookable ranges and edits beds, occupancy and price; availability with reservations can't be removed.
+- Tests: Unit (range normalisation); integration; API
+- Branch: `feature/HTL-04-room-availability-edits` · PR title: `HTL-04: Room availability and edits`
+- Depends on: HTL-03, INV-02 · Blocks: HTL-11, HTL-02, PLT-08
+
+**HTL-06 — Block, deactivate and delete rooms** (issue #48 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-06
+- Expected output: Moderator blocks and unblocks date ranges, deactivates or deletes a room; all rejected when they overlap a reservation.
+- Tests: Integration; API
+- Branch: `feature/HTL-06-block-deactivate-delete-rooms` · PR title: `HTL-06: Block, deactivate and delete rooms`
+- Depends on: HTL-03, INV-02 · Blocks: none
+
+**HTL-11 — Hotel search** (issue #49 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-11, HTL-12
+- Expected output: Search by city or country, dates, guests and rooms; price and rating filters; sorting; only hotels with enough free rooms.
+- Tests: Integration (qualifying rules, edge cases); API
+- Branch: `feature/HTL-11-hotel-search` · PR title: `HTL-11: Hotel search`
+- Depends on: HTL-04 · Blocks: BON-02
+
+**HTL-02 — Hotel details and free rooms** (issue #50 · Sprint 2 · package 4 · Hotels, owner Pierre · module: hotels · TDD: no)
+- Covers: HTL-02, HTL-15
+- Expected output: Hotel page data (profile, times, policy, rating summary) and the rooms free for given dates with total stay price.
+- Tests: Integration; API
+- Branch: `feature/HTL-02-hotel-details-free-rooms` · PR title: `HTL-02: Hotel details and free rooms`
+- Depends on: HTL-04, HTL-09 · Blocks: none
+
+### 15.6 Package 5 · Bookings (Aya): ticket details
+
+**CTR-04 — Bookings contract: booking services** (issue #13 · Sprint 1 · package 5 · Bookings, owner Aya · module: flight-bookings, hotel-bookings · TDD: no)
+- Covers: ACC-17 (interface), GEN-11
+- Expected output: Module skeletons for both booking modules; the service methods other modules call (admin booking list) as stubs plus a fake.
+- Tests: Unit (the fake behaves like the contract)
+- Branch: `feature/CTR-04-bookings-contract` · PR title: `CTR-04: Bookings contract: booking services`
+- Depends on: PLT-04, PLT-05 · Blocks: GEN-11, FLT-19, ACC-11, ACC-17
+
+**GEN-11 — Booking lifecycle and refund rules** (issue #51 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings, hotel-bookings · TDD: required)
+- Covers: GEN-11, FLT-09, HTL-10
+- Expected output: Shared rules: allowed status transitions as conditional updates, and the refund tier calculator.
+- Tests: Unit (state transitions, refund decision table and boundaries)
+- Branch: `feature/GEN-11-booking-lifecycle-refund-rules` · PR title: `GEN-11: Booking lifecycle and refund rules`
+- Depends on: CTR-04 · Blocks: FLT-22, FLT-26, HTL-16, HTL-21
+
+**FLT-19 — Flight booking quote** (issue #52 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: required)
+- Covers: FLT-19, FLT-21, FLT-12 (passenger rules)
+- Expected output: Validate passengers and baggage and return the priced summary without saving anything.
+- Tests: Unit (age types, infant 10%, baggage per segment); API
+- Branch: `feature/FLT-19-flight-booking-quote` · PR title: `FLT-19: Flight booking quote`
+- Depends on: CTR-02, CTR-04 · Blocks: FLT-22
+
+**FLT-22 — Flight seat hold** (issue #53 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: required)
+- Covers: FLT-22, FLT-12 (round trip)
+- Expected output: Create the 10-minute pending booking with seats held atomically (both segments or none); PayableBooking for flights; expiry job; emits expired.
+- Tests: Integration (transaction, expiry job, race with confirmation); API
+- Branch: `feature/FLT-22-flight-seat-hold` · PR title: `FLT-22: Flight seat hold`
+- Depends on: FLT-19, GEN-11, CTR-02, CTR-05 · Blocks: FLT-23, FLT-25, FLT-29, ACC-11
+
+**FLT-23 — Flight confirmation and e-ticket** (issue #54 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: required)
+- Covers: FLT-23
+- Expected output: On payment.succeeded: confirm, convert held seats to booked, set the reference, or refund a late payment; e-ticket PDF.
+- Tests: Integration (idempotent handler, late payment); API (e-ticket)
+- Branch: `feature/FLT-23-flight-confirmation-e-ticket` · PR title: `FLT-23: Flight confirmation and e-ticket`
+- Depends on: FLT-22, PLT-06 · Blocks: FLT-26, ITN-27
+
+**FLT-25 — My flight bookings** (issue #55 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: no)
+- Covers: FLT-25
+- Expected output: List grouped as upcoming, past and cancelled, with details; completion job after the last departure.
+- Tests: Integration; API (owner only)
+- Branch: `feature/FLT-25-my-flight-bookings` · PR title: `FLT-25: My flight bookings`
+- Depends on: FLT-22 · Blocks: none
+
+**FLT-26 — Flight cancellations** (issue #56 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: required)
+- Covers: FLT-26, FLT-06 (bookings side), FLT-05 (passenger notice)
+- Expected output: User cancels with a refund preview (outbound tiers for round trips); provider cancellation cancels confirmed bookings at 100% and expires pending ones; reschedules sync booking times.
+- Tests: Unit; integration (event handlers idempotent); API
+- Branch: `feature/FLT-26-flight-cancellations` · PR title: `FLT-26: Flight cancellations`
+- Depends on: FLT-23, GEN-11, CTR-05, PLT-06 · Blocks: TST-01, FLT-27
+
+**FLT-29 — Airline moderator booking views** (issue #57 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: no)
+- Covers: FLT-29
+- Expected output: Per flight: bookings, passenger names, seats left per cabin, CSV export; own airline only.
+- Tests: API (moderator scope, CSV escaping)
+- Branch: `feature/FLT-29-airline-moderator-booking-views` · PR title: `FLT-29: Airline moderator booking views`
+- Depends on: FLT-22, CTR-02 · Blocks: none
+
+**HTL-16 — Hotel room hold** (issue #58 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: required)
+- Covers: HTL-16, HTL-18
+- Expected output: Create the 10-minute pending reservation for one or more rooms with guests per room, all rooms or none; PayableBooking for hotels; expiry job; emits expired.
+- Tests: Unit (guest rules); integration (transaction, expiry, overlap); API
+- Branch: `feature/HTL-16-hotel-room-hold` · PR title: `HTL-16: Hotel room hold`
+- Depends on: CTR-03, GEN-11, CTR-05 · Blocks: HTL-17, HTL-20, HTL-22, ACC-11
+
+**HTL-17 — Hotel confirmation** (issue #59 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: required)
+- Covers: HTL-17
+- Expected output: On payment.succeeded: confirm, set the reference, or refund a late payment.
+- Tests: Integration (idempotent handler, late payment)
+- Branch: `feature/HTL-17-hotel-confirmation` · PR title: `HTL-17: Hotel confirmation`
+- Depends on: HTL-16, PLT-06 · Blocks: HTL-21, ITN-27
+
+**HTL-20 — My hotel reservations** (issue #60 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: no)
+- Covers: HTL-20
+- Expected output: List grouped as upcoming, past and cancelled, with details; completion job after check-out.
+- Tests: Integration; API (owner only)
+- Branch: `feature/HTL-20-my-hotel-reservations` · PR title: `HTL-20: My hotel reservations`
+- Depends on: HTL-16 · Blocks: HTL-23
+
+**HTL-21 — Hotel cancellations** (issue #61 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: required)
+- Covers: HTL-21
+- Expected output: User cancels the whole reservation before check-in, after a refund preview on the full total.
+- Tests: Unit; integration; API
+- Branch: `feature/HTL-21-hotel-cancellations` · PR title: `HTL-21: Hotel cancellations`
+- Depends on: HTL-17, GEN-11, CTR-05 · Blocks: TST-01
+
+**HTL-22 — Hotel moderator views** (issue #62 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: no)
+- Covers: HTL-22, HTL-08
+- Expected output: The hotel's reservations (guest, dates, status) and the room status view per date range (available, booked with reference, blocked).
+- Tests: Integration; API (moderator scope)
+- Branch: `feature/HTL-22-hotel-moderator-views` · PR title: `HTL-22: Hotel moderator views`
+- Depends on: HTL-16, CTR-03 · Blocks: none
+
+**HTL-23 — Reviews and ratings** (issue #63 · Sprint 2 · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: no)
+- Covers: HTL-23, HTL-24
+- Expected output: One rating and review per completed reservation; edit and delete; public list newest first; hotel rating summary kept up to date; reviews reportable.
+- Tests: Unit; integration (rating recompute); API
+- Branch: `feature/HTL-23-reviews-ratings` · PR title: `HTL-23: Reviews and ratings`
+- Depends on: HTL-20, CTR-03, CTR-07 · Blocks: HTL-26
+
+**ACC-11 — Booking access for admin and account checks** (issue #64 · Sprint 2 · package 5 · Bookings, owner Aya · module: flight-bookings, hotel-bookings · TDD: no)
+- Covers: ACC-11, ACC-12 (booking check), ACC-17 (data)
+- Expected output: Admin read-only booking data across both types; the upcoming-confirmed-bookings check used by account deactivation.
+- Tests: Integration
+- Branch: `feature/ACC-11-booking-access-admin-account` · PR title: `ACC-11: Booking access for admin and account checks`
+- Depends on: CTR-01, CTR-04, FLT-22, HTL-16 · Blocks: none
+
+**FLT-27 — Change a flight booking (bonus)** (issue #98 · Backlog · package 5 · Bookings, owner Aya · module: flight-bookings · TDD: required)
+- Covers: FLT-27
+- Expected output: Change date or flight on the same route and cabin, paying or refunding the difference.
+- Tests: Unit; integration; API
+- Branch: `feature/FLT-27-change-flight-booking` · PR title: `FLT-27: Change a flight booking (bonus)`
+- Depends on: FLT-26, PAY-03 · Blocks: none
+
+**HTL-26 — Reply to reviews (bonus)** (issue #99 · Backlog · package 5 · Bookings, owner Aya · module: hotel-bookings · TDD: no)
+- Covers: HTL-26
+- Expected output: Hotel moderator replies to a review.
+- Tests: API
+- Branch: `feature/HTL-26-reply-reviews` · PR title: `HTL-26: Reply to reviews (bonus)`
+- Depends on: HTL-23 · Blocks: none
+
+### 15.7 Package 6 · Itineraries (Mokhtar): ticket details
+
+**CTR-06 — Itineraries contract: itinerary service** (issue #14 · Sprint 1 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: BLG-12, ITN-20 (interfaces)
+- Expected output: Module skeleton; the ItinerariesService methods other modules call (public itineraries by author) as stubs plus a fake.
+- Tests: Unit (the fake behaves like the contract)
+- Branch: `feature/CTR-06-itineraries-contract` · PR title: `CTR-06: Itineraries contract: itinerary service`
+- Depends on: PLT-04, PLT-05 · Blocks: ITN-01, BLG-12
+
+**ITN-01 — Create and list itineraries** (issue #65 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-01, ITN-03
+- Expected output: Create, edit and delete an itinerary (title, countries, start date); list mine, most recently updated first; open one.
+- Tests: Integration; API (owner only)
+- Branch: `feature/ITN-01-create-list-itineraries` · PR title: `ITN-01: Create and list itineraries`
+- Depends on: CTR-06, CTR-05, CTR-01 · Blocks: ITN-05, ITN-20, ITN-28
+
+**ITN-05 — Days and city groups** (issue #66 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: required)
+- Covers: ITN-05, ITN-09
+- Expected output: Add days and edit each day's city and notes; days numbered and dated from the start date; consecutive same-city days shown as groups.
+- Tests: Unit (numbering, dates, grouping); API
+- Branch: `feature/ITN-05-days-city-groups` · PR title: `ITN-05: Days and city groups`
+- Depends on: ITN-01 · Blocks: ITN-07, ITN-10, ITN-14, ITN-16, ITN-25, ITN-26
+
+**ITN-07 — Delete and reorder days** (issue #67 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: required)
+- Covers: ITN-07, ITN-08
+- Expected output: Delete a day (with its activities, budgets and transport costs) and move a day; numbers, dates, groups and totals follow.
+- Tests: Unit (renumbering, cascades); API
+- Branch: `feature/ITN-07-delete-reorder-days` · PR title: `ITN-07: Delete and reorder days`
+- Depends on: ITN-05 · Blocks: none
+
+**ITN-10 — Activities** (issue #68 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-10
+- Expected output: Add, edit and delete activities per day: name, description, optional time and cost.
+- Tests: API
+- Branch: `feature/ITN-10-activities` · PR title: `ITN-10: Activities`
+- Depends on: ITN-05 · Blocks: ITN-12, ITN-14
+
+**ITN-12 — Activity images** (issue #69 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-12
+- Expected output: Attach up to 5 images to an activity and remove them.
+- Tests: Integration (storage fake); API (limits)
+- Branch: `feature/ITN-12-activity-images` · PR title: `ITN-12: Activity images`
+- Depends on: ITN-10, CTR-05 · Blocks: ITN-21
+
+**ITN-14 — Budgets and budget summary** (issue #70 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: required)
+- Covers: ITN-14, ITN-18 (conversion use)
+- Expected output: Budget entries per day and category in any supported currency; summary per category, day, city group and total in the user's preferred currency with the rate date.
+- Tests: Unit (totals, conversion with fx fake); API
+- Branch: `feature/ITN-14-budgets-budget-summary` · PR title: `ITN-14: Budgets and budget summary`
+- Depends on: ITN-05, ITN-10, CTR-05 · Blocks: ITN-27
+
+**ITN-16 — Transport costs** (issue #71 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-16
+- Expected output: Add, edit and delete transport cost entries linked to a day.
+- Tests: API
+- Branch: `feature/ITN-16-transport-costs` · PR title: `ITN-16: Transport costs`
+- Depends on: ITN-05 · Blocks: none
+
+**ITN-20 — Visibility and public view** (issue #72 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-20, ACC-12 (hide), GEN-09/10 (reportable)
+- Expected output: Public or private visibility; public itineraries read-only to others; hidden while the author is deactivated; reportable and hideable; public itineraries by author for the blog.
+- Tests: Integration (events, port); API
+- Branch: `feature/ITN-20-visibility-public-view` · PR title: `ITN-20: Visibility and public view`
+- Depends on: ITN-01, PLT-06, CTR-07 · Blocks: ITN-21, BLG-13
+
+**ITN-21 — Public search and clone** (issue #73 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-21
+- Expected output: Search public itineraries by keyword (title, country, city) with duration and place filters; clone into a private copy with attribution and copied images.
+- Tests: Integration (search, deep clone); API
+- Branch: `feature/ITN-21-public-search-clone` · PR title: `ITN-21: Public search and clone`
+- Depends on: ITN-20, ITN-12 · Blocks: TST-01, BON-02
+
+**ITN-25 — Hotels for a city group** (issue #74 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-25
+- Expected output: For a chosen city group, hotels available for its dates using the hotel search.
+- Tests: Integration (hotels fake); API
+- Branch: `feature/ITN-25-hotels-city-group` · PR title: `ITN-25: Hotels for a city group`
+- Depends on: ITN-05, CTR-03 · Blocks: none
+
+**ITN-26 — Flights from an itinerary** (issue #75 · Sprint 2 · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-26
+- Expected output: One-way or round-trip flights from a chosen origin to the first day's city, dated from the itinerary.
+- Tests: Integration (flights fake); API
+- Branch: `feature/ITN-26-flights-itinerary` · PR title: `ITN-26: Flights from an itinerary`
+- Depends on: ITN-05, CTR-02 · Blocks: none
+
+**ITN-27 — Link bookings to itinerary days (bonus)** (issue #100 · Backlog · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-27
+- Expected output: Booked flights and hotels linked to itinerary days, feeding the budget.
+- Tests: Integration; API
+- Branch: `feature/ITN-27-link-bookings-itinerary-days` · PR title: `ITN-27: Link bookings to itinerary days (bonus)`
+- Depends on: ITN-14, FLT-23, HTL-17 · Blocks: none
+
+**ITN-28 — Itinerary PDF (bonus)** (issue #101 · Backlog · package 6 · Itineraries, owner Mokhtar · module: itineraries · TDD: no)
+- Covers: ITN-28
+- Expected output: Export or print an itinerary as PDF.
+- Tests: API
+- Branch: `feature/ITN-28-itinerary-pdf` · PR title: `ITN-28: Itinerary PDF (bonus)`
+- Depends on: ITN-01 · Blocks: none
+
+### 15.8 Package 7 · Community & Admin (Mostafa): ticket details
+
+**CTR-07 — Community contract: reportable content port** (issue #15 · Sprint 1 · package 7 · Community & Admin, owner Mostafa · module: blog, moderation, admin · TDD: no)
+- Covers: GEN-09, GEN-10 (interfaces)
+- Expected output: Module skeletons for blog, moderation and admin; the ReportableContent port and its registry; a fake implementation.
+- Tests: Unit (registry and fake)
+- Branch: `feature/CTR-07-community-contract` · PR title: `CTR-07: Community contract: reportable content port`
+- Depends on: PLT-04, PLT-05 · Blocks: HTL-23, ITN-20, BLG-01, GEN-09
+
+**BLG-01 — Posts** (issue #76 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-01, BLG-03, BLG-04
+- Expected output: Create a post as draft or published, edit and delete own posts, list my posts including drafts.
+- Tests: Integration; API (owner only)
+- Branch: `feature/BLG-01-posts` · PR title: `BLG-01: Posts`
+- Depends on: CTR-07, CTR-01 · Blocks: BLG-02, BLG-05, BLG-06, BLG-08, BLG-10, BLG-13
+
+**BLG-02 — Browse and read posts** (issue #77 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-02, ACC-12 (hide)
+- Expected output: Paginated published posts filterable by tag and a post page with author, date, body, tags, images, likes and comments; hidden and deactivated authors' posts excluded.
+- Tests: Integration (visibility rules, events); API
+- Branch: `feature/BLG-02-browse-read-posts` · PR title: `BLG-02: Browse and read posts`
+- Depends on: BLG-01, PLT-06, CTR-01 · Blocks: BLG-12
+
+**BLG-05 — Comments** (issue #78 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-05, BLG-07
+- Expected output: Comment on published posts (1–500 characters, chronological); edit and delete own comments; comment count kept right.
+- Tests: Unit (length boundaries); API
+- Branch: `feature/BLG-05-comments` · PR title: `BLG-05: Comments`
+- Depends on: BLG-01 · Blocks: GEN-10
+
+**BLG-06 — Likes** (issue #79 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-06
+- Expected output: Like once and unlike; like count kept right.
+- Tests: Integration (double like, parallel likes); API
+- Branch: `feature/BLG-06-likes` · PR title: `BLG-06: Likes`
+- Depends on: BLG-01 · Blocks: none
+
+**BLG-08 — Tags** (issue #80 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-08
+- Expected output: Up to 5 tags of up to 30 characters, normalised; list posts by tag.
+- Tests: Unit (normalisation, limits); API
+- Branch: `feature/BLG-08-tags` · PR title: `BLG-08: Tags`
+- Depends on: BLG-01 · Blocks: BLG-09
+
+**BLG-09 — Post search** (issue #81 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-09
+- Expected output: Search published posts by title, tag or author name, ordered by likes + comments then date, with excerpts.
+- Tests: Integration (ordering); API
+- Branch: `feature/BLG-09-post-search` · PR title: `BLG-09: Post search`
+- Depends on: BLG-08, CTR-01 · Blocks: none
+
+**BLG-10 — Post images** (issue #82 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-10
+- Expected output: Attach up to 5 images to a post and remove them.
+- Tests: Integration (storage fake); API (limits)
+- Branch: `feature/BLG-10-post-images` · PR title: `BLG-10: Post images`
+- Depends on: BLG-01, CTR-05 · Blocks: none
+
+**BLG-12 — Author page** (issue #83 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-12
+- Expected output: Public author page: name, join date, published posts, public itineraries.
+- Tests: API
+- Branch: `feature/BLG-12-author-page` · PR title: `BLG-12: Author page`
+- Depends on: BLG-02, CTR-06 · Blocks: none
+
+**GEN-09 — Reports** (issue #84 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: moderation · TDD: no)
+- Covers: GEN-09
+- Expected output: Report a post, comment, review or itinerary with a reason, once per item.
+- Tests: Integration (port fake); API (duplicate 409)
+- Branch: `feature/GEN-09-reports` · PR title: `GEN-09: Reports`
+- Depends on: CTR-07 · Blocks: GEN-10
+
+**GEN-10 — Report resolution and direct moderation** (issue #85 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: moderation, admin, blog · TDD: no)
+- Covers: GEN-10
+- Expected output: Admin lists open reports and dismisses, hides or deletes; direct hide/delete of any content; posts and comments implement the port; audit events emitted.
+- Tests: Integration; API (admin only)
+- Branch: `feature/GEN-10-report-resolution-direct-moderation` · PR title: `GEN-10: Report resolution and direct moderation`
+- Depends on: GEN-09, BLG-05, PLT-06 · Blocks: TST-01
+
+**ACC-13 — Admin account endpoints** (issue #86 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: admin · TDD: no)
+- Covers: ACC-07a, ACC-13, ACC-14, ACC-16
+- Expected output: Admin endpoints to list and search accounts, create moderators linked to a provider, reset passwords, suspend and reactivate users and moderators; audit events emitted.
+- Tests: API (admin only, accounts fake)
+- Branch: `feature/ACC-13-admin-account-endpoints` · PR title: `ACC-13: Admin account endpoints`
+- Depends on: CTR-01, CTR-02, CTR-03, PLT-06 · Blocks: none
+
+**ACC-15 — Provider deactivation** (issue #87 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: admin · TDD: no)
+- Covers: ACC-15 (providers)
+- Expected output: Admin deactivates and reactivates an airline or hotel; its moderators are notified; audit events emitted.
+- Tests: API (admin only, provider fakes)
+- Branch: `feature/ACC-15-provider-deactivation` · PR title: `ACC-15: Provider deactivation`
+- Depends on: CTR-01, CTR-02, CTR-03, PLT-06 · Blocks: none
+
+**ACC-17 — Admin booking list** (issue #88 · Sprint 2 · package 7 · Community & Admin, owner Mostafa · module: admin · TDD: no)
+- Covers: ACC-17
+- Expected output: Read-only list of all flight and hotel bookings, filterable by type, status and date range, paginated.
+- Tests: API (admin only, bookings fake)
+- Branch: `feature/ACC-17-admin-booking-list` · PR title: `ACC-17: Admin booking list`
+- Depends on: CTR-04 · Blocks: BON-01
+
+**BLG-13 — Attach an itinerary to a post (bonus)** (issue #102 · Backlog · package 7 · Community & Admin, owner Mostafa · module: blog · TDD: no)
+- Covers: BLG-13
+- Expected output: An author attaches one of their itineraries to a post.
+- Tests: API
+- Branch: `feature/BLG-13-attach-itinerary-post` · PR title: `BLG-13: Attach an itinerary to a post (bonus)`
+- Depends on: BLG-01, ITN-20 · Blocks: none
+
+**BON-01 — Admin analytics dashboard (bonus)** (issue #103 · Backlog · package 7 · Community & Admin, owner Mostafa · module: admin (new analytics module) · TDD: no)
+- Covers: BON-01
+- Expected output: Bookings and revenue per provider over a selected period.
+- Tests: Integration; API
+- Branch: `feature/BON-01-admin-analytics-dashboard` · PR title: `BON-01: Admin analytics dashboard (bonus)`
+- Depends on: ACC-17 · Blocks: none
+
+**BON-02 — Favourites (bonus)** (issue #104 · Backlog · package 7 · Community & Admin, owner Mostafa · module: new favourites module · TDD: no)
+- Covers: BON-02
+- Expected output: Save hotels and public itineraries to a favourites list and view it.
+- Tests: API
+- Branch: `feature/BON-02-favourites` · PR title: `BON-02: Favourites (bonus)`
+- Depends on: HTL-11, ITN-21 · Blocks: none
+
+### 15.9 Requirement → ticket map
+
+Every requirement in the workbook and the ticket(s) that cover it. A note means no backend ticket is needed.
+
+| Requirement | Type | Ticket(s) | Note |
+|---|---|---|---|
+| ACC-01 | Mandatory | ACC-01 |  |
+| ACC-04 | Mandatory | ACC-04 |  |
+| ACC-05 | Mandatory | ACC-05 |  |
+| ACC-06 | Mandatory | ACC-06 |  |
+| ACC-07a | Mandatory | ACC-08, ACC-16, ACC-13 |  |
+| ACC-08 | Mandatory | ACC-08 |  |
+| ACC-09 | Mandatory | ACC-09 |  |
+| ACC-10 | Mandatory | — | Frontend: send guests to login and back (backend returns 401) |
+| ACC-11 | Mandatory | CTR-01, ACC-11 |  |
+| ACC-12 | Mandatory | ACC-12, ACC-11, ITN-20, BLG-02 |  |
+| ACC-13 | Mandatory | ACC-16, ACC-13 |  |
+| ACC-14 | Mandatory | ACC-16, ACC-13 |  |
+| ACC-15 | Mandatory | ACC-16, FLT-01, HTL-01, ACC-15 |  |
+| ACC-16 | Mandatory | ACC-16, ACC-13 |  |
+| ACC-17 | Mandatory | CTR-04, ACC-11, ACC-17 |  |
+| FLT-01 | Mandatory | FLT-01 |  |
+| FLT-02 | Mandatory | GEN-12, FLT-03 |  |
+| FLT-03 | Mandatory | FLT-03 |  |
+| FLT-04 | Mandatory | FLT-04 |  |
+| FLT-05 | Mandatory | INV-01, FLT-05, FLT-26 |  |
+| FLT-06 | Mandatory | FLT-06, FLT-26 |  |
+| FLT-08 | Mandatory | FLT-08 |  |
+| FLT-09 | Mandatory | FLT-08, GEN-11 |  |
+| FLT-11 | Mandatory | CTR-02, FLT-11 |  |
+| FLT-12 | Mandatory | FLT-11, FLT-19, FLT-22 |  |
+| FLT-15 | Mandatory | FLT-11 |  |
+| FLT-17 | Mandatory | FLT-17 |  |
+| FLT-19 | Mandatory | FLT-19 |  |
+| FLT-21 | Mandatory | FLT-19 |  |
+| FLT-22 | Mandatory | CTR-02, INV-01, FLT-22 |  |
+| FLT-23 | Mandatory | FLT-23 |  |
+| FLT-25 | Mandatory | FLT-25 |  |
+| FLT-26 | Mandatory | FLT-26 |  |
+| FLT-29 | Mandatory | FLT-29 |  |
+| HTL-01 | Mandatory | HTL-01 |  |
+| HTL-02 | Mandatory | HTL-02 |  |
+| HTL-03 | Mandatory | HTL-03 |  |
+| HTL-04 | Mandatory | HTL-04 |  |
+| HTL-05 | Mandatory | INV-02, HTL-04 |  |
+| HTL-06 | Mandatory | INV-02, HTL-06 |  |
+| HTL-08 | Mandatory | HTL-22 |  |
+| HTL-09 | Mandatory | HTL-09 |  |
+| HTL-10 | Mandatory | HTL-09, GEN-11 |  |
+| HTL-11 | Mandatory | CTR-03, HTL-11 |  |
+| HTL-12 | Mandatory | HTL-11 |  |
+| HTL-15 | Mandatory | HTL-02 |  |
+| HTL-16 | Mandatory | HTL-16 |  |
+| HTL-17 | Mandatory | HTL-17 |  |
+| HTL-18 | Mandatory | CTR-03, INV-02, HTL-16 |  |
+| HTL-20 | Mandatory | HTL-20 |  |
+| HTL-21 | Mandatory | HTL-21 |  |
+| HTL-22 | Mandatory | HTL-22 |  |
+| HTL-23 | Mandatory | HTL-23 |  |
+| HTL-24 | Mandatory | HTL-23 |  |
+| PAY-01 | Mandatory | CTR-05, PAY-01, TST-01 |  |
+| PAY-02 | Mandatory | PAY-02 |  |
+| PAY-03 | Mandatory | CTR-05, PAY-03, TST-01 |  |
+| ITN-01 | Mandatory | ITN-01 |  |
+| ITN-03 | Mandatory | ITN-01 |  |
+| ITN-05 | Mandatory | ITN-05 |  |
+| ITN-07 | Mandatory | ITN-07 |  |
+| ITN-08 | Mandatory | ITN-07 |  |
+| ITN-09 | Mandatory | ITN-05 |  |
+| ITN-10 | Mandatory | ITN-10 |  |
+| ITN-12 | Mandatory | ITN-12 |  |
+| ITN-14 | Mandatory | ITN-14 |  |
+| ITN-16 | Mandatory | ITN-16 |  |
+| ITN-18 | Mandatory | CTR-05, ITN-18, ITN-14 |  |
+| ITN-20 | Mandatory | CTR-06, ITN-20 |  |
+| ITN-21 | Mandatory | ITN-21 |  |
+| ITN-25 | Mandatory | ITN-25 |  |
+| ITN-26 | Mandatory | ITN-26 |  |
+| BLG-01 | Mandatory | BLG-01 |  |
+| BLG-02 | Mandatory | BLG-02 |  |
+| BLG-03 | Mandatory | BLG-01 |  |
+| BLG-04 | Mandatory | BLG-01 |  |
+| BLG-05 | Mandatory | BLG-05 |  |
+| BLG-06 | Mandatory | BLG-06 |  |
+| BLG-07 | Mandatory | BLG-05 |  |
+| BLG-08 | Mandatory | BLG-08 |  |
+| BLG-09 | Mandatory | BLG-09 |  |
+| BLG-10 | Mandatory | BLG-10 |  |
+| BLG-12 | Mandatory | CTR-06, BLG-12 |  |
+| GEN-01 | Mandatory | GEN-01 |  |
+| GEN-02 | Mandatory | PLT-05 |  |
+| GEN-03 | Mandatory | — | Frontend: confirmation dialogs |
+| GEN-04 | Mandatory | — | Frontend: empty states |
+| GEN-05 | Mandatory | PLT-05 |  |
+| GEN-06 | Mandatory | FLT-03 |  |
+| GEN-07 | Mandatory | GEN-07 |  |
+| GEN-08 | Mandatory | CTR-05, GEN-08 |  |
+| GEN-09 | Mandatory | CTR-07, ITN-20, GEN-09 |  |
+| GEN-10 | Mandatory | CTR-07, GEN-10 |  |
+| GEN-11 | Mandatory | PLT-06, CTR-04, GEN-11, TST-01 |  |
+| FLT-30 | Mandatory | FLT-30 |  |
+| ACC-18 | Mandatory | ACC-18 |  |
+| PAY-04 | Mandatory | PLT-05, PAY-01 |  |
+| GEN-12 | Mandatory | CTR-05, GEN-12 |  |
+| GEN-13 | Mandatory | PLT-05, CTR-01, ACC-01 |  |
+| ACC-19 | Mandatory | CTR-01, ACC-04, ACC-06 |  |
+| GEN-14 | Mandatory | — | Frontend: information architecture |
+| GEN-15 | Mandatory | — | Frontend: usability |
+| GEN-16 | Mandatory | — | Frontend: feedback and responsiveness |
+| GEN-17 | Mandatory | — | Frontend: visual consistency |
+| ACC-02 | Bonus | ACC-02 |  |
+| ACC-07 | Bonus | ACC-07 |  |
+| GEN-01-B | Bonus | GEN-01b |  |
+| FLT-27 | Bonus | FLT-27 |  |
+| FLT-28 | Bonus | FLT-28 |  |
+| HTL-26 | Bonus | HTL-26 |  |
+| ITN-27 | Bonus | ITN-27 |  |
+| ITN-28 | Bonus | ITN-28 |  |
+| BLG-13 | Bonus | BLG-13 |  |
+| BON-01 | Bonus | BON-01 |  |
+| BON-02 | Bonus | BON-02 |  |
+
+## 16. The course project description: what isn't covered elsewhere
+
+Verbatim excerpts from the course PDF "Software Project I, Winter 2026: Travel Planning and Booking Platform, Project Description", limited to what other sections don't already say. Covered elsewhere: functional scope and the requirements (§17 “Official requirements”), the endpoint list (§6 “Endpoints”, built from course section 8), MongoDB setup (§3.7 “Hosting”), Next.js rendering (§12.6 “Rendering strategy per page”), git workflow (§14 “Workflow”), the prompt-log format (§14.5 “AI prompt log”), core entities (§5 “Data model”). Numbers below are the course PDF's own.
+
+### 16.1 Course 1.1: Technology Stack and MVC Architecture
+
+```text
+The project must follow the Model–View–Controller (MVC) architectural pattern using the following
+technologies:
+• Model – MongoDB Atlas and NestJS: MongoDB Atlas stores the application data. NestJS schemas/models represent domain entities, while services implement business logic, validation, and database
+  operations.
+• View – Next.js: Next.js (React and TypeScript) provides the frontend interface, including public
+  pages, booking workflows, itinerary editors, and role-specific dashboards.
+• Controller – NestJS: NestJS controllers receive HTTP requests, validate incoming data through the
+  application’s validation mechanisms, invoke the appropriate services, and return REST API responses.
+The application consists of one NestJS backend, one Next.js frontend, and one shared MongoDB
+Atlas database.
+Backend functionality must be organized into feature-based modules, such as Authentication, Flights,
+Hotels, Payments, Itineraries, Blog, and Administration.
+```
+
+### 16.2 Course 2: Official Requirements and User Stories
+
+```text
+The detailed functional requirements, user stories, and acceptance criteria are provided in the official
+Excel requirements sheet.
+The Excel sheet is considered an integral and authoritative part of this project description.
+
+                             Project Requirements and User Stories
+
+Each requirement has a unique identifier, such as ACC-01, FLT-11, HTL-16, PAY-01, ITN-21, and BLG-01.
+These identifiers should be referenced in relevant GitHub issues, pull requests, commit messages, and
+API documentation to maintain traceability.
+The official workbook distinguishes between mandatory requirements and optional bonus requirements.
+Teams must prioritize mandatory requirements. Optional features must not replace required functionality.
+```
+
+### 16.3 Course 7.1: Milestone 1: Backend & API - Deadline ( 20/11)
+
+```text
+Milestone 1 focuses on the NestJS backend and MongoDB data layer.
+By the end of this milestone, teams must:
+• design and implement MongoDB schemas;
+• organize backend functionality into NestJS modules, controllers, services, and models;
+
+• implement authentication and authorization;
+• implement the required REST API;
+• enforce booking and inventory consistency;
+• implement payment, cancellation, and refund business logic;
+• implement itinerary, blog, and moderation logic;
+• provide server-side validation and error handling;
+• document and demonstrate APIs through Swagger UI.
+A frontend is not required for Milestone 1.
+```
+
+### 16.4 Course 7.2: Milestone 2: Frontend & Integration - Deadline ( 11/12)
+
+```text
+Milestone 2 focuses on implementing the Next.js frontend and integrating it with the completed backend.
+The frontend must provide:
+• responsive public and authenticated pages;
+• registration, login, and profile management;
+• flight and hotel search and booking workflows;
+• payment and cancellation interfaces;
+• itinerary creation, editing, budgeting, and sharing;
+• blog and community interfaces;
+• airline and hotel moderator dashboards;
+• administrator management and moderation interfaces;
+• appropriate loading, error, and confirmation states.
+Frontend validation and route protection must not replace backend validation and authorization.
+```
+
+### 16.5 Course 7.3: Optional Cloud Deployment Bonus
+
+```text
+Deploying the complete application to any cloud-based platform is considered an optional bonus.
+To qualify for this bonus, students must deploy both the frontend and backend and ensure that the
+application is fully functional in the deployed environment.
+Important: Teams applying for this bonus will be evaluated exclusively on the deployed version of
+their application. The locally running version will not be considered when evaluating the deployment
+bonus.
+```
+
+### 16.6 Course 11.2: AI Usage Regulations
+
+```text
+a) Students are responsible for all submitted code, including AI-generated code.
+b) Students must understand and explain their implementation during project discussions.
+c) AI-generated output must be reviewed before integration.
+d) Sensitive information, passwords, tokens, and credentials must not be shared with AI tools.
+e) The prompt log must be maintained throughout development.
+f) Failure to disclose substantial AI-assisted work may violate submission regulations.
+The purpose of this policy is to encourage responsible AI-assisted development while maintaining transparency, accountability, and understanding.
+```
+
+### 16.7 Course 12: Optional Bonus Requirements
+
+```text
+After completing mandatory requirements, teams may implement the optional bonus features listed in
+the official requirements workbook.
+These may include:
+
+• email verification and email-based password recovery;
+• email notifications;
+• flight booking changes and seat selection;
+• hotel moderator replies to reviews;
+• attaching confirmed bookings to itineraries;
+• itinerary PDF export;
+• attaching itineraries to blog posts;
+• administrator analytics and favourites, where specified in the workbook.
+The official workbook defines the exact scope and acceptance criteria for optional features.
+Bonus features must not replace mandatory requirements.
+Cloud deployment is not mandatory. The application may be developed and demonstrated locally using
+MongoDB Atlas and the required external services.
+```
+
+### 16.8 Course 13: Milestone Deliverables
+
+### 16.9 Course 13.1: Milestone 1: Backend
+
+```text
+The backend milestone submission must contain:
+• fully implemented NestJS backend;
+• MongoDB Atlas integration;
+• documented REST API using Swagger;
+• README with setup instructions;
+• updated AI_PROMPTS.txt;
+• Git history showing team contributions.
+The backend will be evaluated through Swagger UI.
+```
+
+### 16.10 Course 13.2: Milestone 2: Frontend and Final Integration
+
+```text
+The final milestone submission must contain:
+• complete Next.js frontend;
+• integrated backend and frontend;
+• working mandatory workflows for all roles;
+• final README and setup instructions;
+• updated AI_PROMPTS.txt;
+• complete GitHub contribution history.
+```
+
+### 16.11 Course 14: Important Notes
+
+```text
+• The official Excel requirements sheet remains the authoritative source for individual functional requirements.
+• Students may introduce additional database entities, API endpoints, services, and components when
+  technically justified.
+• Security, validation, and authorization must be implemented on the backend, even when frontend
+  validation exists.
+• Students must understand and justify major architectural and implementation decisions during project
+  discussions.
+• GitHub history and the AI prompt log form part of the submitted project material.
+```
+
+## 17. Official requirements (verbatim from the course workbook)
+
+Source: "Final_ SP1_Reviewed_Requirements" workbook. It is authoritative over every other file in this skill.
+
+Format: `[M|B] ID (actors) requirement | deps | complexity`. M = mandatory, B = optional bonus (do bonus work only after all mandatory work in that area is done).
+
+Find one requirement by searching for its ID in bold, for example `**FLT-22**`.
+
+### 17.1 Accounts & Admin
+
+- [M] **ACC-01** (Guest) The system shall allow a guest to register by entering name, unique email, password and a mandatory terms-and-privacy consent checkbox. The password must have at least 8 characters, including at least one letter and one digit. The system shall reject the form with an inline error if the email is invalid or already registered, the password breaks these rules, or consent is not given. | deps: - | Low
+- [M] **ACC-04** (Registered User, Admin, Hotel Moderator, Airline Moderator) The system shall allow a registered user, admin or moderator to log in with email and password and land on their role's home page. On failure it shall show a generic "invalid email or password" message. Suspended accounts shall see an "account suspended" message. | deps: ACC-01 | Medium
+- [M] **ACC-05** (System) After 5 consecutive failed login attempts, the system shall lock the account for 15 minutes and show a lockout message. A successful login resets the counter. | deps: ACC-04 | Medium
+- [M] **ACC-06** (Any logged-in user) The system shall allow a logged-in user to log out, which clears the authentication cookies and revokes the refresh token on the server. A session with no authenticated request for 30 minutes shall expire and require a new login. | deps: ACC-04,ACC-19 | Medium
+- [M] **ACC-07a** (Admin) The system shall allow an admin to reset a user's or moderator's password to a temporary password. The account must set a new password that meets the password rules at its next login. | deps: ACC-04, ACC-14 | Low
+- [M] **ACC-08** (Any logged-in user) The system shall allow a logged-in user to change their password by entering the current password and a new one that meets the rules. | deps: ACC-04 | Low
+- [M] **ACC-09** (Any logged-in user) The system shall allow any logged-in user to edit name, phone number and preferred currency, saving only if all fields pass validation. | deps: ACC-04 | Low
+- [M] **ACC-10** (Guest) The system shall send a guest who attempts a restricted action (book, review, post) to login and return them to that action afterwards. | deps: ACC-04 | Medium
+- [M] **ACC-11** (System) The system shall restrict access to bookings and private itineraries to their owner, except that admins may view all bookings (ACC-17) and moderators may view bookings for their own hotel or airline (FLT-29, HTL-22). Unauthorised requests shall be rejected (403/404). | deps: ACC-04 | Medium
+- [M] **ACC-12** (Registered User) The system shall allow a registered user to deactivate their own account after confirmation. Deactivation is blocked while the user has upcoming Confirmed bookings. A deactivated user cannot log in; their posts and public itineraries are hidden, and their comments and reviews are shown as "Deleted user". | deps: ACC-04, GEN-11 | Medium
+- [M] **ACC-13** (Admin) The system shall allow an admin to create a hotel or airline moderator account (name, email, role) linked to exactly one hotel or airline, with a temporary password set by the admin. The moderator must change the password on first login. | deps: ACC-04, FLT-01, HTL-01 | Medium
+- [M] **ACC-14** (Admin) The system shall allow an admin to view a paginated list of all accounts (name, email, role, status, registration date) and to search by name or email and filter by role and status. | deps: ACC-04 | Low
+- [M] **ACC-15** (Admin) The system shall allow an admin to suspend and reactivate a moderator account (a suspended moderator cannot log in) and, separately, to deactivate and reactivate a hotel or airline. A deactivated provider's listings are hidden from search and cannot be booked; existing Confirmed bookings remain valid. Affected parties receive an in-app notification. | deps: ACC-13, GEN-01 | Medium
+- [M] **ACC-16** (Admin) The system shall allow an admin to suspend and reactivate registered users (for example, for abusive content). Suspended users cannot log in, their existing bookings remain valid, and their content stays visible unless hidden through GEN-10. | deps: ACC-14 | Low
+- [M] **ACC-17** (Admin) The system shall allow an admin to view a read-only list of all flight and hotel bookings (reference, user, provider, dates, amount, status), filterable by type, status and date range. | deps: FLT-23, HTL-17 | Low
+- [M] **ACC-18** (System) Admin accounts shall be created by seeding at setup; there is no admin self-registration. | deps: ACC-04 | Low
+- [B] **ACC-02** (System) The system shall send a verification link by email after registration and block booking until the email is verified. | deps: ACC-01, GEN-01-B | Medium
+- [B] **ACC-07** (Registered User (not logged in)) The system shall allow a user who forgot their password to request a reset link by email; the link expires after 30 minutes, is single-use, is invalidated by a newer request, and the response does not reveal whether the email exists. | deps: ACC-01, GEN-01-B | Medium
+- [B] **BON-01** (Admin) The system shall provide an admin analytics dashboard showing bookings and revenue per provider over a selected period. | deps: ACC-17 | Medium
+
+### 17.2 Flights
+
+- [M] **FLT-01** (Admin, Airline Moderator) The system shall allow an admin to create an airline profile and an airline moderator to edit their airline's profile (name, code, logo). | deps: GEN-08 | Low
+- [M] **FLT-02** (System) The system shall provide a predefined, read-only list of airports (IATA code, name, city, country, IANA time zone) loaded at setup. Flight creation and flight search shall accept only airports from this list. | deps: GEN-12 | Low
+- [M] **FLT-03** (Airline Moderator) The system shall allow an airline moderator to create a flight with flight number, departure and arrival airports, and departure and arrival date-times entered in each airport's local time and stored in UTC. It shall reject identical airports, an arrival not after departure (compared in UTC), a departure in the past, and a duplicate flight number for the same airline on the same departure date. | deps: FLT-01, FLT-02 | Medium
+- [M] **FLT-04** (Airline Moderator) The system shall allow an airline moderator to define cabin categories per flight from the fixed set {Economy, Premium Economy, Business, First}, each used at most once per flight, with a seat count (whole number, >0), price (>0), free baggage allowance (bag count) and maximum weight (kg) per bag. | deps: FLT-03 | Medium
+- [M] **FLT-05** (Airline Moderator) The system shall allow an airline moderator to edit departure/arrival times, cabin prices and cabin seat counts of their own Scheduled flights. Airports cannot be changed once the flight has any booking. Seat counts cannot be reduced below seats already booked or held. Price changes do not affect existing bookings. Any time change sends an in-app notification to passengers with Confirmed bookings. | deps: FLT-03, FLT-04, GEN-01, FLT-30 | Medium
+- [M] **FLT-06** (Airline Moderator) The system shall allow an airline moderator to cancel a Scheduled flight after confirmation. The flight becomes Cancelled and is hidden from search; all its Confirmed bookings become Cancelled with a 100% refund (PAY-03); pending seat holds are released; passengers receive an in-app notification. | deps: FLT-23, PAY-03, GEN-01, FLT-30 | Medium
+- [M] **FLT-08** (Airline Moderator) The system shall allow an airline moderator to define a price per extra bag (>0) and a maximum number of extra bags per passenger (>=0). Each extra bag has the same maximum weight as the cabin's free baggage allowance. | deps: FLT-04 | Low
+- [M] **FLT-09** (Airline Moderator) The system shall allow an airline moderator to define cancellation tiers, each with a unique days-before-departure threshold (integer >=0) and a refund percentage (0-100%). The refund for a cancellation uses the tier with the highest threshold not exceeding the days remaining; if no tier applies, the refund is 0%. | deps: FLT-01 | Medium
+- [M] **FLT-11** (Guest, Registered User) The system shall allow a guest or registered user to search flights by selecting a departure airport, arrival airport, departure date (local date at the departure airport) and number of passengers; list Scheduled flights of active airlines on that date whose available seats (total - booked - held) are sufficient; allow the user to select a flight and cabin category to continue; or show "no flights found" when no match exists. | deps: FLT-02, FLT-03, FLT-04, FLT-22 | High
+- [M] **FLT-12** (Guest, Registered User) The system shall support: (a) round-trip search returning outbound and return options, booked as one booking with two segments, one payment and one reference, and cancelled as a whole using the outbound segment's tier; (b) passenger types adult (12+), child (2-11) and infant (<2): adults and children pay the cabin fare and occupy a seat, infants pay 10% of the fare and occupy no seat, each booking needs at least one adult and no more infants than adults, and the type is validated against the date of birth (FLT-19); (c) an optional cabin-class filter in search. | deps: FLT-11, FLT-19 | High
+- [M] **FLT-15** (Guest, Registered User) The system shall allow a guest or registered user to filter flight results by an inclusive minimum and maximum price while preserving the other search criteria, show an error if min > max, and sort results by price, duration or departure time. | deps: FLT-11 | Medium
+- [M] **FLT-17** (Guest, Registered User) The system shall provide a flight details page showing airline, flight number, airports, local departure and arrival times, duration, each cabin category with price, seats remaining and baggage allowance, and the airline's cancellation policy. | deps: FLT-11 | Low
+- [M] **FLT-19** (Registered User) The system shall allow a registered user, during booking, to enter each passenger's full name, date of birth and passport/ID number and optionally add extra baggage (bags and weight) per passenger up to the airline's maximum, with any baggage fee added to the booking total. | deps: FLT-11, FLT-08 | Medium
+- [M] **FLT-21** (Registered User) The system shall show a booking summary (flight, passengers, baggage, total) before payment. | deps: FLT-19 | Low
+- [M] **FLT-22** (System) When a user proceeds to payment, the system shall atomically reserve the requested seats only if enough remain, creating a booking in Pending Payment status held for 10 minutes. If payment does not succeed within the hold, the booking becomes Expired and the seats are released. Concurrent requests shall never result in more seats booked than available. | deps: FLT-11, GEN-11 | High
+- [M] **FLT-23** (System) After successful payment, the system shall set the flight booking to Confirmed, convert the held seats into booked seats, generate a unique booking reference, show a confirmation page, send an in-app notification with the booking details, and offer a downloadable e-ticket (PDF). | deps: FLT-21, FLT-22, PAY-01, PAY-02, GEN-01 | Medium
+- [M] **FLT-25** (Registered User) The system shall allow a registered user to view their flight bookings grouped as Upcoming, Past and Cancelled, showing reference, flight, date, passengers, cabin and status, and to open full details. | deps: FLT-23 | Low
+- [M] **FLT-26** (Registered User) The system shall allow a registered user to cancel their own Confirmed flight booking any time before departure, after viewing the refund amount computed from the airline's tiers (FLT-09) and confirming. The booking becomes Cancelled, its seats return to inventory and a refund is created (PAY-03). Cancellation after departure is blocked. | deps: FLT-23, FLT-09, PAY-03 | Medium
+- [M] **FLT-29** (Airline Moderator) The system shall allow an airline moderator to view, per flight, its bookings (reference, passenger names, cabin, seats and status: Confirmed or Cancelled), see seats remaining per category, and view or export the passenger list as CSV. | deps: FLT-23 | Low
+- [M] **FLT-30** (System) Flights shall have a status of Scheduled, Cancelled or Departed. A flight becomes Departed once its departure time has passed; only Scheduled flights are searchable, editable or bookable. | deps: FLT-03 | Low
+- [B] **FLT-27** (Registered User) The system shall allow a registered user to change a Confirmed flight booking's date or flight (same route and cabin), paying any fare difference via Stripe or receiving a refund of a lower fare, subject to seat availability. | deps: FLT-26, FLT-22, PAY-01, PAY-03 | High
+- [B] **FLT-28** (Registered User) The system shall allow seat selection. | deps: FLT-11 | High
+
+### 17.3 Hotels
+
+- [M] **HTL-01** (Admin, Hotel Moderator) The system shall allow an admin to create a hotel profile and a hotel moderator to edit their hotel's profile (name, address, city and country, description, photos, star class, amenities). | deps: GEN-08,GEN-12 | Low
+- [M] **HTL-02** (Guest, Registered User) The system shall provide a hotel details page showing the hotel profile, photos, amenities, check-in and check-out times, cancellation policy, average rating and reviews, and the available rooms when dates are provided. | deps: HTL-01 | Low
+- [M] **HTL-03** (Hotel Moderator) The system shall allow a hotel moderator to add a room (an individually bookable unit) with a room number/name unique within the hotel, type, number of beds, maximum occupancy (>=1) and price per night (>0). | deps: HTL-01 | Low
+- [M] **HTL-04** (Hotel Moderator) The system shall allow a hotel moderator to define non-overlapping date ranges when a room is bookable. | deps: HTL-03 | Medium
+- [M] **HTL-05** (Hotel Moderator) The system shall allow a hotel moderator to edit a room's beds, occupancy, price and availability. Price changes do not affect existing reservations, and availability cannot be removed for dates with confirmed reservations. | deps: HTL-03 | Medium
+- [M] **HTL-06** (Hotel Moderator) The system shall allow a hotel moderator to block date ranges for a room and to deactivate or delete a room. Blocking, deactivation or deletion is rejected if it overlaps any Confirmed or Pending Payment reservation. Deactivated rooms are excluded from search; deletion is allowed only for rooms that have never been reserved. | deps: HTL-04, HTL-03 | Medium
+- [M] **HTL-08** (Hotel Moderator) The system shall allow a hotel moderator to view each room's status for a chosen date range as Available, Booked (with reservation reference) or Blocked. | deps: HTL-04 | Medium
+- [M] **HTL-09** (Hotel Moderator) The system shall allow a hotel moderator to set the hotel's standard check-in and check-out times, shown on the hotel page and the booking summary. | deps: HTL-01 | Low
+- [M] **HTL-10** (Hotel Moderator) The system shall allow a hotel moderator to define cancellation tiers, each with a unique days-before-check-in threshold (integer >=0) and a refund percentage (0-100%), applied with the same selection rule as FLT-09. | deps: HTL-01 | Medium
+- [M] **HTL-11** (Guest, Registered User) The system shall allow a guest or registered user to search hotels by city or country, check-in date, check-out date, number of guests and number of rooms (default 1). It shall list active hotels that have at least that many rooms free for the whole stay whose combined maximum occupancy covers the guests. Check-out must be after check-in, and check-in cannot be in the past. | deps: HTL-03, HTL-04, HTL-06, HTL-18 | High
+- [M] **HTL-12** (Guest, Registered User) The system shall allow a guest or registered user to filter hotel results by an inclusive minimum and maximum price per night (price of the cheapest qualifying room) and by minimum average rating (1-5; unrated hotels are excluded when a rating filter is set), and sort the results by that price or by rating. | deps: HTL-11, HTL-23 | Medium
+- [M] **HTL-15** (Guest, Registered User) The system shall allow a guest or registered user to view all of a hotel's rooms that are free for the searched dates, showing type, beds, maximum occupancy, price per night and total stay price, and to select one or more of them to book. | deps: HTL-11 | Medium
+- [M] **HTL-16** (Registered User) The system shall allow a registered user to book one or more available rooms in the same hotel for the same dates in one reservation, assigning adults and children (ages 0-17) to each room, with at least one adult per reservation. No room's guests may exceed its maximum occupancy. The total price is the sum over rooms of nights x that room's price at booking time. | deps: HTL-11, HTL-03, HTL-15 | High
+- [M] **HTL-17** (System) After successful payment, the system shall set the reservation (all its rooms) to Confirmed, generate a unique booking reference, show a confirmation page and send an in-app notification with the reservation details. | deps: HTL-16, PAY-01, PAY-02, GEN-01 | Medium
+- [M] **HTL-18** (System) When a user proceeds to payment, the system shall hold all selected rooms together for 10 minutes as one Pending Payment reservation. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, the whole request is rejected and nothing is held. If payment does not succeed within the hold, the reservation becomes Expired and the rooms are released. Dates must satisfy check-out after check-in and check-in not in the past. | deps: HTL-16, GEN-11 | High
+- [M] **HTL-20** (Registered User) The system shall allow a registered user to view their hotel reservations grouped as Upcoming, Past and Cancelled, showing reference, hotel, rooms, dates, guests, total and status, and to open full details. | deps: HTL-17 | Low
+- [M] **HTL-21** (Registered User) The system shall allow a registered user to cancel their own Confirmed reservation as a whole before the check-in date, after viewing the refund computed from the hotel's tiers (HTL-10) on the full total. The reservation becomes Cancelled, all its rooms are released for those dates and a refund is created (PAY-03). Partial cancellation is not supported. | deps: HTL-17, HTL-10, PAY-03 | Medium
+- [M] **HTL-22** (Hotel Moderator) The system shall allow a hotel moderator to view reservations for their hotel (guest, dates, status). | deps: HTL-17 | Low
+- [M] **HTL-23** (Registered User) A Confirmed reservation becomes Completed once its check-out date has passed. The system shall allow the user to submit one rating (1-5) and an optional review (max 1000 characters) per Completed reservation, regardless of the number of rooms, and later edit or delete it. The hotel's average rating is recalculated accordingly. | deps: HTL-17, GEN-11 | Medium
+- [M] **HTL-24** (Guest, Registered User) The system shall allow a guest or registered user to view a hotel's average rating, number of ratings and reviews (newest first, paginated). | deps: HTL-23 | Low
+- [B] **HTL-26** (Hotel Moderator) The system shall allow a hotel moderator to reply to a review. | deps: HTL-23 | Low
+
+### 17.4 Payments & Policies
+
+- [M] **PAY-01** (Registered User) The system shall allow a registered user to pay for a Pending Payment flight booking or hotel reservation within its hold period using Stripe in test mode (Stripe Elements / PaymentIntents), so that card details never reach the backend. The booking is confirmed only after the backend verifies that the PaymentIntent succeeded (via Stripe webhook). On failure an error is shown and the user may retry until the hold expires; when the hold expires the PaymentIntent is cancelled. Only the Stripe payment ID, amount, currency and status are stored. | deps: FLT-21, HTL-16, FLT-22, HTL-18 | High
+- [M] **PAY-02** (Registered User) Before payment, the system shall show the provider's policies (airline: cancellation and baggage policies; hotel: cancellation policy and check-in/check-out times) and require an acceptance checkbox. Payment is blocked until accepted, and acceptance is stored with a timestamp. | deps: FLT-04, FLT-08, FLT-09, HTL-09, HTL-10 | Low
+- [M] **PAY-03** (System) For every cancellation with a positive refund amount (user cancellations per the provider's tiers; provider-initiated cancellations at 100%), the system shall issue a refund through the Stripe Refunds API, record it, and show its status (Pending, Refunded, Failed) on the booking details. The user receives an in-app notification. | deps: PAY-01, FLT-09, HTL-10, GEN-01 | Medium
+- [M] **PAY-04** (System) All flight and hotel prices, payments and refunds shall use a single platform currency. | deps: - | Low
+
+### 17.5 Itineraries
+
+- [M] **ITN-01** (Registered User) The system shall allow a registered user to create an itinerary with a required title (max 100 characters), one or more countries selected from a predefined list and a start date; edit its title, countries and start date; and delete it after confirmation. It is private by default. When deleted, it disappears from public search, while clones previously made by other users remain unaffected. | deps: ACC-04, GEN-12 | Low
+- [M] **ITN-03** (Registered User) The system shall allow a user to list their itineraries (title, countries, start date, days and visibility), most recently updated first, and open any itinerary to view its full details. | deps: ITN-01 | Low
+- [M] **ITN-05** (Registered User) The system shall allow a user to add days to their itinerary and edit each day's city (selected from the predefined city list shared with hotels and airports) and notes. Days are numbered sequentially, their dates derive from the itinerary start date, and an itinerary has at most 60 days. | deps: ITN-01,GEN-12 | Medium
+- [M] **ITN-07** (Registered User) The system shall allow a user to delete a day after confirmation. Remaining days are renumbered, and dates and budget totals are recalculated. | deps: ITN-05 | Medium
+- [M] **ITN-08** (Registered User) The system shall allow a user to move a day to a new position, with days renumbered and dates and groupings recalculated. | deps: ITN-05 | Medium
+- [M] **ITN-09** (Registered User) The system shall require each itinerary day to have a city and shall display consecutive days in the same city as a group, with the group's day count and budget subtotal. | deps: ITN-05 | Medium
+- [M] **ITN-10** (Registered User) The system shall allow a user to add, edit and delete activities for an itinerary day, including name, description, optional time and optional cost. | deps: ITN-05 | Low
+- [M] **ITN-12** (Registered User) The system shall allow a user to attach images to and remove images from an activity under the shared media-upload rule (GEN-08). | deps: ITN-10, GEN-08 | Medium
+- [M] **ITN-14** (Registered User) The system shall allow a user to add, edit and delete non-negative budget entries for each day across food, accommodation, in-city transport and activities in a selected currency, and show the itinerary's total budget broken down by category and by day. Totals include budget entries, activity costs from ITN-10 (counted under Activities) and intercity transport entries (ITN-16). | deps: ITN-05, ITN-10, ITN-16 | Medium
+- [M] **ITN-16** (Registered User) The system shall allow a user to add, edit and delete a transport cost entry (mode, from-city, to-city, amount, currency, day). | deps: ITN-05 | Low
+- [M] **ITN-18** (Registered User, System) The system shall convert all itinerary budget amounts to the user's preferred currency (from the supported currency list) using exchange rates fetched once per day from a configured public exchange-rate API and cached in the database, and show the rate date. If the API is unavailable, the last cached rates are used. Booking prices are not converted (PAY-04). | deps: ITN-14, ACC-09, PAY-04 | Medium
+- [M] **ITN-20** (Registered User) The system shall allow a user to set an itinerary's visibility to Public or Private. Public itineraries appear in shared search and are read-only to other users. Setting Private removes them immediately. | deps: ITN-01 | Low
+- [M] **ITN-21** (Guest, Registered User) The system shall allow a guest or registered user to search public itineraries by keyword matching title, country or city; filter results by duration (min/max days) and by country or city; and view a public itinerary read-only with author, days, activities and budget. A registered user may clone it; the clone includes all days, activities and budgets, is private, credits the original author and is independent of the original. | deps: ITN-20 | Medium
+- [M] **ITN-25** (Registered User) The system shall allow a user to pick a city group in their itinerary and view hotels available for that group's dates (check-in = date of the group's first day, check-out = the day after its last day) and a guest count and number of rooms they enter, reusing hotel search (HTL-11). | deps: ITN-09, HTL-11 | Medium
+- [M] **ITN-26** (Registered User) The system shall allow a user to search one-way or round-trip flights from a chosen origin airport to any airport in the city of the itinerary's first day. The outbound date defaults to the start date and the return date to the last day's date; the search reuses FLT-11 and FLT-12. | deps: FLT-02, FLT-11, FLT-12, ITN-05 | Medium
+- [B] **ITN-27** (Registered User) The system shall allow booked flights and hotels to be linked to itinerary days, feeding the budget. | deps: FLT-23, HTL-17, ITN-05 | Medium
+- [B] **ITN-28** (Registered User) The system shall allow a user to export or print an itinerary as PDF. | deps: ITN-03 | Medium
+
+### 17.6 Blog
+
+- [M] **BLG-01** (Registered User) The system shall allow a registered user to create a post with a required title and body, optional tags and images, and save it as Draft or Publish. Published posts appear in the author's blog and in search. | deps: ACC-04 | Low
+- [M] **BLG-02** (Guest, Registered User) The system shall allow a guest or registered user to browse a paginated list of published posts filterable by tag, and open a post page showing title, author, date, body, tags, images, like count and comments. Liking, commenting and reporting require login (ACC-10). | deps: BLG-01, BLG-08 | Low
+- [M] **BLG-03** (Registered User) The system shall allow a user to list their own posts, including drafts, with title, status, date, like count and comment count. | deps: BLG-01 | Low
+- [M] **BLG-04** (Registered User) The system shall allow an author to edit and delete their own posts. | deps: BLG-01 | Low
+- [M] **BLG-05** (Registered User) The system shall allow a user to comment on a published post (non-empty, max 500 characters), shown in chronological order. | deps: BLG-01 | Low
+- [M] **BLG-06** (Registered User) The system shall allow a user to like a post once and remove the like, showing the like count. | deps: BLG-01 | Low
+- [M] **BLG-07** (Registered User) The system shall allow a user to edit and delete their own comments. | deps: BLG-05 | Low
+- [M] **BLG-08** (Registered User) The system shall allow an author to add up to 5 tags (max 30 characters each) to a post and edit them later. Tags are searchable and clickable to list matching posts. | deps: BLG-01 | Low
+- [M] **BLG-09** (Guest, Registered User) The system shall allow a guest or registered user to search published posts by keyword in title, tags or author name, showing title, author, date and excerpt, or "no results". Results are ordered by interaction score (likes + comments) descending, with newest first as a tie-breaker. | deps: BLG-01 | Medium
+- [M] **BLG-10** (Registered User) The system shall allow an author to attach images to a post under the shared media-upload rule (GEN-08) and remove them. | deps: BLG-01, GEN-08 | Medium
+- [M] **BLG-12** (Guest, Registered User) The system shall provide a public author page showing the author's name, join date, published posts and public itineraries. | deps: BLG-01, ITN-20 | Low
+- [B] **BLG-13** (Registered User) The system shall allow an author to attach an itinerary to a post. | deps: BLG-01, ITN-03 | Low
+
+### 17.7 Cross-cutting
+
+- [M] **GEN-01** (System) The system shall show in-app notifications (unread count, notification list, mark as read) for booking confirmation, cancellation and refund, flight schedule change, and account or provider suspension. | deps: - | Medium
+- [M] **GEN-02** (System) The system shall show field-level validation messages on all forms. | deps: - | Low
+- [M] **GEN-03** (System) The system shall ask for confirmation before destructive actions (delete, cancel). | deps: - | Low
+- [M] **GEN-04** (System) The system shall show friendly empty states when a list or search has no results. | deps: - | Low
+- [M] **GEN-05** (System) The system shall paginate every list longer than 10 rows (page size 10). | deps: - | Low
+- [M] **GEN-06** (System) The system shall show flight times in each airport's local time zone. | deps: FLT-02, FLT-03 | Medium
+- [M] **GEN-07** (System) The system shall keep an audit log of admin actions (suspensions, deletions). | deps: ACC-15, ACC-16, GEN-10 | Low
+- [M] **GEN-08** (System) The system shall accept image uploads in JPG or PNG format, up to 5 MB each, with up to 5 images per post, activity or hotel and 1 logo per airline, stored on the server and served by URL. Uploads outside these limits are rejected with an error. | deps: - | Medium
+- [M] **GEN-09** (Registered User) The system shall allow a registered user to report a post, comment, review or itinerary with a reason, at most once per item. | deps: ACC-04 | Low
+- [M] **GEN-10** (Admin) The system shall allow an admin to view the list of open reports and resolve each by dismissing it, hiding the content or deleting it, and to hide or delete any post, comment, review or itinerary directly. Hidden content is visible only to its author and admins. | deps: GEN-09 | Medium
+- [M] **GEN-11** (System) Flight bookings and hotel reservations shall follow the lifecycle Pending Payment -> Confirmed -> Completed, with Pending Payment -> Expired (hold timeout) and Confirmed -> Cancelled (user or provider cancellation) as the only other transitions. | deps: FLT-22, HTL-18, PAY-01 | Medium
+- [M] **GEN-12** (System) The system shall seed reference data at setup: airports, cities, countries and supported currencies. | deps: - | Low
+- [M] **GEN-13** (System) All validation, business rules and authorisation shall be enforced by the backend regardless of frontend checks, and passwords shall be stored only as salted hashes. | deps: - | Medium
+- [M] **ACC-19** (System) The system shall not store authentication tokens or user credentials in localStorage, sessionStorage or any other JavaScript-accessible storage. Access and refresh tokens shall be issued as httpOnly, Secure, SameSite cookies, and the frontend shall obtain the current user from an /auth/me endpoint. | deps: ACC-04, ACC-06 | Medium
+- [M] **GEN-14** (System) The system shall provide a clear and organized information architecture, with logically grouped content, balanced spacing, correctly structured menus, and intuitive navigation. Users shall be able to return to previous pages or cancel actions where applicable without losing unrelated data. | deps: - | Medium
+- [M] **GEN-15** (System) The system shall provide an intuitive, easy-to-learn interface with clearly visible actions, understandable labels, and efficient workflows that minimize unnecessary steps and user effort. | deps: - | Medium
+- [M] **GEN-16** (System) The system shall provide clear feedback for user actions, including loading, success, and error states. The interface shall be responsive across desktop, tablet, and mobile screen sizes, prevent common input errors, and provide understandable error messages and recovery options. | deps: GEN-02, GEN-03, GEN-04 | Medium
+- [M] **GEN-17** (System) The system shall maintain a consistent color palette, typography, spacing, alignment, and component styling across all pages. Menus, buttons, forms, tables, and other UI elements shall be visually consistent, properly aligned, and professionally designed. | deps: - | Medium
+- [B] **GEN-01-B** (System) The system shall also send the GEN-01 notifications (plus moderator invitations) by email via SMTP, using a test inbox in development. | deps: GEN-01 | Medium
+- [B] **BON-02** (Registered User) The system shall allow a registered user to save hotels and public itineraries to a favourites list and view it. | deps: HTL-11, ITN-21 | Low
+
+## 18. Course labs vs. this project
+
+The six labs teach the concepts the oral defense asks about, but several code samples are outdated or unsafe. When lab code and this skill differ, use this skill and be ready to explain why (the "why" column is the answer).
+
+### 18.1 Lab 1: MERN recap
+| Lab shows | We do | Why |
+|---|---|---|
+| Express routes and `express.Router` | NestJS controllers | Required stack |
+| "Controller = where business logic is written" | Controllers do HTTP only; logic goes in services | Project PDF §1.1 and NestJS convention: keeps logic testable and reusable |
+| React with Vite + React Router (`BrowserRouter`, `<Outlet>`, `useNavigate`, `useParams`) | Next.js file routing, `layout.tsx`, `next/link`, `next/navigation` | Required stack; layouts replace `<Outlet>` |
+| `localStorage` via `useEffect` | Never for tokens or user data | ACC-19: httpOnly cookies only |
+| Axios in `useEffect` for page data | Server Components fetch page data; `apiFetch` for user actions | Less client JS, no loading waterfalls, works with SSR/ISR |
+| Backend `npm start` | `npm run start:dev` | Watch mode during development |
+| "don't forget CORS" | Next rewrites `/api` (same origin) + `enableCors` for tools | Cookies stay first-party |
+
+### 18.2 Lab 2: Figma, Swagger, TypeScript
+| Lab shows | We do | Why |
+|---|---|---|
+| Swagger from a hand-written `openapi.yaml` with `swagger-ui-express` + `yamljs` (Express) | `@nestjs/swagger` generated from DTOs and decorators, CLI plugin, `/api/docs` | Docs can't drift from code; Milestone 1 is graded in this UI |
+| `tsc --v`, global installs | `tsc -v`; prefer local deps / `npx` | Typo in slide; global versions differ across teammates |
+| Figma design system | Recorded in `DESIGN.md` for agents | Agents can't read Figma; one source of UI truth |
+
+### 18.3 Lab 3: AI workflow
+Good guidance, and still valid: design first, agent instruction files, small slices, verify, PR template, AI log, hooks. Our version: `AGENTS.example.md` + this skill (committed), personal agent files gitignored, per-member prompt logs in `ai-prompts/`.
+Differences: the lab says "NestJS 11" (current is 12). Its monorepo (`apps/api`, `apps/web`, `packages/shared-types`) differs from the project PDF's `backend/` + `frontend/`; we follow the PDF and share types by generating them from OpenAPI. The lab says Spec Kit files from the first two weeks are graded, so check with your TA if that applies to your team.
+
+### 18.4 Lab 4: Decorators + NestJS intro
+| Lab shows | We do | Why |
+|---|---|---|
+| `MongooseModule.forRoot('mongodb://localhost:27017/…')` hardcoded | `forRootAsync` + `ConfigService` + `MONGODB_URI` (Atlas) | Shared Atlas DB, no secrets in code (PDF §8.11) |
+| Decorator theory (class/method/property/parameter, execution order) | Same (Nest uses these legacy TS decorators) | Defense material: know how `@Roles` metadata + `Reflector` work |
+
+### 18.5 Lab 5: NestJS CRUD + auth
+| Lab shows | We do | Why |
+|---|---|---|
+| `@Prop() id: string` manual id | Use Mongo `_id` | Avoids duplicate ids and broken refs |
+| Lowercase classes, `mongoose.Model<course>` | `class Course`, `Model<Course>`, `HydratedDocument<Course>` | TS conventions, correct typing |
+| DTOs without validators | class-validator on every DTO + global `ValidationPipe({ whitelist, forbidNonWhitelisted, transform })` | GEN-13 server-side validation; blocks mass assignment (e.g. `role`) |
+| `PUT` for partial updates | `PATCH` + `PartialType` | REST semantics; matches the PDF endpoint list |
+| `npm start` or `node src/main.js` | `npm run start:dev` | `src` is TypeScript; node can't run it directly |
+| `console.log` of password and hash | Never log secrets | Security; leaks into terminals and logs |
+| Login: `NotFoundException('User not found')` | `401 INVALID_CREDENTIALS` "Invalid email or password" | ACC-04; stops account enumeration |
+| JWT payload `{ userid, role }` | `{ sub, role, sid }` | `sub` is the standard claim; `sid` enables logout and idle expiry |
+| One `token` cookie, 1 h, `secure` only in prod, no `sameSite` | `access_token` 15 min + server-side session with `refresh_token`; httpOnly + Secure + SameSite=Lax | ACC-06, ACC-19 |
+| `JwtModule.register({ secret: process.env... })` | `registerAsync` with `ConfigService` | env may not be loaded at import time |
+| Controller `try/catch` returning `{ statusCode, message }` | Throw HTTP exceptions; a global filter formats them | Correct HTTP status codes; consistent error shape |
+| Roles guard throws `UnauthorizedException` | `ForbiddenException` (403) | 401 = not logged in, 403 = not allowed |
+| `@UseGuards` per controller | Global `APP_GUARD`s + `@Public()` opt-out | New endpoints are protected by default |
+| Installs `@nestjs/passport` but doesn't use it | No Passport | Fewer moving parts; the custom guard is what the lab actually teaches |
+
+### 18.6 Lab 6: Next.js
+Mostly current for Next 16: `proxy.ts` replaces `middleware.ts`, `params`/`searchParams` are Promises, Server vs Client rules, `error.tsx` must be a client component, `global-error.tsx` needs `<html><body>`, metadata only in Server Components.
+Extra notes: in Next 16 every parallel-route slot **must** have `default.tsx` or the build fails. We don't need parallel or intercepting routes for this project, so don't add them without a feature that needs them. Route handlers (`route.ts`) aren't where our API lives; the API is NestJS. Node requirement is 20.9+ (we use 26 LTS).
+
+## 19. Not decided yet: ask Kareem
+
+If a question touches anything below, don't answer as if it were decided. Say it isn't decided and that the member should ask Kareem. You may repeat the facts listed here.
+
+| Topic | What is known | Status |
+|---|---|---|
+| UI design: `DESIGN.md`, colours, typography, components, Tailwind or a UI kit | Agents must follow `DESIGN.md` for UI once it exists. The scaffold has no Tailwind and no UI kit, and none may be added before `DESIGN.md` decides. The course's lab 2 uses Figma for the design system. | Not decided (before M2) |
+| Frontend testing tools and levels | Backend testing is fully decided (§13 “Testing”). | Not decided (before M2) |
+| Frontend tickets (M2) | They come after `DESIGN.md` is decided. The route map and rendering plan in §12 “Frontend” are the current guidance. | Not created yet |
+| Deployment (the optional cloud bonus): provider, how uploads persist | Both apps must be deployed and fully working to qualify; graders then use only the deployed version. Many hosts wipe the disk on redeploy, so uploaded images need a persistent disk or volume. Ticket PLT-09 is in the backlog. | Not decided (the "extras and deployment" topic) |
+| Extra features beyond the requirements, and which bonus `[B]` requirements we do | Bonus tickets are in the backlog. Likely new modules if done: favourites, admin analytics; email would be a notifications channel. Kareem finds and decides extra features. | Not decided |
+| Sprint dates | Tickets are in Sprint 1 (contracts) and Sprint 2 (features); dates are left empty. | Kareem sets them |
+| The 15 design calls in §5.8 “Decisions to confirm in team review” (USD, UTC "today", refund snapshot, baggage per segment, …) | They are the current design and the schemas follow them. | Awaiting team confirmation in the review (PLT-04) |
+| Self-hosted Azure CI runner | Plan B only if GitHub minutes run low (PLT-02, backlog). | Not scheduled |
+| When `develop` is prepared | Just before the tickets start (§3.18 “Git rules”, rule 12). | Kareem does it; exact date not set |
+| GitHub access for Aisha, Jana, Mokhtar | Invites were pending on the snapshot date; their issues get assigned once they accept. | Check GitHub |
+| Whether Spec Kit files are graded | Lab 3 says Spec Kit files from the first two weeks are graded. | Check with the TA |
+| Who presents what in the oral defense, demo data beyond the seed | The demo seed is ticket PLT-08. | Not decided |
+
+Anything else that isn't in this file is also undecided as far as you know: say so and send them to Kareem.
+
+## 20. Glossary
+
+| Term | Meaning here |
+|---|---|
+| Module | A NestJS feature module (accounts, flights, …). Owns its collections and exposes a service. |
+| Package | A group of modules owned by one member (§2.1 “Team and packages”). |
+| Owner | The member whose package contains the module. Only they change it. |
+| Embedded | Stored inside the parent document; loaded, saved and deleted with it. |
+| Reference | A field holding another document's ID. MongoDB doesn't check it; the service does. |
+| Snapshot | A copy of a value at a moment (price, policy) that never changes afterwards. |
+| Hold | A `pending_payment` booking that keeps inventory for 10 minutes (FLT-22, HTL-18). |
+| Inventory | The data that says what can still be sold: seat counters on cabins (flights), `room_nights` documents (hotels). |
+| `SeatInventory` / `RoomNightInventory` | The only classes allowed to change inventory (§5.4 “Inventory operations”). |
+| Atomic update | A check and a change done by the database in one step, so nothing can happen in between. |
+| Conditional update | An update that only applies if the document is still in the expected state (`{ _id, status: from }`). |
+| Transaction | Several writes that all succeed or all fail together (needs a replica set). |
+| Unique index | The database rejects a second document with the same values. |
+| Partial index | An index that only covers documents matching a condition. |
+| TTL index | The database deletes documents automatically after a date. |
+| Port | An interface one module owns and another implements, so the first doesn't depend on the second (`PayableBooking`, `ReportableContent`, `ActiveBookingsCheck`). |
+| Event | A message one module emits ("payment succeeded") and others react to without being called directly (`@nestjs/event-emitter`). |
+| Fake | A stand-in for another module's service or port, shaped exactly like its contract, used until the real one is merged. |
+| Stub | The real class with the agreed method signatures but no logic yet (Sprint 1 contract tickets). |
+| Minor units | Money as whole cents: 1999 = $19.99. |
+| `DateOnly` | A calendar date stored as a `Date` at 00:00:00.000Z. Travels as `YYYY-MM-DD` in the API. |
+| Platform currency | USD: every price, payment and refund (PAY-04). |
+| `ci-ok` | The single required CI check; passes when every job that ran passed. |
+| `npm run verify` | Runs CI's checks locally in one app (format, lint, typecheck, tests with coverage, build). |
+| Contract ticket (`CTR-`) | A Sprint 1 ticket where a package publishes the interface others call, as a stub and a fake. |
+| M1 / M2 | Milestone 1 (backend, 20 Nov) / Milestone 2 (frontend, 11 Dec). |
+| `[M]` / `[B]` | Mandatory / bonus requirement in the workbook. |
+| `ErrorCode` key / value | PascalCase key in code (`ErrorCode.SeatsUnavailable`), UPPER_SNAKE value on the wire (`SEATS_UNAVAILABLE`). List: §10.3 “Response shapes”. |

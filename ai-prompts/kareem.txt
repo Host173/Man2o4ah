@@ -484,3 +484,16 @@ ok push and open a pr
 How the output was used:
 Pushed chore/PLT-05-common-foundation and opened a PR into main (develop is behind main during the setup phase; the PLT-03 PRs also went into main).
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-01
+
+Prompt:
+no do it in its own pr
+
+How the output was used:
+Added .github/workflows/link-issue.yml (adds "Closes #<issue>" to each PR from its ticket key) and a README line; pushed chore/PLT-01-link-issues and opened a PR into develop.
+================================================

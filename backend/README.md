@@ -25,6 +25,45 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Hotels contract (CTR-03)
+
+[HotelsService](src/modules/hotels/hotels.service.ts) provides hotel/room data,
+inclusive room-night lookups, search, rating-summary updates, and provider
+activation. [RoomNightInventory](src/modules/hotels/room-night-inventory.ts)
+provides reserve, release, block, unblock, availability updates, deactivate, and
+delete. Both are exported by `HotelsModule`; models remain private.
+
+These are Sprint 1 stubs: calling them throws `NotImplementedException`.
+Database-backed behavior ships in the corresponding Sprint 2 tickets. There are
+no new HTTP endpoints in CTR-03.
+
+For another module's unit tests, import `FakeHotelsService` and
+`FakeRoomNightInventory` from `test/fakes/index.ts`. Seed the hotel fake with a
+`HotelDataset` (`hotels`, `rooms`, `roomNights`), then construct the inventory fake
+with that same hotel fake. They share in-memory state, so reservations and blocks
+immediately affect search and room-night lookups. Fixtures are cloned per instance.
+
+App IDs are strings, amounts are integer minor units, and dates are UTC `DateOnly`
+values from `common/dates`. Stays exclude check-out; availability and block ranges
+include both endpoints. Failed multi-room holds leave all requested rooms unchanged.
+Lookup of an unknown hotel returns `null`; hotel updates and room inventory edits
+throw `NOT_FOUND` for missing IDs. Reserve rejects unavailable rooms with
+`ROOMS_UNAVAILABLE`. Search returns the shared paginated shape with a
+`pricePerNightMinor` field on each matching hotel.
+
+Pass `{ session }` as the final argument to hotel reads and inventory writes made
+inside a booking transaction. The fakes accept this argument for compatibility but
+do not emulate database transactions or rollback across multiple service calls.
+They do not expire holds themselves: hotel-bookings calls `release(reservationId)`.
+
+Run the contract tests with:
+
+```powershell
+npm test -- hotels.contract.spec.ts hotels.fake.spec.ts
+```
+
+Run `npm run verify` before handing off changes.
+
 ## Project setup
 
 ```bash

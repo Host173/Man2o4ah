@@ -21,7 +21,7 @@ Decisions: `docs/DECISIONS.md` §13–14 (CI), §16 (prompt log), §18 (git). Th
 
 ## 2. Commits
 
-Conventional Commits, module as scope, requirement ID at the end (CI checks the format):
+Conventional Commits, module as scope, requirement ID at the end (the recommended style; CI doesn't check it):
 ```
 feat(flights): implement seat hold with atomic inventory (FLT-22)
 test(flights): cover the 10-minute hold boundary (FLT-22)
@@ -48,7 +48,6 @@ Types: `feat fix test refactor docs style chore ci perf build`. Never write `upd
 | Typecheck | `tsc --noEmit` over source and tests |
 | Tests + coverage | all pass; each backend service file ≥ 80% lines |
 | Build | both apps build |
-| Commit messages | Conventional Commits |
 | Branch / PR title | contain the requirement ID |
 | Security | no high/critical production vulnerabilities (`npm audit`); no committed secrets (gitleaks) |
 

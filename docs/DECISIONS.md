@@ -157,7 +157,6 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 | Typecheck | `tsc --noEmit` over `src` and `test` | |
 | Tests + coverage | all levels pass, coverage reported | minimum 80% lines on `*.service.ts` in business modules |
 | Build | backend and frontend build | |
-| Commit messages | Conventional Commits | checked in CI on the PR's commits |
 | PR title / branch | requirement ID present | branch `<type>/<ID>-<description>`, PR title `<ID>: <title>` (e.g. `FLT-22: Flight seat hold`) |
 | Security | no high/critical vulnerable dependencies; no committed secrets | `npm audit --omit=dev --audit-level=high`; gitleaks |
 

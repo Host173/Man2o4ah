@@ -1,0 +1,28 @@
+import type { Paginated } from '../../src/common/pagination/paginated.js';
+import { toPage } from '../../src/common/pagination/paginated.js';
+import type { AuditService } from '../../src/modules/audit/audit.service.js';
+import type {
+  AuditLogQueryDto,
+  AuditLogView,
+} from '../../src/modules/audit/audit.types.js';
+import type { PublicApi } from './public-api.js';
+
+/** A working `AuditService` over entries you `add(...)`: filters, newest first, paginated. */
+export class FakeAuditService implements PublicApi<AuditService> {
+  private readonly entries: AuditLogView[] = [];
+
+  add(entry: AuditLogView): void {
+    this.entries.push(entry);
+  }
+
+  list(query: AuditLogQueryDto): Promise<Paginated<AuditLogView>> {
+    const { action, from, to, page, limit } = query;
+    const matching = this.entries
+      .filter((entry) => !action || entry.action === action)
+      .filter((entry) => !from || entry.createdAt >= from)
+      .filter((entry) => !to || entry.createdAt <= to)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const items = matching.slice((page - 1) * limit, page * limit);
+    return Promise.resolve(toPage(items, matching.length, page, limit));
+  }
+}

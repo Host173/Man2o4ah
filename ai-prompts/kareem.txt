@@ -850,6 +850,489 @@ Created chore/PLT-06-event-contracts-test-support from origin/develop; added @ne
 ================================================
 Date: 2026-11-12
 Student: Kareem
+Tool: Claude Code
+Related Requirement: CTR-05
+
+Prompt:
+do this
+
+[Attached: CTR05_EXECUTION.md]
+# Execution — CTR-05: Platform contracts (payments, storage, fx, reference data, audit)
+
+Run in the root of the project repository.
+
+## Goal
+
+Publish the interfaces other packages call from the Platform package (issue #14), so they can build against them in Sprint 2 before the real code exists:
+- **payments:** the `PayableBooking` port (and how booking modules plug in), the refund interface, the Stripe gateway interface
+- **storage:** `StorageService`, the image rules and the upload decorator
+- **fx:** `FxService`
+- **reference-data:** `ReferenceDataService`
+- **audit:** `AuditService`
+
+For each one: a **stub** (the real class with the agreed signatures; methods throw `NotImplementedException` until their feature ticket) and a **fake** (a working in-memory version that tests use).
+
+**Out of scope:** any real logic behind the stubs (PAY-01, PAY-03, GEN-08, ITN-18, GEN-12, GEN-07 do that), the Stripe SDK, controllers, Mongoose queries, event listeners, other packages' modules.
+
+## Context you need
+
+**Allowed calls** (`docs/database/data-model.md` §6.1): payments calls nobody (it uses the port). flights and hotels call reference-data and storage. accounts and fx call reference-data. itineraries calls reference-data, fx and storage. blog calls storage. admin calls audit. flight-bookings and hotel-bookings call payments.
+
+**Payments rules** (`docs/ai/skills/travel-platform/references/bookings-payments.md` §4, §6, §7):
+- Payments never writes a booking, and bookings never call Stripe.
+- `POST /api/payments` checks the booking through the port: it belongs to the user, is `pending_payment`, and `holdExpiresAt > now`.
+- On cancellation, the booking module calls `PaymentsService.refund(...)` after its commit, and only if the refund amount is > 0.
+- One refund per booking: `refunds` has a unique index on `{ bookingType, bookingId }`.
+- Reasons: `user_cancellation`, `provider_cancellation`, `late_payment` (a full refund).
+- The Stripe PaymentIntent uses idempotency key `pi-<type>-<bookingId>`; the refund uses `refund-<refundId>`.
+
+**Uploads** (GEN-08, `references/backend.md` §11):
+- JPG or PNG only, at most 5 MB each, random file names, stored on the server and served at `/uploads/<key>`.
+- Documents store `ImageRef { _id, key }`; the URL is computed, never stored.
+- Feature services enforce the counts (≤ 5 per post, activity or hotel; 1 airline logo).
+
+**FX** (`references/domain-rules.md` §2):
+- `convert` uses the newest rates document: `amount × rates[to] / rates[from]`, adjusted for each currency's `minorUnits` (JPY has 0), rounded half up.
+- An unknown currency gives `400 UNSUPPORTED_CURRENCY`; no rates at all gives `503 RATES_UNAVAILABLE`.
+- Responses carry `{ displayCurrency, rateDate }`.
+
+**Reference data:**
+- Dataset IDs are string `_id`s: airport `'CAI'`, city `'cairo'`, country `'EG'`, currency `'USD'`, attraction `'att-1'`.
+- Fields:
+  - airport: `name, cityId, countryCode, timeZone`
+  - city: `name, countryCode`
+  - country: `name, currency`
+  - currency: `name, minorUnits`
+  - attraction: `name, cityId`
+- Read-only to the app.
+
+**Audit** (GEN-07): append-only. `GET /api/admin/audit-logs` is paginated and filterable by action and date. Entries come from `admin.action` events.
+
+**Existing code to reuse:**
+- `ErrorCode` (`common/errors/error-codes.ts`)
+- `Paginated`, `toPage`, `PaginationQueryDto` (`common/pagination/`)
+- `keywordRegex` (`common/text/escape-regex.ts`)
+- `BookingType` (`common/database/booking-type.ts`)
+- the schema enums `RefundReason`, `RefundStatus` (payments) and `AuditAction` (audit)
+- in tests: `createTestApp`, `HOOK_TIMEOUT` (`backend/test/support/`)
+
+**Code rules:**
+- ESM: relative imports end in `.js`; type-only imports use `import type`.
+- No `any`, no `@ts-ignore` or `@ts-expect-error`, no lint-disable comments.
+- Every stub method and every interface gets a one-line JSDoc that names the requirement and, for stubs, the ticket that implements it.
+- Errors use `ErrorCode` (e.g. `new BadRequestException({ code: ErrorCode.UnsupportedCurrency, message })`).
+
+**Coverage gate (important):** CI requires ≥ 80% line coverage on **every** `src/modules/**/*.service.ts`. A stub service with no test fails CI. Step 7 tests every stub method.
+
+**Windows:** run backend tests on their own, not while the frontend builds.
+
+## Before you start
+
+1. `git fetch origin`. `git status` must be clean. If not, stop and report.
+2. Create `feature/CTR-05-platform-contracts` from `origin/develop`.
+3. Confirm the base has PLT-06: `backend/test/support/test-app.ts` exists. If not, stop and report.
+
+## Step 1: Payments contract (`backend/src/modules/payments/`)
+
+**`ports/payable-booking.port.ts`:**
+```ts
+/** A booking's status, as payments sees it (mirrors both booking schemas). */
+export type PayableStatus = 'pending_payment' | 'confirmed' | 'completed' | 'expired' | 'cancelled';
+export interface Payable { amountMinor: number; currency: string; status: PayableStatus; holdExpiresAt: Date }
+export interface PolicyTier { daysBefore: number; refundPercent: number }
+export interface FlightSegmentPolicies {
+  direction: 'outbound' | 'return'; flightNumber: string; cancellationTiers: PolicyTier[];
+  freeBags: number; maxBagWeightKg: number; extraBagPriceMinor: number; maxExtraBagsPerPassenger: number;
+}
+export type BookingPolicies =
+  | { bookingType: 'flight'; segments: FlightSegmentPolicies[] }
+  | { bookingType: 'hotel'; cancellationTiers: PolicyTier[]; checkInTime: string; checkOutTime: string };
+/** Implemented by flight-bookings and hotel-bookings; owned by payments (PAY-01, PAY-02). */
+export interface PayableBooking {
+  readonly bookingType: BookingType;
+  /** The booking's amount, status and hold expiry. Throws 404 NOT_FOUND if it doesn't exist or isn't the user's. */
+  getPayable(bookingId: string, userId: string): Promise<Payable>;
+  /** The booking's policy snapshot (PAY-02). Same 404 rule. */
+  getPolicies(bookingId: string, userId: string): Promise<BookingPolicies>;
+}
+```
+
+**`ports/payable-booking.registry.ts`:** this is real logic, not a stub. `@Injectable() export class PayableBookingRegistry`:
+- `register(booking: PayableBooking): void` throws a plain `Error` if that `bookingType` is already registered.
+- `get(type: BookingType): PayableBooking` throws a plain `Error` naming the type if nothing is registered (a wiring bug, so a 500).
+
+Its JSDoc shows how an implementer plugs in, because booking modules import `PaymentsModule` and payments must never import them:
+```ts
+@Injectable()
+export class FlightPayableBooking implements PayableBooking, OnModuleInit {
+  readonly bookingType = BookingType.FLIGHT;
+  constructor(private readonly registry: PayableBookingRegistry) {}
+  onModuleInit() { this.registry.register(this); }
+  // getPayable, getPolicies …
+}
+```
+
+**`payments.types.ts`:**
+```ts
+export interface RefundRequest {
+  bookingType: BookingType; bookingId: string; userId: string;
+  amountMinor: number;           // > 0 (a 0% refund is never requested, PAY-03)
+  currency: string; reason: RefundReason;
+}
+export interface RefundView {
+  refundId: string; bookingType: BookingType; bookingId: string;
+  amountMinor: number; currency: string; reason: RefundReason; status: RefundStatus;
+}
+```
+
+**`payments.service.ts`** (stub). `@Injectable() export class PaymentsService` with:
+- `refund(request: RefundRequest): Promise<RefundView>`. JSDoc: "Creates the refund (status `pending`) and asks Stripe for it. Call after your transaction commits. One refund per booking: a second call for the same booking returns the existing one. Throws 400 `VALIDATION_FAILED` if `amountMinor <= 0`. Implemented in PAY-03."
+- `getRefund(bookingType: BookingType, bookingId: string): Promise<RefundView | null>`. JSDoc: "The booking's refund, for showing its status (PAY-03). Implemented in PAY-03."
+
+Both throw `new NotImplementedException('<method>: implemented in PAY-03')`.
+
+**`stripe/stripe-gateway.ts`:**
+```ts
+export const STRIPE_GATEWAY = Symbol('STRIPE_GATEWAY');
+export interface CreatePaymentIntentInput {
+  amountMinor: number; currency: string;
+  metadata: { bookingType: BookingType; bookingId: string };
+  idempotencyKey: string;        // pi-<type>-<bookingId>
+}
+export interface GatewayPaymentIntent { id: string; clientSecret: string; status: string }
+export type GatewayRefundStatus = 'pending' | 'requires_action' | 'succeeded' | 'failed' | 'canceled';
+export interface CreateRefundInput {
+  paymentIntentId: string; amountMinor: number;
+  idempotencyKey: string;        // refund-<refundId>
+  metadata: { refundId: string };
+}
+export interface GatewayRefund { id: string; status: GatewayRefundStatus }
+/** A verified webhook event, reduced to what payments uses. */
+export type GatewayEvent =
+  | { id: string; type: 'payment_intent.succeeded' | 'payment_intent.payment_failed'; paymentIntent: { id: string; metadata: Record<string, string> } }
+  | { id: string; type: 'refund.updated' | 'refund.failed'; refund: { id: string; status: GatewayRefundStatus; metadata: Record<string, string> } }
+  | { id: string; type: 'ignored'; originalType: string };
+/** The only code that talks to Stripe (PAY-01). Tests use FakeStripeGateway. */
+export interface StripeGateway {
+  createPaymentIntent(input: CreatePaymentIntentInput): Promise<GatewayPaymentIntent>;
+  cancelPaymentIntent(paymentIntentId: string): Promise<void>;
+  createRefund(input: CreateRefundInput): Promise<GatewayRefund>;
+  /** Verifies the signature; throws 400 BAD_SIGNATURE if it doesn't match. */
+  parseWebhook(rawBody: Buffer, signature: string): GatewayEvent;
+}
+```
+Also add `stripe/stripe-gateway.stub.ts`: `@Injectable() export class StripeGatewayStub implements StripeGateway`, where every method throws `NotImplementedException('… implemented in PAY-01')`.
+
+**`payments.module.ts`:** keep the `MongooseModule.forFeature` block. Add these providers: `PaymentsService`, `PayableBookingRegistry` and `{ provide: STRIPE_GATEWAY, useClass: StripeGatewayStub }`. Export `PaymentsService` and `PayableBookingRegistry`, not the gateway.
+
+**Commit:** `feat(payments): add the payable-booking port, registry, refund interface and Stripe gateway contract (CTR-05)`
+
+## Step 2: Storage contract (new module `backend/src/modules/storage/`)
+
+**`image-rules.ts`:** real logic, shared by the real service and the fake.
+- `MAX_IMAGE_BYTES = 5 * 1024 * 1024`
+- `ALLOWED_IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png' } as const`
+- `MAX_IMAGES_PER_ITEM = 5`
+- `export interface UploadedImage { buffer: Buffer; originalname: string; mimetype: string; size: number }` (the fields of a Multer file that storage uses)
+- `assertImageAllowed(file: UploadedImage): void`. It throws `BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Invalid image', details: [{ field: 'file', message }] })` when:
+  - `mimetype` isn't JPG or PNG ("only JPG or PNG images are allowed")
+  - `size > MAX_IMAGE_BYTES` ("an image can be at most 5 MB")
+  - `size === 0` ("the file is empty")
+
+**`image-upload.decorator.ts`:** `export function ImageUpload(field = 'file')`, built with `applyDecorators` from:
+- `UseInterceptors(FileInterceptor(field, { limits: { fileSize: MAX_IMAGE_BYTES, files: 1 } }))` (`FileInterceptor` from `@nestjs/platform-express`). Give no `storage` or `dest` option: Multer then keeps the file in memory (`file.buffer`), which is what storage expects. Don't import `multer` directly; it isn't a direct dependency.
+- `ApiConsumes('multipart/form-data')`
+- `ApiBody` with a schema of one binary field named `field`
+
+Its JSDoc says:
+- One image per request.
+- The controller reads it with `@UploadedFile() file` and passes it to the feature service, which calls `storage.save(file)`.
+- Feature modules never configure Multer themselves.
+
+**`storage.service.ts`** (stub except `urlOf`):
+```ts
+export interface StoredImage { _id: Types.ObjectId; key: string }  // the ImageRef subdocument to store
+@Injectable() export class StorageService {
+  /** Validates (assertImageAllowed) and saves the file under a random key (GEN-08). */
+  save(file: UploadedImage): Promise<StoredImage>
+  /** Deletes the file; a missing file is not an error (GEN-08). */
+  delete(key: string): Promise<void>
+  /** Copies the file under a new key, for itinerary clones (ITN-21, GEN-08). */
+  copy(key: string): Promise<StoredImage>
+  /** The public URL: `/uploads/<key>`. Never stored. */
+  urlOf(key: string): string
+}
+```
+`save`, `delete` and `copy` throw `NotImplementedException('… implemented in GEN-08')`. `urlOf` is real.
+
+**`storage.module.ts`:** `@Module({ providers: [StorageService], exports: [StorageService] })`. Add `StorageModule` to `AppModule`'s `imports`, after `AuditModule`. Change nothing else there.
+
+**Commit:** `feat(storage): add the storage contract, image rules and upload decorator (CTR-05)`
+
+## Step 3: FX contract (`backend/src/modules/fx/`)
+
+**`fx.types.ts`:**
+```ts
+export interface Converter {
+  /** 'YYYY-MM-DD' of the rates used. */
+  rateDate: string;
+  /** Converts an amount in minor units; rounds half up. Throws 400 UNSUPPORTED_CURRENCY for an unknown code. */
+  convert(amountMinor: number, from: string, to: string): number;
+}
+```
+**`fx.service.ts`** (stub). `@Injectable() export class FxService` with:
+- `getConverter(): Promise<Converter>`. JSDoc: "Loads the newest rates once; use it to convert many amounts (budget summaries, ITN-14/18). Throws 503 RATES_UNAVAILABLE if there are no rates. Implemented in ITN-18."
+- `convert(amountMinor: number, from: string, to: string): Promise<{ amountMinor: number; rateDate: string }>`. JSDoc: "One conversion. Same errors. Implemented in ITN-18."
+
+**`fx.module.ts`:** keep the Mongoose block; provide and export `FxService`.
+
+**Commit:** `feat(fx): add the FxService contract (CTR-05)`
+
+## Step 4: Reference-data contract (`backend/src/modules/reference-data/`)
+
+**`reference-data.types.ts`:**
+```ts
+export interface AirportView { code: string; name: string; cityId: string; countryCode: string; timeZone: string }
+export interface CityView { id: string; name: string; countryCode: string }
+export interface CountryView { code: string; name: string; currency: string }
+export interface CurrencyView { code: string; name: string; minorUnits: number }
+export interface AttractionView { id: string; name: string; cityId: string }
+```
+**`reference-data.service.ts`** (stub). `@Injectable() export class ReferenceDataService`. Every getter returns `null`, or a missing key in the `Map`, when something isn't found; the caller decides 400 or 404.
+- `getAirport(code: string): Promise<AirportView | null>`
+- `getAirports(codes: string[]): Promise<Map<string, AirportView>>` (bulk, for lists)
+- `getCity(id: string): Promise<CityView | null>`
+- `getCities(ids: string[]): Promise<Map<string, CityView>>`
+- `findCityIds(keyword: string): Promise<string[]>` (case-insensitive name match on the escaped keyword; ITN-21)
+- `getCountry(code: string): Promise<CountryView | null>`
+- `getCountries(codes: string[]): Promise<Map<string, CountryView>>`
+- `findCountryCodes(keyword: string): Promise<string[]>`
+- `getCurrency(code: string): Promise<CurrencyView | null>`
+- `listCurrencies(): Promise<CurrencyView[]>` (sorted by code)
+- `listAttractions(cityId: string): Promise<AttractionView[]>` (sorted by name)
+
+Every method throws `NotImplementedException('… implemented in GEN-12')`.
+
+**`reference-data.module.ts`:** keep everything; add `ReferenceDataService` to `providers` and `exports`.
+
+**Commit:** `feat(reference-data): add the ReferenceDataService contract (CTR-05)`
+
+## Step 5: Audit contract (`backend/src/modules/audit/`)
+
+**`audit.types.ts`:**
+```ts
+export class AuditLogQueryDto extends PaginationQueryDto {
+  action?: AuditAction;   // @IsOptional() @IsIn(Object.values(AuditAction)) @ApiPropertyOptional({ enum: … })
+  from?: Date;            // @IsOptional() @Type(() => Date) @IsDate() — inclusive
+  to?: Date;              // same — inclusive
+}
+export interface AuditLogView {
+  id: string; actorId: string; action: AuditAction;
+  target: { type: string; id: string }; details?: Record<string, unknown>; createdAt: Date;
+}
+```
+**`audit.service.ts`** (stub). `@Injectable() export class AuditService` with:
+- `list(query: AuditLogQueryDto): Promise<Paginated<AuditLogView>>`. JSDoc: "Newest first, filtered by action and an inclusive date range (GEN-07). Entries are written by the audit module's own `admin.action` listener; no other module writes them. Implemented in GEN-07."
+
+It throws `NotImplementedException`.
+
+**`audit.module.ts`:** keep the Mongoose block; provide and export `AuditService`.
+
+**Commit:** `feat(audit): add the AuditService contract (CTR-05)`
+
+## Step 6: Fakes (`backend/test/fakes/`)
+
+**`public-api.ts`:** `export type PublicApi<T> = { [K in keyof T]: T[K] };`. It keeps public members only, so a fake still type-checks after the real class gains private dependencies. Every fake below `implements PublicApi<TheService>` (or the interface named), so **`npm run typecheck` fails if a fake drifts from its contract**.
+
+| File | Class | Behaviour |
+|---|---|---|
+| `payable-booking.fake.ts` | `FakePayableBooking implements PayableBooking` | constructor `(bookingType)`; `set(bookingId, userId, payable, policies)`; `getPayable`/`getPolicies` return the stored values for the owner and throw `NotFoundException({ code: ErrorCode.NotFound, … })` for another user or an unknown ID |
+| `payments.fake.ts` | `FakePaymentsService implements PublicApi<PaymentsService>` | `refund` validates `amountMinor > 0` (400 `VALIDATION_FAILED`); creates a `RefundView` with a new ObjectId hex ID and status `pending`; a second call for the same booking returns the first. `getRefund` returns it or `null`. Public `refunds` array; `setStatus(refundId, status)` |
+| `stripe-gateway.fake.ts` | `FakeStripeGateway implements StripeGateway` | IDs `pi_fake_<n>` and `re_fake_<n>`; clientSecret `<id>_secret`. The same `idempotencyKey` returns the same object (like Stripe). `cancelPaymentIntent` records the ID. `nextRefundStatus` (default `pending`). `failNext(method)` makes the next call throw an `Error`. Public `calls` log. `parseWebhook` accepts only `FAKE_STRIPE_SIGNATURE` (an exported constant) and returns `JSON.parse(rawBody)` as `GatewayEvent`; anything else throws `BadRequestException({ code: ErrorCode.BadSignature, … })` |
+| `storage.fake.ts` | `FakeStorageService implements PublicApi<StorageService>` | `save` calls `assertImageAllowed`, then keeps the buffer in memory under `<ObjectId hex>.<jpg\|png>`. `delete` (missing is fine). `copy` (an unknown key throws a 404 `NOT_FOUND`). `urlOf` like the real one. `has(key)` and `keys()` |
+| `fx.fake.ts` | `FakeFxService implements PublicApi<FxService>` | default rates per USD: `USD 1, EGP 50, EUR 0.9, AED 3.6725, JPY 150`; minor units `JPY 0`, others 2; rateDate `'2026-11-01'`. Constructor accepts overrides. Conversion: `round(amountMinor / 10^mu(from) / rate(from) × rate(to) × 10^mu(to))`, half up. Unknown code → 400 `UNSUPPORTED_CURRENCY`. `setNoRates()` makes both methods throw 503 `RATES_UNAVAILABLE` (`ServiceUnavailableException`) |
+| `reference-data.fake.ts` | `FakeReferenceDataService implements PublicApi<ReferenceDataService>` | a small built-in dataset (below), replaceable through the constructor. Keyword search uses `keywordRegex`. Same `null`/`Map` rules |
+| `audit.fake.ts` | `FakeAuditService implements PublicApi<AuditService>` | `add(entry)` stores an `AuditLogView`; `list` filters by action and inclusive dates, newest first, and paginates with `toPage` |
+
+Fake reference dataset:
+- **Airports:**
+  - `CAI` Cairo International Airport, `cairo`, `EG`, `Africa/Cairo`
+  - `DXB` Dubai International Airport, `dubai`, `AE`, `Asia/Dubai`
+  - `JFK` John F. Kennedy International Airport, `new-york`, `US`, `America/New_York`
+- **Cities:** `cairo`/Cairo/EG, `dubai`/Dubai/AE, `new-york`/New York/US
+- **Countries:** `EG`/Egypt/EGP, `AE`/United Arab Emirates/AED, `US`/United States/USD
+- **Currencies:** `USD`/US Dollar/2, `EGP`/Egyptian Pound/2, `AED`/UAE Dirham/2, `EUR`/Euro/2, `JPY`/Japanese Yen/0
+- **Attractions:** `att-1` Pyramids of Giza/cairo, `att-2` Egyptian Museum/cairo, `att-3` Burj Khalifa/dubai
+
+Add `backend/test/fakes/index.ts` re-exporting every fake and `FAKE_STRIPE_SIGNATURE`.
+
+**Commit:** `test(fakes): add fakes for the platform contracts (CTR-05)`
+
+## Step 7: Tests
+
+**Stub specs** (next to each service). Each one constructs the service directly and asserts that **every** stub method rejects or throws `NotImplementedException`. `storage.service.spec.ts` also checks that `urlOf('a.png')` is `/uploads/a.png`. These keep the coverage gate green.
+- `payments.service.spec.ts`
+- `storage.service.spec.ts`
+- `fx.service.spec.ts`
+- `reference-data.service.spec.ts`
+- `audit.service.spec.ts`
+
+**Real-logic specs:**
+- `payable-booking.registry.spec.ts`: register then get; a second register of the same type throws; get of an unregistered type throws.
+- `image-rules.spec.ts`:
+  - PNG of exactly `MAX_IMAGE_BYTES` passes; one byte more fails with `details[0].field === 'file'`
+  - JPEG passes; `image/gif` fails; size 0 fails
+- `audit.types.spec.ts`: `AuditLogQueryDto` validates `action` against the enum and converts `from` to a `Date`.
+
+**Wiring** (`backend/src/modules/platform-contracts.api.spec.ts`):
+- `createTestApp({ imports: [PaymentsModule, StorageModule, FxModule, ReferenceDataModule, AuditModule] })`
+- `moduleRef.get(...)` returns each exported service and `PayableBookingRegistry`
+- `moduleRef.get(STRIPE_GATEWAY)` is a `StripeGatewayStub`
+
+**Fake specs** (`backend/test/fakes/*.spec.ts`, one per fake). Each fake must behave like its contract:
+- **payable-booking:** owner gets the values; another user gets 404 `NOT_FOUND`.
+- **payments:**
+  - refund of 0 → 400
+  - the same booking twice → same `refundId`
+  - `getRefund` → `null`, then the view
+- **stripe:**
+  - the same idempotency key → same intent; a different key → a new ID
+  - `failNext('createRefund')` throws once, then works
+  - `parseWebhook`: a good signature returns the event; a bad one → 400 `BAD_SIGNATURE`
+- **storage:**
+  - save/has/delete; delete of a missing key doesn't throw
+  - copy gets a new key with the same bytes; copy of an unknown key → 404
+  - a GIF is rejected
+- **fx:**
+  - 1000 USD minor → 50000 EGP minor
+  - 100 USD minor → 150 JPY (0 minor units)
+  - 1 EGP minor → USD rounds half up as specified
+  - an unknown code → 400 `UNSUPPORTED_CURRENCY`
+  - `setNoRates` → 503 `RATES_UNAVAILABLE`
+  - `getConverter().rateDate === '2026-11-01'`
+- **reference-data:**
+  - `getAirport('CAI').timeZone === 'Africa/Cairo'`; an unknown code → `null`
+  - `getAirports(['CAI','XXX'])` has only `CAI`
+  - `findCityIds('CAI')` finds `cairo` (case-insensitive)
+  - `findCityIds('(')` doesn't throw
+  - `listCurrencies()` is sorted
+- **audit:** filter by action, by date range (inclusive edges), newest first, pagination totals.
+
+**Commit:** `test(platform): cover the contract stubs, rules and wiring (CTR-05)`
+
+## Step 8: Document the port pattern
+
+**`docs/database/data-model.md` §6.2:** under the ports table, add one paragraph, unchanged:
+"**Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`)."
+
+**`docs/ai/skills/travel-platform/references/backend.md` §9:** replace the port example code block (the one with `PAYABLE_BOOKINGS`) and the sentence after it ("Implementers register their class under the token…") with:
+```ts
+// payments/ports/payable-booking.port.ts — owned by payments
+export interface PayableBooking {
+  readonly bookingType: BookingType;
+  getPayable(bookingId: string, userId: string): Promise<Payable>;
+  getPolicies(bookingId: string, userId: string): Promise<BookingPolicies>;
+}
+// in flight-bookings — the implementer registers itself; payments never imports it
+@Injectable()
+export class FlightPayableBooking implements PayableBooking, OnModuleInit {
+  readonly bookingType = BookingType.FLIGHT;
+  constructor(private readonly registry: PayableBookingRegistry) {}
+  onModuleInit() { this.registry.register(this); }
+}
+```
+followed by this sentence:
+"The owner exports a registry; implementers register in `onModuleInit`. Use the same pattern for every port. Contracts are published with **fakes** in `backend/test/fakes/` that `implements PublicApi<Service>`, so a drifting fake fails `npm run typecheck`."
+
+Change nothing else in either file.
+
+**Commit:** `docs: document the port registry pattern and the contract fakes (CTR-05)`
+
+## Step 9: Prompt log
+
+Append this run's entry to your member's prompt log as your agent file (section 4) says. One entry for the whole run.
+**Commit:** `chore(ai): log the CTR-05 prompt (CTR-05)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (on its own) | exit 0 (includes per-file coverage on every `*.service.ts`) |
+| G2 | `cd backend && npx vitest run src/modules/payments src/modules/storage src/modules/fx src/modules/reference-data src/modules/audit src/modules/platform-contracts.api.spec.ts test/fakes` | 0 failed; at least 60 tests passed; the 5 stub specs, 3 real-logic specs, the wiring spec and 7 fake specs all ran |
+| G3 | `cd backend && npm audit --omit=dev --audit-level=high` | exit 0 |
+| G4 | `git diff --name-only origin/develop...HEAD -- backend/package.json backend/package-lock.json` | empty (no new packages) |
+| G5 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/{payments,storage,fx,reference-data,audit}/` (no schema files), `backend/src/modules/platform-contracts.api.spec.ts`, `backend/src/app.module.ts`, `backend/test/fakes/`, `docs/database/data-model.md`, `docs/ai/skills/travel-platform/references/backend.md`, and your prompt-log file |
+| G6 | `git diff --name-only origin/develop...HEAD -- 'backend/src/modules/*/schemas/*' backend/src/modules/accounts backend/src/modules/flights backend/src/modules/hotels backend/src/modules/flight-bookings backend/src/modules/hotel-bookings backend/src/modules/itineraries backend/src/modules/blog backend/src/modules/moderation backend/src/modules/notifications backend/src/common frontend .github docs/ai/chat-skill` | empty |
+| G7 | `grep -rln "NotImplementedException" backend/src/modules` | exactly the 5 services plus `stripe-gateway.stub.ts` |
+| G8 | `git log --format=%s origin/develop..HEAD` | 9 commits, Conventional Commits, each ending in `(CTR-05)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- No real logic behind the stubs beyond what this file marks real: the registry, `assertImageAllowed`, `urlOf`, the decorator, the DTO.
+- Don't touch other packages' modules, any schema, `common/`, CI, the frontend or the chat skill.
+- No new packages. No lint, Prettier, TypeScript or Vitest config changes.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+When finished, report:
+- The branch and the commit list.
+- Each gate's result in one line (G2 with the test count).
+- Any decision you had to make that this file didn't settle, with the reason.
+- The PR title to use: `CTR-05: Platform contracts`.
+
+How the output was used:
+Created feature/CTR-05-platform-contracts from origin/develop; added the payments port, registry, refund and Stripe gateway contracts, the storage module (image rules, upload decorator), and the FxService, ReferenceDataService and AuditService stubs; added fakes in backend/test/fakes with specs, stub and wiring specs, and the port-registry docs in data-model.md and backend.md (commits d6b96e8, e3e0018, 1a1ad0f, 65d3c3b, 22cf580, c3068d4, 9ee84d4, 33b3c37 plus this log commit); nothing pushed.
+
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude Code
+Related Requirement: CTR-05
+
+Prompt:
+Two things first, then publish:
+1. In docs/ai/skills/travel-platform/references/backend.md §9, change the line above the port example from "owner defines the interface and a token; implementer provides it" to "owner defines the interface and exports a registry; implementer registers itself". Change nothing else. Commit: docs(ai): match the port wording to the registry pattern (CTR-05)
+2. Run git log --oneline -10 and confirm the chore(ai) prompt-log commit is there.
+Then run npm run verify in backend/ once more (on its own) and continue with the publish steps below.
+
+How the output was used:
+Changed one line in backend.md §9 (commit a4eabcc); confirmed the chore(ai) log commit e9b61f6 is in the log; npm run verify passed again (468 tests); nothing pushed because no publish steps came with the message.
+
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude Code
+Related Requirement: CTR-05
+
+Prompt:
+Publish it now:
+
+1. Push the branch: git push -u origin feature/CTR-05-platform-contracts
+2. Open a PR into develop (gh pr create --base develop) titled exactly:
+   CTR-05: Platform contracts
+3. Fill the PR body using our template, like this:
+
+## What and why
+
+Requirement IDs: CTR-05 (PAY-01, PAY-03, GEN-08, ITN-18, GEN-12, GEN-07 interfaces)
+Summary: Stubs and fakes for the platform contracts: the PayableBooking port, PaymentsService refunds, the Stripe gateway interface, StorageService with the image rules and @ImageUpload(), FxService, ReferenceDataService and AuditService. Fakes live in backend/test/fakes/ and are type-checked against the real services.
+
+**Shared-contract change, please read @AishaAlRawahi @mostafa-elsahy:** ports are now wired with a registry. The owning module exports a registry, and each implementer injects it and calls `registry.register(this)` in `onModuleInit`, so the owner never imports the implementers (no cycle). Payments uses `PayableBookingRegistry`. Use the same pattern for your ports: `ActiveBookingsCheck` (CTR-01) and `ReportableContent` (CTR-07). It's documented in data-model §6.2 and backend.md §9.
+
+## Testing technique
+
+<test levels and counts from your report: stub specs, real-logic specs, wiring spec, fake specs; npm run verify result>
+
+## Screenshots (frontend: page | backend: swagger/postman)
+
+n/a: contracts only, no endpoints.
+
+4. Don't add a "Closes #" line; the link-issue workflow adds it.
+5. Don't merge. Reply with the PR number and URL, then log this prompt in my prompt log as usual.
+
+How the output was used:
+Pushed feature/CTR-05-platform-contracts and opened PR #112 into develop ("CTR-05: Platform contracts") with the template filled in; not merged.
 Tool: Claude (claude.ai)
 Related Requirement: PLT-01
 

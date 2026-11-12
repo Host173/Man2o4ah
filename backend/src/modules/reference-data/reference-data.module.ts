@@ -5,6 +5,7 @@ import { Attraction, AttractionSchema } from './schemas/attraction.schema.js';
 import { City, CitySchema } from './schemas/city.schema.js';
 import { Country, CountrySchema } from './schemas/country.schema.js';
 import { Currency, CurrencySchema } from './schemas/currency.schema.js';
+import { ReferenceDataService } from './reference-data.service.js';
 import { ReferenceDataSeedService } from './seed/reference-data-seed.service.js';
 
 @Module({
@@ -17,6 +18,7 @@ import { ReferenceDataSeedService } from './seed/reference-data-seed.service.js'
       { name: Currency.name, schema: CurrencySchema },
     ]),
   ],
-  providers: [ReferenceDataSeedService],
+  providers: [ReferenceDataSeedService, ReferenceDataService],
+  exports: [ReferenceDataService],
 })
 export class ReferenceDataModule {}

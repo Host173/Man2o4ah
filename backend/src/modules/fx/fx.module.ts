@@ -4,6 +4,7 @@ import {
   ExchangeRate,
   ExchangeRateSchema,
 } from './schemas/exchange-rate.schema.js';
+import { FxService } from './fx.service.js';
 
 @Module({
   imports: [
@@ -11,5 +12,7 @@ import {
       { name: ExchangeRate.name, schema: ExchangeRateSchema },
     ]),
   ],
+  providers: [FxService],
+  exports: [FxService],
 })
 export class FxModule {}

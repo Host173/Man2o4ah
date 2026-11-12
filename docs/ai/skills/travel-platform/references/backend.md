@@ -129,17 +129,23 @@ try {
 
 ## 9. Ports and events
 
-**Port** (owner defines the interface and a token; implementer provides it):
+**Port** (owner defines the interface and exports a registry; implementer registers itself):
 ```ts
-// payments/ports/payable-booking.port.ts (owned by payments)
-export const PAYABLE_BOOKINGS = Symbol('PAYABLE_BOOKINGS');
+// payments/ports/payable-booking.port.ts — owned by payments
 export interface PayableBooking {
-  readonly bookingType: 'flight' | 'hotel';
+  readonly bookingType: BookingType;
   getPayable(bookingId: string, userId: string): Promise<Payable>;
   getPolicies(bookingId: string, userId: string): Promise<BookingPolicies>;
 }
+// in flight-bookings — the implementer registers itself; payments never imports it
+@Injectable()
+export class FlightPayableBooking implements PayableBooking, OnModuleInit {
+  readonly bookingType = BookingType.FLIGHT;
+  constructor(private readonly registry: PayableBookingRegistry) {}
+  onModuleInit() { this.registry.register(this); }
+}
 ```
-Implementers register their class under the token the owner documents. Follow the owner's file and README for the exact wiring.
+The owner exports a registry; implementers register in `onModuleInit`. Use the same pattern for every port. Contracts are published with **fakes** in `backend/test/fakes/` that `implements PublicApi<Service>`, so a drifting fake fails `npm run typecheck`.
 
 **Event:**
 ```ts

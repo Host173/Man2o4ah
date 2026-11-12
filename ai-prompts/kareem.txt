@@ -1302,3 +1302,39 @@ Then run npm run verify in backend/ once more (on its own) and continue with the
 How the output was used:
 Changed one line in backend.md §9 (commit a4eabcc); confirmed the chore(ai) log commit e9b61f6 is in the log; npm run verify passed again (468 tests); nothing pushed because no publish steps came with the message.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude Code
+Related Requirement: CTR-05
+
+Prompt:
+Publish it now:
+
+1. Push the branch: git push -u origin feature/CTR-05-platform-contracts
+2. Open a PR into develop (gh pr create --base develop) titled exactly:
+   CTR-05: Platform contracts
+3. Fill the PR body using our template, like this:
+
+## What and why
+
+Requirement IDs: CTR-05 (PAY-01, PAY-03, GEN-08, ITN-18, GEN-12, GEN-07 interfaces)
+Summary: Stubs and fakes for the platform contracts: the PayableBooking port, PaymentsService refunds, the Stripe gateway interface, StorageService with the image rules and @ImageUpload(), FxService, ReferenceDataService and AuditService. Fakes live in backend/test/fakes/ and are type-checked against the real services.
+
+**Shared-contract change, please read @AishaAlRawahi @mostafa-elsahy:** ports are now wired with a registry. The owning module exports a registry, and each implementer injects it and calls `registry.register(this)` in `onModuleInit`, so the owner never imports the implementers (no cycle). Payments uses `PayableBookingRegistry`. Use the same pattern for your ports: `ActiveBookingsCheck` (CTR-01) and `ReportableContent` (CTR-07). It's documented in data-model §6.2 and backend.md §9.
+
+## Testing technique
+
+<test levels and counts from your report: stub specs, real-logic specs, wiring spec, fake specs; npm run verify result>
+
+## Screenshots (frontend: page | backend: swagger/postman)
+
+n/a: contracts only, no endpoints.
+
+4. Don't add a "Closes #" line; the link-issue workflow adds it.
+5. Don't merge. Reply with the PR number and URL, then log this prompt in my prompt log as usual.
+
+How the output was used:
+Pushed feature/CTR-05-platform-contracts and opened PR #112 into develop ("CTR-05: Platform contracts") with the template filled in; not merged.
+================================================

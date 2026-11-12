@@ -812,18 +812,28 @@ A URL path does not decide the module. Endpoints that combine provider data with
 ### 6.3 Events (in-process, `@nestjs/event-emitter`)
 Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
 
-| Event | Emitted by | Handled by |
-|---|---|---|
-| `payment.succeeded {bookingType, bookingId}` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
-| `flight-booking.expired`, `hotel-reservation.expired` | booking modules | payments → cancel the PaymentIntent |
-| `flight-booking.confirmed`, `…cancelled`, `hotel-reservation.confirmed`, `…cancelled` `{bookingId, userId, reference}` | booking modules | notifications |
-| `refund.updated {refundId, userId, status}` | payments | notifications |
-| `flight.rescheduled {flightId, departureAt, arrivalAt}` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled {bookingId, userId}` → notifications |
-| `flight.cancelled {flightId}` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
-| `user.deactivated`, `user.reactivated {userId}` | accounts | blog, itineraries → set `authorDeactivated` |
-| `account.suspended`, `account.reactivated {userId}` | accounts | notifications |
-| `provider.deactivated`, `provider.reactivated {providerType, providerId, moderatorIds}` | admin | notifications |
-| `admin.action {actorId, action, target, details}` | admin, moderation | audit |
+Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
+
+| Event | Payload | Emitted by | Handled by |
+|---|---|---|---|
+| `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
+| `flight-booking.expired` | `{ bookingId, userId }` | flight-bookings | payments → cancel the PaymentIntent |
+| `hotel-reservation.expired` | `{ bookingId, userId }` | hotel-bookings | payments → cancel the PaymentIntent |
+| `flight-booking.confirmed` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
+| `flight-booking.cancelled` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
+| `hotel-reservation.confirmed` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
+| `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
+| `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
+| `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
+| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
+| `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
+| `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
+| `account.suspended` | `{ userId }` | accounts | notifications |
+| `account.reactivated` | `{ userId }` | accounts | notifications |
+| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 ---
 

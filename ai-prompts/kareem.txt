@@ -1285,9 +1285,7 @@ When finished, report:
 
 How the output was used:
 Created feature/CTR-05-platform-contracts from origin/develop; added the payments port, registry, refund and Stripe gateway contracts, the storage module (image rules, upload decorator), and the FxService, ReferenceDataService and AuditService stubs; added fakes in backend/test/fakes with specs, stub and wiring specs, and the port-registry docs in data-model.md and backend.md (commits d6b96e8, e3e0018, 1a1ad0f, 65d3c3b, 22cf580, c3068d4, 9ee84d4, 33b3c37 plus this log commit); nothing pushed.
-================================================
 
-================================================
 Date: 2026-11-12
 Student: Kareem
 Tool: Claude Code
@@ -1301,9 +1299,7 @@ Then run npm run verify in backend/ once more (on its own) and continue with the
 
 How the output was used:
 Changed one line in backend.md §9 (commit a4eabcc); confirmed the chore(ai) log commit e9b61f6 is in the log; npm run verify passed again (468 tests); nothing pushed because no publish steps came with the message.
-================================================
 
-================================================
 Date: 2026-11-12
 Student: Kareem
 Tool: Claude Code
@@ -1337,4 +1333,12 @@ n/a: contracts only, no endpoints.
 
 How the output was used:
 Pushed feature/CTR-05-platform-contracts and opened PR #112 into develop ("CTR-05: Platform contracts") with the template filled in; not merged.
+Tool: Claude (claude.ai)
+Related Requirement: PLT-01
+
+Prompt:
+no just remove the commit rules i really don't need it that much
+
+How the output was used:
+Removed the Conventional Commits CI job and commitlint.config.mjs; README, DECISIONS and workflow.md now call the commit style recommended, not checked; opened a PR into develop.
 ================================================

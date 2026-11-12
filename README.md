@@ -80,7 +80,6 @@ Every pull request into `develop` or `main`, and every push to those branches, r
 
 Checks on the whole repository, on pull requests only:
 
-- Every commit follows Conventional Commits.
 - The branch name is `<type>/<ID>-<description>`, with type one of `feature`, `fix`, `chore`, `docs`, `test`, `refactor`.
 - The PR title contains a requirement ID.
 - No secret is found in the PR's history (gitleaks).

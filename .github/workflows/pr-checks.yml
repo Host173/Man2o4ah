@@ -38,20 +38,6 @@ jobs:
           fi
           exit "$fail"
 
-  commits:
-    name: Conventional Commits
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: wagoid/commitlint-github-action@v6
-        with:
-          configFile: commitlint.config.mjs
-
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

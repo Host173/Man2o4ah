@@ -1,0 +1,555 @@
+import { toDateOnly } from '../../src/common/dates/date-only.js';
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import type {
+  HotelSearchQuery,
+  HotelView,
+  RoomView,
+} from '../../src/modules/hotels/hotels.types.js';
+import { FakeHotelsService, FakeRoomNightInventory } from './index.js';
+
+const checkIn = toDateOnly('2026-11-15');
+const checkOut = toDateOnly('2026-11-17');
+
+function hotel(id: string, overrides: Partial<HotelView> = {}): HotelView {
+  return {
+    id,
+    name: id,
+    address: '1 Test Street',
+    cityId: 'cairo',
+    countryCode: 'EG',
+    photos: [],
+    amenities: [],
+    checkInTime: '14:00',
+    checkOutTime: '12:00',
+    cancellationPolicy: { tiers: [{ daysBefore: 7, refundPercent: 100 }] },
+    isActive: true,
+    ratingSummary: { average: null, count: 0 },
+    ...overrides,
+  };
+}
+
+function room(id: string, overrides: Partial<RoomView> = {}): RoomView {
+  return {
+    id,
+    hotelId: 'hotel-1',
+    name: id,
+    type: 'Double',
+    beds: 1,
+    maxOccupancy: 2,
+    pricePerNightMinor: 10000,
+    isActive: true,
+    availability: [
+      {
+        fromDate: toDateOnly('2026-11-12'),
+        toDate: toDateOnly('2026-11-30'),
+      },
+    ],
+    hasEverBeenReserved: false,
+    ...overrides,
+  };
+}
+
+let hotels: FakeHotelsService;
+let inventory: FakeRoomNightInventory;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-12T12:00:00Z'));
+  hotels = new FakeHotelsService({
+    hotels: [hotel('hotel-1')],
+    rooms: [room('room-1'), room('room-2')],
+  });
+  inventory = new FakeRoomNightInventory(hotels);
+});
+
+afterEach(() => vi.useRealTimers());
+
+describe('FakeHotelsService', () => {
+  const query: HotelSearchQuery = {
+    cityId: 'cairo',
+    checkIn,
+    checkOut,
+    guests: 2,
+  };
+
+  it('returns detached hotel data, including booking policies, and null for a missing hotel', async () => {
+    const found = await hotels.getHotel('hotel-1');
+    expect(found?.cancellationPolicy.tiers).toEqual([
+      { daysBefore: 7, refundPercent: 100 },
+    ]);
+    if (!found) throw new Error('Expected fixture hotel');
+    found.cancellationPolicy.tiers.length = 0;
+    expect(
+      (await hotels.getHotel('hotel-1'))?.cancellationPolicy.tiers,
+    ).toHaveLength(1);
+    expect(await hotels.getHotel('missing')).toBeNull();
+  });
+
+  it('includes inactive rooms for booking validation, scoped to the hotel', async () => {
+    await inventory.deactivate('room-1');
+    expect(await hotels.getRooms('hotel-1')).toEqual([
+      expect.objectContaining({ id: 'room-1', isActive: false }),
+      expect.objectContaining({ id: 'room-2', isActive: true }),
+    ]);
+    expect(await hotels.getRooms('missing')).toEqual([]);
+  });
+
+  it('exposes reservations and blocks over inclusive dates without exposing other hotels', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await inventory.block('room-2', checkIn, checkIn);
+    const nights = await hotels.getRoomNights('hotel-1', checkIn, checkIn);
+    expect(nights).toEqual([
+      expect.objectContaining({
+        kind: 'reservation',
+        roomId: 'room-1',
+        reservationId: 'reservation-1',
+        date: checkIn,
+      }),
+      expect.objectContaining({
+        kind: 'blocked',
+        roomId: 'room-2',
+        date: checkIn,
+      }),
+    ]);
+    expect(await hotels.getRoomNights('missing', checkIn, checkOut)).toEqual(
+      [],
+    );
+  });
+
+  it('searches only active hotels with enough free rooms and capacity for the entire stay', async () => {
+    expect((await hotels.search({ ...query, rooms: 2, guests: 4 })).total).toBe(
+      1,
+    );
+    expect((await hotels.search({ ...query, rooms: 1, guests: 3 })).total).toBe(
+      0,
+    );
+    expect((await hotels.search({ ...query, rooms: 3 })).total).toBe(0);
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    expect((await hotels.search({ ...query, rooms: 2 })).total).toBe(0);
+    await inventory.block(
+      'room-2',
+      toDateOnly('2026-11-16'),
+      toDateOnly('2026-11-16'),
+    );
+    expect((await hotels.search(query)).total).toBe(0);
+  });
+
+  it('reflects provider activation without deleting existing reservations', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await hotels.setActive('hotel-1', false);
+    expect((await hotels.search(query)).total).toBe(0);
+    expect(await hotels.getHotel('hotel-1')).toMatchObject({ isActive: false });
+    expect(
+      await hotels.getRoomNights('hotel-1', checkIn, checkOut),
+    ).toHaveLength(2);
+    await hotels.setActive('hotel-1', true);
+    expect((await hotels.search(query)).total).toBe(1);
+  });
+
+  it('filters by location, inclusive nightly price, and updated rating; unrated hotels are excluded by rating filters', async () => {
+    expect(
+      (
+        await hotels.search({
+          ...query,
+          minPriceMinor: 10000,
+          maxPriceMinor: 10000,
+        })
+      ).total,
+    ).toBe(1);
+    expect(
+      (await hotels.search({ ...query, minPriceMinor: 10001 })).total,
+    ).toBe(0);
+    expect((await hotels.search({ ...query, maxPriceMinor: 9999 })).total).toBe(
+      0,
+    );
+    expect((await hotels.search({ ...query, minRating: 1 })).total).toBe(0);
+    await hotels.setRatingSummary('hotel-1', { average: 4.5, count: 2 });
+    expect((await hotels.search({ ...query, minRating: 4.5 })).total).toBe(1);
+    expect((await hotels.search({ ...query, minRating: 5 })).total).toBe(0);
+    expect((await hotels.search({ ...query, cityId: 'dubai' })).total).toBe(0);
+    expect(
+      (await hotels.search({ ...query, cityId: undefined, countryCode: 'EG' }))
+        .total,
+    ).toBe(1);
+    expect(
+      (await hotels.search({ ...query, cityId: undefined, countryCode: 'AE' }))
+        .total,
+    ).toBe(0);
+  });
+
+  it('sorts and paginates qualifying hotels using the shared response shape', async () => {
+    hotels.data.hotels.push(
+      hotel('hotel-2', { ratingSummary: { average: 5, count: 1 } }),
+    );
+    hotels.data.rooms.push(
+      room('room-3', { hotelId: 'hotel-2', pricePerNightMinor: 5000 }),
+    );
+    const result = await hotels.search({
+      ...query,
+      sortBy: 'price',
+      page: 2,
+      limit: 1,
+    });
+    expect(result).toMatchObject({
+      total: 2,
+      page: 2,
+      limit: 1,
+      totalPages: 2,
+    });
+    expect(result.items.map((item) => item.id)).toEqual(['hotel-1']);
+    const rated = await hotels.search({
+      ...query,
+      sortBy: 'rating',
+      sortOrder: 'desc',
+    });
+    expect(rated.items.map((item) => item.id)).toEqual(['hotel-2', 'hotel-1']);
+  });
+
+  it.each([
+    { checkIn: toDateOnly('2026-11-11') },
+    { checkOut: checkIn },
+    { checkIn: new Date('2026-11-15T12:00:00Z') },
+    { cityId: undefined },
+    { guests: 0 },
+    { rooms: 0 },
+    { limit: 51 },
+    { minPriceMinor: 200, maxPriceMinor: 100 },
+  ])('rejects invalid search input: %o', async (changes) => {
+    await expect(hotels.search({ ...query, ...changes })).rejects.toMatchObject(
+      {
+        response: { code: ErrorCode.ValidationFailed },
+      },
+    );
+  });
+
+  it('reports missing hotels when updating activation or ratings', async () => {
+    await expect(hotels.setActive('missing', false)).rejects.toMatchObject({
+      response: { code: ErrorCode.NotFound },
+    });
+    await expect(
+      hotels.setRatingSummary('missing', { average: null, count: 0 }),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.NotFound },
+    });
+  });
+});
+
+describe('FakeRoomNightInventory', () => {
+  it('reserves every selected room for check-in through check-out minus one night', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1', 'room-2'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    const nights = await hotels.getRoomNights('hotel-1', checkIn, checkOut);
+    expect(nights).toHaveLength(4);
+    expect(
+      nights.every((night) => night.date >= checkIn && night.date < checkOut),
+    ).toBe(true);
+    expect(
+      (await hotels.getRooms('hotel-1')).every(
+        (item) => item.hasEverBeenReserved,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an overlapping reservation without holding any other requested room', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await expect(
+      inventory.reserve(
+        'hotel-1',
+        ['room-2', 'room-1'],
+        checkIn,
+        checkOut,
+        'reservation-2',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.RoomsUnavailable } });
+    expect(
+      await hotels.getRoomNights('hotel-1', checkIn, checkOut),
+    ).toHaveLength(2);
+    expect(
+      (await hotels.getRooms('hotel-1')).find((item) => item.id === 'room-2')
+        ?.hasEverBeenReserved,
+    ).toBe(false);
+  });
+
+  it('allows a new stay starting on the previous stay checkout date', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkOut,
+      toDateOnly('2026-11-18'),
+      'reservation-2',
+    );
+    expect(hotels.data.roomNights).toHaveLength(3);
+  });
+
+  it('allows exactly one of two simultaneous overlapping requests', async () => {
+    const results = await Promise.allSettled(
+      ['reservation-1', 'reservation-2'].map((id) =>
+        inventory.reserve('hotel-1', ['room-1'], checkIn, checkOut, id),
+      ),
+    );
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    expect(hotels.data.roomNights).toHaveLength(2);
+  });
+
+  it.each(['missing', 'inactive', 'other hotel', 'outside availability'])(
+    'rejects a room that is %s',
+    async (scenario) => {
+      if (scenario === 'inactive') await inventory.deactivate('room-1');
+      if (scenario === 'other hotel') hotels.data.rooms[0].hotelId = 'hotel-2';
+      if (scenario === 'outside availability') {
+        await inventory.setAvailability('room-1', [
+          { fromDate: checkIn, toDate: checkIn },
+        ]);
+      }
+      await expect(
+        inventory.reserve(
+          'hotel-1',
+          [scenario === 'missing' ? 'missing' : 'room-1'],
+          checkIn,
+          checkOut,
+          'reservation-1',
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.RoomsUnavailable },
+      });
+      expect(hotels.data.roomNights).toEqual([]);
+    },
+  );
+
+  it('rejects reservations in inactive hotels', async () => {
+    await hotels.setActive('hotel-1', false);
+    await expect(
+      inventory.reserve(
+        'hotel-1',
+        ['room-1'],
+        checkIn,
+        checkOut,
+        'reservation-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.RoomsUnavailable } });
+  });
+
+  it.each([{ roomIds: [] }, { roomIds: ['room-1', 'room-1'] }])(
+    'rejects empty or repeated room selections: %j',
+    async ({ roomIds }) => {
+      await expect(
+        inventory.reserve(
+          'hotel-1',
+          roomIds,
+          checkIn,
+          checkOut,
+          'reservation-1',
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    },
+  );
+
+  it.each([
+    [checkIn, checkIn],
+    [checkOut, checkIn],
+    [toDateOnly('2026-11-11'), checkOut],
+    [new Date('invalid'), checkOut],
+    [new Date('2026-11-15T01:00:00Z'), checkOut],
+  ])('rejects invalid stay dates: %s to %s', async (from, to) => {
+    await expect(
+      inventory.reserve('hotel-1', ['room-1'], from, to, 'reservation-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    expect(hotels.data.roomNights).toEqual([]);
+  });
+
+  it('releases only the selected reservation, is repeatable, and leaves room history and blocks intact', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await inventory.reserve(
+      'hotel-1',
+      ['room-2'],
+      checkIn,
+      checkOut,
+      'reservation-2',
+    );
+    await inventory.block('room-1', checkOut, checkOut);
+    await inventory.release('reservation-1');
+    await inventory.release('reservation-1');
+    expect(hotels.data.roomNights).toHaveLength(3);
+    expect((await hotels.getRooms('hotel-1'))[0].hasEverBeenReserved).toBe(
+      true,
+    );
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-3',
+    );
+  });
+
+  it('blocks inclusive nights and rejects overlaps with either reservations or blocks atomically', async () => {
+    const blockId = await inventory.block(
+      'room-1',
+      checkIn,
+      toDateOnly('2026-11-16'),
+    );
+    expect(hotels.data.roomNights).toHaveLength(2);
+    await expect(
+      inventory.reserve(
+        'hotel-1',
+        ['room-1'],
+        checkIn,
+        checkOut,
+        'reservation-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.RoomsUnavailable } });
+    await expect(
+      inventory.block('room-1', toDateOnly('2026-11-16'), checkOut),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.OverlapsReservationOrBlock },
+    });
+    expect(hotels.data.roomNights).toHaveLength(2);
+    await inventory.unblock(blockId);
+    await inventory.unblock(blockId);
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await expect(
+      inventory.block('room-1', checkIn, checkOut),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.OverlapsReservationOrBlock },
+    });
+    expect(hotels.data.roomNights).toHaveLength(2);
+  });
+
+  it('normalizes adjacent availability ranges, rejecting overlaps without changing existing availability', async () => {
+    await inventory.setAvailability('room-1', [
+      { fromDate: checkOut, toDate: checkOut },
+      { fromDate: checkIn, toDate: toDateOnly('2026-11-16') },
+    ]);
+    expect((await hotels.getRooms('hotel-1'))[0].availability).toEqual([
+      { fromDate: checkIn, toDate: checkOut },
+    ]);
+    await expect(
+      inventory.setAvailability('room-1', [
+        { fromDate: checkIn, toDate: checkOut },
+        { fromDate: checkOut, toDate: checkOut },
+      ]),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    expect((await hotels.getRooms('hotel-1'))[0].availability).toEqual([
+      { fromDate: checkIn, toDate: checkOut },
+    ]);
+  });
+
+  it('protects reserved nights when editing, deactivating, or deleting a room', async () => {
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      checkIn,
+      checkOut,
+      'reservation-1',
+    );
+    await expect(inventory.setAvailability('room-1', [])).rejects.toMatchObject(
+      { response: { code: ErrorCode.AvailabilityHasReservations } },
+    );
+    await expect(inventory.deactivate('room-1')).rejects.toMatchObject({
+      response: { code: ErrorCode.RoomHasReservations },
+    });
+    await expect(inventory.delete('room-1')).rejects.toMatchObject({
+      response: { code: ErrorCode.RoomHasReservations },
+    });
+    await inventory.release('reservation-1');
+    await inventory.setAvailability('room-1', []);
+    await inventory.deactivate('room-1');
+    await expect(inventory.delete('room-1')).rejects.toMatchObject({
+      response: { code: ErrorCode.RoomWasReserved },
+    });
+  });
+
+  it('protects today in UTC, but permits availability changes and deactivation after reserved nights have passed', async () => {
+    const today = toDateOnly('2026-11-12');
+    await inventory.reserve(
+      'hotel-1',
+      ['room-1'],
+      today,
+      toDateOnly('2026-11-13'),
+      'reservation-1',
+    );
+    await expect(inventory.deactivate('room-1')).rejects.toMatchObject({
+      response: { code: ErrorCode.RoomHasReservations },
+    });
+    vi.setSystemTime(new Date('2026-11-13T00:00:00Z'));
+    await inventory.setAvailability('room-1', []);
+    await inventory.deactivate('room-1');
+    await expect(inventory.delete('room-1')).rejects.toMatchObject({
+      response: { code: ErrorCode.RoomWasReserved },
+    });
+  });
+
+  it('deletes never-reserved rooms and their blocks, without deleting another room', async () => {
+    await inventory.block('room-1', checkIn, checkOut);
+    await inventory.delete('room-1');
+    expect(await hotels.getRooms('hotel-1')).toEqual([
+      expect.objectContaining({ id: 'room-2' }),
+    ]);
+    expect(hotels.data.roomNights).toEqual([]);
+  });
+
+  it('reports missing rooms rather than pretending that updates succeeded', async () => {
+    for (const call of [
+      () => inventory.block('missing', checkIn, checkOut),
+      () => inventory.setAvailability('missing', []),
+      () => inventory.deactivate('missing'),
+      () => inventory.delete('missing'),
+    ]) {
+      await expect(call()).rejects.toMatchObject({
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+  });
+});

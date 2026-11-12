@@ -1,3 +1,16 @@
 AI prompt log — Pierre Remon Raafat
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+
+================================================
+Date: 2026-11-12
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: CTR-03
+
+Prompt:
+Implement CTR-03 for my hotels module using the existing project conventions. Define typed hotel-service and room-night inventory contracts, register and export their stubs, and provide in-memory fakes that other modules can use in tests. The inventory fake should reject overlapping reservations and blocked nights, handle multi-room requests without partial reservations, and support releasing room nights. Include the documented search, rating-summary, provider-activation, and inventory operations, with focused unit tests for their expected behavior and important date boundaries. Keep the real database-backed features for Sprint 2, preserve the frozen schemas, and do not change Aya’s booking modules. Update the related documentation and run the backend verification checks. If my laptop cannot install the locked dependencies, report that limitation honestly and use GitHub Actions to validate the changes through a draft PR targeting develop. Commit and push only the changes related to CTR-03.
+
+How the output was used:
+Added hotels contract stubs, in-memory fakes, unit tests, backend documentation, and this newly approved prompt entry; no commit yet.
+================================================

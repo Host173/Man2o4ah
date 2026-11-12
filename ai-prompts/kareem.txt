@@ -497,3 +497,16 @@ no do it in its own pr
 How the output was used:
 Added .github/workflows/link-issue.yml (adds "Closes #<issue>" to each PR from its ticket key) and a README line; pushed chore/PLT-01-link-issues and opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-03
+
+Prompt:
+ok add it and you didn't merge the last pr to so merge it  at the same time
+
+How the output was used:
+Merged PR #108; added .ignore and .cursorignore so search tools skip docs/ai/chat-skill/; pushed chore/PLT-03-ignore-chat-skill and opened a PR into develop.
+================================================

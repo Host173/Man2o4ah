@@ -129,7 +129,7 @@ try {
 
 ## 9. Ports and events
 
-**Port** (owner defines the interface and a token; implementer provides it):
+**Port** (owner defines the interface and exports a registry; implementer registers itself):
 ```ts
 // payments/ports/payable-booking.port.ts — owned by payments
 export interface PayableBooking {

@@ -143,12 +143,12 @@ Implementers register their class under the token the owner documents. Follow th
 
 **Event:**
 ```ts
-this.events.emit('flight.cancelled', { flightId });                 // after commit
+this.events.emit(Events.FlightCancelled, { flightId: flight._id.toString() }); // this.events: AppEvents; after commit
 
-@OnEvent('flight.cancelled')
-async onFlightCancelled({ flightId }: FlightCancelledEvent) { /* idempotent, conditional updates */ }
+@OnEvent(Events.FlightCancelled)
+async onFlightCancelled({ flightId }: PayloadOf<typeof Events.FlightCancelled>) { /* idempotent, conditional updates */ }
 ```
-Event names and payloads are fixed in `docs/database/data-model.md` §6.3. A new event or payload field is a contract change (ask first).
+Event names and payloads are fixed in `docs/database/data-model.md` §6.3 and typed in `backend/src/common/events/`: always use `Events.X` with `AppEvents.emit`, never a string literal or `EventEmitter2` directly. IDs travel as strings. A new event or payload field is a contract change (ask first).
 
 ## 10. Scheduled jobs
 

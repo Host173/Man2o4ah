@@ -846,3 +846,16 @@ When finished, report:
 How the output was used:
 Created chore/PLT-06-event-contracts-test-support from origin/develop; added @nestjs/jwt, src/common/events (Events, payloads, AppEvents, EventsModule), the data-model event table, test/support helpers (createTestApp, loginAs, clearCollections, FakeEvents) with specs, and the testing.md and backend.md skill updates (commits 9217410, defbd15, 03c2d7e, 2881061, 3df1e27 plus this log commit); nothing pushed.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-01
+
+Prompt:
+no just remove the commit rules i really don't need it that much
+
+How the output was used:
+Removed the Conventional Commits CI job and commitlint.config.mjs; README, DECISIONS and workflow.md now call the commit style recommended, not checked; opened a PR into develop.
+================================================

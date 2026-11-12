@@ -94,6 +94,8 @@ Branch and PR title example:
 - Branch: `feature/FLT-22-seat-hold`
 - Title: `FLT-22: seat hold`
 
+**Each PR is linked to its issue automatically.** A workflow reads the ticket key from the branch name (or the PR title) and adds `Closes #<issue>` to the PR description, so the PR shows on the issue and the issue closes when the PR is merged into `develop`. If no issue matches, it leaves a comment instead.
+
 **A PR merges only when CI is green and the team leader approves.**
 
 ## Team rules

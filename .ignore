@@ -1,0 +1,3 @@
+# Search tools (ripgrep-based agents such as Claude Code and Codex) skip these.
+# The chat skill repeats the requirements, data model and tickets; coding agents use docs/ai/skills/.
+docs/ai/chat-skill/

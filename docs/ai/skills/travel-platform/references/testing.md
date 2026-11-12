@@ -43,24 +43,21 @@ Elsewhere (CRUD, wiring) tests come in the same PR as the code. Tickets mark it 
 
 ## 4. Integration tests on the in-memory database
 
-`backend/test/support/mongo-memory.ts` starts a single-node replica set (transactions work) and returns its URI. Tests **never** touch Atlas.
+`createTestApp` (`backend/test/support/test-app.ts`) starts a one-node in-memory replica set (transactions work), builds your module with the production app wiring (`configureApp`), and waits for every index. It returns `{ app, moduleRef, connection, http, close }`. Tests **never** touch Atlas or read `.env`.
 ```ts
-let moduleRef: TestingModule;
+let t: TestApp;
 beforeAll(async () => {
-  const uri = await startTestDb();
-  moduleRef = await Test.createTestingModule({
-    imports: [MongooseModule.forRoot(uri), FlightsModule],        // your module, real
-  })
-    .overrideProvider(ReferenceDataService).useValue(fakeReferenceData)   // other modules, fake
-    .compile();
-  await moduleRef.get<Model<Flight>>(getModelToken(Flight.name)).init(); // wait for indexes
-});
-beforeEach(async () => { await clearCollections(); });            // no leftover data
-afterAll(async () => { await moduleRef.close(); await stopTestDb(); });
+  t = await createTestApp({
+    imports: [FlightsModule],                                                            // your module, real
+    override: (b) => b.overrideProvider(ReferenceDataService).useValue(fakeReferenceData), // other modules, fake
+  });
+}, HOOK_TIMEOUT);
+beforeEach(() => clearCollections(t.connection));                                        // no leftover data
+afterAll(() => t.close(), HOOK_TIMEOUT);
 ```
 Pitfalls and their fixes:
 - **Leftover data** makes results depend on test order: wipe collections in `beforeEach`.
-- **Indexes are built in the background:** `await Model.init()` before relying on a unique index, or a duplicate slips through and the test passes wrongly.
+- **Indexes are built in the background:** `createTestApp` already waits for the indexes. A test that builds its own module must `await Model.init()` before relying on a unique index, or a duplicate slips through and the test passes wrongly.
 - **Concurrency tests:** fire with `Promise.allSettled` and assert the **invariant** (exactly 5 succeeded, counters add up), never which request won or the order.
 - **Scope:** only your own module is real; fake the others, or your test breaks whenever they change.
 - The first run downloads the MongoDB binary (CI caches it).
@@ -71,6 +68,7 @@ Pitfalls and their fixes:
 - **Before the other module exists:** write the fake from the contract in `docs/database/data-model.md` §4 and §6 (inventory methods, ports, events). Replace it with the real one at integration time.
 - **Stripe and FXRatesAPI** sit behind adapter classes in their modules; tests swap the adapter, never call the network. Webhooks are tested by calling the handler with a constructed event (and a test for a bad signature).
 - **Time:** `vi.useFakeTimers()` / `vi.setSystemTime()` for holds, expiry and "today" rules.
+- **Events:** override `AppEvents` with `new FakeEvents()` (`backend/test/support/fake-events.ts`) and assert `fake.payloadsOf(Events.X)`.
 
 ## 6. API tests
 
@@ -79,6 +77,8 @@ Supertest against the real Nest app (in-memory DB, fakes for external services):
 await request(app.getHttpServer()).post('/api/flight-bookings/hold').set('Cookie', userCookie).send(body)
   .expect(409).expect(res => expect(res.body.code).toBe('SEATS_UNAVAILABLE'));
 ```
+Log in with `const u = await loginAs(t.connection, 'user')` (`backend/test/support/auth.ts`; any role, moderators get a `providerId`) and send `.set('Cookie', u.cookie)`. `loginAs` creates a real user and session and signs the token the way the auth guard expects.
+
 Cover: the success response shape (no `passwordHash`, correct pagination shape), 400 with field `details`, 401 without a cookie, 403 with the wrong role, 404 for another user's resource (ACC-11), 409 for conflicts. Assert the status and the **code**, never the message wording.
 
 ## 7. E2E flows

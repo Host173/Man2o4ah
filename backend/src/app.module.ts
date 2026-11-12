@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventsModule } from './common/events/events.module.js';
 import { validate } from './config/validate.js';
 import { HealthModule } from './health/health.module.js';
 import { ReferenceDataModule } from './modules/reference-data/reference-data.module.js';
@@ -30,6 +31,7 @@ import { AuditModule } from './modules/audit/audit.module.js';
     }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
+    EventsModule,
     HealthModule,
     ReferenceDataModule,
     AccountsModule,

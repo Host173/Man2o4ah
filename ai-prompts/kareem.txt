@@ -510,3 +510,339 @@ ok add it and you didn't merge the last pr to so merge it  at the same time
 How the output was used:
 Merged PR #108; added .ignore and .cursorignore so search tools skip docs/ai/chat-skill/; pushed chore/PLT-03-ignore-chat-skill and opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-06
+
+Prompt:
+execute this, make sure you work from the leatest develop
+
+[Attached: PLT06_EXECUTION.md]
+# Execution — PLT-06: Event contracts and test support
+
+Run in the root of the project repository.
+
+## Goal
+
+Two shared pieces that 15 tickets wait for (issue #8, GEN-11 events):
+1. **Event contracts:** every event in the data model (§6.3), as typed names and payloads in one place, plus a typed emitter (`AppEvents`).
+2. **Test support:**
+   - an app factory for API and integration tests (in-memory MongoDB, the production app wiring)
+   - `loginAs` to act as a logged-in user of any role
+   - `clearCollections`
+   - `FakeEvents` to check emitted events
+
+Then the data model's event table is spelled out in full, and the coding skill points to the new helpers.
+
+**Out of scope:** auth guards, login and JWT config validation (CTR-01, Accounts), any event handler or emitter inside a module, anything under `backend/src/modules/`, CI, the frontend, the chat skill (`docs/ai/chat-skill/`).
+
+## Context you need
+
+**Events** (`docs/database/data-model.md` §6.3, `docs/ai/skills/travel-platform/references/backend.md` §9):
+- In-process events through `@nestjs/event-emitter` (already registered in `AppModule` by PLT-05).
+- Emitted **after** the transaction commits.
+- Handlers are idempotent (conditional updates).
+- A new event or payload field is a contract change.
+
+**Auth contract** (`references/auth.md` §2, §3, §5). `loginAs` must produce exactly what the real guard (built later in CTR-01) accepts:
+- Cookie `access_token` holds a JWT `{ sub, role, sid, providerId? }`, HS256, signed with `JWT_ACCESS_SECRET`, valid 15 minutes. `providerId` is the moderator's `moderatorOf.providerId`, and is absent for other roles.
+- The guard verifies the JWT, then loads the session by `sid`. The session must exist with `expiresAt > now`.
+- Session documents: `{ userId, refreshTokenHash, lastActivityAt, expiresAt }`, with `expiresAt = lastActivityAt + 30 min`.
+- Roles: `user`, `admin`, `airline_moderator`, `hotel_moderator`. Moderators need `moderatorOf: { providerType, providerId }` with `providerType` matching the role (`airline` / `hotel`). The `User` schema enforces this.
+
+**Existing code to reuse, not duplicate:**
+- `backend/test/support/mongo-memory.ts`: `startMemoryMongo()` and `HOOK_TIMEOUT`.
+- `backend/src/app.setup.ts`: `configureApp(app, { uploadDir, frontendUrl })`. The app must be created with `{ rawBody: true }`.
+- Schemas: `User`/`UserSchema`/`UserRole`/`ProviderType` from `modules/accounts/schemas/user.schema.ts`, `Session`/`SessionSchema` from `session.schema.ts`, `BookingType` from `common/database/booking-type.ts`, `RefundStatus` from `modules/payments/schemas/refund.schema.ts`, `AuditAction` from `modules/audit/schemas/audit-log.schema.ts`.
+
+**Code rules:**
+- ESM: relative imports end in `.js`.
+- Type-only imports use `import type`.
+- No `any`, no `@ts-ignore` or `@ts-expect-error`, no lint-disable comments.
+- Prettier style: single quotes, trailing commas.
+
+**Windows note:** run backend test commands on their own, not while the frontend builds. The in-memory MongoDB can fail to shut down cleanly when both run at once.
+
+## Before you start
+
+1. `git fetch origin`. `git status` must be clean. If not, stop and report.
+2. Create `chore/PLT-06-event-contracts-test-support` from `origin/develop` (the default branch; PRs now go into `develop`).
+3. Confirm the base has PLT-05: `backend/src/app.setup.ts` exists and exports `configureApp`. If not, stop and report.
+
+## Step 1: Package
+
+In `backend/`: `npm install @nestjs/jwt`. It's a production dependency: the Accounts package uses it for real tokens, and installing it once here avoids two lockfile changes. If npm reports a peer-dependency conflict, stop and report. Never use `--force` or `--legacy-peer-deps`.
+
+**Commit:** `build(backend): add @nestjs/jwt (PLT-06)`
+
+## Step 2: Event names, payloads and the typed emitter
+
+Create `backend/src/common/events/`.
+
+**`events.ts`:** a `const` object `Events` (PascalCase keys) plus `type EventName`. Exactly these 18 events:
+
+| Key | Value |
+|---|---|
+| `PaymentSucceeded` | `payment.succeeded` |
+| `FlightBookingExpired` | `flight-booking.expired` |
+| `HotelReservationExpired` | `hotel-reservation.expired` |
+| `FlightBookingConfirmed` | `flight-booking.confirmed` |
+| `FlightBookingCancelled` | `flight-booking.cancelled` |
+| `HotelReservationConfirmed` | `hotel-reservation.confirmed` |
+| `HotelReservationCancelled` | `hotel-reservation.cancelled` |
+| `RefundUpdated` | `refund.updated` |
+| `FlightRescheduled` | `flight.rescheduled` |
+| `FlightBookingRescheduled` | `flight-booking.rescheduled` |
+| `FlightCancelled` | `flight.cancelled` |
+| `UserDeactivated` | `user.deactivated` |
+| `UserReactivated` | `user.reactivated` |
+| `AccountSuspended` | `account.suspended` |
+| `AccountReactivated` | `account.reactivated` |
+| `ProviderDeactivated` | `provider.deactivated` |
+| `ProviderReactivated` | `provider.reactivated` |
+| `AdminAction` | `admin.action` |
+
+**`event-payloads.ts`:** one interface per payload shape. Every ID is a `string` (`id.toString()`) and every time is a `Date`. Type-only imports from the schema files above.
+
+| Interface | Fields | Used by |
+|---|---|---|
+| `PaymentSucceededEvent` | `bookingType: BookingType; bookingId: string` | `payment.succeeded` |
+| `BookingExpiredEvent` | `bookingId: string; userId: string` | both `…expired` |
+| `BookingStatusEvent` | `bookingId: string; userId: string; reference: string` | the four `…confirmed` / `…cancelled` |
+| `RefundUpdatedEvent` | `refundId: string; userId: string; status: RefundStatus` | `refund.updated` |
+| `FlightRescheduledEvent` | `flightId: string; departureAt: Date; arrivalAt: Date` | `flight.rescheduled` |
+| `FlightBookingRescheduledEvent` | `bookingId: string; userId: string` | `flight-booking.rescheduled` |
+| `FlightCancelledEvent` | `flightId: string` | `flight.cancelled` |
+| `UserStatusEvent` | `userId: string` | `user.deactivated`, `user.reactivated`, `account.suspended`, `account.reactivated` |
+| `ProviderStatusEvent` | `providerType: ProviderType; providerId: string; moderatorIds: string[]` | both `provider.…` |
+| `AdminActionEvent` | `actorId: string; action: AuditAction; target: { type: string; id: string }; details?: Record<string, unknown>` | `admin.action` |
+
+It also has:
+- `export interface EventPayloads { [Events.PaymentSucceeded]: PaymentSucceededEvent; … }`, with exactly one entry per event
+- `export type PayloadOf<K extends EventName> = EventPayloads[K];`
+
+Each interface gets a one-line JSDoc naming the emitter and handler (from the table in step 4).
+
+**`app-events.service.ts`:** `@Injectable() export class AppEvents`, wrapping `EventEmitter2`:
+```ts
+emit<K extends EventName>(name: K, payload: PayloadOf<K>): void
+```
+Its JSDoc says: emit after the transaction commits; never use a string literal or `EventEmitter2` directly.
+
+**`events.module.ts`:** `@Global() @Module({ providers: [AppEvents], exports: [AppEvents] }) export class EventsModule {}`.
+
+Add `EventsModule` to `AppModule`'s `imports`, right after `ScheduleModule.forRoot()`. Change nothing else there.
+
+**Tests** (`backend/src/common/events/`):
+- `events.spec.ts`:
+  - 18 entries, values unique, each matching `/^[a-z-]+\.[a-z-]+$/`
+  - a type-level check with Vitest's `expectTypeOf` that `Exclude<EventName, keyof EventPayloads>` is `never`, and the same the other way round
+  - `expectTypeOf<PayloadOf<typeof Events.FlightCancelled>>().toEqualTypeOf<FlightCancelledEvent>()`
+- `app-events.service.spec.ts`: a testing module with `EventEmitterModule.forRoot()`, `EventsModule`, and a test-only provider holding an `@OnEvent(Events.FlightCancelled)` method. Call `moduleRef.init()`, emit through `AppEvents`, and assert the listener received the exact payload. A second listener on another event must not be called.
+
+**Commit:** `feat(common): add typed event names, payloads and AppEvents (PLT-06)`
+
+## Step 3: Spell out the event table in the data model
+
+In `docs/database/data-model.md` §6.3, keep the heading and the sentence "Handlers are **idempotent**…". Replace the table that follows (from its header row to its last row) with this, unchanged:
+
+```markdown
+Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
+
+| Event | Payload | Emitted by | Handled by |
+|---|---|---|---|
+| `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
+| `flight-booking.expired` | `{ bookingId, userId }` | flight-bookings | payments → cancel the PaymentIntent |
+| `hotel-reservation.expired` | `{ bookingId, userId }` | hotel-bookings | payments → cancel the PaymentIntent |
+| `flight-booking.confirmed` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
+| `flight-booking.cancelled` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
+| `hotel-reservation.confirmed` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
+| `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
+| `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
+| `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
+| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
+| `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
+| `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
+| `account.suspended` | `{ userId }` | accounts | notifications |
+| `account.reactivated` | `{ userId }` | accounts | notifications |
+| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
+```
+
+Change nothing else in the file.
+
+**Commit:** `docs(database): spell out every event and its payload (PLT-06)`
+
+## Step 4: Test support
+
+Create these in `backend/test/support/`, next to `mongo-memory.ts`.
+
+**`test-config.ts`:**
+- `export const TEST_JWT_ACCESS_SECRET = 'test-access-secret-not-for-production';`
+- `export const TEST_CONFIG = { JWT_ACCESS_SECRET: TEST_JWT_ACCESS_SECRET, PLATFORM_CURRENCY: 'USD', FRONTEND_URL: 'http://localhost:3000' };`
+
+**`test-app.ts`:**
+```ts
+export interface TestAppOptions {
+  imports?: ModuleMetadata['imports'];        // the module(s) under test, real
+  controllers?: ModuleMetadata['controllers'];
+  providers?: ModuleMetadata['providers'];
+  override?: (builder: TestingModuleBuilder) => TestingModuleBuilder; // fakes for other modules
+}
+export interface TestApp {
+  app: NestExpressApplication;
+  moduleRef: TestingModule;
+  connection: Connection;
+  http: () => ReturnType<typeof request>;     // request(app.getHttpServer())
+  close: () => Promise<void>;
+}
+export async function createTestApp(options?: TestAppOptions): Promise<TestApp>
+```
+It does, in this order:
+1. Start the in-memory replica set with `startMemoryMongo()`.
+2. Build the testing module with these imports, in order:
+   - `ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [() => TEST_CONFIG] })`
+   - `MongooseModule.forRoot(uri, { dbName: 'test' })`
+   - `EventEmitterModule.forRoot()`
+   - `EventsModule`
+   - the caller's `imports`
+
+   Add the caller's `controllers` and `providers`, then apply `override` if given.
+3. `createNestApplication<NestExpressApplication>({ rawBody: true })`.
+4. `configureApp(app, { uploadDir: <a new temp dir>, frontendUrl: TEST_CONFIG.FRONTEND_URL })`.
+5. `await app.init()`.
+6. Wait for every index: `await Promise.all(Object.values(connection.models).map((m) => m.init()))`, where `connection` is `moduleRef.get<Connection>(getConnectionToken())`.
+
+`close()` closes the app, stops the replica set and deletes the temp dir. Give it a JSDoc with a 6-line usage example, and say that tests never read `.env` or touch Atlas.
+
+**`clear-collections.ts`:** `clearCollections(connection)` runs `deleteMany({})` on every collection of the connection, in parallel. It doesn't drop collections, so the indexes stay.
+
+**`auth.ts`:**
+```ts
+export interface LoginAsOptions {
+  providerId?: string;           // moderators: their airline or hotel; default: a new ObjectId
+  mustChangePassword?: boolean;  // default false
+  status?: UserStatus;           // default 'active'
+  sessionExpired?: boolean;      // default false: true sets expiresAt 1 minute in the past
+}
+export interface LoggedInUser {
+  id: string; role: UserRole; providerId?: string; sid: string;
+  cookie: string;                // 'access_token=<jwt>', for .set('Cookie', u.cookie)
+}
+export async function loginAs(connection: Connection, role: UserRole, options?: LoginAsOptions): Promise<LoggedInUser>
+```
+It does, in this order:
+1. **Models:** get the `User` and `Session` models from the connection (`connection.models[User.name] ?? connection.model(User.name, UserSchema)`, and the same for `Session`). This works whether or not the test imported `AccountsModule`.
+2. **User:** create it through the model, so the schema validates:
+   - `name: 'Test <role>'`
+   - email `<role>.<new ObjectId hex>@test.local`
+   - `passwordHash: 'not-a-real-hash'`
+   - `role`, `status`, `mustChangePassword`
+   - for moderator roles, `moderatorOf: { providerType: 'airline' | 'hotel' (matching the role), providerId }`
+3. **Session:** create it with:
+   - `userId`
+   - `refreshTokenHash` = the SHA-256 hex of 48 random bytes (`node:crypto`)
+   - `lastActivityAt` = now, and `expiresAt` = now + 30 min (or now − 1 min when `sessionExpired`)
+4. **Token:** sign `{ sub: userId, role, sid: sessionId, providerId? }` with `new JwtService({ secret: TEST_JWT_ACCESS_SECRET })` (HS256, `expiresIn: '15m'`). `providerId` is only for moderators.
+5. **Return** the `LoggedInUser`.
+
+**`fake-events.ts`:** `export class FakeEvents`. It has the same public `emit(name, payload)` signature as `AppEvents` and records `{ name, payload }` in a public `emitted` array. It also has `payloadsOf<K extends EventName>(name: K): PayloadOf<K>[]` and `clear()`. In tests, use it with `override: (b) => b.overrideProvider(AppEvents).useValue(fake)`.
+
+**Tests** (`backend/test/support/`, one spec per helper; use `HOOK_TIMEOUT` on `beforeAll`/`afterAll`):
+- `test-app.spec.ts`: `createTestApp({ imports: [HealthModule] })`.
+  - `GET /api/health` returns 200 with `status: 'ok'` (the prefix and DB are wired).
+  - `GET /api/nope` returns 404 with `code: 'NOT_FOUND'` and `path` (the filter is wired).
+  - `connection.name` is `test`, and its host is the in-memory server (not Atlas).
+  - After `close()`, the temp upload dir no longer exists.
+- `auth.spec.ts`, with one shared `createTestApp()`:
+  - For each of the 4 roles: `JwtService.verifyAsync(cookieValue, { secret })` succeeds; `sub`, `role` and `sid` match; `providerId` is present only for moderators and equals `moderatorOf.providerId` in the saved user.
+  - The session found by `sid` has `expiresAt > now`. With `sessionExpired: true` it is `< now`.
+  - Two calls create two different users (unique emails).
+  - The cookie string starts with `access_token=`.
+- `clear-collections.spec.ts`: after inserting into two collections, `clearCollections` leaves both empty and the unique index on `users.email` still exists (`collection.indexes()`).
+- `fake-events.spec.ts`: records two emits; `payloadsOf` filters by name; `clear()` empties it.
+
+**Commit:** `test(support): add the test app factory, loginAs, clearCollections and FakeEvents (PLT-06)`
+
+## Step 5: Point the coding skill at the helpers
+
+Only these two files under `docs/ai/skills/travel-platform/references/` change.
+
+**`backend.md` §9 "Ports and events":** replace the event example code block (the lines with `this.events.emit('flight.cancelled'…` and `@OnEvent('flight.cancelled')`) with:
+```ts
+this.events.emit(Events.FlightCancelled, { flightId: flight._id.toString() }); // this.events: AppEvents; after commit
+
+@OnEvent(Events.FlightCancelled)
+async onFlightCancelled({ flightId }: PayloadOf<typeof Events.FlightCancelled>) { /* idempotent, conditional updates */ }
+```
+Then replace the sentence starting "Event names and payloads are fixed in" with:
+"Event names and payloads are fixed in `docs/database/data-model.md` §6.3 and typed in `backend/src/common/events/`: always use `Events.X` with `AppEvents.emit`, never a string literal or `EventEmitter2` directly. IDs travel as strings. A new event or payload field is a contract change (ask first)."
+
+**`testing.md`:**
+- **§4:** replace the first sentence (about `mongo-memory.ts`) and the code block after it with:
+  - this paragraph: "`createTestApp` (`backend/test/support/test-app.ts`) starts a one-node in-memory replica set (transactions work), builds your module with the production app wiring (`configureApp`), and waits for every index. It returns `{ app, moduleRef, connection, http, close }`. Tests **never** touch Atlas or read `.env`."
+  - this code block:
+  ```ts
+  let t: TestApp;
+  beforeAll(async () => {
+    t = await createTestApp({
+      imports: [FlightsModule],                                                            // your module, real
+      override: (b) => b.overrideProvider(ReferenceDataService).useValue(fakeReferenceData), // other modules, fake
+    });
+  }, HOOK_TIMEOUT);
+  beforeEach(() => clearCollections(t.connection));                                        // no leftover data
+  afterAll(() => t.close(), HOOK_TIMEOUT);
+  ```
+  In the pitfalls list, change the "Indexes are built in the background" item to say `createTestApp` already waits for the indexes, and that a test building its own module must `await Model.init()`.
+- **§5:** add one bullet at the end: "**Events:** override `AppEvents` with `new FakeEvents()` (`backend/test/support/fake-events.ts`) and assert `fake.payloadsOf(Events.X)`."
+- **§6:** after the code block, add: "Log in with `const u = await loginAs(t.connection, 'user')` (`backend/test/support/auth.ts`; any role, moderators get a `providerId`) and send `.set('Cookie', u.cookie)`. `loginAs` creates a real user and session and signs the token the way the auth guard expects."
+
+**Commit:** `docs(ai): point the coding skill at the event and test helpers (PLT-06)`
+
+## Step 6: Prompt log
+
+Append this run's entry to your member's prompt log as your agent file (section 4) says. One entry for the whole run.
+**Commit:** `chore(ai): log the PLT-06 prompt (PLT-06)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (on its own) | exit 0 |
+| G2 | `cd backend && npx vitest run src/common/events test/support` | 6 spec files run (`mongo-memory.ts` has no spec); 0 failed; at least 20 tests passed |
+| G3 | the events match the data model (command below) | `SAME 18` |
+| G4 | `cd backend && npm audit --omit=dev --audit-level=high` | exit 0 |
+| G5 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/common/events/` and `backend/test/support/`, plus `backend/src/app.module.ts`, `backend/package.json`, `backend/package-lock.json`, `docs/database/data-model.md`, `docs/ai/skills/travel-platform/references/backend.md`, `docs/ai/skills/travel-platform/references/testing.md`, and your prompt-log file |
+| G6 | `git diff --stat origin/develop...HEAD -- backend/src/modules frontend .github docs/ai/chat-skill` | empty |
+| G7 | `grep -c "…cancelled" docs/database/data-model.md` | `0` |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(PLT-06)` |
+| G9 | `git status --porcelain` | empty |
+
+G3, run in `backend/`:
+```bash
+node -e "const fs=require('fs');const a=new Set([...fs.readFileSync('src/common/events/events.ts','utf8').matchAll(/'([a-z-]+\.[a-z-]+)'/g)].map(m=>m[1]));const s=fs.readFileSync('../docs/database/data-model.md','utf8');const sec=s.slice(s.indexOf('### 6.3'),s.indexOf('## 7.'));const b=new Set([...sec.matchAll(/^\| \x60([a-z-]+\.[a-z-]+)\x60 \|/gm)].map(m=>m[1]));const d=[...a].filter(x=>!b.has(x)).concat([...b].filter(x=>!a.has(x)));console.log(d.length?'DIFF '+d:'SAME '+a.size)"
+```
+
+## Constraints
+
+- Don't touch `backend/src/modules/`, `backend/src/common/` outside `events/`, CI, the frontend, `docs/ai/chat-skill/`, or any skill file other than the two in step 5.
+- No packages beyond step 1. No changes to lint, Prettier, TypeScript or Vitest config.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+When finished, report:
+- The branch and the commit list.
+- Each gate's result in one line (G2 with the test count).
+- The installed `@nestjs/jwt` version.
+- Any decision you had to make that this file didn't settle, with the reason.
+
+How the output was used:
+Created chore/PLT-06-event-contracts-test-support from origin/develop; added @nestjs/jwt, src/common/events (Events, payloads, AppEvents, EventsModule), the data-model event table, test/support helpers (createTestApp, loginAs, clearCollections, FakeEvents) with specs, and the testing.md and backend.md skill updates (commits 9217410, defbd15, 03c2d7e, 2881061, 3df1e27 plus this log commit); nothing pushed.
+================================================

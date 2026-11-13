@@ -18,7 +18,6 @@ import {
   PASSWORD_CHANGE_ALLOW_LIST,
   SESSION_IDLE_MS,
   SESSION_SLIDE_INTERVAL_MS,
-  TEMPORARY_PUBLIC_ROUTES,
 } from './auth.constants.js';
 import type {
   AccessTokenPayload,
@@ -59,7 +58,7 @@ export class JwtAuthGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    if (isPublic || this.matches(TEMPORARY_PUBLIC_ROUTES, request)) {
+    if (isPublic) {
       // Personalise public pages when possible; a bad cookie is just a guest.
       try {
         request.user = await this.authenticate(request);
@@ -180,16 +179,8 @@ export class JwtAuthGuard implements CanActivate {
   private isAllowedDuringPasswordChange(
     request: AuthenticatedRequest,
   ): boolean {
-    return this.matches(PASSWORD_CHANGE_ALLOW_LIST, request);
-  }
-
-  /** Exact method + path match (a trailing slash is ignored). */
-  private matches(
-    routes: readonly { method: string; path: string }[],
-    request: AuthenticatedRequest,
-  ): boolean {
     const path = request.path.replace(/\/+$/, '');
-    return routes.some(
+    return PASSWORD_CHANGE_ALLOW_LIST.some(
       (route) => route.method === request.method && route.path === path,
     );
   }

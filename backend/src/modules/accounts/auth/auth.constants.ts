@@ -15,17 +15,6 @@ export const SESSION_IDLE_MS = 30 * MINUTE_MS;
 export const SESSION_SLIDE_INTERVAL_MS = MINUTE_MS;
 
 /**
- * TEMPORARY: routes outside accounts that must stay open but don't carry
- * `@Public()` yet. `GET /api/health` belongs to the platform package; once its
- * controller has `@Public()`, this entry is redundant and can be deleted.
- * Never add a route that returns user data here.
- */
-export const TEMPORARY_PUBLIC_ROUTES: readonly {
-  method: string;
-  path: string;
-}[] = [{ method: 'GET', path: '/api/health' }];
-
-/**
  * The only routes an account with `mustChangePassword` may call
  * (ACC-07a, ACC-13; auth.md §4). Matched on method and full path.
  */

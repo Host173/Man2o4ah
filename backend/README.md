@@ -157,8 +157,15 @@ update(@CurrentUser() user: AuthUser) { /* user.id, user.role, user.providerId, 
 - While an account has `mustChangePassword`, only `GET /api/auth/me`,
   `PATCH /api/auth/change-password` and `POST /api/auth/logout` work; anything
   else is 403 `PASSWORD_CHANGE_REQUIRED`.
-- The guards need `JWT_ACCESS_SECRET` in the configuration. Tests get it from
+- The guards verify tokens with `JWT_ACCESS_SECRET` (in `backend/.env`;
+  generate one with `openssl rand -base64 32`). If it isn't set, the app still
+  starts and logs a warning, but fails closed: every protected route answers
+  401 and public routes treat everyone as a guest. Tests get it from
   `test/support/test-config.ts`.
+- `GET /api/health` stays open through `TEMPORARY_PUBLIC_ROUTES` in
+  `auth/auth.constants.ts` until its controller gets `@Public()`; then that
+  entry can be deleted. Swagger (`/api/docs`) and `/uploads` are served outside
+  the guards. Any other route a guest must reach needs `@Public()`.
 
 In API tests, import `AccountsModule` into `createTestApp` and log in with
 `loginAs(t.connection, Role.X)` from `test/support/auth.ts`, then send

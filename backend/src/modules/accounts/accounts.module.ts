@@ -9,6 +9,7 @@ import {
   ACCESS_TOKEN_TTL_SECONDS,
 } from './auth/auth.constants.js';
 import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
+import { jwtAccessSecret } from './auth/jwt-secret.js';
 import { RolesGuard } from './auth/roles.guard.js';
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
 import { Session, SessionSchema } from './schemas/session.schema.js';
@@ -23,7 +24,8 @@ import { User, UserSchema } from './schemas/user.schema.js';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        // undefined until JWT_ACCESS_SECRET is set: the guard then fails closed (401).
+        secret: jwtAccessSecret(config),
         signOptions: {
           algorithm: ACCESS_TOKEN_ALGORITHM,
           expiresIn: ACCESS_TOKEN_TTL_SECONDS,

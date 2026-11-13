@@ -129,6 +129,68 @@ Run the bookings contract tests with:
 npm test -- src/modules/flight-bookings src/modules/hotel-bookings test/fakes/flight-bookings.fake.spec.ts test/fakes/hotel-bookings.fake.spec.ts
 ```
 
+## Accounts contract (CTR-01)
+
+`AccountsModule` registers two **global** guards, in this order:
+[JwtAuthGuard](src/modules/accounts/auth/jwt-auth.guard.ts) then
+[RolesGuard](src/modules/accounts/auth/roles.guard.ts). Every route needs a
+logged-in account unless it is marked `@Public()`. Import the decorators and
+types from `src/modules/accounts/auth/`:
+
+```ts
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
+import { Role } from '../accounts/auth/auth.types.js';
+import type { AuthUser } from '../accounts/auth/auth.types.js';
+
+@Roles(Role.AIRLINE_MODERATOR) @Patch(':id')
+update(@CurrentUser() user: AuthUser) { /* user.id, user.role, user.providerId, user.sid */ }
+```
+
+- `@Public()`: guests allowed; `@CurrentUser()` is the user if a valid cookie
+  was sent, otherwise `undefined`. A bad cookie never fails a public route.
+- `@Roles(...)`: other roles get 403 `FORBIDDEN_ROLE`. No `@Roles` = any
+  logged-in account. Ownership and moderator scope (ACC-11) stay in services.
+- The token is read only from the `access_token` cookie (never a header).
+  Missing → 401 `NOT_AUTHENTICATED`; invalid or expired → 401 `TOKEN_EXPIRED`;
+  session deleted or idle for 30 minutes → 401 `SESSION_EXPIRED`. Each request
+  slides the session's idle window (at most once a minute).
+- While an account has `mustChangePassword`, only `GET /api/auth/me`,
+  `PATCH /api/auth/change-password` and `POST /api/auth/logout` work; anything
+  else is 403 `PASSWORD_CHANGE_REQUIRED`.
+- The guards need `JWT_ACCESS_SECRET` in the configuration. Tests get it from
+  `test/support/test-config.ts`.
+
+In API tests, import `AccountsModule` into `createTestApp` and log in with
+`loginAs(t.connection, Role.X)` from `test/support/auth.ts`, then send
+`.set('Cookie', u.cookie)`.
+
+[AccountsService](src/modules/accounts/accounts.service.ts) is what other
+modules may call: `getProfiles(ids)` (name, status, join date: author names,
+"Deleted user", BLG-12), `findUserIdsByName(q)` (BLG-09), and the admin
+operations `listAccounts` (ACC-14), `createModerator` (ACC-13),
+`resetPassword` (ACC-07a), `suspend` and `reactivate` (ACC-15, ACC-16).
+Sprint 1 stubs: calling them throws `NotImplementedException`; the real
+methods ship in ACC-16. The types are in
+[accounts.types.ts](src/modules/accounts/accounts.types.ts). IDs are strings.
+
+[ActiveBookingsCheck](src/modules/accounts/ports/active-bookings-check.port.ts)
+is the port flight-bookings and hotel-bookings implement
+(`hasUpcomingConfirmed(userId)`), so ACC-12 can block deactivation without
+accounts importing them. Register the implementation in `onModuleInit` with
+[ActiveBookingsCheckRegistry](src/modules/accounts/ports/active-bookings-check.registry.ts),
+which `AccountsModule` exports. The registry fails if a booking type is not
+registered, rather than answering "no bookings".
+
+For other modules' tests, import `FakeAccountsService` (seed it with
+`FakeAccountSeed[]`; `get(id)` shows status, `mustChangePassword` and revoked
+sessions) and `FakeActiveBookingsCheck` from `test/fakes/index.ts`.
+
+Run the accounts contract tests with:
+
+```bash
+npm test -- src/modules/accounts test/fakes/accounts.fake.spec.ts test/fakes/active-bookings-check.fake.spec.ts
+```
+
 ## Project setup
 
 ```bash

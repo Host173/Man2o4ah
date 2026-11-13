@@ -4429,3 +4429,62 @@ this isn't done independently just continue as you were and follow all original 
 How the output was used:
 Reverted the out-of-scope edits; working tree back at 5c7a8ed; npm run verify passed; no code changes
 ================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+without pushing or editing anything pleaes help me understand what i need in order to complete the contract
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+verify that the code on this branch follows 
+
+Expected output
+Role enum, AuthUser type, @public / @roles / @currentuser, global JWT-cookie and role guards (session check included); the AccountsService interface other modules call (profiles, name search, admin operations) as stubs plus a fake; the ActiveBookingsCheck port.
+
+Requirements: ACC-11, ACC-19, GEN-13
+Package: 2 · Accounts & Auth
+Module(s): accounts
+
+Tests: Unit (guards); API (401 without cookie, 403 wrong role)
+TDD required: No
+
+Branch: feature/CTR-01-accounts-contract
+PR title: CTR-01: Accounts contract: guards, roles and account service
+
+Depends on: #6 (PLT-04), #7 (PLT-05)
+Blocks: #24 (ACC-01), #29 (ACC-09), #30 (ACC-12), #31 (ACC-16), #64 (ACC-11), #65 (ITN-01), #76 (BLG-01), #77 (BLG-02), #81 (BLG-09), #86 (ACC-13), #87 (ACC-15)
+
+How to build it is up to the owner; see the project skill (docs/ai/skills/travel-platform/).
+
+and please be sure on whether the depends on only indicates whether the contract will be used by plt4 and 5
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+can you please rerwite it in a way so that the contract can technically be done even if it doesn't work perrfectly it should work once plt 4 and 4 are put in place
+
+How the output was used:
+Guard fails closed without JWT_ACCESS_SECRET and keeps GET /api/health open via a temporary allow-list, with tests and README; committed 257e37b
+================================================

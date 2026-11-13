@@ -6,6 +6,7 @@ import type {
   AccountProfile,
   CreateModeratorInput,
 } from './accounts.types.js';
+import type { ProviderType } from './schemas/user.schema.js';
 
 /**
  * What other modules may ask accounts (CTR-01). Exported by `AccountsModule`;
@@ -34,6 +35,20 @@ export class AccountsService {
     throw new NotImplementedException(
       'findUserIdsByName: implemented in ACC-16',
     );
+  }
+
+  /**
+   * IDs of the moderators of one airline or hotel, whatever their status, so
+   * admin can notify them when the provider is (de)activated (ACC-15,
+   * `provider.deactivated.moderatorIds`). None → `[]`.
+   */
+  getModeratorIds(
+    providerType: ProviderType,
+    providerId: string,
+  ): Promise<string[]> {
+    void providerType;
+    void providerId;
+    throw new NotImplementedException('getModeratorIds: implemented in ACC-16');
   }
 
   /** ACC-14: paginated, newest first; `q` matches name or email. */

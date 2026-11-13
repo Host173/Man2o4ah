@@ -12,6 +12,7 @@ describe('accounts contract (stubs)', () => {
   const calls: [string, () => unknown][] = [
     ['getProfiles', () => accounts.getProfiles(['u-1'])],
     ['findUserIdsByName', () => accounts.findUserIdsByName('ali')],
+    ['getModeratorIds', () => accounts.getModeratorIds('hotel', 'h-1')],
     ['listAccounts', () => accounts.listAccounts({ page: 1, limit: 10 })],
     [
       'createModerator',

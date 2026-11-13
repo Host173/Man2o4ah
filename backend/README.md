@@ -166,7 +166,8 @@ In API tests, import `AccountsModule` into `createTestApp` and log in with
 
 [AccountsService](src/modules/accounts/accounts.service.ts) is what other
 modules may call: `getProfiles(ids)` (name, status, join date: author names,
-"Deleted user", BLG-12), `findUserIdsByName(q)` (BLG-09), and the admin
+"Deleted user", BLG-12), `findUserIdsByName(q)` (BLG-09),
+`getModeratorIds(providerType, providerId)` (ACC-15's `moderatorIds`), and the admin
 operations `listAccounts` (ACC-14), `createModerator` (ACC-13),
 `resetPassword` (ACC-07a), `suspend` and `reactivate` (ACC-15, ACC-16).
 Sprint 1 stubs: calling them throws `NotImplementedException`; the real

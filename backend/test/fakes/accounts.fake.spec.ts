@@ -74,6 +74,42 @@ describe('FakeAccountsService', () => {
     });
   });
 
+  describe('getModeratorIds (ACC-15)', () => {
+    it("returns the provider's moderators, including new and suspended ones", async () => {
+      const accounts = new FakeAccountsService([
+        ...seed,
+        {
+          id: 'm-2',
+          name: 'Suspended Mod',
+          email: 'm2@nile.example',
+          role: 'hotel_moderator',
+          status: 'suspended',
+          moderatorOf: { providerType: 'hotel', providerId: 'h-1' },
+        },
+      ]);
+      const created = await accounts.createModerator({
+        name: 'New Mod',
+        email: 'new@nile.example',
+        role: 'hotel_moderator',
+        providerId: 'h-1',
+        temporaryPassword: 'Temp1234',
+      });
+      expect((await accounts.getModeratorIds('hotel', 'h-1')).sort()).toEqual(
+        ['m-1', 'm-2', created.id].sort(),
+      );
+    });
+
+    it('matches the provider type as well as the ID, and returns [] when none', async () => {
+      const accounts = new FakeAccountsService(seed);
+      await expect(accounts.getModeratorIds('airline', 'h-1')).resolves.toEqual(
+        [],
+      );
+      await expect(accounts.getModeratorIds('hotel', 'h-9')).resolves.toEqual(
+        [],
+      );
+    });
+  });
+
   describe('listAccounts (ACC-14)', () => {
     const ids = (page: { items: { id: string }[] }) =>
       page.items.map((item) => item.id);

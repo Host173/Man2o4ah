@@ -109,6 +109,19 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
       .map((account) => account.id);
   }
 
+  async getModeratorIds(
+    providerType: ProviderType,
+    providerId: string,
+  ): Promise<string[]> {
+    return [...this.accounts.values()]
+      .filter(
+        (account) =>
+          account.moderatorOf?.providerType === providerType &&
+          account.moderatorOf.providerId === providerId,
+      )
+      .map((account) => account.id);
+  }
+
   async listAccounts(
     query: AccountListQuery,
   ): Promise<Paginated<AccountListItem>> {

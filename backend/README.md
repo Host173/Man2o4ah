@@ -94,6 +94,41 @@ Run the community contract tests with:
 npm test -- src/modules/moderation src/modules/blog src/modules/admin test/fakes/reportable-content.fake.spec.ts
 ```
 
+## Bookings contract (CTR-04)
+
+[FlightBookingsService](src/modules/flight-bookings/flight-bookings.service.ts)
+and [HotelBookingsService](src/modules/hotel-bookings/hotel-bookings.service.ts)
+each provide `listForAdmin(query)` for the admin booking list (`ACC-17`). They are
+exported by `FlightBookingsModule` and `HotelBookingsModule`; models remain
+private. Both are read-only.
+
+These are Sprint 1 stubs: calling them throws `NotImplementedException`. The
+database-backed list ships in `ACC-11`. There are no new HTTP endpoints in
+CTR-04; `GET /api/admin/bookings` belongs to the admin module.
+
+The query takes `page` and `limit`, and optionally `status` and a `from`/`to`
+range on the booking's `createdAt` (both ends inclusive). Each service returns
+the shared paginated shape, newest `createdAt` first. Rows
+([FlightBookingAdminView](src/modules/flight-bookings/flight-bookings.types.ts),
+[HotelReservationAdminView](src/modules/hotel-bookings/hotel-bookings.types.ts))
+carry `bookingType` (`'flight'` or `'hotel'`), `bookingId`, `reference` (absent
+until confirmed), `userId`, `providerId` (the outbound airline or the hotel),
+`startAt`/`endAt` (flight departures, or hotel check-in/check-out as UTC
+`DateOnly` values), `totalMinor`, `currency`, `status` and `createdAt`. IDs are
+strings and amounts are integer minor units. To list both types, call both
+services and merge by `createdAt`.
+
+For other modules' tests (`ACC-17`), import `FakeFlightBookingsService` and
+`FakeHotelBookingsService` from `test/fakes/index.ts` and pass the admin views
+to the constructor. The fakes filter, sort and paginate like the contract above.
+Fixtures and results are copied, so tests cannot change each other's data.
+
+Run the bookings contract tests with:
+
+```bash
+npm test -- src/modules/flight-bookings src/modules/hotel-bookings test/fakes/flight-bookings.fake.spec.ts test/fakes/hotel-bookings.fake.spec.ts
+```
+
 ## Project setup
 
 ```bash

@@ -809,7 +809,7 @@ A URL path does not decide the module. Endpoints that combine provider data with
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
 | `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` (blocks ACC-12) |
 
-**Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`).
+**Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`). Moderation: `ReportableContentRegistry` (`moderation/ports/`).
 
 ### 6.3 Events (in-process, `@nestjs/event-emitter`)
 Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.

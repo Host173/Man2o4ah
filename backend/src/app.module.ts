@@ -17,6 +17,7 @@ import { ItinerariesModule } from './modules/itineraries/itineraries.module.js';
 import { FxModule } from './modules/fx/fx.module.js';
 import { BlogModule } from './modules/blog/blog.module.js';
 import { ModerationModule } from './modules/moderation/moderation.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
@@ -45,6 +46,7 @@ import { StorageModule } from './modules/storage/storage.module.js';
     FxModule,
     BlogModule,
     ModerationModule,
+    AdminModule,
     NotificationsModule,
     AuditModule,
     StorageModule,

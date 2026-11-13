@@ -1,4 +1,5 @@
 export { FakeAuditService } from './audit.fake.js';
+export { FakeFlightBookingsService } from './flight-bookings.fake.js';
 export { FakeFlightsData } from './flights-data.fake.js';
 export type {
   FakeAirlineSeed,
@@ -8,6 +9,7 @@ export type {
 export { FakeFlightsService } from './flights.fake.js';
 export { FakeFxService } from './fx.fake.js';
 export type { FakeFxOptions } from './fx.fake.js';
+export { FakeHotelBookingsService } from './hotel-bookings.fake.js';
 export { FakeHotelsService } from './hotels.fake.js';
 export type { HotelDataset } from './hotels.fake.js';
 export { FakePayableBooking } from './payable-booking.fake.js';

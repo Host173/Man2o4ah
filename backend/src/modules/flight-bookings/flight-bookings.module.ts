@@ -4,6 +4,7 @@ import {
   FlightBooking,
   FlightBookingSchema,
 } from './schemas/flight-booking.schema.js';
+import { FlightBookingsService } from './flight-bookings.service.js';
 
 @Module({
   imports: [
@@ -11,5 +12,7 @@ import {
       { name: FlightBooking.name, schema: FlightBookingSchema },
     ]),
   ],
+  providers: [FlightBookingsService],
+  exports: [FlightBookingsService],
 })
 export class FlightBookingsModule {}

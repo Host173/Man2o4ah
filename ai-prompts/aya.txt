@@ -1,3 +1,210 @@
 AI prompt log — Aya Amr
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: none
+
+Prompt:
+implement claude.md from the agent example .md and add in this in my preferences 
+
+I want you to act as both a senior developer and a tutor while helping me implement my Jira tasks.
+
+I'm not familiar with TypeScript, so **help me learn TypeScript as we work**, rather than simply writing the code for me.
+
+- Explain unfamiliar TypeScript concepts, syntax, methods, and patterns in simple terms.
+- Before implementing, briefly explain the task, the relevant files, and how the implementation fits into the existing architecture.
+- Break implementations into small, understandable steps instead of dumping large amounts of code.
+- Explain why you're choosing a particular approach and its alternatives when relevant.
+- Whenever possible, let me try implementing smaller parts myself, then review my work.
+- Don't assume I understand something; check my understanding occasionally.
+- Follow the existing codebase conventions and avoid unnecessary changes.
+
+**Most importantly:** Prioritize helping me understand what I'm implementing so I gradually become capable of completing similar tasks independently, rather than relying on you to write all the code.
+
+How the output was used:
+Created CLAUDE.md (gitignored, from AGENTS.example.md, About me and preferences filled in); no commit
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+dont add the setup and ctr question prompts, i now want to start implemeting ctr-04 issue , in a taskbased way, where i will review each step before committting it
+
+How the output was used:
+Planned CTR-04 in steps; created branch feature/CTR-04-bookings-contract from develop, ran npm ci, drafted flight-bookings.types.ts for review; no commit
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+why is it taking so long
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+what is a reference
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+im done
+[Attached: screenshot of VS Code showing hotel-bookings.types.ts and a passing npm run typecheck]
+
+How the output was used:
+Answer only, no files changed (review of hotel-bookings.types.ts)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+fix those edits and choose the filter
+
+How the output was used:
+Reformatted hotel-bookings.types.ts (LF, 2 spaces), added JSDoc comments, kept createdAt as the date-range filter; no commit
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+two commits then we start the service stubs
+
+How the output was used:
+Committed db9fe2c and 3030e3d (types); added flight-bookings.service.ts, module wiring and flight-bookings.contract.spec.ts for review; no commit yet
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+.+
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+i am done
+
+How the output was used:
+Answer only, no files changed (review of hotel-bookings.service.ts; module wiring and spec still missing)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+can you help me out here i dont know what to put
+
+How the output was used:
+Answer only, no files changed (walked through the module wiring and contract spec)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+i am done
+
+How the output was used:
+Answer only, no files changed (review of module wiring and hotel-bookings.contract.spec.ts)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+i fixed the formatting
+
+How the output was used:
+Answer only, no files changed (re-checked formatting before the Step 2 commits)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+commit now
+
+How the output was used:
+Committed the flight-bookings and hotel-bookings service stubs, module wiring and contract specs (Step 2)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+im ready
+
+How the output was used:
+Added test/fakes/flight-bookings.fake.ts and its export in test/fakes/index.ts for review; no commit
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+okay no implement the tests and the fakes and then commit them
+
+How the output was used:
+Added hotel-bookings.fake.ts, both fake specs and the index export; committed the fakes and their tests (Step 3 and 4)
+================================================
+================================================
+Date: 2026-11-13
+Student: Aya
+Tool: Claude Code
+Related Requirement: CTR-04
+
+Prompt:
+do step 5
+
+How the output was used:
+Added the "Bookings contract (CTR-04)" section to backend/README.md; committed it
+================================================

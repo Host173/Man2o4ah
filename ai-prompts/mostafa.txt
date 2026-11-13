@@ -1,3 +1,16 @@
 AI prompt log — Mostafa Elsahy
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+================================================
+Date: 2026-11-13
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: CTR-07
+
+Prompt:
+Implement CTR-07 (issue #15, Sprint 1, Community & Admin) using the existing project conventions: the community contract for the reportable content port, covering GEN-09 and GEN-10 as interfaces only. First read the CTR-07, GEN-09 and GEN-10 specs and follow the documented port operations and naming exactly, without inventing operations, and confirm the PLT-04 and PLT-05 outputs are present on develop (report it clearly if they aren’t, rather than recreating them). Create module skeletons for blog, moderation and admin that match how existing modules are structured, then define the typed ReportableContent port that content-owning modules like hotels, itineraries and blog will implement, plus its registry, which registers providers, resolves them by content type, and handles duplicate registration and unknown-type lookups in a well-defined typed way. Register and export the stubs through the module system, and provide an in-memory fake ReportableContent implementation that other modules (HTL-23, ITN-20, BLG-01, GEN-09) can use in their tests. Keep everything to interfaces and skeletons: no database-backed features, controllers with real logic, or report workflows, no changes to the frozen schemas, and no changes to Aya’s booking modules or anything outside blog, moderation, admin and the shared contract wiring. TDD isn’t required, but ship focused unit tests for the registry (registration, lookup, duplicates, unknown type) and the fake (satisfies the port contract, predictable behavior, edge cases like unknown content and repeated calls). Update the related documentation, run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/CTR-07-community-contract, commit and push only the CTR-07 changes, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+
+How the output was used:
+Added ReportableContent port and ReportableContentRegistry in moderation, blog/moderation/admin module skeletons, FakeReportableContent in test/fakes, unit/wiring specs, and contract documentation on feature/CTR-07-community-contract (commits a56b2a0 and follow-up format/prompt-log commit).
+================================================
+

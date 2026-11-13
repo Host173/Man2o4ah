@@ -25,4 +25,3 @@ export interface ReportableContent {
    */
   delete(id: string): Promise<void>;
 }
-

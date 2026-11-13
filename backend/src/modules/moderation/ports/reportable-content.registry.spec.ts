@@ -53,4 +53,3 @@ describe('ReportableContentRegistry', () => {
     expect(() => registry.register(invalidProvider)).toThrow(/flight/);
   });
 });
-

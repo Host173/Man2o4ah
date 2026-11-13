@@ -6,4 +6,3 @@ import { AdminService } from './admin.service.js';
   exports: [AdminService],
 })
 export class AdminModule {}
-

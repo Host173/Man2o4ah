@@ -50,4 +50,3 @@ export class ReportableContentRegistry {
     return content;
   }
 }
-

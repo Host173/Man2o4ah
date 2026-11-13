@@ -84,4 +84,3 @@ export class FakeReportableContent implements ReportableContent {
     return entry;
   }
 }
-

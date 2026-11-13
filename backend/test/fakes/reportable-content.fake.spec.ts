@@ -89,4 +89,3 @@ describe('FakeReportableContent', () => {
     expect(await fake.exists('itn-1')).toBe(false);
   });
 });
-

@@ -22,4 +22,3 @@ describe('BlogService (skeleton)', () => {
     expect(moduleRef.get(BlogService)).toBeInstanceOf(BlogService);
   });
 });
-

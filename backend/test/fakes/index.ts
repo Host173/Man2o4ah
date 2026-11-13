@@ -15,6 +15,8 @@ export { FakePaymentsService } from './payments.fake.js';
 export type { PublicApi } from './public-api.js';
 export { FakeReferenceDataService } from './reference-data.fake.js';
 export type { ReferenceDataset } from './reference-data.fake.js';
+export { FakeReportableContent } from './reportable-content.fake.js';
+export type { FakeReportableEntry } from './reportable-content.fake.js';
 export { FakeSeatInventory } from './seat-inventory.fake.js';
 export type { SeatCounters } from './seat-inventory.fake.js';
 export { FakeRoomNightInventory } from './room-night-inventory.fake.js';

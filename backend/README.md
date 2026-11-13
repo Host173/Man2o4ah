@@ -64,6 +64,36 @@ npm test -- hotels.contract.spec.ts hotels.fake.spec.ts
 
 Run `npm run verify` before handing off changes.
 
+## Community contract (CTR-07)
+
+[ReportableContent](src/modules/moderation/ports/reportable-content.port.ts)
+defines the port (`targetType`, `exists(id)`, `hide(id)`, `delete(id)`) that
+content-owning modules (`blog` for `post` and `comment`, `hotel-bookings` for
+`review`, `itineraries` for `itinerary`) implement for content reporting
+(`GEN-09`) and report resolution (`GEN-10`).
+[ReportableContentRegistry](src/modules/moderation/ports/reportable-content.registry.ts)
+is exported by `ModerationModule` so each content module can register its
+provider in `onModuleInit` without creating circular imports.
+
+`BlogModule` (`BlogService`), `ModerationModule` (`ModerationService`,
+`ReportableContentRegistry`), and `AdminModule` (`AdminService`) provide Sprint 1
+module skeletons; database-backed workflows ship in Sprint 3 (`BLG-01..09`,
+`GEN-06`, `GEN-09`, `GEN-10`, `ACC-07a`, `ACC-09..11`, `ACC-13..15`).
+
+For unit and contract tests in `HTL-23`, `ITN-20`, `BLG-01`, `GEN-09`, and
+`GEN-10`, import `FakeReportableContent` from `test/fakes/index.ts`. Seed IDs in
+the constructor or with `add(id)` / `set(id)`; `exists(id)` returns `true` for
+seeded items (including hidden ones) and `false` for unknown or deleted IDs,
+`hide(id)` marks an item hidden (`isHidden(id) === true`) idempotently and throws
+404 `NOT_FOUND` for missing IDs, and `delete(id)` removes the item and throws 404
+`NOT_FOUND` when missing or already deleted.
+
+Run the community contract tests with:
+
+```bash
+npm test -- src/modules/moderation src/modules/blog src/modules/admin test/fakes/reportable-content.fake.spec.ts
+```
+
 ## Project setup
 
 ```bash

@@ -5,6 +5,7 @@ import {
   HotelReservationSchema,
 } from './schemas/hotel-reservation.schema.js';
 import { Review, ReviewSchema } from './schemas/review.schema.js';
+import { HotelBookingsService } from './hotel-bookings.service.js';
 
 @Module({
   imports: [
@@ -13,5 +14,7 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
       { name: Review.name, schema: ReviewSchema },
     ]),
   ],
+  providers: [HotelBookingsService],
+  exports: [HotelBookingsService],
 })
 export class HotelBookingsModule {}

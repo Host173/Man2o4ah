@@ -38,6 +38,52 @@ jobs:
           fi
           exit "$fail"
 
+  prompt-log:
+    name: Prompt log entry
+    # A develop -> main milestone release is exempt.
+    if: github.head_ref != 'develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the author's prompt log
+        # Untrusted text goes through env, never into the script body.
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # GitHub login -> the member's log file (ai-prompts/<first name>.txt).
+          case "$AUTHOR" in
+            Host173) member=kareem ;;
+            AishaAlRawahi) member=aisha ;;
+            janaelmenshawy) member=jana ;;
+            pierreofficial) member=pierre ;;
+            Hestias-space) member=aya ;;
+            Mohamed-Mokhtar-Elalfy-16009527) member=mokhtar ;;
+            mostafa-elsahy) member=mostafa ;;
+            *)
+              echo "::notice::$AUTHOR is not a team member; prompt log not checked."
+              exit 0 ;;
+          esac
+          log="ai-prompts/$member.txt"
+          fail=0
+          added=$(git diff --unified=0 "$BASE_SHA...$HEAD_SHA" -- "$log" | grep -c '^+Prompt:' || true)
+          if [ "$added" -lt 1 ]; then
+            echo "::error file=$log::No new prompt-log entry in $log. Every prompt gets one entry (format: AGENTS.example.md section 4)."
+            fail=1
+          else
+            echo "$added new entry/entries in $log."
+          fi
+          # The logs are append-only: no PR may remove or change an existing line.
+          removed=$(git diff --unified=0 "$BASE_SHA...$HEAD_SHA" -- ai-prompts | grep -c '^-[^-]' || true)
+          if [ "$removed" -gt 0 ]; then
+            echo "::error::$removed line(s) removed or changed in ai-prompts/. The logs are append-only."
+            fail=1
+          fi
+          exit "$fail"
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

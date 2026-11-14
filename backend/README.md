@@ -129,6 +129,36 @@ Run the bookings contract tests with:
 npm test -- src/modules/flight-bookings src/modules/hotel-bookings test/fakes/flight-bookings.fake.spec.ts test/fakes/hotel-bookings.fake.spec.ts
 ```
 
+## Itineraries contract (CTR-06)
+
+[ItinerariesService](src/modules/itineraries/itineraries.service.ts) provides the
+public itineraries by author that the blog's author page needs (`BLG-12`). It is
+exported by `ItinerariesModule`; the itinerary model stays private.
+
+This is a Sprint 1 stub: calling it throws `NotImplementedException`. The
+database-backed list ships in ITN-20. There are no new HTTP endpoints in CTR-06;
+`GET /api/authors/:id` belongs to the blog module.
+
+The method is `listPublicByAuthor(ownerId, { page?, limit? })`. It returns the
+shared paginated shape, newest `updatedAt` first, with `page` defaulting to 1 and
+`limit` to 10. Only public itineraries are included: `visibility: public`, not
+hidden, and not owned by a deactivated author (`ITN-20`). Each row
+([PublicItinerarySummary](src/modules/itineraries/itineraries.types.ts)) carries
+`id`, `ownerId` (the author), `title`, `countryCodes`, `startDate` (a UTC
+`DateOnly`), `dayCount`, `cityIds` (the distinct day cities) and `updatedAt`.
+Days, activities and budgets are not part of this list.
+
+For other modules' tests (`BLG-12`), import `FakeItinerariesService` from
+`test/fakes/index.ts` and pass the public summaries to the constructor. The fake
+filters by owner, sorts and paginates like the contract above. Fixtures and
+results are copied, so tests cannot change each other's data.
+
+Run the itineraries contract tests with:
+
+```bash
+npm test -- src/modules/itineraries test/fakes/itineraries.fake.spec.ts
+```
+
 ## Project setup
 
 ```bash

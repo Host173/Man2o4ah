@@ -1342,3 +1342,16 @@ no just remove the commit rules i really don't need it that much
 How the output was used:
 Removed the Conventional Commits CI job and commitlint.config.mjs; README, DECISIONS and workflow.md now call the commit style recommended, not checked; opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-14
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-01
+
+Prompt:
+ok do all this and open a pr with the changes and if there is something i have to do my self tell me  how before you start work so i do this in parallel with you
+
+How the output was used:
+Added the prompt-log CI check, .github/copilot-instructions.md (review checklist), the on-demand Claude review workflow, and README/DECISIONS notes; opened a PR into develop.
+================================================

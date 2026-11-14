@@ -12,6 +12,7 @@ export type { FakeFxOptions } from './fx.fake.js';
 export { FakeHotelBookingsService } from './hotel-bookings.fake.js';
 export { FakeHotelsService } from './hotels.fake.js';
 export type { HotelDataset } from './hotels.fake.js';
+export { FakeItinerariesService } from './itineraries.fake.js';
 export { FakePayableBooking } from './payable-booking.fake.js';
 export { FakePaymentsService } from './payments.fake.js';
 export type { PublicApi } from './public-api.js';

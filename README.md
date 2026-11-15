@@ -41,7 +41,7 @@ There is no root `package.json`. Each app has its own.
 ## Setup
 
 1. Clone the repository.
-2. Copy the `backend/.env` values from `.env.example` into `backend/.env` and fill in `MONGODB_URI` (get it from the team leader).
+2. Copy the `backend/.env` values from `.env.example` into `backend/.env` and fill in `MONGODB_URI` (get it from the team leader) and `JWT_ACCESS_SECRET` (any long random string; `.env.example` shows how to generate one).
 3. Copy the frontend values from `.env.example` into `frontend/.env.local`.
 4. Run `npm install` in `backend/` and in `frontend/`.
 

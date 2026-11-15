@@ -78,8 +78,8 @@ backend/seed-data/        course CSVs (never edit)
 | flights | reference-data, storage |
 | hotels | reference-data, storage |
 | payments | — (uses the `PayableBooking` port) |
-| flight-bookings | flights, payments |
-| hotel-bookings | hotels, payments |
+| flight-bookings | flights, payments, accounts (registers `ActiveBookingsCheck`) |
+| hotel-bookings | hotels, payments, accounts (registers `ActiveBookingsCheck`) |
 | itineraries | reference-data, fx, flights, hotels, accounts, storage |
 | blog | accounts, itineraries, storage |
 | moderation | — (uses the `ReportableContent` port) |

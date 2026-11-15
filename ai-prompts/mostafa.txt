@@ -14,3 +14,17 @@ How the output was used:
 Added ReportableContent port and ReportableContentRegistry in moderation, blog/moderation/admin module skeletons, FakeReportableContent in test/fakes, unit/wiring specs, and contract documentation on feature/CTR-07-community-contract (commits a56b2a0 and follow-up format/prompt-log commit).
 ================================================
 
+
+================================================
+Date: 2026-11-15
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-01
+
+Prompt:
+Implement BLG-01 (Sprint 1, package 7, Community & Admin, module: blog) using the existing project conventions: blog posts where a user can create a post as draft or published, edit and delete their own posts, and list their own posts including drafts, covering BLG-01, BLG-03 and BLG-04. First read the BLG-01, BLG-03 and BLG-04 specs and the project skill in docs/ai/skills/travel-platform/, and follow the documented endpoints, naming and conventions exactly without inventing behavior. Confirm the outputs of CTR-07 (#15) and CTR-01 (#10) are present on develop, and if they aren’t, report it clearly instead of recreating them. Build on the existing blog module skeleton and CTR-07 contract: add the post model and persistence following the project’s data conventions, with create (status draft or published), update, delete and a “list my posts” operation that includes drafts, all restricted to the authenticated owner so that other users get the project’s documented forbidden or not-found response when trying to edit or delete someone else’s post, and so that drafts are never exposed to non-owners. Don’t implement features reserved for later blog tickets (BLG-02, BLG-05, BLG-06, BLG-08, BLG-10, BLG-13), don’t change the frozen schemas, and don’t touch Aya’s booking modules or anything outside the blog module and the shared wiring this task needs. TDD isn’t required, but ship integration tests for the post operations and API tests that verify owner-only access (create as draft and published, edit and delete own posts, list own posts with drafts, and rejection of edits, deletes and draft access by other users or unauthenticated requests), including edge cases like invalid input, a missing post and repeated deletes. Update the related documentation (API docs and module docs, plus any index or changelog the project keeps), run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/BLG-01-posts, commit and push only the BLG-01 changes with the PR title BLG-01: Posts in mind, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+Attachments: docs/ai/chat-skill/chat-instructions.txt, docs/ai/chat-skill/SKILL.md
+
+How the output was used:
+Implemented blog post creation (draft/published), owner-scoped listing (/api/posts/mine), editing, and deletion with comment/like cleanup in BlogService and BlogController, added CreatePostDto/UpdatePostDto/PostResponseDto and PostView types, and added DTO unit tests, service integration tests, and HTTP API tests on feature/BLG-01-posts.
+================================================

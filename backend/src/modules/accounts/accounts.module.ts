@@ -21,7 +21,8 @@ import { User, UserSchema } from './schemas/user.schema.js';
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
- * `/api/auth/*` (ACC-01 registration); `AuthService` stays internal. Other
+ * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user);
+ * `AuthService` stays internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.

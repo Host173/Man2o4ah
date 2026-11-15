@@ -1,3 +1,1311 @@
 AI prompt log — Jana Elmenshawi
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+================================================
+Date: 2026-11-12
+Student: Jana
+Tool: Claude (claude.ai chat)
+Related Requirement: CTR-02
+
+Prompt:
+Expected output
+The FlightsService interface (flight/airline data for booking, bookability checks, search, provider activation) and the SeatInventory interface (data-model §4.1) as stubs, plus fakes; the fake SeatInventory keeps real counters.
+
+Requirements: FLT-22, FLT-11 (interfaces)
+Package: 3 · Flights
+Module(s): flights
+
+Tests: Unit (the fakes behave like the contract)
+TDD required: No
+
+Branch: feature/CTR-02-flights-contract
+PR title: CTR-02: Flights contract: flight service and SeatInventory
+
+Depends on: #6 (PLT-04), #7 (PLT-05)
+Blocks: #33 (FLT-01), #37 (INV-01), #52 (FLT-19), #53 (FLT-22), #57 (FLT-29), #75 (ITN-26), #86 (ACC-13), #87 (ACC-15)
+
+How to build it is up to the owner; see the project skill (docs/ai/skills/travel-platform/). do this ticket, explain everything you write heres all the relevant info FLT-22 & FLT-11 Expected output
+Create the 10-minute pending booking with seats held atomically (both segments or none); PayableBooking for flights; expiry job; emits expired.
+Requirements: FLT-22, FLT-12 (round trip)       Expected output
+Search by airports, local date and passengers; round trip returns outbound and return; price filter and sorting; only bookable flights with enough seats.
+Requirements: FLT-11, FLT-12 (round-trip search), FLT-15
+Package: 3 · Flights
+Module(s): flights
+Tests: Integration (filters, edge cases); API
+TDD required: No
+Branch: 
+PR title: 
+Depends on: [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04)
+Blocks: [#97](https://github.com/Host173/Man2o4ah/issues/97) (FLT-28)
+How to build it is up to the owner; see the project skill (). back to my original ticket those are flt-22 and flt-11 
+Package: 5 · Bookings
+Module(s): flight-bookings
+Tests: Integration (transaction, expiry job, race with confirmation); API
+TDD required: Yes
+Branch: 
+PR title: 
+Depends on: [#52](https://github.com/Host173/Man2o4ah/issues/52) (FLT-19), [#51](https://github.com/Host173/Man2o4ah/issues/51) (GEN-11), [#11](https://github.com/Host173/Man2o4ah/issues/11) (CTR-02), [#9](https://github.com/Host173/Man2o4ah/issues/9) (CTR-05)
+Blocks: [#54](https://github.com/Host173/Man2o4ah/issues/54) (FLT-23), [#55](https://github.com/Host173/Man2o4ah/issues/55) (FLT-25), [#57](https://github.com/Host173/Man2o4ah/issues/57) (FLT-29), [#64](https://github.com/Host173/Man2o4ah/issues/64) (ACC-11)
+How to build it is up to the owner; see the project skill ().
+
+4.1 from the datamodel: 
+
+````markdown
+### 4.1 `SeatInventory` (flights module)
+`items` = list of `{ flightId, cabinId, seats }`. Every update matches the cabin with `$elemMatch` and changes it with the positional `$`, so check + change happen in **one atomic document update**.
+
+| Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
+|---|---|---|---|
+| `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
+| `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
+| `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
+| `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
+| `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+Example (`hold`, one item):
+```js
+flights.updateOne(
+  { _id: flightId, status: 'scheduled', departureAt: { $gt: now },
+    cabins: { $elemMatch: { _id: cabinId, availableSeats: { $gte: seats } } } },
+  { $inc: { 'cabins.$.availableSeats': -seats, 'cabins.$.heldSeats': seats },
+    $set: { hasBookings: true } },
+  { session })
+// modifiedCount === 0  →  throw SeatsUnavailable
+```
+A round trip holds both segments in the same transaction, so it never holds one without the other.
+````
+
+/travel-platform-knowledge  dont assume anything if theres anything you need ASK
+
+[Attached: Database_Design_Team_Review.pdf]
+Software Project I · Travel Planning and Booking Platform
+
+
+Database Design
+What each module stores, why it is designed this way, and what to watch
+out for.
+ Draft for team review · 10 November 2026
+
+
+
+
+   Why you are reading this. Every member owns some modules. Before we freeze the schema,
+   read your modules here, make sure you understand and agree with them, and raise any
+   change now. After the freeze, a change needs a PR approved by the team leader.
+   Need more detail? docs/database/data-model.md has every field, rule and index. The project
+   skill can answer questions about any module.
+
+
+
+
+                                        Database Design · Team Review · 1/24
+How to review
+     1. Read pages 3–4 (the seven rules and the overview). Everything else follows from them.
+     2. Read your modules. For each one: do you understand every collection and why it is shaped this
+        way? Could you build its endpoints from it?
+     3. Check the tricky parts. They are where bugs will come from. If one is unclear, ask now.
+     4. Answer the decisions on the last pages that touch your modules: agree, or propose an
+        alternative with a reason.
+     5. Fill in the table below in our review meeting. "Changes requested" needs a written change, not
+        just a concern.
+
+Module                                 Owner                Approved            Changes requested
+reference-data
+
+accounts
+flights
+
+flight-bookings
+hotels
+hotel-bookings
+
+payments
+itineraries
+fx
+
+blog
+moderation
+notifications · audit · admin ·
+storage
+
+
+
+
+                                         Database Design · Team Review · 2/24
+The seven rules
+  1   One owner per collection
+      Each collection belongs to one module. Other modules use that module's service, never its
+      collection, and never populate across modules.
+
+
+ 2    Embed what a parent owns; reference what is shared
+      Cabins live inside a flight, passengers inside a booking, days inside an itinerary. Flights,
+      rooms, users and airports are referenced by ID.
+
+
+ 3    A hold is a pending booking
+      Proceeding to payment creates a pending_payment booking that keeps the inventory for 10
+      minutes. Payment confirms it; the timeout expires it.
+
+
+ 4    The database guarantees no overselling
+      Seats: one atomic "take N only if N are free" update. Rooms: one document per room per
+      night with a unique index.
+
+
+ 5    Bookings keep snapshots
+      Prices and policies are copied at hold time, so later edits by moderators never change an
+      existing booking or its refund.
+
+
+ 6    Money is integers, times are UTC
+      Prices are whole cents in one platform currency (USD). Instants are UTC; calendar dates are
+      midnight UTC; flight times are shown in the airport's local time.
+
+
+ 7    Modules talk through services, ports and events
+      Lower modules never import higher ones. When they must, the lower module owns an
+      interface (port) or emits an event.
+
+
+
+
+                                       Database Design · Team Review · 3/24
+Overview: 27 collections in 13 modules
+Each yellow box is a module. Solid arrow: reference inside the module. Dashed arrow: reference to another module's collection (by ID only). Most collections also hold a
+userId ; those arrows are left out.
+                                                                                                 Data model overview — solid arrow = reference inside a module, dashed = reference to another module (most collections also hold a userId → users)
+
+
+                                                              payments                                                                                                                              moderation                                       blog
+              accounts                                                                                  fx                            notifications                       audit
+
+   sessions               users                              refunds                             exchange_rates                       notifications                    audit_logs                    reports                                          likes   comments
+
+
+
+
+                                                                                                                                                                                                                           target (post, comment,
+                                                                                                                                                                                                                               review, itinerary)
+
+
+                                                                                                                                                                                                                                                                           hotel_bookings        hotels
+
+                                       policy_acceptances    payments    stripe_webhook_events                                                                                                                                                       posts                      reviews       room_nights
+
+
+
+
+                                           flight_bookings
+
+                                       flight_bookings                                                                                                                                                                                                                   hotel_reservations
+
+
+
+
+                                           flights
+
+                                            flights                                                                                                                                                                                                                                                rooms
+
+
+
+
+                         itineraries                                                                                                                                                                                                                                                                              reference_data
+
+                         itineraries      airlines                                                                                                                                                                                                                                            hotels        attractions        airports
+
+
+
+
+                                                                                                                                                                                                                                                                                                              cities
+
+
+
+
+                                                                                                                                                                                                                                                                                                            countries
+
+
+
+
+                                                                                                                                                                                                                                                                                                            currencies
+
+
+
+
+                                                                                                                                         Database Design · Team Review · 4/24
+reference-data                                                                             GEN-12, FLT-02
+
+Holds the course datasets (countries, cities, airports, attractions) and the supported currencies.
+The graders test the API in Swagger using these exact IDs.
+ countries                       8 countries, each with its currency
+ cities                          8 cities
+ airports                        8 airports with IANA time zones
+ attractions                     8 attractions
+ currencies                      7 supported currencies, derived from the countries file
+
+WHY IT IS DESIGNED THIS WAY
+ The dataset ID is the document's _id ( 'CAI' , 'cairo' , 'EG' ). A grader can type an ID from the
+ CSV into Swagger and it just works. Other modules store these IDs as plain strings.
+ Read-only. No endpoint writes to these collections, so no feature can corrupt the data the graders
+ rely on.
+ Currencies come from the countries file. GEN-12 asks us to seed supported currencies; the dataset
+ already names one per country. Each currency stores its minorUnits (JPY has none).
+TRICKY PARTS
+  The seed must import rows exactly, be safe to re-run (upsert by _id ), and check every reference
+  before writing anything.
+  Airport time zones drive every flight time in the system (FLT-03, GEN-06).
+HOW IT TALKS TO OTHER MODULES
+Read by accounts, flights, hotels, itineraries and fx through its service.
+POSSIBLE FUTURE CONFLICTS
+  If the course publishes new CSVs, re-run the seed. The seed never deletes, so removing a row that
+  is already used can't break anything silently.
+
+
+
+
+                                            Database Design · Team Review · 5/24
+accounts                                                                          ACC-01 – ACC-19, GEN-13
+
+Who you are and what you may do: registration, login, lockout, sessions, profile, roles, and which
+provider a moderator manages.
+ users                         every account: users, admins, airline and hotel moderators
+ sessions                      one per logged-in device; refresh token hash and idle expiry
+
+WHY IT IS DESIGNED THIS WAY
+ One users collection for every role, with a role field. One login flow, one lockout rule, one
+ password rule.
+ Moderator assignment is embedded ( moderatorOf ) because a moderator manages exactly one
+ provider (ACC-13).
+ A sessions collection is needed because logout must revoke the refresh token on the server and
+ sessions expire after 30 idle minutes (ACC-06). A TTL index deletes expired sessions automatically.
+TRICKY PARTS
+  Lockout counter must be atomic ( $inc ). Read-then-write lets five parallel wrong passwords slip
+  past the limit.
+  Every authenticated request checks the session and slides its expiry. Password change, admin reset,
+  suspension and deactivation delete all the user's sessions.
+  Deactivation is blocked while the user has upcoming confirmed bookings (ACC-12), but accounts
+  can't import the booking modules (that would be a cycle). So accounts defines an
+  ActiveBookingsCheck port and the booking modules implement it.
+  Tokens live only in httpOnly cookies (ACC-19). Nothing auth-related goes to localStorage.
+HOW IT TALKS TO OTHER MODULES
+Emits user.deactivated , user.reactivated , account.suspended , account.reactivated . Its auth
+guards are used by every module.
+POSSIBLE FUTURE CONFLICTS
+  The auth guard and the role/ownership guards are needed by everyone, so they must be built first, in
+  the shared foundation.
+  Bonus email verification would add fields (for example emailVerifiedAt ). That is an additive
+  change.
+
+
+
+
+                                        Database Design · Team Review · 6/24
+flights                                                                          FLT-01 – FLT-17, FLT-30, GEN-06
+
+The airline moderator's world: airline profile, baggage and cancellation policies, flights, cabins,
+and the seat inventory.
+ airlines                       profile, logo, active flag, baggage policy, cancellation tiers
+ flights                        schedule, status and embedded cabins with seat counters
+
+WHY IT IS DESIGNED THIS WAY
+ Cabins are embedded in the flight. A flight has at most 4, and they never exist alone. Because the
+ seat counters live inside one document, "take 3 seats only if 3 are free" is one atomic update. That
+ is what makes overselling impossible (FLT-22).
+ Four counters per cabin: total, available, held, booked, always total = available + held + booked .
+ Search shows available seats directly (FLT-11), and a capacity cut can be checked in the same
+ atomic way (FLT-05).
+ Times are stored in UTC, plus departureLocalDate (the date at the departure airport). Search by
+ local date and the "same flight number on the same date" rule become simple equality checks.
+ Policies are embedded in the airline: there is one of each, and they're always read with it.
+  hasBookings flag: airports can't change once a flight is booked (FLT-05). The flag is set when seats
+ are first held, so flights never has to ask flight-bookings, which would be a cycle.
+TRICKY PARTS
+   SeatInventory is the only code that changes seat counters. Every hold, confirm, release,
+  cancellation and capacity change goes through it.
+  Time zones: local input → UTC, and departureLocalDate recomputed whenever the time changes.
+  Cancelling a flight (FLT-06) must cancel its bookings with a 100% refund, but flights doesn't own
+  bookings. It emits flight.cancelled and flight-bookings does the rest.
+HOW IT TALKS TO OTHER MODULES
+Emits flight.rescheduled , flight.cancelled . Used by flight-bookings ( SeatInventory , flight details)
+and itineraries (search reuse, ITN-26).
+POSSIBLE FUTURE CONFLICTS
+  The flight-bookings owner builds on SeatInventory . Its method list (data model §4.1) is the contract
+  between the two owners; agree on it before either starts.
+
+
+
+
+                                         Database Design · Team Review · 7/24
+flight-bookings                                                                FLT-12, FLT-19 – FLT-29, GEN-11
+
+A traveler's flight bookings: passengers, baggage, the seat hold, confirmation, e-ticket and
+cancellation.
+ flight_bookings                booking with embedded segments (1–2), passengers, pricing, policy
+                                snapshot and status
+
+WHY IT IS DESIGNED THIS WAY
+ A hold is a pending_payment booking. FLT-22 says the hold creates a booking in Pending Payment,
+ and GEN-11 starts the lifecycle there. A separate holds collection would duplicate that state.
+ Segments and passengers are embedded: they belong to the booking and are bounded.
+ Snapshots. The fare and the airline's policies are copied into the booking at hold time. A later price
+ change doesn't touch it (FLT-05), and refunds use the policy the user actually accepted (PAY-02).
+ Synced copies of departure times let us list Upcoming/Past and check "before departure" without
+ querying another module. They're updated by the flight.rescheduled event.
+ The reference is set on confirmation (FLT-23). A partial unique index lets many pending bookings
+ have none.
+TRICKY PARTS
+  Booking and seat counters change in one transaction, so a crash can't leave seats held with no
+  booking. A round trip holds both segments or nothing.
+  The expiry job and the payment webhook can hit the same booking at the same moment. Both use
+  a conditional update ("only if still pending_payment "), so exactly one wins.
+  A payment that succeeds after expiry must not confirm; it gets a full automatic refund.
+  Passenger type is checked against age on the departure date. Infants take no seat and pay 10%.
+  Extra baggage is charged per segment at that airline's price.
+  FLT-29 (bookings per flight, passenger CSV) lives here even though its URL starts with /flights ,
+  because only this module can read bookings.
+HOW IT TALKS TO OTHER MODULES
+Uses flights ( SeatInventory ) and payments (refunds). Implements the PayableBooking and
+ActiveBookingsCheck ports. Listens to payment.succeeded , flight.rescheduled , flight.cancelled .
+Emits confirmed / cancelled / expired / rescheduled events.
+POSSIBLE FUTURE CONFLICTS
+  Agree on the PayableBooking port and the payment.succeeded payload with the payments owner
+  first.
+  The admin booking list (ACC-17) reads from here through the service.
+
+
+
+
+                                        Database Design · Team Review · 8/24
+Class diagram: flights and flight-bookings
+                                                                                                                                                flights and flight-bookings
+
+
+                                                                                                                                                                                                                                            flights
+
+
+
+
+                                                                                                                                                                                                                                                                                               «embedded»
+                                                                                                                                                                                                                                                                                              BaggagePolicy
+
+
+                                                                                                                                                                                                                                                Airline                           extraBagPriceMinor : int?
+                                                                                                                                                                                                                                                                                  maxExtraBagsPerPassenger : int
+                                                                                                                                                                                                                           name : string
+                                                      flight_bookings                                                                                                                                                      code : string unique
+                                                                                                                                                                                                                     1
+                                                                                                                                                                          Flight               airlineId                   logo : ImageRef?
+                                                                                                  «embedded»                                                                                                               isActive : boolean
+                                                                                                                                                                                               *
+                                                                                                FlightSegment                                          airlineId : ObjectId                                                baggagePolicy : BaggagePolicy
+                                                                                                                                                       flightNumber : string                                               cancellationPolicy.tiers : CancellationTier[]
+                                                                               direction : outbound/return                                             departureAirportId : string
+                                                                               flightId : ObjectId                                                     arrivalAirportId : string
+                                                                                                                                                                                                                                                                                              «embedded»
+                                                                        1..2   cabinId : ObjectId                                                      departureAt : Date UTC
+                                                                                                                           flightId + cabinId                                                                                                                                                CancellationTier
+                                                                               cabinClass : string                                                     arrivalAt : Date UTC
+                                                                                                                                                                                                                                                                           0..*
+                                                                               airlineId, flightNumber : copies                                        departureLocalDate : YYYY-MM-DD                                                      «embedded»
+                                                                                                                                                                                                                                                Cabin                              daysBefore : int unique in list
+                                                                               departureAt, arrivalAt : synced copies                                  durationMinutes : int
+                                                                                                                                                                                                                                                                                   refundPercent : int 0-100
+                                                                               fareMinor : int snapshot                                                status : scheduled/cancelled/departed
+                                                                               policy : SegmentPolicy snapshot                                         hasBookings : boolean                                      cabinClass : economy/premium_economy/business/first
+                                                                                                                                                       cabins : Cabin[]                                           totalSeats : int
+                                                                                                                                                                                                           0..4   availableSeats : int
+                                FlightBooking                                                                                                                                                                     heldSeats : int
+                                                                                                                                                                                                                  bookedSeats : int
+ userId : ObjectId                                                                                                                                                                                                priceMinor : int
+                                                                                                  «embedded»
+ reference : string? unique                                                                                                                                                                                       freeBags : int
+                                                                                                   Passenger
+ status : pending_payment/confirmed/completed/expired/cancelled                                                                                                                                                   maxBagWeightKg : number
+ tripType : one_way/round_trip
+                                                                                      type : adult/child/infant
+ segments : FlightSegment[]
+                                                                               1..*   fullName : string
+ passengers : Passenger[]
+                                                                                      dateOfBirth : DateOnly
+ seatCount : int
+                                                                                      documentNumber : string
+ pricing : Pricing
+                                                                                      extraBagCount : int
+ holdExpiresAt : Date
+                                                                                      extraBagWeightKg : number
+ firstDepartureAt : Date
+ lastDepartureAt : Date
+ cancellation : Cancellation?
+
+
+                                                                                                  «embedded»
+                                                                                                 Cancellation
+
+                                                                               0..1   cancelledAt : Date
+                                                                                      cancelledBy : user/provider
+                                                                                      refundPercent : int
+                                                                                      refundAmountMinor : int
+
+
+
+
+                                                                                                                        Database Design · Team Review · 9/24
+hotels                                                                                          HTL-01 – HTL-15
+
+The hotel moderator's world: hotel profile, policies, rooms, availability, blocked dates, and the
+room-night inventory.
+ hotels                          profile, photos, amenities, times, cancellation tiers, rating summary
+ rooms                           bookable units with price, occupancy and availability ranges
+ room_nights                     one document per taken room per night (reserved or blocked)
+
+WHY IT IS DESIGNED THIS WAY
+  room_nights is the double-booking guarantee. One document per room per night, with a unique
+ index on (room, date). Two reservations for the same night can't both be saved, even at the exact
+ same millisecond. Date-range overlap checks in code can't promise that.
+ Blocked dates use the same documents ( kind: blocked ), so a block and a reservation also can't
+ overlap (HTL-06).
+ Rooms are their own collection, not embedded in the hotel: reservations and nights point to them,
+ and search queries them across hotels.
+ Availability ranges stay on the room (few, small). The room's inventoryVersion is bumped by every
+ inventory change, so two changes to the same room in parallel conflict and one retries.
+  ratingSummary is stored on the hotel for the rating filter and sort (HTL-12). It's updated only through
+  HotelsService.setRatingSummary .
+
+TRICKY PARTS
+  Date semantics: a stay from the 10th to the 13th uses the nights of the 10th, 11th and 12th. Availability
+  ranges are inclusive.
+  Search (HTL-11): a hotel qualifies if it has enough free rooms for the whole stay and their combined
+  occupancy covers the guests. The price filter uses the cheapest qualifying room.
+  Editing availability, deactivating or deleting a room must check reservations from today onward,
+  inside the same transaction.
+HOW IT TALKS TO OTHER MODULES
+Used by hotel-bookings ( RoomNightInventory , room details, setRatingSummary ) and itineraries (search
+reuse, ITN-25).
+POSSIBLE FUTURE CONFLICTS
+  RoomNightInventory 's method list (data model §4.2) is the contract with hotel-bookings.
+  HTL-08 (room status view) and HTL-22 (hotel's reservations) live in hotel-bookings, because they
+  need reservation data.
+
+
+
+
+                                          Database Design · Team Review · 10/24
+hotel-bookings                                                                            HTL-16 – HTL-24
+
+Reservations (one or more rooms in one hotel) and reviews.
+ hotel_reservations             reservation with embedded rooms, guests, price and policy snapshots
+ reviews                        one rating and review per completed reservation
+
+WHY IT IS DESIGNED THIS WAY
+ Same pattern as flights: a hold is a pending_payment reservation, rooms and guests are embedded,
+ prices and policies are snapshots.
+ Reviews are their own collection, because they're listed per hotel, newest first, paginated (HTL-24).
+ The unique index on reservationId enforces one review per reservation, however many rooms it
+ had.
+TRICKY PARTS
+  All selected rooms are held together or not at all (HTL-16, HTL-18): one transaction, any unavailable
+  room rejects the whole request.
+  Refund on the full total, only before the check-in date, never partial (HTL-21).
+  Every review change recomputes the hotel's rating, including an admin hiding or deleting a review.
+HOW IT TALKS TO OTHER MODULES
+Uses hotels and payments. Implements PayableBooking , ActiveBookingsCheck and ReportableContent
+(reviews). Listens to payment.succeeded . Emits confirmed / cancelled / expired events.
+POSSIBLE FUTURE CONFLICTS
+  Shares the PayableBooking port with flight-bookings. Keep both implementations identical in
+  behaviour.
+
+
+
+
+                                        Database Design · Team Review · 11/24
+Class diagram: hotels and hotel-bookings
+                                                                                                                                              hotels and hotel-bookings
+
+
+                                                                                                          hotel_bookings
+
+                                                                                             HotelReservation
+
+
+                                                              userId : ObjectId
+                                                              hotelId : ObjectId
+                  Review
+                                                              reference : string? unique
+                                                              status : pending_payment/confirmed/completed/expired/cancelled
+ reservationId : ObjectId unique
+                                                              checkInDate : DateOnly
+ hotelId : ObjectId                                                                                                                                                              «embedded»
+                                                          1   checkOutDate : DateOnly
+ userId : ObjectId                        reservationId                                                                                                                         ReservedRoom
+                                       0..1                   nights : int
+ rating : int 1-5
+                                                              rooms : ReservedRoom[]
+ text : string?                                                                                                                                                  roomId : ObjectId
+                                                              totalMinor : int
+ isHidden : boolean                                                                                                                                       1..*   roomName, roomType : snapshots
+                                                              currency : string
+                                                                                                                                                                 pricePerNightMinor : int snapshot
+                                                              policySnapshot : tiers, checkIn/Out times
+                                                                                                                                                                 adults : int
+                                                              holdExpiresAt : Date
+                                                                                                                                                                 childAges : int[]
+                                                              cancellation : Cancellation?
+                                                                                                                                                                 subtotalMinor : int
+
+
+
+
+                                                                                                                                                       hotels
+
+                                                                                                                                                                                                                                                                                          Hotel
+                                                                                                                                                                                                     roomId
+
+                                                                                                                                                                                                                                                                  name : string
+                                                                                                                                                                                                       hotelId                                                    address : string
+                                                                                                                                                                                                                                                                  cityId : string
+                                                   reservationId                                                                                                                                                                                                  countryCode : string
+                                                                                                                                                                                                                                                                  description : string?
+                                                                                                                                                                                                                                                                  photos : ImageRef[0..5]
+                                                                                                                                                                                                                                                                  starRating : int?
+                                                                                                                                                                                                                                                                  amenities : string[]
+                                                                                                                                                                                                                                                                  checkInTime : HH:mm
+                                                                                                                                                                                                                                                                  checkOutTime : HH:mm
+                                                                                                                                                                                                                                                             1
+                                                                                                                                                                                                                                                                  cancellationPolicy.tiers : CancellationTier[]
+                                                                                                                                                                                                                                                       hotelId    isActive : boolean
+                                                                                                                                                                                                                                  Room                            ratingSummary : average, count
+                                                                                                                                                                                                                                                       *
+
+                                                                                                                                                                                                                  hotelId : ObjectId
+              RoomNight                                                                                                                                                                                           name : string unique in hotel
+                                                                                                                                                                                                                  type : string
+  roomId : ObjectId                                                                                                                                                                                               beds : int                                                      «embedded»
+  hotelId : ObjectId                                                                                                                                                                                              maxOccupancy : int                                            AvailabilityRange
+  date : DateOnly                                                                                                                                                                                                 pricePerNightMinor : int                       0..*
+  kind : reservation/blocked                                                                                                                                                                                  1
+                                                                                                                                                                                                                  isActive : boolean                                    fromDate : DateOnly
+  reservationId : ObjectId?                                                                                                           roomId (unique                                                              availability : AvailabilityRange[]
+                                   *                                                                                                                                                                                                                                    toDate : DateOnly inclusive
+  blockId : ObjectId?                                                                                                                  roomId+date)                                                               hasEverBeenReserved : boolean
+                                                                                                                                                                                                                  inventoryVersion : int
+
+
+
+
+                                                                                                                               Database Design · Team Review · 12/24
+payments                                                                                  PAY-01 – PAY-04
+
+Money in and out through Stripe test mode: PaymentIntents, the webhook, refunds, and policy
+acceptance.
+ payments                       one PaymentIntent per booking
+ refunds                        one refund per cancelled booking
+ policy_acceptances             when the user accepted the policies
+ stripe_webhook_events          IDs of processed webhook events
+
+WHY IT IS DESIGNED THIS WAY
+ Store only what PAY-01 allows: Stripe ID, amount, currency, status. Card data never reaches us.
+ One payment per booking. A failed card retries on the same PaymentIntent.
+ Bookings are confirmed only by the verified webhook, never by the frontend saying "it worked".
+  stripe_webhook_events makes the webhook idempotent: Stripe can send the same event twice, and
+ we process it once.
+ Payments doesn't import the booking modules. It defines a PayableBooking port (amount, status,
+ hold expiry) and emits payment.succeeded . That avoids a dependency cycle.
+TRICKY PARTS
+  Webhook signature verification needs the raw request body.
+  When a hold expires, the PaymentIntent is cancelled. A late success still triggers a full refund.
+  A refund document is created only when the amount is above 0 (PAY-03), and its status is updated
+  from Stripe.
+HOW IT TALKS TO OTHER MODULES
+Called by both booking modules for refunds. Emits payment.succeeded and refund.updated . Listens to
+booking expiry events.
+POSSIBLE FUTURE CONFLICTS
+  Its two ports/events are the contract with both booking owners. Write them first, then all three can
+  work in parallel against fakes.
+
+
+
+
+                                        Database Design · Team Review · 13/24
+Class diagram: payments
+                                                                                           payments
+
+
+                                                                 payments
+
+                              Refund
+                                                                                                             Payment
+ paymentId : ObjectId                                                                                                                                           «flight-bookings»
+                                                                                                                                      bookingType + bookingId
+ bookingType : flight/hotel                                                              bookingType : flight/hotel                                              FlightBooking
+ bookingId : ObjectId                                                                    bookingId : ObjectId
+ userId : ObjectId                                                                   1   userId : ObjectId
+                                                                         paymentId
+ stripeRefundId : string?                                             0..1               stripePaymentIntentId : string unique
+ amountMinor : int                                                                       amountMinor : int
+ currency : string                                                                       currency : string
+ reason : user_cancellation/provider_cancellation/late_payment                           status : pending/failed/succeeded/canceled   bookingType + bookingId
+ status : pending/refunded/failed
+
+
+
+
+                                                                                                       PolicyAcceptance
+
+
+                                                                                               bookingType : flight/hotel
+                                                                                               bookingId : ObjectId                   bookingType + bookingId
+                                                                                               userId : ObjectId
+                                                                                               acceptedAt : Date
+
+
+
+                                                                                                                                                                «hotel-bookings»
+                                                                                                                                                                HotelReservation
+
+                                                                                                      StripeWebhookEvent              bookingType + bookingId
+
+
+                                                                                             type : string
+
+
+                                                                                             _id : string(Stripe event id)
+                                                                                             receivedAt : Date(TTL 30d)
+
+
+
+
+                                                                             Database Design · Team Review · 14/24
+itineraries                                                                              ITN-01 – ITN-26
+
+Trip planning: itineraries with ordered days, cities, activities, images, budgets, transport costs,
+sharing and cloning.
+ itineraries                    the whole trip in one document
+
+WHY IT IS DESIGNED THIS WAY
+ Everything is embedded. A trip is bounded (≤ 60 days), owned by one user, and always loaded and
+ saved as a whole.
+ Day order is the array order. Day numbers and dates are never stored; they're computed from the
+ position and the start date. Adding, deleting or reordering days can't leave a wrong number or date
+ behind (ITN-07, ITN-08).
+  dayCount and cityIds are stored copies so public search can filter by duration and city with an
+ index.
+ Transport costs point to a day by its _id , which stays the same when days move.
+TRICKY PARTS
+  Endpoints address activities, budgets and transport costs by their own ID ( /api/activities/:id ), so
+  those embedded IDs are indexed.
+  Deleting a day also deletes its activities, images, budget entries and transport costs.
+  Clone = deep copy with new IDs and copied image files, so the clone survives the original being
+  deleted (ITN-21).
+  Budget totals are converted to the user's preferred currency with the cached rates, showing the rate
+  date.
+HOW IT TALKS TO OTHER MODULES
+Uses reference-data, fx, flights and hotels (search reuse), accounts (author names), storage.
+Implements ReportableContent . Listens to user.deactivated .
+POSSIBLE FUTURE CONFLICTS
+  ITN-25/26 reuse hotel and flight search. They depend on those services' search methods, so their
+  signatures must be agreed early.
+
+
+
+
+                                        Database Design · Team Review · 15/24
+Class diagram: itineraries and fx
+                                                                    itineraries and fx
+
+
+                                                                          itineraries
+
+
+                                                                Itinerary
+
+                                            ownerId : ObjectId
+                                            title : string
+                                            countryCodes : string[]
+                                            startDate : DateOnly
+                                            visibility : private/public
+                                            isHidden : boolean
+                                            authorDeactivated : boolean
+                                            clonedFrom : itineraryId, authorId
+                                            days : Day[0..60]
+                                            transportCosts : TransportCost[]
+                                            dayCount : int derived
+                                            cityIds : string[] derived
+
+
+
+
+                                                                                                                  0..*
+
+
+                                                                                                        «embedded»
+                                                                                                       TransportCost
+
+                                                                                        dayId : ObjectId
+                                                                                        mode : flight/train/bus/car/ferry/other
+                                                                                        fromCityId : string
+                                                                                        toCityId : string
+                                                                                        amountMinor : int
+                                                                                        currency : string
+
+
+
+
+                                                                                                            dayId
+
+
+                                        0..60
+                                                             «embedded»
+                                                                Day
+
+                                                cityId : string
+                                                notes : string?
+                                                activities : Activity[]
+                                                budgetEntries : BudgetEntry[]
+
+
+
+
+                                 0..*
+
+                                                                                                           0..*
+                         «embedded»
+                           Activity                                                               «embedded»
+                                                                                                  BudgetEntry
+             name : string
+             description : string?                                 category : food/accommodation/in_city_transport/activities
+             time : HH:mm?                                         amountMinor : int
+             cost : amountMinor, currency                          currency : string
+             images : ImageRef[0..5]                               note : string?
+             attractionId : string?
+
+
+
+
+                                                                              fx
+
+
+                                                                     ExchangeRate
+
+                                                        rateDate : DateOnly unique
+                                                        base : string
+                                                        rates : Map<string, number>
+                                                        fetchedAt : Date
+                                                        source : string
+
+
+
+
+                                                   Database Design · Team Review · 16/24
+fx                                                                                                  ITN-18
+
+Fetches exchange rates from FXRatesAPI once a day and caches them.
+ exchange_rates                   one document per day with all supported rates
+
+WHY IT IS DESIGNED THIS WAY
+ One document per day, so "latest rates" is one indexed read and the rate date is easy to show.
+ The API key stays on the server; the frontend never calls FXRatesAPI.
+TRICKY PARTS
+  If the API fails, use the last cached day (ITN-18). If there is none yet, return a clear error.
+  Convert with the currency's minor units (JPY has none) and round half up.
+HOW IT TALKS TO OTHER MODULES
+Used by itineraries. Calls only reference-data (supported currencies).
+POSSIBLE FUTURE CONFLICTS
+  None expected.
+
+
+
+
+                                           Database Design · Team Review · 17/24
+blog                                                                                    BLG-01 – BLG-12
+
+Community content: posts (draft/published), tags, images, comments and likes.
+ posts                         posts with tags, images, counters
+ comments                      comments on posts
+ likes                         one document per user per liked post
+
+WHY IT IS DESIGNED THIS WAY
+ Likes are a collection with a unique index on (post, user). "Like once" (BLG-06) is guaranteed by
+ the database, even with double clicks.
+ Comments are separate: they're unbounded and paginated.
+  likeCount and commentCount are stored on the post for lists and the interaction-score order (BLG-
+ 09).
+ Tags are normalised (trimmed, lowercase), so "Paris" and "paris" are one tag.
+TRICKY PARTS
+  Counters must move together with the like/comment (unlike only decrements if a like was really
+  removed; hiding a comment decrements).
+  Search by author name asks accounts for matching user IDs.
+  Deleting a post deletes its comments, likes and image files.
+HOW IT TALKS TO OTHER MODULES
+Uses accounts (names, status), itineraries (author page, BLG-12), storage. Implements
+ReportableContent (posts, comments). Listens to user.deactivated .
+
+POSSIBLE FUTURE CONFLICTS
+  Bonus BLG-13 (attach an itinerary) would add one field to posts.
+
+
+
+
+                                       Database Design · Team Review · 18/24
+moderation                                                                               GEN-09, GEN-10
+
+User reports on posts, comments, reviews and itineraries, and their resolution.
+ reports                        report with target, reason and status
+
+WHY IT IS DESIGNED THIS WAY
+ One collection for every content type ( targetType + targetId ), since reports belong to no single
+ content module.
+ Unique index on (reporter, target) enforces "at most once per item" (GEN-09).
+ Hiding or deleting goes through the ReportableContent port, implemented by blog, hotel-bookings
+ and itineraries. Moderation never touches their collections.
+TRICKY PARTS
+  Resolving one report closes all open reports on the same content.
+  The content may already be deleted by its author; the admin can still dismiss the report.
+HOW IT TALKS TO OTHER MODULES
+Called by admin. Emits admin.action for the audit log.
+POSSIBLE FUTURE CONFLICTS
+  Each content owner must implement the port's exists , hide and delete .
+
+
+
+
+                                        Database Design · Team Review · 19/24
+Class diagram: blog, moderation, notifications and audit
+                                                                 blog, moderation, notifications and audit
+
+
+                                                                                                                                 blog
+
+                           moderation
+                                                                                               Comment
+
+                                                                                        postId : ObjectId
+                                                          targetType + targetId         authorId : ObjectId                  postId
+                                                                                                                     *
+                                                                                        body : string
+                                                                                        isHidden : boolean                                                        Post
+
+                             Report                                                                                                           1
+                                                                                                                                                  authorId : ObjectId
+                                                                                                                                                  title : string
+ reporterId : ObjectId
+                                                                                                                                                  body : string
+ targetType : post/comment/review/itinerary
+                                                                                                  Like                                            tags : string[0..5]
+ targetId : ObjectId
+                                                                                                                                          1
+                                                                                                                                                  images : ImageRef[0..5]
+ reason : string                                                                                                         postId (unique
+                                                                                          postId : ObjectId                                       status : draft/published
+ status : open/dismissed/content_hidden/content_deleted                                                          *       postId+userId)
+                                                                                          userId : ObjectId                                       publishedAt : Date?
+ resolvedBy : ObjectId?
+                                                                                                                                                  likeCount : int
+ resolvedAt : Date?
+                                                                                                                                                  commentCount : int
+                                                                                                                                                  isHidden : boolean
+                                                                                         targetType + targetId                                    authorDeactivated : boolean
+
+
+
+
+                          notifications
+
+
+                         Notification
+
+
+                   userId : ObjectId
+                   type : string
+                   title : string
+                   message : string
+                   entity : type, id
+                   readAt : Date?
+
+
+
+
+                             audit
+
+
+                           AuditLog
+
+                   actorId : ObjectId
+                   action : string
+                   target : type, id
+                   details : object
+                   createdAt : Date
+
+
+
+
+                                                             Database Design · Team Review · 20/24
+notifications · audit · admin · storage GEN-01, GEN-07, GEN-08, ACC-13 – ACC-17
+Platform services. notifications: in-app notifications (GEN-01). audit: append-only log of admin
+actions (GEN-07). admin: admin endpoints, owns no data. storage: image upload validation and
+files on disk (GEN-08), owns no collection.
+ notifications                  per user, read/unread
+ audit_logs                     who did what to which target, when
+
+WHY IT IS DESIGNED THIS WAY
+ Notifications and audit only listen to events. Booking code doesn't know they exist, so adding a
+ notification never changes booking code.
+ Audit logs are append-only: no update or delete exists anywhere in the code.
+ Admin owns no data. Suspending a user calls accounts; hiding a post goes through moderation.
+ Admin can't become a module that reaches into everyone's collections.
+ Images are stored on the server's disk, as GEN-08 says. Documents store the file key, and the URL
+ is computed in responses.
+TRICKY PARTS
+  Events must carry the recipients (user IDs), so notifications doesn't have to look them up.
+  ACC-17 (admin list of all bookings) merges two collections into one paginated list, sorted by date.
+HOW IT TALKS TO OTHER MODULES
+Everyone emits events these modules listen to. Admin calls accounts, flights, hotels, both booking
+modules, moderation.
+POSSIBLE FUTURE CONFLICTS
+  Deployment: many cloud hosts wipe the disk on every redeploy. Uploaded images need a persistent
+  disk or volume there. We'll settle this in the deployment topic.
+
+
+
+
+                                        Database Design · Team Review · 21/24
+Class diagram: accounts and reference-data
+                                                                                   accounts and reference-data
+
+
+                                                                                          reference_data
+
+              Airport
+
+
+  name : string
+  cityId : string
+                               cityId
+  countryCode : string
+
+
+  _id : string(iata_code)                            City                                                         Country                                                      Currency
+  timeZone : string(IANA)
+                                           name : string                                                   name : string                                              name : string
+                                                                        countryCode                                                             currency
+                                           countryCode : string                                            currency : string                                          minorUnits : int
+
+
+            Attraction                     _id : string(city_id)                                           _id : string(code)                                         _id : string(ISO code)
+
+
+ name : string
+                               cityId
+ cityId : string
+
+
+ _id : string(attraction_id)
+
+
+
+
+                                                                                                                       accounts                    preferredCurrency
+
+                                                                                                                      User
+
+                                                                                          name : string
+                                                                                          email : string unique
+                                                  Session                                 passwordHash : string
+                                                                                          role : user/admin/airline_moderator/hotel_moderator
+                                        userId : ObjectId                                 status : active/suspended/deactivated
+                                                                                      1
+                                        refreshTokenHash : string         userId          phone : string?                                                                    «embedded»
+                                        lastActivityAt : Date
+                                                                    *
+                                                                                          preferredCurrency : string                                                         ModeratorOf
+                                                                                                                                                            0..1
+                                                                                          moderatorOf : ModeratorOf?
+                                        expiresAt : Date(TTL)                             mustChangePassword : boolean                                             providerType : airline/hotel
+                                                                                          termsAcceptedAt : Date?                                                  providerId : ObjectId
+                                                                                          failedLoginAttempts : int
+                                                                                          lockedUntil : Date?
+
+
+
+
+                                                                    Database Design · Team Review · 22/24
+Decisions to confirm
+The requirements are silent or ambiguous on these points, so the design makes a call. Agree or propose an
+alternative in the review meeting.
+#      Decision                                                                      Affects
+1      Platform currency is USD.                                                     all
+2      "Today" for date-only rules is the UTC date.                                  hotels, hotel-bookings
+3      Refunds use the policy snapshot taken at hold time, not the provider's        flight-bookings, hotel-
+       current policy.                                                               bookings
+4      Extra baggage is chosen once per passenger and applies to every               flight-bookings
+       segment, charged per segment at that airline's price.
+5      A flight booking is completed when its last segment has departed.             flight-bookings
+6      Pending bookings on a cancelled flight become expired.                        flights, flight-bookings
+7      A cancelled flight keeps its flight number for that date.                     flights
+8      Airline code is 2–3 uppercase letters/digits, unique.                         flights
+9      Every room in a hotel reservation has at least one guest.                     hotel-bookings
+10     Blocking a range that overlaps an existing block is rejected.                 hotels
+11     Hidden reviews are excluded from the average rating.                          hotel-bookings
+12     commentCount counts only visible comments.                                    blog
+13     Activities may optionally link a dataset attraction.                          itineraries
+14     A payment that succeeds after the hold expired is refunded in full            payments
+       automatically.
+15     Hotel default check-in/out times are 14:00 / 12:00.                           hotels
+
+
+
+Glossary
+Embedded                     Stored inside the parent document. Loaded, saved and deleted with it.
+Reference                    A field holding another document's ID. MongoDB doesn't check it; the service
+                             does.
+Snapshot                     A copy of a value at a moment (price, policy) that never changes afterwards.
+Hold                         A pending_payment booking that keeps inventory for 10 minutes.
+Transaction                  Several writes that all succeed or all fail together.
+Atomic update                A check and a change done by the database in one step, so nothing can happen in
+                             between.
+Unique index                 The database rejects a second document with the same values.
+
+
+
+                                             Database Design · Team Review · 23/24
+Partial index   An index that only covers documents matching a condition (e.g. those that have a
+                reference).
+TTL index       The database deletes documents automatically after a date.
+Port            An interface a module owns and another module implements, so the first doesn't
+                depend on the second.
+Event           A message one module emits ("payment succeeded") and others react to without
+                being called directly.
+Minor units     Money as whole cents (1999 = $19.99), so there are no rounding errors.
+
+
+
+
+                               Database Design · Team Review · 24/24
+
+[Attached: AGENTS_example.md]
+# Agent instructions (template)
+
+Template version: 2026-11-11
+
+Copy this file to your own tool's instruction file, then fill in "About me":
+- Claude Code: `CLAUDE.md` at the repo root
+- Codex, Cursor, Copilot agents, Antigravity and most others: `AGENTS.md` at the repo root
+- Gemini CLI: `GEMINI.md` at the repo root
+
+Those files are gitignored, so add your own preferences freely in the last section. When this template's version changes, copy it again and keep your "About me" and "My preferences" sections.
+
+## About me (fill in)
+
+I am <First name>. My prompt log is `ai-prompts/<first name in lowercase>.txt`.
+
+## 1. Read first
+
+1. `README.md`, section "Team rules": binding for every change.
+2. `docs/ai/skills/travel-platform/SKILL.md`: the project skill. Follow its routing table and read only the reference files the task needs.
+3. Data: `docs/database/data-model.md`. Decisions: `docs/DECISIONS.md`.
+
+If an instruction conflicts with these, follow them and tell me about the conflict.
+If the first lines of `AGENTS.example.md` in the repo show a newer template version than this file, tell me once so I can copy it again.
+
+## 2. Always
+
+- Change only the modules my package owns (`references/modules.md` in the skill). If the task needs a change elsewhere, stop and tell me.
+- For any UI change, follow `DESIGN.md`. If it doesn't exist yet, say so and don't invent a design.
+- Write tests with the code; write them first where the ticket says "TDD: required".
+- Before saying a task is done, run `npm run verify` in every app you changed and report the real result.
+- If something isn't decided in the docs above and can't be derived safely, don't assume: stop and tell me to ask the team leader (Kareem).
+
+## 3. Git
+
+- Work on a branch `<type>/<ID>-<description>` created from the latest `develop`.
+- Commit with Conventional Commits ending in the requirement ID, e.g. `feat(flights): add seat hold (FLT-22)`.
+- Never push, open or merge a PR, force-push, rebase, or commit to `develop` or `main` unless I explicitly ask in this conversation.
+- When I ask you to open a PR: target `develop`, title `<ID>: <description>`, and fill in every section of the PR template.
+- Never commit `.env` files, secrets or connection strings.
+
+## 4. Prompt log (every prompt)
+
+At the end of every turn, append one entry to my prompt log (the file named in "About me"), in the course's format. Copy, don't summarize: the prompt is copied exactly and the other fields are mechanical.
+
+```
+================================================
+Date: <today, YYYY-MM-DD>
+Student: <my first name from "About me">
+Tool: <this tool's name>
+Related Requirement: <the ID in the current branch name, or none>
+
+Prompt:
+<my message, copied exactly>
+
+How the output was used:
+<one line: files changed and commit, or "Answer only, no files changed">
+================================================
+```
+
+- If my message attaches a file (e.g. an execution file), add a line `[Attached: <file name>]` after my message and paste the file's full content, unchanged.
+- Replace any secret, token, connection string or `.env` value with `<removed>`. Change nothing else.
+- Append only; never edit earlier entries.
+- If "About me" isn't filled in, ask my name once and tell me to add it there.
+
+## My preferences (optional, personal)
+
+<anything you like: language, explanation style, how much detail, ...>
+
+[Attached: README.md]
+# Travel Platform
+
+A platform to plan, book and share trips.
+
+## Stack
+
+- NestJS (backend API)
+- MongoDB Atlas with Mongoose
+- Next.js (App Router) frontend
+- TypeScript
+
+## Repository structure
+
+```
+project-root/
+├── backend/            NestJS app
+├── frontend/           Next.js app
+├── docs/
+│   ├── ai/             AI skills: skills/travel-platform/ (coding agents), chat-skill/ (chat assistants)
+│   ├── requirements/
+│   ├── api/
+│   ├── database/       data model, class and ER diagrams
+│   └── DECISIONS.md    every project decision
+├── ai-prompts/         one AI prompt log per member
+├── AGENTS.example.md   template for your own (gitignored) agent file
+├── AI_PROMPTS.txt      pointer to ai-prompts/
+├── README.md
+├── .env.example
+├── .gitignore
+├── .gitattributes
+└── .nvmrc
+```
+
+There is no root `package.json`. Each app has its own.
+
+## Prerequisites
+
+- Node.js: the version in `.nvmrc` (`nvm use`)
+- npm
+
+## Setup
+
+1. Clone the repository.
+2. Copy the `backend/.env` values from `.env.example` into `backend/.env` and fill in `MONGODB_URI` (get it from the team leader).
+3. Copy the frontend values from `.env.example` into `frontend/.env.local`.
+4. Run `npm install` in `backend/` and in `frontend/`.
+
+## Run
+
+- Backend: `npm run start:dev` in `backend/`
+- Frontend: `npm run dev` in `frontend/`
+
+## URLs
+
+- API: http://localhost:4000/api
+- Swagger: http://localhost:4000/api/docs
+- Frontend: http://localhost:3000
+
+## Workflow
+
+- `main` holds milestone releases; `develop` is for integration.
+- Branch, commit and pull request rules: see [Team rules](#team-rules).
+- Open PRs into `develop`; the team leader reviews them.
+- Commits use Conventional Commits, for example `feat(flights): ...`.
+- Never commit `.env` files.
+- AI prompts are logged per member: see [AI setup](#ai-setup).
+
+## Quality gates
+
+Every pull request into `develop` or `main`, and every push to those branches, runs the CI pipeline (`.github/workflows/ci.yml`). Only the app(s) you changed are checked.
+
+| Gate | Backend | Frontend |
+| --- | --- | --- |
+| Format | Prettier check, never writes | Prettier check, never writes |
+| Lint | `oxlint`, 0 errors | ESLint, 0 errors |
+| Typecheck | `npm run typecheck` | `npm run typecheck` |
+| Tests and coverage | all tests pass; at least 80% line coverage on `src/modules/**/*.service.ts` | no tests yet |
+| Build | `npm run build` | `npm run build` |
+| Security | `npm audit --omit=dev --audit-level=high` | same |
+
+Checks on the whole repository, on pull requests only:
+
+- The branch name is `<type>/<ID>-<description>`, with type one of `feature`, `fix`, `chore`, `docs`, `test`, `refactor`.
+- The PR title contains a requirement ID.
+- No secret is found in the PR's history (gitleaks).
+
+A PR from `develop` into `main` (a milestone release) is exempt from the branch name and title rules.
+
+**Run `npm run verify` in each app you changed before pushing.** It runs the same gates as CI, in the same order, and stops at the first failure. Use `npm run format` to fix formatting.
+
+Branch and PR title example:
+
+- Branch: `feature/FLT-22-seat-hold`
+- Title: `FLT-22: seat hold`
+
+**Each PR is linked to its issue automatically.** A workflow reads the ticket key from the branch name (or the PR title) and adds `Closes #<issue>` to the PR description, so the PR shows on the issue and the issue closes when the PR is merged into `develop`. If no issue matches, it leaves a comment instead.
+
+**A PR merges only when CI is green and the team leader approves.**
+
+## Team rules
+
+These rules bind every change, by a person or an agent. The details are in the project skill (`docs/ai/skills/travel-platform/`), and every decision is in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+### Ownership
+- Each package (one per member) owns whole modules, backend and pages. You only change modules your package owns; another module's data is reached through its service, a port or an event. See the skill's `references/modules.md`.
+- The data model in [`docs/database/`](docs/database/) is frozen. A change goes through the team leader as its own PR (doc, diagram, schema and index test together).
+- If something isn't decided, ask the team leader. Don't guess.
+
+### Git
+1. Branch from the latest `develop`, one ticket per branch: `<type>/<ID>-<description>` (type: `feature`, `fix`, `chore`, `docs`, `test`, `refactor`), e.g. `feature/FLT-22-seat-hold`.
+2. Never commit or push to `develop` or `main` directly.
+3. Never branch from another ticket's branch. If you need another ticket's code, start after it's merged; if you only need its interface, start now against a fake.
+4. Keep your branch current by merging `develop` into it (no rebase, no force-push).
+5. Push your branch at least once a day.
+6. Commits: Conventional Commits ending in the requirement ID, e.g. `feat(flights): add seat hold (FLT-22)`.
+7. PRs target `develop`, titled `<ID>: <description>`, with the template filled in. They merge when CI is green and the team leader approves, with a merge commit (not squash). Delete the branch afterwards.
+8. At each milestone the team leader merges `develop` into `main` and tags `m1` / `m2`.
+
+### Tests
+- No PR without tests. The ticket lists the levels it needs: unit, integration (in-memory MongoDB), API (Supertest), E2E.
+- Test first (test commit before code commit) where the ticket says **TDD: required**: pricing, refunds, status changes, inventory, budgets, lockout, and every bug fix.
+- Tests never touch Atlas. Never weaken, skip or delete a test to make a suite pass.
+
+### AI
+- Copy `AGENTS.example.md` to your own tool's file (see "AI setup" below).
+- Every prompt is logged in your own file in `ai-prompts/` (your agent does it). Never paste secrets, tokens or connection strings into an AI tool.
+
+## AI setup
+
+1. **Instructions:** copy `AGENTS.example.md` to your tool's file at the repo root (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, Cursor, Copilot agents and most others, `GEMINI.md` for Gemini CLI) and fill in "About me". These files are gitignored, so they're yours.
+2. **Project skill:** `docs/ai/skills/travel-platform/`. Your agent reads `SKILL.md` first (your instruction file tells it to). Claude Code users can also install it as a native skill:
+   - Windows (cmd, repo root): `mkdir .claude\skills` then `mklink /J .claude\skills\travel-platform docs\ai\skills\travel-platform`
+   - macOS/Linux (repo root): `mkdir -p .claude/skills && ln -s ../../docs/ai/skills/travel-platform .claude/skills/travel-platform`
+3. **Prompt log:** `ai-prompts/<your first name>.txt`. Your agent appends one entry per prompt. For chat tools without access to the repo, add material prompts by hand.
+4. **Chat assistants** (Claude, ChatGPT, Gemini): use the chat skill `docs/ai/chat-skill/SKILL.md`, one file with all the project knowledge. Paste `docs/ai/chat-skill/chat-instructions.txt` into the tool's instructions field (custom GPT, Gemini Gem, Claude project) and upload `SKILL.md` as knowledge. On Claude you can also add it as a skill.
+
+## Database
+
+- The data model lives in `docs/database/` (`data-model.md` is the source of truth; class and ER diagrams are next to it). Mongoose schemas in `backend/src/modules/*/schemas/` are written from it, and `backend/test/db/indexes.spec.ts` fails if a collection's indexes drift from it.
+- Seed the reference data (countries, cities, airports, attractions, currencies) from `backend/seed-data/*.csv`: with `MONGODB_URI` set in `backend/.env`, run `npm run seed:reference` in `backend/`. It validates every reference before writing and is safe to re-run.
+- Tests use an in-memory MongoDB replica set and never touch Atlas. The first test run downloads a MongoDB binary, so it can take a few minutes.
+
+How the output was used:
+Created the flights contract (FlightsService and SeatInventory stubs, flights.types.ts), the fakes (FakeFlightsData, FakeFlightsService, FakeSeatInventory) and their specs; edited flights.module.ts and test/fakes/index.ts. Not committed yet.
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Jana
+Tool: Claude (claude.ai chat)
+Related Requirement: CTR-02
+
+Prompt:
+whats the diffrence between flights.data.fake and flights.fake explain it in absolute detail
+
+How the output was used:
+Answer only, no files changed
+================================================

@@ -83,6 +83,7 @@ Checks on the whole repository, on pull requests only:
 - The branch name is `<type>/<ID>-<description>`, with type one of `feature`, `fix`, `chore`, `docs`, `test`, `refactor`.
 - The PR title contains a requirement ID.
 - No secret is found in the PR's history (gitleaks).
+- The author's prompt log (`ai-prompts/<first name>.txt`) has at least one new entry, and no existing line in `ai-prompts/` is removed or changed (the logs are append-only).
 
 A PR from `develop` into `main` (a milestone release) is exempt from the branch name and title rules.
 
@@ -94,6 +95,8 @@ Branch and PR title example:
 - Title: `FLT-22: seat hold`
 
 **Each PR is linked to its issue automatically.** A workflow reads the ticket key from the branch name (or the PR title) and adds `Closes #<issue>` to the PR description, so the PR shows on the issue and the issue closes when the PR is merged into `develop`. If no issue matches, it leaves a comment instead.
+
+**AI review.** Copilot reviews every PR automatically against the project's rules (`.github/copilot-instructions.md`); read its comments and fix what's real. For an important PR (contracts, inventory, holds, payments), the team leader can ask for a deeper review by commenting `@claude review this` on it. Claude reads the project skill first and posts its review on the PR; it never pushes commits.
 
 **A PR merges only when CI is green and the team leader approves.**
 

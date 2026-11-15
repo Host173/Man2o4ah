@@ -1,3 +1,103 @@
 AI prompt log — Mohamed Mokhtar Shaker
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+================================================
+Date: 2026-11-14
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: CTR-06
+
+Prompt:
+# Role & Objective
+You are an elite software engineering and code review AI agent. You are tasked with implementing issue **CTR-06: Itineraries contract: itinerary service (#14)** for the repository cloned from: `https://github.com/Host173/Man2o4ah.git`
+
+---
+
+# Phase 1: Mandatory Deep Discovery & Inspection (Do This First)
+Before writing any code or modifying any files, you must exhaustively inspect the workspace:
+1. **Recursive File Hierarchy Exploration:** Scan every directory, module, and file layout to understand the existing project architecture.
+2. **Read All Rules & Configuration Files:** Read every `.cursorrules`, `README`, configuration file, linter config, documentation file, and project skill in the repository (specifically checking paths like `docs/ai/skills/travel-platform/` as referenced in the issue). 
+3. **Inspect Agent Tools & Setup:** Review all available tools, scripts, and testing setups.
+4. **Strict Enforcement:** Have a sharp eye for detail. Every project rule, architectural constraint, naming convention, and configuration standard is mandatory and must be strictly followed without exception.
+
+---
+
+# Phase 2: Specifications & Task Requirements (From Issue #14)
+
+Implement the requirements detailed below with absolute precision:
+
+### Issue Details
+* **Issue Title:** CTR-06: Itineraries contract: itinerary service (#14)
+* **Branch to Use:** `feature/CTR-06-itineraries-contract`
+* **PR Title:** `CTR-06: Itineraries contract: itinerary service`
+
+### Core Expected Output
+* **Module Skeleton:** Implement the module skeleton where other modules call public itineraries by author as stubs plus a fake implementation.
+
+### Technical Requirements & Scope
+* **Requirements ID:** `BLG-12`, `ITN-20` (interfaces)
+* **Package:** `6 · itineraries`
+* **Module(s):** `itineraries`
+* **Tests:** Unit tests where the fake behaves like the contract.
+* **TDD Required:** No
+
+### Dependencies & Blockers
+* **Depends on:** `#6 (PLT-04)`, `#7 (PLT-05)` (Ensure these foundational models and structures are fully respected and integrated).
+* **Blocks:** `#65 (ITN-01)`, `#83 (BLG-12)`
+
+---
+
+# Phase 3: Execution & Engineering Standards
+1. **Naming Conventions:** Strictly adhere to the project's established casing, file-naming patterns, and structural conventions found during Phase 1 inspection.
+2. **Code Quality & Architecture:** Write clean, maintainable code matching the repository's established patterns for services, interfaces, and fakes.
+3. **Verification:** Verify that all implementations fulfill the contract specifications, pass existing checks, and properly expose the required stubs and fake behavior.
+
+How the output was used:
+Added the itineraries service stub, contract types, module export, fake and its tests, and the README section; commits 013e970, 9345db4, 814bd76.
+================================================
+================================================
+Date: 2026-11-14
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: CTR-06
+
+Prompt:
+# Role & Objective
+You are an elite software engineering AI agent. Your task is to address Scrum Master review feedback on the already-open Pull Request **#118** (`CTR-06: Itineraries contract: itinerary service`) on branch `feature/CTR-06-itineraries-contract` in repository `https://github.com/Host173/Man2o4ah.git`[cite: 1, 12].
+
+**CRITICAL:** Do NOT create a new branch or a new Pull Request. Commit and push directly to the existing `feature/CTR-06-itineraries-contract` branch, and edit the description of the existing open Pull Request (`#118`)[cite: 1, 12].
+
+---
+
+# Phase 1: Mandatory File & Rule Inspection
+Before making any edits, thoroughly read and inspect:
+1. **Repository & Workflow Rules:** Read `AGENTS.example.md` (specifically **§4** regarding prompt log formatting), `workflow.md`, `.github/pull_request_template.md`, `README.md`, and any rules in `docs/ai/skills/travel-platform/`.
+2. **Existing Prompt Logs & Git Diff:** Inspect `ai-prompts/` (including `ai-prompts/mokhtar.txt` and peer logs like `aya.txt` if present) and run `git status`, `git log -n 5`, and `git diff develop...HEAD` (or `main...HEAD`) to see the exact files modified in this PR[cite: 9].
+
+---
+
+# Phase 2: Required Changes (From Scrum Master Review)
+
+### 1. Add Missing Prompt Log Entry (`ai-prompts/mokhtar.txt`)
+* `ai-prompts/mokhtar.txt` is currently missing from this PR and has no entries on `develop`. Because prompt logs are graded, this is mandatory.
+* Read `AGENTS.example.md §4` carefully and follow its exact required format, headers, timestamps, and conventions.
+* Create/update `ai-prompts/mokhtar.txt` with the prompt log entries for ticket **CTR-06** (covering the prompts used to implement and audit the `itineraries` contract, service stub, fake, and tests).
+
+### 2. Clean Up the Existing Open PR Description (`#118`)
+* Update the body/description of the already-open Pull Request **#118** (using `gh pr edit 118 --body ...`)[cite: 12]:
+  * Remove all `` markers completely.
+  * Remove the inaccurate mention that `app.module.ts` was modified (`ItinerariesModule` was already registered).
+  * Ensure the PR description accurately reflects the exact `git diff` of this PR (including the addition of `ai-prompts/mokhtar.txt`) and follows `.github/pull_request_template.md`.
+
+*(Note: Do NOT modify `PublicItineraryQuery` for `PaginationQueryDto`—the reviewer explicitly noted to leave that optional item for `ITN-20`.)*
+
+---
+
+# Phase 3: Verification, Commit, Push & PR Edit
+1. **Verify:** Run `npm run verify` (or the repository's lint/format/test checks) to confirm everything remains green[cite: 2].
+2. **Commit & Push:** Stage `ai-prompts/mokhtar.txt`, commit using the repository's exact commit convention (`docs(itineraries): add CTR-06 prompt log entry` or matching pattern from `git log` / `workflow.md`), and push to `origin feature/CTR-06-itineraries-contract`[cite: 1].
+3. **Edit Existing PR:** Update PR `#118` in place using `gh pr edit 118` and verify via `gh pr view 118` that the title (`CTR-06: Itineraries contract: itinerary service`), description, and file diff are completely clean[cite: 1, 12].
+
+How the output was used:
+Added the CTR-06 prompt-log entry and corrected the PR #118 description after review; no source changes.
+================================================

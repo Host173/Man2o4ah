@@ -51,3 +51,4 @@ Man2o4ah is the GIU Software Project I "Travel Planning and Booking Platform": a
 - The author's prompt log `ai-prompts/<first name>.txt` gets one entry per prompt (a CI check enforces at least one new entry). Entries are append-only.
 - No secrets, tokens, connection strings or `.env` values anywhere in the diff or the description.
 - Documentation and comments must be true: they are read by the team's AI agents.
+- Contracts and features are not documented in README files (the types, method comments and fakes are the documentation). Flag a PR that adds such a section.

@@ -1,7 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { getModelToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
+import { vi } from 'vitest';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
@@ -18,6 +19,7 @@ describe('BlogService (skeleton)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [BlogModule],
     })
+      .useMocker((token) => (token === getConnectionToken() ? {} : undefined))
       .overrideProvider(getModelToken(Post.name))
       .useValue({})
       .overrideProvider(getModelToken(Comment.name))
@@ -65,11 +67,11 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
   }, HOOK_TIMEOUT);
 
   describe('create (BLG-01)', () => {
-    it('creates a draft post without publishedAt and with schema defaults', async () => {
+    it('creates a draft post without publishedAt, trims title, and preserves body spaces', async () => {
       const created = await service.create(
         {
           title: '  Luxor Sunrise  ',
-          body: 'Hot air balloons over the Valley of the Kings.',
+          body: '  Hot air balloons over the Valley of the Kings.  ',
           status: PostStatus.DRAFT,
         },
         ownerId,
@@ -79,7 +81,7 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
       expect(created.authorId).toBe(ownerId);
       expect(created.title).toBe('Luxor Sunrise');
       expect(created.body).toBe(
-        'Hot air balloons over the Valley of the Kings.',
+        '  Hot air balloons over the Valley of the Kings.  ',
       );
       expect(created.status).toBe(PostStatus.DRAFT);
       expect(created.publishedAt).toBeUndefined();
@@ -107,11 +109,18 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
       expect(created.publishedAt).toBeInstanceOf(Date);
     });
 
-    it('rejects malformed authorId with VALIDATION_FAILED', async () => {
+    it('rejects malformed authorId and blank body with VALIDATION_FAILED', async () => {
       await expect(
         service.create(
           { title: 'Title', body: 'Body', status: PostStatus.DRAFT },
           'not-an-object-id',
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.create(
+          { title: 'Title', body: '    ', status: PostStatus.DRAFT },
+          ownerId,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -284,9 +293,18 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
       expect(persistedDraft?.title).toBe('Owner Draft');
     });
 
-    it('rejects malformed postId with VALIDATION_FAILED', async () => {
+    it('rejects malformed postId and blank body with VALIDATION_FAILED', async () => {
+      const created = await service.create(
+        { title: 'Title', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+
       await expect(
         service.update('bad-id', { title: 'Test' }, ownerId),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.update(created._id, { body: '    ' }, ownerId),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -377,6 +395,48 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
       await expect(service.delete('bad-id', ownerId)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it('rolls back post and comment deletions if like deletion fails mid-transaction', async () => {
+      const target = await service.create(
+        { title: 'Atomic Post', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const targetObjectId = new Types.ObjectId(target._id);
+      const commenterObjectId = new Types.ObjectId(otherUserId);
+
+      await commentModel.create({
+        postId: targetObjectId,
+        authorId: commenterObjectId,
+        body: 'Keep me on rollback',
+      });
+      await likeModel.create({
+        postId: targetObjectId,
+        userId: commenterObjectId,
+      });
+
+      const spy = vi.spyOn(likeModel, 'deleteMany').mockImplementation(
+        () =>
+          ({
+            exec: () => Promise.reject(new Error('like cleanup failed')),
+          }) as never,
+      );
+
+      try {
+        await expect(service.delete(target._id, ownerId)).rejects.toThrow(
+          'like cleanup failed',
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(await postModel.findById(target._id).exec()).not.toBeNull();
+      expect(
+        await commentModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(1);
+      expect(
+        await likeModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(1);
     });
   });
 });

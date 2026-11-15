@@ -3,9 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Connection, Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
@@ -33,6 +33,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 @Injectable()
 export class BlogService {
   constructor(
+    @InjectConnection() private readonly connection: Connection,
     @InjectModel(Post.name) private readonly postModel: Model<StoredPost>,
     @InjectModel(Comment.name) private readonly commentModel: Model<Comment>,
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
@@ -41,6 +42,7 @@ export class BlogService {
   /** BLG-01: creates a post as draft or published owned by the authenticated user. */
   async create(dto: CreatePostDto, userId: string): Promise<PostView> {
     const authorId = this.parseId(userId, 'userId');
+    this.assertNonBlankBody(dto.body);
     const created = await this.postModel.create({
       authorId,
       title: dto.title.trim(),
@@ -84,6 +86,10 @@ export class BlogService {
   ): Promise<PostView> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
+
+    if (dto.body !== undefined) {
+      this.assertNonBlankBody(dto.body);
+    }
 
     const existing = await this.postModel
       .findOne({ _id: id, authorId })
@@ -130,22 +136,38 @@ export class BlogService {
 
   /**
    * BLG-04: deletes the authenticated owner's post along with its comments and
-   * likes; throws 404 if missing or owned by someone else.
+   * likes in one transaction; throws 404 if missing or owned by someone else.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
 
-    const deleted = await this.postModel
-      .findOneAndDelete({ _id: id, authorId })
-      .lean()
-      .exec();
-    if (!deleted) throw this.notFound();
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const deleted = await this.postModel
+          .findOneAndDelete({ _id: id, authorId }, { session })
+          .lean()
+          .exec();
+        if (!deleted) throw this.notFound();
 
-    await Promise.all([
-      this.commentModel.deleteMany({ postId: id }).exec(),
-      this.likeModel.deleteMany({ postId: id }).exec(),
-    ]);
+        await this.commentModel.deleteMany({ postId: id }, { session }).exec();
+        await this.likeModel.deleteMany({ postId: id }, { session }).exec();
+      });
+      // BLG-10 will delete stored post image files after the transaction commits.
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private assertNonBlankBody(body: string): void {
+    if (!/\S/.test(body)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field: 'body', message: 'body must not be blank' }],
+      });
+    }
   }
 
   private parseId(value: string, field: string): Types.ObjectId {

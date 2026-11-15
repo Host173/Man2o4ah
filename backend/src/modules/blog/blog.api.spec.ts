@@ -121,7 +121,7 @@ describe('BlogController HTTP API (BLG-01, BLG-03, BLG-04)', () => {
         .set('Cookie', user.cookie)
         .send({
           title: '  Sinai Trail Draft  ',
-          body: 'Packing checklist for Dahab.',
+          body: '  Packing checklist for Dahab.  ',
           status: PostStatus.DRAFT,
         });
 
@@ -129,7 +129,7 @@ describe('BlogController HTTP API (BLG-01, BLG-03, BLG-04)', () => {
       expect(draftRes.body).toMatchObject({
         authorId: user.id,
         title: 'Sinai Trail Draft',
-        body: 'Packing checklist for Dahab.',
+        body: '  Packing checklist for Dahab.  ',
         status: PostStatus.DRAFT,
         tags: [],
         images: [],
@@ -173,6 +173,19 @@ describe('BlogController HTTP API (BLG-01, BLG-03, BLG-04)', () => {
         code: ErrorCode.ValidationFailed,
       });
       expect(whitespaceTitle.body.details.length).toBeGreaterThan(0);
+
+      const blankBody = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', user.cookie)
+        .send({ title: 'Title', body: '    ', status: PostStatus.DRAFT });
+      expect(blankBody.status).toBe(400);
+      expect(blankBody.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(
+        blankBody.body.details.some(
+          (detail: { field: string }) => detail.field === 'body',
+        ),
+      ).toBe(true);
 
       const invalidStatus = await testApp!
         .http()
@@ -416,6 +429,14 @@ describe('BlogController HTTP API (BLG-01, BLG-03, BLG-04)', () => {
         .send({ title: null });
       expect(nullFieldRes.status).toBe(400);
       expect(nullFieldRes.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const blankBodyRes = await testApp!
+        .http()
+        .patch(`/api/posts/${created.body._id}`)
+        .set('Cookie', owner.cookie)
+        .send({ body: '    ' });
+      expect(blankBodyRes.status).toBe(400);
+      expect(blankBodyRes.body.code).toBe(ErrorCode.ValidationFailed);
     });
   });
 

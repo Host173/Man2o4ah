@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { PostStatus } from '../schemas/post.schema.js';
 
 function trim(value: unknown): unknown {
@@ -24,6 +24,7 @@ export class CreatePostDto {
   @IsString()
   @MinLength(1)
   @MaxLength(20000)
+  @Matches(/\S/, { message: 'body must not be blank' })
   body!: string;
 
   @ApiProperty({

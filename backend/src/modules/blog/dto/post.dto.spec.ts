@@ -39,11 +39,11 @@ describe('CreatePostDto & UpdatePostDto', () => {
   const pipe = createValidationPipe();
 
   describe('CreatePostDto', () => {
-    it('accepts valid draft and published payloads and trims title whitespace', async () => {
+    it('accepts valid draft and published payloads and trims title without trimming body', async () => {
       const draft = (await pipe.transform(
         {
           title: '  Cairo Weekend Notes  ',
-          body: 'Walked along the Nile at sunset.',
+          body: '  Walked along the Nile at sunset.  ',
           status: PostStatus.DRAFT,
         },
         { type: 'body', metatype: CreatePostDto },
@@ -51,7 +51,7 @@ describe('CreatePostDto & UpdatePostDto', () => {
 
       expect(draft).toBeInstanceOf(CreatePostDto);
       expect(draft.title).toBe('Cairo Weekend Notes');
-      expect(draft.body).toBe('Walked along the Nile at sunset.');
+      expect(draft.body).toBe('  Walked along the Nile at sunset.  ');
       expect(draft.status).toBe('draft');
 
       const published = (await pipe.transform(
@@ -137,6 +137,13 @@ describe('CreatePostDto & UpdatePostDto', () => {
       await expectValidationError(
         pipe.transform(
           { title: 'Valid', body: '', status: PostStatus.DRAFT },
+          { type: 'body', metatype: CreatePostDto },
+        ),
+        'body',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { title: 'Valid', body: '    ', status: PostStatus.DRAFT },
           { type: 'body', metatype: CreatePostDto },
         ),
         'body',
@@ -241,6 +248,13 @@ describe('CreatePostDto & UpdatePostDto', () => {
           { type: 'body', metatype: UpdatePostDto },
         ),
         'title',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { body: '    ' },
+          { type: 'body', metatype: UpdatePostDto },
+        ),
+        'body',
       );
       await expectValidationError(
         pipe.transform(

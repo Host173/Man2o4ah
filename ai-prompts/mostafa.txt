@@ -54,3 +54,22 @@ Error: Process completed with exit code 1.
 How the output was used:
 Formatted backend/src/modules/admin/admin.service.ts with Prettier (removing the space inside `export class AdminService { }` introduced in 99e188d) and verified `npm run format:check`, `lint`, `typecheck`, and `build` pass on feature/BLG-01-posts.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-01
+
+Prompt:
+In reference to the implementation of BLG-01 the following was observed: Bug
+A body made only of spaces ("    ") is accepted. The title is trimmed, but the body isn’t. Reject a blank body without trimming the text itself (for example, with @Matches(/\S/)), and add a test for it.
+Should fix
+Deleting a post, its comments, and its likes are three separate writes. If one fails halfway, comments and likes are left without a post. Run all three in one transaction.
+The comment edit in admin.service.ts isn’t part of BLG-01, and part of it is wrong: ACC-07a, ACC-14, and ACC-16 belong to the accounts module, not admin. Revert it here and fix it in an admin ticket.
+Note
+When BLG-10 adds images, deleting a post must also delete its image files, as the data model says.
+
+How the output was used:
+Added @Matches(/\S/) validation on post body without trimming it, wrapped post/comment/like deletion in a Mongoose transaction in BlogService.delete, reverted backend/src/modules/admin/admin.service.ts to match develop, and added DTO, service (including transaction rollback), and API tests on feature/BLG-01-posts.
+================================================

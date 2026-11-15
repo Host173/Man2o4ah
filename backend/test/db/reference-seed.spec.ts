@@ -38,7 +38,9 @@ function csvIds(file: string): string[] {
   return rows.map((row) => Object.values(row)[0]);
 }
 
-describe('reference-data seed', () => {
+// Each test seeds the full CSV dataset: about 1 s alone, but it can pass the
+// default 5 s when the whole suite shares the CPU, so it gets more time.
+describe('reference-data seed', { timeout: 30_000 }, () => {
   let mongo: MemoryMongo;
   let connection: Connection;
   let seed: ReferenceDataSeedService;

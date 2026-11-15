@@ -14,6 +14,14 @@ import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.regis
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
 
+/**
+ * Accounts (CTR-01). Registers the global guards: every route needs a
+ * logged-in account (the `access_token` cookie) unless it is `@Public()`;
+ * Swagger and `/uploads` are served outside the guards. Needs
+ * `JWT_ACCESS_SECRET` in the configuration. Other modules use the exported
+ * `AccountsService` and `ActiveBookingsCheckRegistry`; tests use
+ * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
+ */
 @Module({
   imports: [
     MongooseModule.forFeature([

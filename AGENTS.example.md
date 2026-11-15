@@ -1,6 +1,6 @@
 # Agent instructions (template)
 
-Template version: 2026-11-11
+Template version: 2026-11-15
 
 Copy this file to your own tool's instruction file, then fill in "About me":
 - Claude Code: `CLAUDE.md` at the repo root
@@ -27,6 +27,7 @@ If the first lines of `AGENTS.example.md` in the repo show a newer template vers
 - Change only the modules my package owns (`references/modules.md` in the skill). If the task needs a change elsewhere, stop and tell me.
 - For any UI change, follow `DESIGN.md`. If it doesn't exist yet, say so and don't invent a design.
 - Write tests with the code; write them first where the ticket says "TDD: required".
+- Don't document contracts or features in README files. A contract is documented by its types, the comment on each method, and its fake; cross-module rules live in `docs/database/data-model.md` §6.
 - Before saying a task is done, run `npm run verify` in every app you changed and report the real result.
 - If something isn't decided in the docs above and can't be derived safely, don't assume: stop and tell me to ask the team leader (Kareem).
 

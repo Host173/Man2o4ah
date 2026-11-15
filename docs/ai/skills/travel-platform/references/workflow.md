@@ -35,6 +35,7 @@ Types: `feat fix test refactor docs style chore ci perf build`. Never write `upd
 
 - Target `develop`. Title: `<ID>: <short description>` (CI checks the ID), e.g. `FLT-22: Seat hold`.
 - Fill in the template (`.github/pull_request_template.md`): requirement IDs and summary, design decisions and why, how it was tested (including the concurrency result where relevant), AI usage, screenshots (frontend), and the checklist.
+- Don't add contract or feature descriptions to README files: a contract is documented by its types, method comments and fake (and `docs/database/data-model.md` §6 for cross-module rules). A README copy goes stale.
 - Only related changes. Call out any change to a shared contract at the top (data model, ports, events, error codes, auth, `common/`, `DESIGN.md`).
 - A PR merges when **CI is green and the team leader approves**. He merges with a **merge commit** (not squash: it keeps the test-first order and authorship in history).
 - Agents never push, open PRs, force-push, or touch `develop`/`main` unless the member explicitly asks.

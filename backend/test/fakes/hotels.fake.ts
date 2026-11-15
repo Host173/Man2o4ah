@@ -1,9 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { addDays, isDateOnly } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
+import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
+import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
+import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
   HotelSearchQuery,
   HotelSearchResult,
@@ -14,6 +18,7 @@ import type {
 } from '../../src/modules/hotels/hotels.types.js';
 import type { RatingSummary } from '../../src/modules/hotels/schemas/hotel.schema.js';
 import type { PublicApi } from './public-api.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 
 export interface HotelDataset {
   hotels: HotelView[];
@@ -46,13 +51,74 @@ export function assertStayDates(checkIn: Date, checkOut: Date): void {
 export class FakeHotelsService implements PublicApi<HotelsService> {
   readonly data: HotelDataset;
 
-  constructor(dataset: Partial<HotelDataset> = {}) {
+  constructor(
+    dataset: Partial<HotelDataset> = {},
+    private readonly referenceData: Pick<
+      ReferenceDataService,
+      'getCity'
+    > = new FakeReferenceDataService(),
+  ) {
     this.data = structuredClone({
       hotels: [],
       rooms: [],
       roomNights: [],
       ...dataset,
     });
+  }
+
+  async create(input: CreateHotelDto): Promise<HotelView> {
+    const city = await this.requireCity(input.cityId);
+    const hotel: HotelView = {
+      id: new Types.ObjectId().toHexString(),
+      name: input.name.trim(),
+      address: input.address.trim(),
+      cityId: city.id,
+      countryCode: city.countryCode,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.starRating !== undefined
+        ? { starRating: input.starRating }
+        : {}),
+      photos: [],
+      amenities: input.amenities?.map((amenity) => amenity.trim()) ?? [],
+      checkInTime: '14:00',
+      checkOutTime: '12:00',
+      cancellationPolicy: { tiers: [] },
+      isActive: true,
+      ratingSummary: { average: null, count: 0 },
+    };
+    this.data.hotels.push(hotel);
+    return structuredClone(hotel);
+  }
+
+  async update(
+    hotelId: string,
+    input: UpdateHotelDto,
+    moderatorHotelId: string,
+  ): Promise<HotelView> {
+    if (hotelId !== moderatorHotelId) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Hotel not found',
+      });
+    }
+    const hotel = this.requireHotel(hotelId);
+    const fields: Partial<HotelView> = {};
+    if (input.cityId !== undefined) {
+      const city = await this.requireCity(input.cityId);
+      fields.cityId = city.id;
+      fields.countryCode = city.countryCode;
+    }
+    if (input.name !== undefined) fields.name = input.name.trim();
+    if (input.address !== undefined) fields.address = input.address.trim();
+    if (input.description !== undefined) fields.description = input.description;
+    if (input.starRating !== undefined) fields.starRating = input.starRating;
+    if (input.amenities !== undefined) {
+      fields.amenities = input.amenities.map((amenity) => amenity.trim());
+    }
+    Object.assign(hotel, fields);
+    return structuredClone(hotel);
   }
 
   getHotel(
@@ -223,5 +289,22 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     return hotel;
+  }
+
+  private async requireCity(cityId: string) {
+    const city = await this.referenceData.getCity(cityId);
+    if (!city) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Unknown city',
+        details: [
+          {
+            field: 'cityId',
+            message: 'must be an existing reference-data city',
+          },
+        ],
+      });
+    }
+    return city;
   }
 }

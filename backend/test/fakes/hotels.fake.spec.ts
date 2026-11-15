@@ -65,6 +65,92 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  it('creates hotel profiles with reference-derived countries and detached defaults', async () => {
+    const created = await hotels.create({
+      name: '  Dubai Hotel  ',
+      address: '  1 Test Street  ',
+      cityId: 'dubai',
+      description: 'A new hotel',
+      starRating: 5,
+      amenities: ['  Pool  '],
+    });
+    expect(created).toMatchObject({
+      name: 'Dubai Hotel',
+      address: '1 Test Street',
+      cityId: 'dubai',
+      countryCode: 'AE',
+      description: 'A new hotel',
+      starRating: 5,
+      amenities: ['Pool'],
+      photos: [],
+      cancellationPolicy: { tiers: [] },
+      isActive: true,
+      ratingSummary: { average: null, count: 0 },
+    });
+    created.amenities.length = 0;
+    expect((await hotels.getHotel(created.id))?.amenities).toEqual(['Pool']);
+    const minimal = await hotels.create({
+      name: 'Minimal',
+      address: 'Address',
+      cityId: 'cairo',
+    });
+    expect(minimal.amenities).toEqual([]);
+    expect(minimal).not.toHaveProperty('description');
+    expect(minimal).not.toHaveProperty('starRating');
+  });
+
+  it('updates only supplied profile fields and derives the new country', async () => {
+    const previous = await hotels.getHotel('hotel-1');
+    const updated = await hotels.update(
+      'hotel-1',
+      {
+        name: '  Edited  ',
+        address: '  New Address  ',
+        cityId: 'dubai',
+        description: '',
+        starRating: 4,
+        amenities: ['  Wi-Fi  '],
+      },
+      'hotel-1',
+    );
+    expect(updated).toEqual({
+      ...previous,
+      name: 'Edited',
+      address: 'New Address',
+      cityId: 'dubai',
+      countryCode: 'AE',
+      description: '',
+      starRating: 4,
+      amenities: ['Wi-Fi'],
+    });
+    expect(await hotels.update('hotel-1', {}, 'hotel-1')).toEqual(updated);
+    await hotels.update('hotel-1', { amenities: [] }, 'hotel-1');
+    updated.amenities.push('Detached');
+    expect((await hotels.getHotel('hotel-1'))?.amenities).toEqual([]);
+  });
+
+  it('rejects unassigned hotel edits and unknown cities without partial changes', async () => {
+    const previous = await hotels.getHotel('hotel-1');
+    await expect(
+      hotels.update('hotel-1', { name: 'Forbidden' }, 'hotel-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(hotels.update('missing', {}, 'missing')).rejects.toMatchObject(
+      { response: { code: ErrorCode.NotFound } },
+    );
+    await expect(
+      hotels.update(
+        'hotel-1',
+        { name: 'Invalid', cityId: 'missing' },
+        'hotel-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      hotels.create({ name: 'Invalid', address: 'Address', cityId: 'missing' }),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    expect(await hotels.getHotel('hotel-1')).toEqual(previous);
+    expect(hotels.data.hotels).toHaveLength(1);
+  });
+
   const query: HotelSearchQuery = {
     cityId: 'cairo',
     checkIn,

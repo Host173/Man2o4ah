@@ -24,7 +24,10 @@ import type {
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 
-type HotelRecord = Hotel & { _id: Types.ObjectId };
+type StoredHotel = Omit<Hotel, 'photos'> & {
+  photos: (Hotel['photos'][number] & { _id: Types.ObjectId })[];
+};
+type HotelRecord = StoredHotel & { _id: Types.ObjectId };
 type ProfileFields = Pick<
   Hotel,
   | 'name'
@@ -39,7 +42,7 @@ type ProfileFields = Pick<
 @Injectable()
 export class HotelsService {
   constructor(
-    @InjectModel(Hotel.name) private readonly hotelModel: Model<Hotel>,
+    @InjectModel(Hotel.name) private readonly hotelModel: Model<StoredHotel>,
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
   ) {}

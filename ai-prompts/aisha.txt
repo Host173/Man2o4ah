@@ -1,3 +1,140 @@
 AI prompt log — Aisha Al Rawahi
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+# AI AGENT PROMPT: CTR-01
+
+## A. Context
+- **You are:** the owner of Package 2 · Accounts & Auth
+- **Ticket:** CTR-01: Accounts contract: guards, roles and account service (#10) (§15.3).
+- **Branch:** `feature/CTR-01-accounts-contract` (§15.3).
+- **First Action:** Read your agent file, the README ("Team rules"), and `docs/ai/skills/travel-platform/` (§3.15).
+
+## B. Preconditions
+1. Verify that every "Depends on" ticket (#6 PLT-04, #7 PLT-05) is merged by checking for its code in the repository (§15.3).
+2. Branch from the latest `develop`. If `develop` is not prepared yet, ask Aisha (§3.18 rule 12). If a dependency is missing, STOP and report it.
+
+## C. Acceptance Criteria (Checklist)
+Build and test the following items in the `accounts` module, matching exact casing (§15.3):
+- [ ] **Role Enum:** Define the role enum (`user`, `admin`, `airline_moderator`, `hotel_moderator`) (§7.1).
+- [ ] **AuthUser Type:** Define the `AuthUser` payload type (`{ id, role, providerId?, sid }`) (§7.5).
+- [ ] **Decorators:** Implement `@Public()`, `@Roles(...)`, and `@CurrentUser()` decorators (§7.5).
+- [ ] **Guards:** Implement global JWT-cookie and role guards, including session check (`sessions` collection lookup and 30-minute idle sliding window) (§7.3, §7.5).
+- [ ] **AccountsService Interface & Fake:** Create the `AccountsService` interface for other modules (profiles, name search, admin operations) as stubs plus a functioning fake (§13.5).
+- [ ] **ActiveBookingsCheck Port:** Define the `ActiveBookingsCheck` port interface to prevent deactivation while upcoming confirmed bookings exist (§4.6.2, §5.6.2).
+
+**Exact Requirement Texts to Satisfy:**
+- **ACC-11:** "The system shall restrict access to bookings and private itineraries to their owner, except that admins may view all bookings (ACC-17) and moderators may view bookings for their own hotel or airline (FLT-29, HTL-22). Unauthorised requests shall be rejected (403/404)." (§17.1)
+- **ACC-19:** "The system shall not store authentication tokens or user credentials in localStorage, sessionStorage or any other JavaScript-accessible storage. Access and refresh tokens shall be issued as httpOnly, Secure, SameSite cookies, and the frontend shall obtain the current user from an /auth/me endpoint." (§17.7)
+- **GEN-13:** "All validation, business rules and authorisation shall be enforced by the backend regardless of frontend checks, and passwords shall be stored only as salted hashes." (§17.7)
+
+## D. Decisions that Apply (with Why)
+- **Why httpOnly cookies and never `localStorage`?** JavaScript cannot read httpOnly cookies, protecting tokens from XSS leakage (§3.17).
+- **Why global guards with `@Public()` opt-out?** A new endpoint is protected by default, so forgetting a decorator cannot accidentally expose it (§3.17).
+- **Why a `sessions` collection?** Logout must revoke the refresh token on the server and sessions must expire after 30 idle minutes (§3.9, §4.6.2).
+- **Why an `ActiveBookingsCheck` port?** Accounts cannot import booking modules (which would create a dependency cycle), so a port inverting the dependency solves it (§3.3).
+
+## E. Scope
+- **May Change:** Files within the `accounts` module directory (`backend/src/modules/accounts/`).
+- **Must Not Change (Without Kareem's Approval):** Other modules, `common/` core files, data models, ports in other modules, events, error codes, auth cookies, `DESIGN.md`, or new packages (§3.2, §3.3, §3.17).
+- **Downstream Consumers:** Downstream tickets (#24 ACC-01, #29 ACC-09, #30 ACC-12, #31 ACC-16, #64 ACC-11, #65 ITN-01, #76 BLG-01, #77 BLG-02, #81 BLG-09, #86 ACC-13, #87 ACC-15) depend on these contracts and port definitions. Ensure interface stubs fully satisfy their expected inputs/outputs.
+
+## F. Workflow
+1. Explore the repository and report what already exists.
+2. Present an implementation plan and **WAIT for Aisha's approval**.
+3. Write unit tests for guards and API tests for 401 without cookie / 403 wrong role using Vitest and Supertest (§13.1, §13.6). TDD is not required for this ticket, but tests are mandatory.
+4. Implement the code.
+5. Run `npm run verify` to pass all CI quality gates (§3.10, §14.4).
+6. Commit using Conventional Commits with scope `accounts` and requirement ID `ACC-11` (§14.2).
+7. Add Swagger tags and `@ApiOperation` summaries to any created endpoints (§11.12).
+8. Walk through the Definition of Done (§14.6).
+9. Provide a final report: files changed, test results, PR-ready design decisions and why, contract changes, and open questions for Kareem.
+- *Never push or open a PR unless Aisha explicitly asks* (§3.18 rule 10).
+
+## G. Prompt-Log Instruction
+Append one entry to `ai-prompts/aisha.txt` exactly following §14.5 format, with the prompt copied verbatim.
+
+## H. STOP Conditions
+Stop immediately and ask if you encounter: anything undecided, a shared-contract change, another package's module, a missing dependency (`PLT-04` or `PLT-05`), an ambiguous requirement affecting data/money/status, or a CI gate that can only pass by silencing it (§0.2).
+
+## I. Open Questions for Kareem
+- Are there any specific payload requirements for the `AccountsService` name search and profile stubs beyond what is defined in the data model §5.3.2?
+
+[Attached: chat-instructions.txt] (identical to docs/ai/chat-skill/chat-instructions.txt at commit f95d30d)
+[Attached: travel-platform-knowledge-SKILL.md] (identical to docs/ai/chat-skill/SKILL.md at commit f95d30d)
+
+How the output was used:
+Merged origin/develop into the branch (fast-forward); explored the repo and presented an implementation plan; no source files changed
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+the agents.example.md is in this path: C:\Users\aisha\Desktop\Man2o4ah\AGENTS.example.md and please complete what you can from the desired contract so that it can be fulfilled
+
+How the output was used:
+Created personal CLAUDE.md (gitignored); added accounts guards, decorators, AccountsService stubs, ActiveBookingsCheck port and registry, fakes, tests and README section; committed 22e84c3, 7da7050, dd4c29f, eecc84a
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+please verify that my prompt completes this completely and make any and all changes to complete this with various checking and tests
+
+How the output was used:
+Renamed the branch to feature/CTR-01-accounts-contract; added AccountsService.getModeratorIds, JwtAuthGuard unit tests, mutation and built-app smoke checks; committed 67bf559, d4cba03
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+no you misunderstood i want you to build the contract so it would work even without the technical things it depends on i dont want it to run fine without them i want the contract to be comopleted and be ready to work perfectly once the dependents are implemented plt 4 and 5, please adjust so i tmatches this description
+
+How the output was used:
+Removed the fallbacks for a missing JWT_ACCESS_SECRET and an unprotected health route (revert commit 1c1b4a1), so the contract relies directly on PLT-04 (users/sessions schemas) and PLT-05 (error codes, error filter, cookie parsing); npm run verify passed
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+please pull from develop branch and complete the contract
+
+How the output was used:
+Merged develop (PLT-03, PLT-01, CTR-06); took develop's backend README per the new no-README-contract-docs rule and moved the guard notes into an AccountsModule comment; npm run verify passed; committed 8c1c695
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Aisha
+Tool: Claude Code
+Related Requirement: CTR-01
+
+Prompt:
+if its safe to push, as in the contract is complete, please push with an appropriate message and if not please tell me what i need to wait for or do before pushing
+
+How the output was used:
+Checked the branch for secrets and pushed feature/CTR-01-accounts-contract to origin; no PR opened
+================================================

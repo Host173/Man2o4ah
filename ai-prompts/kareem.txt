@@ -1355,3 +1355,16 @@ ok do all this and open a pr with the changes and if there is something i have t
 How the output was used:
 Added the prompt-log CI check, .github/copilot-instructions.md (review checklist), the on-demand Claude review workflow, and README/DECISIONS notes; opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-03
+
+Prompt:
+ok create a pr that remove those
+
+How the output was used:
+Replaced the NestJS template backend README (and the four contract sections in it) with a short command list; added a "no contract docs in READMEs" rule to AGENTS.example.md, workflow.md, the Copilot checklist and DECISIONS; opened a PR into develop.
+================================================

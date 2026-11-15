@@ -2,6 +2,13 @@ import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from '../../../common/errors/validation-exception.factory.js';
 import { PostStatus } from '../schemas/post.schema.js';
 import { CreatePostDto } from './create-post.dto.js';
+import { ListPostsQueryDto } from './list-posts-query.dto.js';
+import {
+  CommentResponseDto,
+  PaginatedPublishedPostsResponseDto,
+  PostDetailResponseDto,
+  PublishedPostResponseDto,
+} from './post.response.dto.js';
 import { UpdatePostDto } from './update-post.dto.js';
 
 function createValidationPipe(): ValidationPipe {
@@ -269,6 +276,79 @@ describe('CreatePostDto & UpdatePostDto', () => {
           { type: 'body', metatype: UpdatePostDto },
         ),
       );
+    });
+  });
+
+  describe('ListPostsQueryDto & BLG-02 response DTOs', () => {
+    it('defaults pagination values and leaves tag undefined when omitted or blank', async () => {
+      const defaults = (await pipe.transform(
+        {},
+        { type: 'query', metatype: ListPostsQueryDto },
+      )) as ListPostsQueryDto;
+
+      expect(defaults).toBeInstanceOf(ListPostsQueryDto);
+      expect(defaults.page).toBe(1);
+      expect(defaults.limit).toBe(10);
+      expect(defaults.tag).toBeUndefined();
+
+      const blankTag = (await pipe.transform(
+        { tag: '   ' },
+        { type: 'query', metatype: ListPostsQueryDto },
+      )) as ListPostsQueryDto;
+      expect(blankTag.tag).toBeUndefined();
+    });
+
+    it('normalises tag filter (trim and lowercase) alongside pagination params', async () => {
+      const query = (await pipe.transform(
+        { page: '2', limit: '5', tag: '  EGYPT-2026  ' },
+        { type: 'query', metatype: ListPostsQueryDto },
+      )) as ListPostsQueryDto;
+
+      expect(query.page).toBe(2);
+      expect(query.limit).toBe(5);
+      expect(query.tag).toBe('egypt-2026');
+    });
+
+    it('rejects invalid page, limit, non-string tag, or unknown query params', async () => {
+      await expectValidationError(
+        pipe.transform(
+          { page: '0' },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'page',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { limit: '51' },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'limit',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { tag: ['egypt', 'siwa'] },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'tag',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { q: 'cairo' },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+      );
+    });
+
+    it('constructs Swagger response DTO classes cleanly', () => {
+      const published = new PublishedPostResponseDto();
+      const page = new PaginatedPublishedPostsResponseDto();
+      const comment = new CommentResponseDto();
+      const detail = new PostDetailResponseDto();
+
+      expect(published).toBeInstanceOf(PublishedPostResponseDto);
+      expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
+      expect(comment).toBeInstanceOf(CommentResponseDto);
+      expect(detail).toBeInstanceOf(PublishedPostResponseDto);
     });
   });
 });

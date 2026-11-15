@@ -26,3 +26,34 @@ export interface PostView {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * Plain view of a published blog post including the resolved author name
+ * (`BLG-02`).
+ */
+export interface PublishedPostView extends PostView {
+  authorName: string | null;
+}
+
+/**
+ * Plain view of a visible comment shown on the post page (`BLG-02`).
+ * Deactivated comment authors resolve to `'Deleted user'` (`ACC-12`).
+ */
+export interface CommentView {
+  _id: string;
+  postId: string;
+  authorId: string;
+  authorName: string | null;
+  body: string;
+  isHidden: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Full post page view including author name and visible chronological comments
+ * (`BLG-02`).
+ */
+export interface PostDetailView extends PublishedPostView {
+  comments: CommentView[];
+}

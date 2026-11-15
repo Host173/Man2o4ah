@@ -154,7 +154,7 @@ describe('POST /api/auth/register (API, ACC-01, GEN-13)', () => {
         t.http().post(URL).send(valid),
       ]);
 
-      const statuses = results.map((r) => r.status).sort();
+      const statuses = results.map((r) => r.status).sort((a, b) => a - b);
       expect(statuses).toEqual([201, 409]);
       const loser = results.find((r) => r.status === 409);
       expect(loser?.body.code).toBe(ErrorCode.EmailTaken);

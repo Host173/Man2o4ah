@@ -8,6 +8,8 @@ import {
   ACCESS_TOKEN_ALGORITHM,
   ACCESS_TOKEN_TTL_SECONDS,
 } from './auth/auth.constants.js';
+import { AuthController } from './auth/auth.controller.js';
+import { AuthService } from './auth/auth.service.js';
 import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
 import { RolesGuard } from './auth/roles.guard.js';
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
@@ -18,8 +20,10 @@ import { User, UserSchema } from './schemas/user.schema.js';
  * Accounts (CTR-01). Registers the global guards: every route needs a
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
- * `JWT_ACCESS_SECRET` in the configuration. Other modules use the exported
- * `AccountsService` and `ActiveBookingsCheckRegistry`; tests use
+ * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
+ * `/api/auth/*` (ACC-01 registration); `AuthService` stays internal. Other
+ * modules use the exported `AccountsService` and
+ * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
  */
 @Module({
@@ -39,8 +43,10 @@ import { User, UserSchema } from './schemas/user.schema.js';
       }),
     }),
   ],
+  controllers: [AuthController],
   providers: [
     AccountsService,
+    AuthService,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -28,3 +28,29 @@ Attachments: docs/ai/chat-skill/chat-instructions.txt, docs/ai/chat-skill/SKILL.
 How the output was used:
 Implemented blog post creation (draft/published), owner-scoped listing (/api/posts/mine), editing, and deletion with comment/like cleanup in BlogService and BlogController, added CreatePostDto/UpdatePostDto/PostResponseDto and PostView types, and added DTO unit tests, service integration tests, and HTTP API tests on feature/BLG-01-posts.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-01
+
+Prompt:
+It didn't pass the CI, to clarify the following things failed: Run npm run format:check
+
+> backend@0.0.1 format:check
+> prettier --ignore-path ../.prettierignore --check "src/**/*.ts" "test/**/*.ts"
+
+Checking formatting...
+[warn] src/modules/admin/admin.service.ts
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+Error: Process completed with exit code 1. The second thing that failed: Check Job Results
+Run fail=0
+ok: changes=success
+Error: backend job result: failure
+ok: frontend=skipped
+Error: Process completed with exit code 1.
+
+How the output was used:
+Formatted backend/src/modules/admin/admin.service.ts with Prettier (removing the space inside `export class AdminService { }` introduced in 99e188d) and verified `npm run format:check`, `lint`, `typecheck`, and `build` pass on feature/BLG-01-posts.
+================================================

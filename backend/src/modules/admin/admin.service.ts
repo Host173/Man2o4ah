@@ -6,4 +6,4 @@ import { Injectable } from '@nestjs/common';
  * Sprint 1 skeleton (CTR-07); features ship in Sprint 2.
  */
 @Injectable()
-export class AdminService { }
+export class AdminService {}

@@ -1,15 +1,30 @@
 import { existsSync } from 'node:fs';
+import { Controller, Get } from '@nestjs/common';
 import { HealthModule } from '../../src/health/health.module.js';
+import { UserRole } from '../../src/modules/accounts/schemas/user.schema.js';
+import { loginAs } from './auth.js';
 import { HOOK_TIMEOUT } from './mongo-memory.js';
 import { createTestApp } from './test-app.js';
 import type { TestApp } from './test-app.js';
+
+/** A route without `@Public()`, to prove the global guards are on. */
+@Controller('guarded-probe')
+class GuardedProbeController {
+  @Get()
+  get() {
+    return { ok: true };
+  }
+}
 
 describe('createTestApp', () => {
   let t: TestApp;
   let closed = false;
 
   beforeAll(async () => {
-    t = await createTestApp({ imports: [HealthModule] });
+    t = await createTestApp({
+      imports: [HealthModule],
+      controllers: [GuardedProbeController],
+    });
   }, HOOK_TIMEOUT);
 
   afterAll(async () => {
@@ -20,6 +35,20 @@ describe('createTestApp', () => {
     const res = await t.http().get('/api/health').expect(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.database).toBe('up');
+  });
+
+  it('runs the global auth guards: a route without @Public() needs a login', async () => {
+    const res = await t.http().get('/api/guarded-probe').expect(401);
+    expect(res.body.code).toBe('NOT_AUTHENTICATED');
+  });
+
+  it('lets a loginAs user through the global guards', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    await t
+      .http()
+      .get('/api/guarded-probe')
+      .set('Cookie', user.cookie)
+      .expect(200, { ok: true });
   });
 
   it('answers an unknown route through the error filter', async () => {

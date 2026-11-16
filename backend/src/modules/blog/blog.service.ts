@@ -132,27 +132,46 @@ export class BlogService {
 
   /**
    * BLG-02: loads a publicly visible published post with its resolved author
-   * name and visible chronological comments. Throws 404 for missing, draft,
-   * hidden, or deactivated-author posts.
+   * name. Throws 404 for missing, draft, hidden, or deactivated-author posts.
    */
   async getById(postId: string): Promise<PostDetailView> {
     const id = this.parseId(postId, 'postId');
-    const { post, postAuthor, comments } = await this.loadPublicPostContext(id);
-    return {
-      ...this.toPublishedView(post, postAuthor),
-      comments,
-    };
+    const { post, postAuthor } = await this.loadVisiblePublishedPost(id);
+    return this.toPublishedView(post, postAuthor);
   }
 
   /**
-   * BLG-05: lists visible comments on a published post in chronological
-   * order (oldest first). Throws 404 for missing, draft, hidden, or
-   * deactivated-author posts.
+   * BLG-05 / GEN-05: lists paginated visible comments on a published post in
+   * chronological order (oldest first, `_id` as tie-breaker). Throws 404 for
+   * missing, draft, hidden, or deactivated-author posts.
    */
-  async listComments(postId: string): Promise<CommentView[]> {
+  async listComments(
+    postId: string,
+    query: PaginationQueryDto = new PaginationQueryDto(),
+  ): Promise<Paginated<CommentView>> {
     const id = this.parseId(postId, 'postId');
-    const { comments } = await this.loadPublicPostContext(id);
-    return comments;
+    await this.loadVisiblePublishedPost(id);
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const result = await paginate(
+      this.commentModel,
+      { postId: id, isHidden: false },
+      { page, limit },
+      { sort: { createdAt: 1, _id: 1 } },
+    );
+    const profiles = await this.resolveProfiles(
+      result.items.map((comment) => comment.authorId.toHexString()),
+    );
+    return {
+      ...result,
+      items: result.items.map((comment) =>
+        this.toCommentView(
+          comment as CommentRecord,
+          profiles.get(comment.authorId.toHexString()),
+        ),
+      ),
+    };
   }
 
   /**
@@ -393,10 +412,9 @@ export class BlogService {
     return new Map(profiles.map((profile) => [profile.id, profile]));
   }
 
-  private async loadPublicPostContext(id: Types.ObjectId): Promise<{
+  private async loadVisiblePublishedPost(id: Types.ObjectId): Promise<{
     post: PostRecord;
     postAuthor: AccountProfile | undefined;
-    comments: CommentView[];
   }> {
     const post = await this.postModel
       .findOne({
@@ -409,16 +427,7 @@ export class BlogService {
       .exec();
     if (!post) throw this.notFound();
 
-    const comments = await this.commentModel
-      .find({ postId: id, isHidden: false })
-      .sort({ createdAt: 1, _id: 1 })
-      .lean()
-      .exec();
-
-    const profiles = await this.resolveProfiles([
-      post.authorId.toHexString(),
-      ...comments.map((comment) => comment.authorId.toHexString()),
-    ]);
+    const profiles = await this.resolveProfiles([post.authorId.toHexString()]);
     const postAuthor = profiles.get(post.authorId.toHexString());
     if (postAuthor?.status === UserStatus.DEACTIVATED) {
       throw this.notFound();
@@ -427,12 +436,6 @@ export class BlogService {
     return {
       post: post as PostRecord,
       postAuthor,
-      comments: comments.map((comment) =>
-        this.toCommentView(
-          comment as CommentRecord,
-          profiles.get(comment.authorId.toHexString()),
-        ),
-      ),
     };
   }
 

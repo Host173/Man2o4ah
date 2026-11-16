@@ -833,15 +833,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   });
 
   describe('GET /api/posts/:id (BLG-02)', () => {
-    it('returns the full published post page with author name, suspended author name, and deactivated commenter as "Deleted user"', async () => {
+    it('returns the published post page with author name (including suspended author) and omits embedded comments', async () => {
       const author = await loginAs(testApp!.connection, UserRole.USER);
       const suspendedAuthor = await loginAs(
         testApp!.connection,
         UserRole.USER,
         { status: UserStatus.SUSPENDED },
       );
-      const commenter = await loginAs(testApp!.connection, UserRole.USER);
-      const deactivatedId = new Types.ObjectId().toHexString();
 
       Object.assign(
         fakeAccounts,
@@ -852,13 +850,6 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
             name: 'Suspended Author',
             email: 'suspended@example.com',
             status: UserStatus.SUSPENDED,
-          },
-          { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
-          {
-            id: deactivatedId,
-            name: 'Deleted Author',
-            email: 'deleted@example.com',
-            status: UserStatus.DEACTIVATED,
           },
         ]),
       );
@@ -887,30 +878,6 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         },
       );
 
-      const c1 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(commenter.id),
-        body: 'Incredible lighting!',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c2 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(deactivatedId),
-        body: 'Worth the evening ticket.',
-      });
-      await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(commenter.id),
-        body: 'Moderated spam comment',
-        isHidden: true,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c3 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(suspendedAuthor.id),
-        body: 'Comment from suspended user.',
-      });
-
       const res = await testApp!.http().get(`/api/posts/${created.body._id}`);
 
       expect(res.status).toBe(200);
@@ -931,31 +898,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(typeof res.body.publishedAt).toBe('string');
       expect(typeof res.body.createdAt).toBe('string');
       expect(typeof res.body.updatedAt).toBe('string');
-      expect(res.body.comments).toHaveLength(3);
-      expect(res.body.comments[0]).toMatchObject({
-        _id: c1._id.toHexString(),
-        postId: created.body._id,
-        authorId: commenter.id,
-        authorName: 'Omar Said',
-        body: 'Incredible lighting!',
-        isHidden: false,
-      });
-      expect(res.body.comments[1]).toMatchObject({
-        _id: c2._id.toHexString(),
-        postId: created.body._id,
-        authorId: deactivatedId,
-        authorName: 'Deleted user',
-        body: 'Worth the evening ticket.',
-        isHidden: false,
-      });
-      expect(res.body.comments[2]).toMatchObject({
-        _id: c3._id.toHexString(),
-        postId: created.body._id,
-        authorId: suspendedAuthor.id,
-        authorName: 'Suspended Author',
-        body: 'Comment from suspended user.',
-        isHidden: false,
-      });
+      expect(res.body.comments).toBeUndefined();
 
       // A suspended author's own post page remains visible with their author name shown (ACC-16).
       const suspendedPost = await testApp!
@@ -977,6 +920,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         authorName: 'Suspended Author',
         title: 'Suspended Author Post',
       });
+      expect(suspendedRes.body.comments).toBeUndefined();
     });
 
     it('returns 404 NOT_FOUND for missing, draft (even by owner), hidden, or deactivated-author posts and 400 for malformed id', async () => {
@@ -1160,14 +1104,22 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .http()
         .get(`/api/posts/${postId}/comments`);
       expect(guestList.status).toBe(200);
-      expect(guestList.body.map((c: { _id: string }) => c._id)).toEqual([
+      expect(guestList.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 4,
+        totalPages: 1,
+      });
+      expect(guestList.body.items.map((c: { _id: string }) => c._id)).toEqual([
         c1.body._id,
         c2.body._id,
         c3.body._id,
         c4Deactivated._id.toHexString(),
       ]);
       expect(
-        guestList.body.map((c: { authorName: string | null }) => c.authorName),
+        guestList.body.items.map(
+          (c: { authorName: string | null }) => c.authorName,
+        ),
       ).toEqual([
         'Omar Said',
         'Laila Hassan',
@@ -1175,16 +1127,11 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         'Deleted user',
       ]);
 
-      // Post detail page matches the same chronological comment list.
+      // Post detail page keeps commentCount and does not embed comments (GEN-05).
       const detail = await testApp!.http().get(`/api/posts/${postId}`);
       expect(detail.status).toBe(200);
       expect(detail.body.commentCount).toBe(3);
-      expect(detail.body.comments.map((c: { _id: string }) => c._id)).toEqual([
-        c1.body._id,
-        c2.body._id,
-        c3.body._id,
-        c4Deactivated._id.toHexString(),
-      ]);
+      expect(detail.body.comments).toBeUndefined();
 
       // Edit own comment keeps commentCount unchanged.
       const edited = await testApp!
@@ -1434,7 +1381,142 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
       const detail = await testApp!.http().get(`/api/posts/${post.body._id}`);
       expect(detail.body.commentCount).toBe(1);
-      expect(detail.body.comments[0].body).toBe('Original comment');
+      expect(detail.body.comments).toBeUndefined();
+
+      const commentsRes = await testApp!
+        .http()
+        .get(`/api/posts/${post.body._id}/comments`);
+      expect(commentsRes.status).toBe(200);
+      expect(commentsRes.body.items[0].body).toBe('Original comment');
+    });
+
+    it('paginates comments (default page size 10), supports page 2, orders oldest first with _id tie-break across pages, and validates pagination params', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: owner.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
+        ]),
+      );
+
+      const post = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Paginated Comments Post',
+          body: 'Long discussion',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = post.body._id as string;
+      const postObjectId = new Types.ObjectId(postId);
+      const commenterObjectId = new Types.ObjectId(commenter.id);
+
+      const baseMs = new Date('2026-11-16T10:00:00.000Z').getTime();
+      const tieDate = new Date(baseMs + 90_000);
+      await commentModel.insertMany([
+        ...Array.from({ length: 9 }, (_, i) => ({
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: `Comment ${i + 1}`,
+          isHidden: false,
+          createdAt: new Date(baseMs + i * 10_000),
+          updatedAt: new Date(baseMs + i * 10_000),
+        })),
+        // Intentionally insert higher _id first with identical createdAt to prove _id tie-break across page 1 -> page 2.
+        {
+          _id: new Types.ObjectId('673000000000000000000002'),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 11 (tie _id higher)',
+          isHidden: false,
+          createdAt: tieDate,
+          updatedAt: tieDate,
+        },
+        {
+          _id: new Types.ObjectId('673000000000000000000001'),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 10 (tie _id lower)',
+          isHidden: false,
+          createdAt: tieDate,
+          updatedAt: tieDate,
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Moderated hidden comment',
+          isHidden: true,
+          createdAt: new Date(baseMs + 5_000),
+          updatedAt: new Date(baseMs + 5_000),
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 12',
+          isHidden: false,
+          createdAt: new Date(baseMs + 100_000),
+          updatedAt: new Date(baseMs + 100_000),
+        },
+      ]);
+
+      const page1 = await testApp!.http().get(`/api/posts/${postId}/comments`);
+      expect(page1.status).toBe(200);
+      expect(page1.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(page1.body.items).toHaveLength(10);
+      expect(page1.body.items.map((c: { body: string }) => c.body)).toEqual([
+        ...Array.from({ length: 9 }, (_, i) => `Comment ${i + 1}`),
+        'Comment 10 (tie _id lower)',
+      ]);
+
+      const page2 = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=2`);
+      expect(page2.status).toBe(200);
+      expect(page2.body).toMatchObject({
+        page: 2,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(page2.body.items.map((c: { body: string }) => c.body)).toEqual([
+        'Comment 11 (tie _id higher)',
+        'Comment 12',
+      ]);
+
+      const pageOut = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=3`);
+      expect(pageOut.status).toBe(200);
+      expect(pageOut.body).toEqual({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+
+      const badPage = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=0`);
+      expect(badPage.status).toBe(400);
+      expect(badPage.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badLimit = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?limit=51`);
+      expect(badLimit.status).toBe(400);
+      expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
     });
   });
 });

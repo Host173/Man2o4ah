@@ -646,9 +646,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   });
 
   describe('getById (BLG-02)', () => {
-    it('returns published post with author name, suspended author name still shown, and deactivated commenter shown as "Deleted user"', async () => {
-      const missingCommenterId = new Types.ObjectId().toHexString();
-
+    it('returns published post with author name (including suspended author) and omits embedded comments', async () => {
       const post = await service.create(
         {
           title: 'Dahab Diving',
@@ -665,40 +663,15 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
             tags: ['red-sea'],
             images: [{ _id: imageId, key: 'blog/reef.png' }],
             likeCount: 4,
-            commentCount: 4,
+            commentCount: 2,
           },
         },
       );
 
-      const postObjectId = new Types.ObjectId(post._id);
-      const c1 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(activeCommenterId),
-        body: 'First comment',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c2 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(deactivatedCommenterId),
-        body: 'Comment from deactivated user',
-      });
       await commentModel.create({
-        postId: postObjectId,
+        postId: new Types.ObjectId(post._id),
         authorId: new Types.ObjectId(activeCommenterId),
-        body: 'Hidden comment',
-        isHidden: true,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c3 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(suspendedUserId),
-        body: 'Comment from suspended user',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c4 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(missingCommenterId),
-        body: 'Fourth comment',
+        body: 'Loaded separately via paginated comments endpoint',
       });
 
       const detail = await service.getById(post._id);
@@ -713,29 +686,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
         status: PostStatus.PUBLISHED,
         likeCount: 4,
-        commentCount: 4,
+        commentCount: 2,
         isHidden: false,
         authorDeactivated: false,
       });
       expect(detail.publishedAt).toBeInstanceOf(Date);
-      expect(detail.comments.map((c) => c._id)).toEqual([
-        c1._id.toHexString(),
-        c2._id.toHexString(),
-        c3._id.toHexString(),
-        c4._id.toHexString(),
-      ]);
-      expect(detail.comments.map((c) => c.authorName)).toEqual([
-        'Omar Said',
-        'Deleted user',
-        'Suspended Author',
-        null,
-      ]);
-      expect(detail.comments[0]).toMatchObject({
-        postId: post._id,
-        authorId: activeCommenterId,
-        body: 'First comment',
-        isHidden: false,
-      });
+      expect('comments' in detail).toBe(false);
 
       // A suspended author's own post page still shows their author name (ACC-16).
       const suspendedPost = await service.create(
@@ -921,7 +877,8 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('lists visible comments oldest first, excludes hidden ones, and resolves Deleted user and suspended author names', async () => {
+    it('lists paginated visible comments oldest first, excludes hidden ones, and resolves Deleted user and suspended author names', async () => {
+      const missingCommenterId = new Types.ObjectId().toHexString();
       const post = await service.create(
         { title: 'Red Sea', body: 'Reef notes', status: PostStatus.PUBLISHED },
         ownerId,
@@ -960,6 +917,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         { body: 'Third by suspended' },
         suspendedUserId,
       );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const fourth = await commentModel.create({
+        postId: new Types.ObjectId(post._id),
+        authorId: new Types.ObjectId(missingCommenterId),
+        body: 'Fourth missing profile',
+      });
       await commentModel.create({
         postId: new Types.ObjectId(post._id),
         authorId: new Types.ObjectId(activeCommenterId),
@@ -967,16 +930,22 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         isHidden: true,
       });
 
-      const comments = await service.listComments(post._id);
-      expect(comments.map((c) => c._id)).toEqual([
+      const page1 = await service.listComments(post._id);
+      expect(page1.page).toBe(1);
+      expect(page1.limit).toBe(10);
+      expect(page1.total).toBe(4);
+      expect(page1.totalPages).toBe(1);
+      expect(page1.items.map((c) => c._id)).toEqual([
         first._id,
         second._id,
         third._id,
+        fourth._id.toHexString(),
       ]);
-      expect(comments.map((c) => c.authorName)).toEqual([
+      expect(page1.items.map((c) => c.authorName)).toEqual([
         'Omar Said',
         'Deleted user',
         'Suspended Author',
+        null,
       ]);
 
       for (const hiddenId of [
@@ -992,6 +961,95 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       await expect(service.listComments('bad-id')).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it('paginates comments with default limit 10 across pages ordered by createdAt then _id ascending', async () => {
+      const post = await service.create(
+        {
+          title: 'Long Thread',
+          body: 'Many comments',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const postObjectId = new Types.ObjectId(post._id);
+      const authorObjId = new Types.ObjectId(activeCommenterId);
+      const baseTime = new Date('2026-11-16T10:00:00.000Z').getTime();
+
+      // Insert 12 visible comments (comments #10 and #11 share createdAt to test _id tie-break across pages)
+      // plus 1 hidden comment that must be excluded from items and total.
+      const tieTime = new Date(baseTime + 90_000);
+      const docs = [
+        ...Array.from({ length: 9 }, (_, i) => ({
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: `Comment ${i + 1}`,
+          isHidden: false,
+          createdAt: new Date(baseTime + i * 10_000),
+          updatedAt: new Date(baseTime + i * 10_000),
+        })),
+        {
+          _id: new Types.ObjectId('673000000000000000000002'),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 11 (tie _id higher)',
+          isHidden: false,
+          createdAt: tieTime,
+          updatedAt: tieTime,
+        },
+        {
+          _id: new Types.ObjectId('673000000000000000000001'),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 10 (tie _id lower)',
+          isHidden: false,
+          createdAt: tieTime,
+          updatedAt: tieTime,
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Hidden comment',
+          isHidden: true,
+          createdAt: new Date(baseTime + 5_000),
+          updatedAt: new Date(baseTime + 5_000),
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 12',
+          isHidden: false,
+          createdAt: new Date(baseTime + 100_000),
+          updatedAt: new Date(baseTime + 100_000),
+        },
+      ];
+      await commentModel.insertMany(docs);
+
+      const page1 = await service.listComments(post._id);
+      expect(page1.page).toBe(1);
+      expect(page1.limit).toBe(10);
+      expect(page1.total).toBe(12);
+      expect(page1.totalPages).toBe(2);
+      expect(page1.items).toHaveLength(10);
+      expect(page1.items.map((c) => c.body)).toEqual([
+        ...Array.from({ length: 9 }, (_, i) => `Comment ${i + 1}`),
+        'Comment 10 (tie _id lower)',
+      ]);
+
+      const page2Query = new PaginationQueryDto();
+      page2Query.page = 2;
+      const page2 = await service.listComments(post._id, page2Query);
+      expect(page2.page).toBe(2);
+      expect(page2.limit).toBe(10);
+      expect(page2.total).toBe(12);
+      expect(page2.totalPages).toBe(2);
+      expect(page2.items.map((c) => c.body)).toEqual([
+        'Comment 11 (tie _id higher)',
+        'Comment 12',
+      ]);
     });
 
     it('updates own comment without changing commentCount and rejects non-owners or invalid input', async () => {

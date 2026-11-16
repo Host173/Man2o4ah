@@ -40,6 +40,7 @@ import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
   CommentResponseDto,
+  PaginatedCommentsResponseDto,
   PaginatedPostResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
@@ -95,7 +96,7 @@ export class BlogController {
   @Public()
   @Get('posts/:id')
   @ApiOperation({
-    summary: 'BLG-02 Read a published post page with author and comments',
+    summary: 'BLG-02 Read a published post page with author',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostDetailResponseDto })
@@ -148,18 +149,20 @@ export class BlogController {
   @Public()
   @Get('posts/:id/comments')
   @ApiOperation({
-    summary: 'BLG-05 List comments on a published post in chronological order',
+    summary:
+      'BLG-05 / GEN-05 List paginated comments on a published post in chronological order',
   })
   @ApiParam({ name: 'id', type: String })
-  @ApiOkResponse({ type: [CommentResponseDto] })
-  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiOkResponse({ type: PaginatedCommentsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID or pagination query' })
   @ApiNotFoundResponse({
     description: 'Post not found or not publicly visible',
   })
   listComments(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
-  ): Promise<CommentView[]> {
-    return this.blogService.listComments(id.toHexString());
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<CommentView>> {
+    return this.blogService.listComments(id.toHexString(), query);
   }
 
   @Post('posts/:id/comments')

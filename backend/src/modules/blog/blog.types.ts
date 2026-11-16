@@ -51,9 +51,7 @@ export interface CommentView {
 }
 
 /**
- * Full post page view including author name and visible chronological comments
- * (`BLG-02`).
+ * Public post page view (`BLG-02`).
+ * Comments are loaded separately via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
  */
-export interface PostDetailView extends PublishedPostView {
-  comments: CommentView[];
-}
+export type PostDetailView = PublishedPostView;

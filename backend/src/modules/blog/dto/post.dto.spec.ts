@@ -6,6 +6,7 @@ import { CreatePostDto } from './create-post.dto.js';
 import { ListPostsQueryDto } from './list-posts-query.dto.js';
 import {
   CommentResponseDto,
+  PaginatedCommentsResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
   PublishedPostResponseDto,
@@ -345,12 +346,15 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const published = new PublishedPostResponseDto();
       const page = new PaginatedPublishedPostsResponseDto();
       const comment = new CommentResponseDto();
+      const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
 
       expect(published).toBeInstanceOf(PublishedPostResponseDto);
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
+      expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect('comments' in detail).toBe(false);
     });
   });
 

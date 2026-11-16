@@ -58,10 +58,11 @@ export class HotelsService {
   async update(
     hotelId: string,
     input: UpdateHotelDto,
-    moderatorHotelId: string,
+    moderatorHotelId: string | undefined,
   ): Promise<HotelView> {
     const id = this.parseId(hotelId);
     if (
+      moderatorHotelId === undefined ||
       !Types.ObjectId.isValid(moderatorHotelId) ||
       !id.equals(moderatorHotelId)
     ) {

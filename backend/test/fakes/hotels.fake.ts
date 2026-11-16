@@ -95,7 +95,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
   async update(
     hotelId: string,
     input: UpdateHotelDto,
-    moderatorHotelId: string,
+    moderatorHotelId: string | undefined,
   ): Promise<HotelView> {
     if (hotelId !== moderatorHotelId) {
       throw new NotFoundException({

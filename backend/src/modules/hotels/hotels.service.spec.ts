@@ -189,6 +189,16 @@ describe('HotelsService (HTL-01 integration)', () => {
       await expect(call()).rejects.toMatchObject({
         response: { code: ErrorCode.NotFound },
       });
+
+      it('refuses edits without a valid trusted moderator assignment', async () => {
+        const created = await service.create(profile);
+        for (const assignment of [undefined, '', 'not-an-objectid']) {
+          await expect(
+            service.update(created.id, { name: 'Denied' }, assignment),
+          ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+        }
+        expect(await service.getHotel(created.id)).toEqual(created);
+      });
     }
   });
 

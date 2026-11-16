@@ -2,7 +2,6 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
-import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
@@ -19,15 +18,18 @@ import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
 
 describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   let testApp: TestApp | undefined;
-  let accountsService: AccountsService;
+  const fakeAccounts = new FakeAccountsService();
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
   let likeModel: Model<LikeDocument>;
 
   beforeAll(async () => {
-    testApp = await createTestApp({ imports: [BlogModule] });
-    accountsService = testApp.moduleRef.get(AccountsService);
+    testApp = await createTestApp({
+      imports: [BlogModule],
+      override: (builder) =>
+        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+    });
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
       getModelToken(Post.name),
@@ -41,7 +43,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
-    vi.restoreAllMocks();
+    Object.assign(fakeAccounts, new FakeAccountsService());
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -581,13 +583,22 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     it('paginates published posts, filters by normalised tag, handles unknown tags, and excludes drafts, hidden posts, and deactivated authors', async () => {
       const alice = await loginAs(testApp!.connection, UserRole.USER);
       const bob = await loginAs(testApp!.connection, UserRole.USER);
+      const suspended = await loginAs(testApp!.connection, UserRole.USER, {
+        status: UserStatus.SUSPENDED,
+      });
 
-      const fakeAccounts = new FakeAccountsService([
-        { id: alice.id, name: 'Alice Explorer', email: 'alice@example.com' },
-        { id: bob.id, name: 'Bob Nomad', email: 'bob@example.com' },
-      ]);
-      vi.spyOn(accountsService, 'getProfiles').mockImplementation((ids) =>
-        fakeAccounts.getProfiles(ids),
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: alice.id, name: 'Alice Explorer', email: 'alice@example.com' },
+          { id: bob.id, name: 'Bob Nomad', email: 'bob@example.com' },
+          {
+            id: suspended.id,
+            name: 'Suspended Author',
+            email: 'suspended@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+        ]),
       );
 
       const p1 = await testApp!
@@ -615,11 +626,22 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
           body: 'Camp 3',
           status: PostStatus.PUBLISHED,
         });
+      await new Promise((resolve) => setTimeout(resolve, 10));
       const bobPub = await testApp!
         .http()
         .post('/api/posts')
         .set('Cookie', bob.cookie)
         .send({ title: 'Nubia', body: 'South', status: PostStatus.PUBLISHED });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const suspendedPub = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', suspended.cookie)
+        .send({
+          title: 'Karnak',
+          body: 'East Bank',
+          status: PostStatus.PUBLISHED,
+        });
       await testApp!
         .http()
         .post('/api/posts')
@@ -654,21 +676,32 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         { $set: { tags: ['nile'] } },
       );
       await postModel.updateOne(
+        { _id: new Types.ObjectId(suspendedPub.body._id as string) },
+        { $set: { tags: ['nile'] } },
+      );
+      await postModel.updateOne(
         { _id: new Types.ObjectId(hiddenPub.body._id as string) },
         { $set: { isHidden: true, tags: ['desert'] } },
       );
 
-      // Pagination boundaries on unfiltered public list (4 visible posts).
+      // Pagination boundaries on unfiltered public list (5 visible posts).
       const page1 = await testApp!.http().get('/api/posts?page=1&limit=2');
       expect(page1.status).toBe(200);
       expect(page1.body).toMatchObject({
         page: 1,
         limit: 2,
-        total: 4,
-        totalPages: 2,
+        total: 5,
+        totalPages: 3,
       });
       expect(page1.body.items).toHaveLength(2);
+      // Suspended user's post and author name remain visible per ACC-16.
       expect(page1.body.items[0]).toMatchObject({
+        _id: suspendedPub.body._id,
+        authorId: suspended.id,
+        authorName: 'Suspended Author',
+        title: 'Karnak',
+      });
+      expect(page1.body.items[1]).toMatchObject({
         _id: bobPub.body._id,
         authorId: bob.id,
         authorName: 'Bob Nomad',
@@ -682,23 +715,29 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         isHidden: false,
         authorDeactivated: false,
       });
-      expect(page1.body.items[1]._id).toBe(p3.body._id);
 
       const page2 = await testApp!.http().get('/api/posts?page=2&limit=2');
       expect(page2.status).toBe(200);
       expect(page2.body.items.map((p: { _id: string }) => p._id)).toEqual([
+        p3.body._id,
         p2.body._id,
+      ]);
+      expect(page2.body.items[0].authorName).toBe('Alice Explorer');
+
+      const page3 = await testApp!.http().get('/api/posts?page=3&limit=2');
+      expect(page3.status).toBe(200);
+      expect(page3.body.items.map((p: { _id: string }) => p._id)).toEqual([
         p1.body._id,
       ]);
 
-      const pageOut = await testApp!.http().get('/api/posts?page=3&limit=2');
+      const pageOut = await testApp!.http().get('/api/posts?page=4&limit=2');
       expect(pageOut.status).toBe(200);
       expect(pageOut.body).toEqual({
         items: [],
-        page: 3,
+        page: 4,
         limit: 2,
-        total: 4,
-        totalPages: 2,
+        total: 5,
+        totalPages: 3,
       });
 
       // Normalised tag filtering (trim & lowercase) and unknown tag empty state.
@@ -719,7 +758,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
       const blankTag = await testApp!.http().get('/api/posts?tag=%20%20');
       expect(blankTag.status).toBe(200);
-      expect(blankTag.body.total).toBe(4);
+      expect(blankTag.body.total).toBe(5);
 
       const unknownTag = await testApp!.http().get('/api/posts?tag=unknown');
       expect(unknownTag.status).toBe(200);
@@ -738,7 +777,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .get('/api/posts')
         .set('Cookie', bob.cookie);
       expect(afterDeactivate.status).toBe(200);
-      expect(afterDeactivate.body.total).toBe(3);
+      expect(afterDeactivate.body.total).toBe(4);
       expect(
         afterDeactivate.body.items.some(
           (p: { _id: string }) => p._id === bobPub.body._id,
@@ -748,7 +787,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       await eventEmitter.emitAsync(Events.UserReactivated, { userId: bob.id });
       const afterReactivate = await testApp!.http().get('/api/posts');
       expect(afterReactivate.status).toBe(200);
-      expect(afterReactivate.body.total).toBe(4);
+      expect(afterReactivate.body.total).toBe(5);
     });
 
     it('rejects invalid query parameters with 400 VALIDATION_FAILED', async () => {
@@ -767,23 +806,34 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   });
 
   describe('GET /api/posts/:id (BLG-02)', () => {
-    it('returns the full published post page to guests and authenticated users with author, tags, images, likes and chronological comments', async () => {
+    it('returns the full published post page with author name, suspended author name, and deactivated commenter as "Deleted user"', async () => {
       const author = await loginAs(testApp!.connection, UserRole.USER);
+      const suspendedAuthor = await loginAs(
+        testApp!.connection,
+        UserRole.USER,
+        { status: UserStatus.SUSPENDED },
+      );
       const commenter = await loginAs(testApp!.connection, UserRole.USER);
       const deactivatedId = new Types.ObjectId().toHexString();
 
-      const fakeAccounts = new FakeAccountsService([
-        { id: author.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
-        { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
-        {
-          id: deactivatedId,
-          name: 'Deleted Author',
-          email: 'deleted@example.com',
-          status: UserStatus.DEACTIVATED,
-        },
-      ]);
-      vi.spyOn(accountsService, 'getProfiles').mockImplementation((ids) =>
-        fakeAccounts.getProfiles(ids),
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: author.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          {
+            id: suspendedAuthor.id,
+            name: 'Suspended Author',
+            email: 'suspended@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+          { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
+          {
+            id: deactivatedId,
+            name: 'Deleted Author',
+            email: 'deleted@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
       );
 
       const created = await testApp!
@@ -805,7 +855,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
             tags: ['luxor', 'history'],
             images: [{ _id: imageId, key: 'blog/luxor.jpg' }],
             likeCount: 7,
-            commentCount: 2,
+            commentCount: 3,
           },
         },
       );
@@ -827,6 +877,12 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         body: 'Moderated spam comment',
         isHidden: true,
       });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c3 = await commentModel.create({
+        postId,
+        authorId: new Types.ObjectId(suspendedAuthor.id),
+        body: 'Comment from suspended user.',
+      });
 
       const res = await testApp!.http().get(`/api/posts/${created.body._id}`);
 
@@ -841,14 +897,14 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         images: [{ _id: imageId.toHexString(), key: 'blog/luxor.jpg' }],
         status: PostStatus.PUBLISHED,
         likeCount: 7,
-        commentCount: 2,
+        commentCount: 3,
         isHidden: false,
         authorDeactivated: false,
       });
       expect(typeof res.body.publishedAt).toBe('string');
       expect(typeof res.body.createdAt).toBe('string');
       expect(typeof res.body.updatedAt).toBe('string');
-      expect(res.body.comments).toHaveLength(2);
+      expect(res.body.comments).toHaveLength(3);
       expect(res.body.comments[0]).toMatchObject({
         _id: c1._id.toHexString(),
         postId: created.body._id,
@@ -864,6 +920,35 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         authorName: 'Deleted user',
         body: 'Worth the evening ticket.',
         isHidden: false,
+      });
+      expect(res.body.comments[2]).toMatchObject({
+        _id: c3._id.toHexString(),
+        postId: created.body._id,
+        authorId: suspendedAuthor.id,
+        authorName: 'Suspended Author',
+        body: 'Comment from suspended user.',
+        isHidden: false,
+      });
+
+      // A suspended author's own post page remains visible with their author name shown (ACC-16).
+      const suspendedPost = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', suspendedAuthor.cookie)
+        .send({
+          title: 'Suspended Author Post',
+          body: 'Remains readable.',
+          status: PostStatus.PUBLISHED,
+        });
+      const suspendedRes = await testApp!
+        .http()
+        .get(`/api/posts/${suspendedPost.body._id}`);
+      expect(suspendedRes.status).toBe(200);
+      expect(suspendedRes.body).toMatchObject({
+        _id: suspendedPost.body._id,
+        authorId: suspendedAuthor.id,
+        authorName: 'Suspended Author',
+        title: 'Suspended Author Post',
       });
     });
 

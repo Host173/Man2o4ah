@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -298,15 +297,8 @@ export class BlogService {
     const uniqueIds = [...new Set(userIds)];
     if (uniqueIds.length === 0) return new Map();
 
-    try {
-      const profiles = await this.accountsService.getProfiles(uniqueIds);
-      return new Map(profiles.map((profile) => [profile.id, profile]));
-    } catch (error) {
-      if (error instanceof NotImplementedException) {
-        return new Map();
-      }
-      throw error;
-    }
+    const profiles = await this.accountsService.getProfiles(uniqueIds);
+    return new Map(profiles.map((profile) => [profile.id, profile]));
   }
 
   private assertNonBlankBody(body: string): void {

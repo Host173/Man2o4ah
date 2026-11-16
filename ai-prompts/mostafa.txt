@@ -88,3 +88,21 @@ Attachments: docs/ai/chat-skill/chat-instructions.txt, docs/ai/chat-skill/SKILL.
 How the output was used:
 Implemented public paginated post browsing with tag filtering (GET /api/posts), post detail reading with author/comments/counts (GET /api/posts/:id), @OnEvent handlers for user.deactivated/user.reactivated, DTOs/Swagger docs, and unit/integration/API tests on feature/BLG-02-browse-read-posts.
 ================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-02
+
+Prompt:
+In regards to the implementation of BLG-02, the following fixes are needed: resolveProfiles catches NotImplementedException and returns no names. In production, every author name is null until getProfiles is implemented, and your API tests run against that stub, so no test checks that author names appear. The requirement says the post page shows the author. Remove the catch, use FakeAccountsService in the service and API tests, and assert:
+the post’s author name
+a deactivated commenter shown as “Deleted user”
+a suspended author’s name still shown
+
+How the output was used:
+Removed the NotImplementedException catch from BlogService.resolveProfiles, overrode AccountsService with FakeAccountsService in blog.service.spec.ts and blog.api.spec.ts via Nest DI, and added explicit assertions for the post author name, deactivated commenter "Deleted user", and suspended author name visibility on feature/BLG-02-browse-read-posts.
+================================================

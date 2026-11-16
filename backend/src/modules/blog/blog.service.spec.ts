@@ -54,7 +54,7 @@ describe('BlogService (skeleton)', () => {
 describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () => {
   let testApp: TestApp | undefined;
   let service: BlogService;
-  let accountsService: AccountsService;
+  const fakeAccounts = new FakeAccountsService();
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -63,11 +63,18 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   const ownerId = new Types.ObjectId().toHexString();
   const otherUserId = new Types.ObjectId().toHexString();
+  const suspendedUserId = new Types.ObjectId().toHexString();
+  const activeCommenterId = new Types.ObjectId().toHexString();
+  const deactivatedCommenterId = new Types.ObjectId().toHexString();
+  const deactivatedAuthorId = new Types.ObjectId().toHexString();
 
   beforeAll(async () => {
-    testApp = await createTestApp({ imports: [BlogModule] });
+    testApp = await createTestApp({
+      imports: [BlogModule],
+      override: (builder) =>
+        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+    });
     service = testApp.moduleRef.get(BlogService);
-    accountsService = testApp.moduleRef.get(AccountsService);
     appEvents = testApp.moduleRef.get(AppEvents);
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -83,6 +90,47 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    Object.assign(
+      fakeAccounts,
+      new FakeAccountsService([
+        {
+          id: ownerId,
+          name: 'Aisha Rawahi',
+          email: 'aisha@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: otherUserId,
+          name: 'Bob Nomad',
+          email: 'bob@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: suspendedUserId,
+          name: 'Suspended Author',
+          email: 'suspended@example.com',
+          status: UserStatus.SUSPENDED,
+        },
+        {
+          id: activeCommenterId,
+          name: 'Omar Said',
+          email: 'omar@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: deactivatedCommenterId,
+          name: 'Former Traveler',
+          email: 'former@example.com',
+          status: UserStatus.DEACTIVATED,
+        },
+        {
+          id: deactivatedAuthorId,
+          name: 'Deactivated Author',
+          email: 'deactivated@example.com',
+          status: UserStatus.DEACTIVATED,
+        },
+      ]),
+    );
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -468,20 +516,6 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   describe('listPublished (BLG-02)', () => {
     it('returns published non-hidden active posts newest publishedAt first with resolved author names', async () => {
-      const suspendedUserId = new Types.ObjectId().toHexString();
-      const fakeAccounts = new FakeAccountsService([
-        { id: ownerId, name: 'Aisha Rawahi', email: 'aisha@example.com' },
-        {
-          id: suspendedUserId,
-          name: 'Suspended Author',
-          email: 'suspended@example.com',
-          status: UserStatus.SUSPENDED,
-        },
-      ]);
-      vi.spyOn(accountsService, 'getProfiles').mockImplementation((ids) =>
-        fakeAccounts.getProfiles(ids),
-      );
-
       const older = await service.create(
         { title: 'Older Post', body: 'Body 1', status: PostStatus.PUBLISHED },
         ownerId,
@@ -594,6 +628,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(page2.total).toBe(3);
       expect(page2.totalPages).toBe(2);
       expect(page2.items.map((p) => p._id)).toEqual([p1._id]);
+      expect(page2.items[0].authorName).toBe('Aisha Rawahi');
 
       const unknown = await service.listPublished({
         page: 1,
@@ -608,55 +643,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         totalPages: 0,
       });
     });
-
-    it('falls back to null authorName when AccountsService.getProfiles is a NotImplementedException stub and rethrows unexpected errors', async () => {
-      const created = await service.create(
-        {
-          title: 'Stubbed Profile',
-          body: 'Body',
-          status: PostStatus.PUBLISHED,
-        },
-        ownerId,
-      );
-
-      // Default AccountsService in createTestApp throws NotImplementedException.
-      const fallback = await service.listPublished();
-      expect(fallback.items).toHaveLength(1);
-      expect(fallback.items[0]._id).toBe(created._id);
-      expect(fallback.items[0].authorName).toBeNull();
-
-      vi.spyOn(accountsService, 'getProfiles').mockRejectedValueOnce(
-        new Error('Database connection lost'),
-      );
-      await expect(service.listPublished()).rejects.toThrow(
-        'Database connection lost',
-      );
-    });
   });
 
   describe('getById (BLG-02)', () => {
-    it('returns published post with author name and chronological visible comments resolving deactivated authors to "Deleted user"', async () => {
-      const activeCommenterId = new Types.ObjectId().toHexString();
-      const deactivatedCommenterId = new Types.ObjectId().toHexString();
+    it('returns published post with author name, suspended author name still shown, and deactivated commenter shown as "Deleted user"', async () => {
       const missingCommenterId = new Types.ObjectId().toHexString();
-
-      const fakeAccounts = new FakeAccountsService([
-        { id: ownerId, name: 'Aisha Rawahi', email: 'aisha@example.com' },
-        {
-          id: activeCommenterId,
-          name: 'Omar Said',
-          email: 'omar@example.com',
-        },
-        {
-          id: deactivatedCommenterId,
-          name: 'Former Traveler',
-          email: 'former@example.com',
-          status: UserStatus.DEACTIVATED,
-        },
-      ]);
-      vi.spyOn(accountsService, 'getProfiles').mockImplementation((ids) =>
-        fakeAccounts.getProfiles(ids),
-      );
 
       const post = await service.create(
         {
@@ -674,7 +665,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
             tags: ['red-sea'],
             images: [{ _id: imageId, key: 'blog/reef.png' }],
             likeCount: 4,
-            commentCount: 3,
+            commentCount: 4,
           },
         },
       );
@@ -700,8 +691,14 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       await new Promise((resolve) => setTimeout(resolve, 10));
       const c3 = await commentModel.create({
         postId: postObjectId,
+        authorId: new Types.ObjectId(suspendedUserId),
+        body: 'Comment from suspended user',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c4 = await commentModel.create({
+        postId: postObjectId,
         authorId: new Types.ObjectId(missingCommenterId),
-        body: 'Third comment',
+        body: 'Fourth comment',
       });
 
       const detail = await service.getById(post._id);
@@ -716,7 +713,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
         status: PostStatus.PUBLISHED,
         likeCount: 4,
-        commentCount: 3,
+        commentCount: 4,
         isHidden: false,
         authorDeactivated: false,
       });
@@ -725,10 +722,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         c1._id.toHexString(),
         c2._id.toHexString(),
         c3._id.toHexString(),
+        c4._id.toHexString(),
       ]);
       expect(detail.comments.map((c) => c.authorName)).toEqual([
         'Omar Said',
         'Deleted user',
+        'Suspended Author',
         null,
       ]);
       expect(detail.comments[0]).toMatchObject({
@@ -737,17 +736,18 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         body: 'First comment',
         isHidden: false,
       });
-    });
 
-    it('falls back to null authorName when AccountsService throws NotImplementedException', async () => {
-      const post = await service.create(
-        { title: 'Solo Post', body: 'Content', status: PostStatus.PUBLISHED },
-        ownerId,
+      // A suspended author's own post page still shows their author name (ACC-16).
+      const suspendedPost = await service.create(
+        {
+          title: 'Suspended Author Post',
+          body: 'Still publicly visible.',
+          status: PostStatus.PUBLISHED,
+        },
+        suspendedUserId,
       );
-
-      const detail = await service.getById(post._id);
-      expect(detail.authorName).toBeNull();
-      expect(detail.comments).toEqual([]);
+      const suspendedDetail = await service.getById(suspendedPost._id);
+      expect(suspendedDetail.authorName).toBe('Suspended Author');
     });
 
     it('throws 404 NOT_FOUND for missing, draft, hidden, or deactivated-author posts and 400 for invalid id', async () => {
@@ -792,18 +792,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       // Also throws 404 if AccountsService reports author status DEACTIVATED before event flag updates.
       const racePost = await service.create(
         { title: 'Race Post', body: 'Body', status: PostStatus.PUBLISHED },
-        ownerId,
-      );
-      const deactivatedAccounts = new FakeAccountsService([
-        {
-          id: ownerId,
-          name: 'Aisha Rawahi',
-          email: 'aisha@example.com',
-          status: UserStatus.DEACTIVATED,
-        },
-      ]);
-      vi.spyOn(accountsService, 'getProfiles').mockImplementation((ids) =>
-        deactivatedAccounts.getProfiles(ids),
+        deactivatedAuthorId,
       );
       await expect(service.getById(racePost._id)).rejects.toThrow(
         NotFoundException,
@@ -875,6 +864,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
       const restored = await service.getById(ownersPublished._id);
       expect(restored._id).toBe(ownersPublished._id);
+      expect(restored.authorName).toBe('Aisha Rawahi');
       expect(restored.authorDeactivated).toBe(false);
 
       // Draft and admin-hidden posts stay inaccessible on getById even after reactivation.

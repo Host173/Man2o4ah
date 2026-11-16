@@ -220,3 +220,123 @@ i did them i think now i want to write the pr
 How the output was used:
 Ran npm run verify (passed); drafted the PR title and description for CTR-04; no files in the repo changed except this log
 ================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+i want to start implementing endpoints in sprint 2 what do i need to know to start (i am user hestiasspace)
+
+How the output was used:
+Planned Sprint 2 (GEN-11 first); created branch feature/GEN-11-booking-lifecycle-refund-rules from develop and ran npm ci; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+they are assigned to me
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+go
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.spec.ts (TDD, failing until Step 2); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+commit
+
+How the output was used:
+Committed refund-tiers.spec.ts (failing TDD test for GEN-11)
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+u write it
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.ts (tests now pass); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+commit  and step adding rlly short prompts to prompt txt
+
+How the output was used:
+Committed f54c55b (refund tier calculator); added a "skip really short prompts" rule to my local CLAUDE.md preferences
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+i want to copy env
+
+How the output was used:
+Created backend/.env and frontend/.env.local from .env.example (gitignored, not committed); generated a local JWT secret <removed>
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+he didnt say anything make an assumption and i might change it later
+
+How the output was used:
+Kept the GEN-11 rules in flight-bookings (assumption, pending Kareem) and recorded it in file comments; skipped the README section because the backend README now forbids contract copies; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+commit and let me run npm run verify
+
+How the output was used:
+Committed the shared-location comments in refund-tiers.ts and booking-lifecycle.ts; Aya runs npm run verify herself
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+[Attached: screenshot of npm run verify passing (86 test files, 943 tests, 97.07% statements), with the draft message "it passed, do 1 and 2"]
+
+How the output was used:
+Committed the GEN-11 prompt log; drafted the GEN-11 PR title and description
+================================================

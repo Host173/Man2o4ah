@@ -121,3 +121,27 @@ Implement BLG-05 (Sprint 1, package 7, Community & Admin, module: blog) using th
 How the output was used:
 Added CreateCommentDto and UpdateCommentDto, implemented BLG-05/BLG-07 chronological listing, transactional comment creation/deletion (keeping commentCount accurate), and owner-restricted editing in BlogService and BlogController with Swagger/JSDoc docs and unit/integration/API tests on feature/BLG-05-comments.
 ================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-05
+
+Prompt:
+In regards to the implementation of BLG-5, the following CI checks failed: Run npm run format:check
+
+> backend@0.0.1 format:check
+> prettier --ignore-path ../.prettierignore --check "src/**/*.ts" "test/**/*.ts"
+
+Checking formatting...
+[warn] src/modules/blog/dto/create-comment.dto.ts
+[warn] src/modules/blog/dto/update-comment.dto.ts
+[warn] Code style issues found in 2 files. Run Prettier with --write to fix.
+Error: Process completed with exit code 1.
+
+How the output was used:
+Formatted create-comment.dto.ts and update-comment.dto.ts via npm run format, re-verified format:check, lint, typecheck, build, and blog tests on feature/BLG-05-comments.
+================================================

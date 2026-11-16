@@ -19,4 +19,3 @@ export class CreateCommentDto {
   @MaxLength(500)
   body!: string;
 }
-

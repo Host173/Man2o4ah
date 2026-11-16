@@ -206,16 +206,25 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
   });
 
   describe('segments', () => {
-    it.each([
+    const mismatched: [string, FlightQuoteRequestDto][] = [
       [
         'one_way with two segments',
-        { ...roundTrip('back'), tripType: 'one_way' as const },
+        {
+          tripType: 'one_way',
+          segments: roundTrip('back').segments,
+          passengers: [adult()],
+        },
       ],
       [
         'round_trip with one segment',
-        { ...oneWay(), tripType: 'round_trip' as const },
+        {
+          tripType: 'round_trip',
+          segments: oneWay().segments,
+          passengers: [adult()],
+        },
       ],
-    ])('rejects %s', async (_label, body) => {
+    ];
+    it.each(mismatched)('rejects %s', async (_label, body) => {
       await expect(quotes.quote(body)).rejects.toMatchObject(
         invalid('segments'),
       );

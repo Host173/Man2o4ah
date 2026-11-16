@@ -1368,3 +1368,29 @@ ok create a pr that remove those
 How the output was used:
 Replaced the NestJS template backend README (and the four contract sections in it) with a short command list; added a "no contract docs in READMEs" rule to AGENTS.example.md, workflow.md, the Copilot checklist and DECISIONS; opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-05
+
+Prompt:
+so here is what we goona do in order first make this pr mergeable , second, continue the dependincy conversation, last continue the ai check setup conversation. if you clear then create the plt pr with the fixes then tell me what is the problem exactly again in clearer way especially that we plt 1-6 ig so what happenedd ?
+
+How the output was used:
+Made the platform side ready for CTR-01's global guards: JWT_ACCESS_SECRET in .env.example, README and config validation; @Public() on the health route; createTestApp always loads AccountsModule; accounts added to the bookings rows of the module tables; opened a PR into the CTR-01 branch.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-12
+
+Prompt:
+ok do the fix/plt while giveing those to mostafa
+
+How the output was used:
+Gave the reference-data seed tests a 30-second timeout (they could pass the default 5 s under full-suite load, as Mostafa's PR #124 reported); opened a PR into develop.
+================================================

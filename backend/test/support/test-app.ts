@@ -12,6 +12,7 @@ import type { Connection } from 'mongoose';
 import request from 'supertest';
 import { configureApp } from '../../src/app.setup.js';
 import { EventsModule } from '../../src/common/events/events.module.js';
+import { AccountsModule } from '../../src/modules/accounts/accounts.module.js';
 import { startMemoryMongo } from './mongo-memory.js';
 import { TEST_CONFIG } from './test-config.js';
 
@@ -36,7 +37,8 @@ export interface TestApp {
 }
 
 /**
- * Builds the production app wiring (`configureApp`) around your module on a
+ * Builds the production app wiring (`configureApp`, the global auth guards from
+ * `AccountsModule`) around your module on a
  * one-node in-memory MongoDB replica set (transactions work), and waits for
  * every index. Tests never read `.env` and never touch Atlas.
  *
@@ -65,6 +67,9 @@ export async function createTestApp(
         MongooseModule.forRoot(mongo.uri, { dbName: 'test' }),
         EventEmitterModule.forRoot(),
         EventsModule,
+        // The real global guards, as in production: routes need a login
+        // (`loginAs`) unless they are `@Public()`.
+        AccountsModule,
         ...(options.imports ?? []),
       ],
       controllers: options.controllers ?? [],

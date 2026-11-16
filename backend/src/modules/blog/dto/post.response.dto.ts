@@ -120,7 +120,7 @@ export class PaginatedPublishedPostsResponseDto implements Paginated<PublishedPo
   totalPages!: number;
 }
 
-/** Swagger response model for a visible comment on a blog post (`BLG-02`). */
+/** Swagger response model for a comment on a blog post (`BLG-02`, `BLG-05`, `BLG-07`). */
 export class CommentResponseDto implements CommentView {
   @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f604' })
   _id!: string;

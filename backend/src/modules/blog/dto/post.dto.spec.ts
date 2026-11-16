@@ -1,6 +1,7 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from '../../../common/errors/validation-exception.factory.js';
 import { PostStatus } from '../schemas/post.schema.js';
+import { CreateCommentDto } from './create-comment.dto.js';
 import { CreatePostDto } from './create-post.dto.js';
 import { ListPostsQueryDto } from './list-posts-query.dto.js';
 import {
@@ -9,6 +10,7 @@ import {
   PostDetailResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
+import { UpdateCommentDto } from './update-comment.dto.js';
 import { UpdatePostDto } from './update-post.dto.js';
 
 function createValidationPipe(): ValidationPipe {
@@ -349,6 +351,73 @@ describe('CreatePostDto & UpdatePostDto', () => {
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+    });
+  });
+
+  describe('CreateCommentDto & UpdateCommentDto (BLG-05, BLG-07)', () => {
+    it('accepts boundary lengths 1 and 500 (after trimming) for both create and update', async () => {
+      for (const metatype of [CreateCommentDto, UpdateCommentDto]) {
+        const min = (await pipe.transform(
+          { body: '  a  ' },
+          { type: 'body', metatype },
+        )) as CreateCommentDto;
+        expect(min).toBeInstanceOf(metatype);
+        expect(min.body).toBe('a');
+
+        const max = (await pipe.transform(
+          { body: 'a'.repeat(500) },
+          { type: 'body', metatype },
+        )) as CreateCommentDto;
+        expect(max.body).toHaveLength(500);
+
+        const paddedMax = (await pipe.transform(
+          { body: `  ${'b'.repeat(500)}\n` },
+          { type: 'body', metatype },
+        )) as CreateCommentDto;
+        expect(paddedMax.body).toBe('b'.repeat(500));
+      }
+    });
+
+    it('rejects 0 chars, whitespace-only input, and 501 chars with VALIDATION_FAILED', async () => {
+      for (const metatype of [CreateCommentDto, UpdateCommentDto]) {
+        for (const invalidBody of ['', '   ', '\t\n ', 'a'.repeat(501)]) {
+          await expectValidationError(
+            pipe.transform({ body: invalidBody }, { type: 'body', metatype }),
+            'body',
+          );
+        }
+      }
+    });
+
+    it('rejects missing, null, non-string body and non-whitelisted fields', async () => {
+      for (const metatype of [CreateCommentDto, UpdateCommentDto]) {
+        await expectValidationError(
+          pipe.transform({}, { type: 'body', metatype }),
+          'body',
+        );
+        await expectValidationError(
+          pipe.transform({ body: null }, { type: 'body', metatype }),
+          'body',
+        );
+        await expectValidationError(
+          pipe.transform({ body: 12345 }, { type: 'body', metatype }),
+          'body',
+        );
+
+        for (const extra of [
+          { postId: '507f1f77bcf86cd799439011' },
+          { authorId: '507f1f77bcf86cd799439011' },
+          { isHidden: true },
+          { _id: '507f1f77bcf86cd799439011' },
+        ]) {
+          await expectValidationError(
+            pipe.transform(
+              { body: 'Valid comment', ...extra },
+              { type: 'body', metatype },
+            ),
+          );
+        }
+      }
     });
   });
 });

@@ -30,26 +30,30 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BlogService } from './blog.service.js';
 import type {
+  CommentView,
   PostDetailView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { CreateCommentDto } from './dto/create-comment.dto.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
+  CommentResponseDto,
   PaginatedPostResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
   PostResponseDto,
 } from './dto/post.response.dto.js';
+import { UpdateCommentDto } from './dto/update-comment.dto.js';
 import { UpdatePostDto } from './dto/update-post.dto.js';
 
 @ApiTags('blog')
-@Controller('posts')
+@Controller()
 export class BlogController {
   constructor(private readonly blogService: BlogService) {}
 
-  @Post()
+  @Post('posts')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-01 Create a post as draft or published' })
@@ -63,7 +67,7 @@ export class BlogController {
   }
 
   @Public()
-  @Get()
+  @Get('posts')
   @ApiOperation({
     summary: 'BLG-02 Browse paginated published posts filterable by tag',
   })
@@ -75,7 +79,7 @@ export class BlogController {
     return this.blogService.listPublished(query);
   }
 
-  @Get('mine')
+  @Get('posts/mine')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-03 List own posts including drafts' })
@@ -89,7 +93,7 @@ export class BlogController {
   }
 
   @Public()
-  @Get(':id')
+  @Get('posts/:id')
   @ApiOperation({
     summary: 'BLG-02 Read a published post page with author and comments',
   })
@@ -105,7 +109,7 @@ export class BlogController {
     return this.blogService.getById(id.toHexString());
   }
 
-  @Patch(':id')
+  @Patch('posts/:id')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-04 Edit own post' })
@@ -123,7 +127,7 @@ export class BlogController {
     return this.blogService.update(id.toHexString(), dto, user.id);
   }
 
-  @Delete(':id')
+  @Delete('posts/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
@@ -139,5 +143,76 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.blogService.delete(id.toHexString(), user.id);
+  }
+
+  @Public()
+  @Get('posts/:id/comments')
+  @ApiOperation({
+    summary: 'BLG-05 List comments on a published post in chronological order',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: [CommentResponseDto] })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  listComments(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<CommentView[]> {
+    return this.blogService.listComments(id.toHexString());
+  }
+
+  @Post('posts/:id/comments')
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-05 Add a comment to a published post' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: CommentResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID or comment body' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  createComment(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: CreateCommentDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CommentView> {
+    return this.blogService.createComment(id.toHexString(), dto, user.id);
+  }
+
+  @Patch('comments/:id')
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-07 Edit own comment' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: CommentResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid comment ID or body' })
+  @ApiNotFoundResponse({
+    description: 'Comment not found or owned by another user',
+  })
+  updateComment(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: UpdateCommentDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CommentView> {
+    return this.blogService.updateComment(id.toHexString(), dto, user.id);
+  }
+
+  @Delete('comments/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-07 Delete own comment' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiNoContentResponse({ description: 'Comment deleted' })
+  @ApiBadRequestResponse({ description: 'Invalid comment ID' })
+  @ApiNotFoundResponse({
+    description: 'Comment not found or owned by another user',
+  })
+  async removeComment(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.blogService.deleteComment(id.toHexString(), user.id);
   }
 }

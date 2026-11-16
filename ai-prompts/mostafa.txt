@@ -106,3 +106,18 @@ a suspended author’s name still shown
 How the output was used:
 Removed the NotImplementedException catch from BlogService.resolveProfiles, overrode AccountsService with FakeAccountsService in blog.service.spec.ts and blog.api.spec.ts via Nest DI, and added explicit assertions for the post author name, deactivated commenter "Deleted user", and suspended author name visibility on feature/BLG-02-browse-read-posts.
 ================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-05
+
+Prompt:
+Implement BLG-05 (Sprint 1, package 7, Community & Admin, module: blog) using the existing project conventions: comments on published posts, covering BLG-05 and BLG-07. First read the BLG-05 and BLG-07 specs and the project skill in docs/ai/skills/travel-platform/, and follow the documented endpoints, naming and error conventions exactly without inventing behavior. Confirm the BLG-01 output (#76) is present on develop, and if it isn’t, report it clearly instead of recreating it. Build on the existing blog module and the BLG-01 post model: add the comment model and persistence following the project’s data conventions, with create, edit and delete operations restricted to the authenticated author of the comment, and a chronological (oldest first) list of comments on a post. Comments are only allowed on published posts, so commenting on a draft, hidden or missing post returns the project’s documented error response. Enforce a body length of 1 to 500 characters, with the trimming and whitespace-only handling the spec defines, and keep the post’s comment count correct on create and delete (and on any other path the spec names) so it never drifts or goes negative. Don’t implement features reserved for later tickets (GEN-10 and anything else not listed here), don’t change the frozen schemas, and don’t touch Aya’s booking modules or anything outside the blog module and the shared wiring this task needs. TDD isn’t required, but ship unit tests for the length boundaries (0, 1, 500 and 501 characters, plus whitespace-only input) and API tests covering create, chronological listing, editing and deleting own comments, rejection of edits and deletes by other users or unauthenticated requests, commenting on a draft or missing post, repeated deletes, and comment count correctness after each operation. Update the related documentation (API docs and module docs, plus any index or changelog the project keeps), run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/BLG-05-comments, commit and push only the BLG-05 changes with the PR title BLG-05: Comments in mind, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+
+How the output was used:
+Added CreateCommentDto and UpdateCommentDto, implemented BLG-05/BLG-07 chronological listing, transactional comment creation/deletion (keeping commentCount accurate), and owner-restricted editing in BlogService and BlogController with Swagger/JSDoc docs and unit/integration/API tests on feature/BLG-05-comments.
+================================================

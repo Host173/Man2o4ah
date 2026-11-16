@@ -1,3 +1,8 @@
+/**
+ * Booking lifecycle rules shared by flight-bookings and hotel-bookings (GEN-11).
+ * Lives here until the team leader decides where shared booking rules belong;
+ * hotel-bookings imports it from this file.
+ */
 import { ConflictException } from '@nestjs/common';
 import type {
   ClientSession,

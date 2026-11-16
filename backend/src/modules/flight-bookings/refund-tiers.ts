@@ -1,3 +1,8 @@
+/**
+ * Refund tiers shared by flight-bookings and hotel-bookings (GEN-11). Lives here
+ * until the team leader decides where shared booking rules belong; hotel-bookings
+ * imports it from this file.
+ */
 import { percentOfMinor } from '../../common/money/money.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

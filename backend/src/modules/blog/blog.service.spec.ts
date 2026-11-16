@@ -1,15 +1,24 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
+import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import { Session } from '../accounts/schemas/session.schema.js';
+import { User, UserStatus } from '../accounts/schemas/user.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
+import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
 import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
@@ -19,12 +28,22 @@ describe('BlogService (skeleton)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [BlogModule],
     })
-      .useMocker((token) => (token === getConnectionToken() ? {} : undefined))
+      .useMocker((token) => {
+        if (token === getConnectionToken()) return {};
+        if (token === ConfigService) {
+          return { getOrThrow: () => 'test-secret-with-at-least-32-chars' };
+        }
+        return undefined;
+      })
       .overrideProvider(getModelToken(Post.name))
       .useValue({})
       .overrideProvider(getModelToken(Comment.name))
       .useValue({})
       .overrideProvider(getModelToken(Like.name))
+      .useValue({})
+      .overrideProvider(getModelToken(User.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Session.name))
       .useValue({})
       .compile();
 
@@ -32,19 +51,32 @@ describe('BlogService (skeleton)', () => {
   });
 });
 
-describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
+describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () => {
   let testApp: TestApp | undefined;
   let service: BlogService;
+  const fakeAccounts = new FakeAccountsService();
+  let appEvents: AppEvents;
+  let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
   let likeModel: Model<LikeDocument>;
 
   const ownerId = new Types.ObjectId().toHexString();
   const otherUserId = new Types.ObjectId().toHexString();
+  const suspendedUserId = new Types.ObjectId().toHexString();
+  const activeCommenterId = new Types.ObjectId().toHexString();
+  const deactivatedCommenterId = new Types.ObjectId().toHexString();
+  const deactivatedAuthorId = new Types.ObjectId().toHexString();
 
   beforeAll(async () => {
-    testApp = await createTestApp({ imports: [BlogModule] });
+    testApp = await createTestApp({
+      imports: [BlogModule],
+      override: (builder) =>
+        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+    });
     service = testApp.moduleRef.get(BlogService);
+    appEvents = testApp.moduleRef.get(AppEvents);
+    eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
       getModelToken(Post.name),
     );
@@ -57,6 +89,48 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
+    vi.restoreAllMocks();
+    Object.assign(
+      fakeAccounts,
+      new FakeAccountsService([
+        {
+          id: ownerId,
+          name: 'Aisha Rawahi',
+          email: 'aisha@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: otherUserId,
+          name: 'Bob Nomad',
+          email: 'bob@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: suspendedUserId,
+          name: 'Suspended Author',
+          email: 'suspended@example.com',
+          status: UserStatus.SUSPENDED,
+        },
+        {
+          id: activeCommenterId,
+          name: 'Omar Said',
+          email: 'omar@example.com',
+          status: UserStatus.ACTIVE,
+        },
+        {
+          id: deactivatedCommenterId,
+          name: 'Former Traveler',
+          email: 'former@example.com',
+          status: UserStatus.DEACTIVATED,
+        },
+        {
+          id: deactivatedAuthorId,
+          name: 'Deactivated Author',
+          email: 'deactivated@example.com',
+          status: UserStatus.DEACTIVATED,
+        },
+      ]),
+    );
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -437,6 +511,386 @@ describe('BlogService (BLG-01, BLG-03, BLG-04 integration)', () => {
       expect(
         await likeModel.countDocuments({ postId: targetObjectId }).exec(),
       ).toBe(1);
+    });
+  });
+
+  describe('listPublished (BLG-02)', () => {
+    it('returns published non-hidden active posts newest publishedAt first with resolved author names', async () => {
+      const older = await service.create(
+        { title: 'Older Post', body: 'Body 1', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const newer = await service.create(
+        { title: 'Newer Post', body: 'Body 2', status: PostStatus.PUBLISHED },
+        suspendedUserId,
+      );
+      const draft = await service.create(
+        { title: 'Hidden Draft', body: 'Draft', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        {
+          title: 'Moderated Out',
+          body: 'Moderated',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const deactivatedPost = await service.create(
+        {
+          title: 'Deactivated Author Post',
+          body: 'Hidden',
+          status: PostStatus.PUBLISHED,
+        },
+        otherUserId,
+      );
+
+      const olderImageId = new Types.ObjectId();
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(older._id) },
+        {
+          $set: {
+            tags: ['cairo', 'nile'],
+            images: [{ _id: olderImageId, key: 'blog/cairo.jpg' }],
+          },
+        },
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedPost._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      const result = await service.listPublished();
+
+      expect(result.total).toBe(2);
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(10);
+      expect(result.totalPages).toBe(1);
+      expect(result.items.map((p) => p._id)).toEqual([newer._id, older._id]);
+      expect(result.items.map((p) => p._id)).not.toContain(draft._id);
+      expect(result.items.map((p) => p._id)).not.toContain(hidden._id);
+      expect(result.items.map((p) => p._id)).not.toContain(deactivatedPost._id);
+      // Suspended user content remains visible per ACC-16.
+      expect(result.items[0].authorName).toBe('Suspended Author');
+      expect(result.items[1].authorName).toBe('Aisha Rawahi');
+      expect(result.items[1].tags).toEqual(['cairo', 'nile']);
+      expect(result.items[1].images).toEqual([
+        { _id: olderImageId.toHexString(), key: 'blog/cairo.jpg' },
+      ]);
+    });
+
+    it('filters by tag, handles pagination boundaries, and returns empty results for unknown tag', async () => {
+      const p1 = await service.create(
+        { title: 'Siwa 1', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        { title: 'Siwa 2', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p3 = await service.create(
+        { title: 'Siwa 3', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const other = await service.create(
+        { title: 'Aswan', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      await postModel.updateMany(
+        {
+          _id: {
+            $in: [p1._id, p2._id, p3._id].map((id) => new Types.ObjectId(id)),
+          },
+        },
+        { $set: { tags: ['oasis', 'siwa'] } },
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(other._id) },
+        { $set: { tags: ['nubia'] } },
+      );
+
+      const query = new ListPostsQueryDto();
+      query.tag = 'oasis';
+      query.page = 2;
+      query.limit = 2;
+
+      const page2 = await service.listPublished(query);
+      expect(page2.page).toBe(2);
+      expect(page2.limit).toBe(2);
+      expect(page2.total).toBe(3);
+      expect(page2.totalPages).toBe(2);
+      expect(page2.items.map((p) => p._id)).toEqual([p1._id]);
+      expect(page2.items[0].authorName).toBe('Aisha Rawahi');
+
+      const unknown = await service.listPublished({
+        page: 1,
+        limit: 10,
+        tag: 'nonexistent',
+      });
+      expect(unknown).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+  });
+
+  describe('getById (BLG-02)', () => {
+    it('returns published post with author name, suspended author name still shown, and deactivated commenter shown as "Deleted user"', async () => {
+      const missingCommenterId = new Types.ObjectId().toHexString();
+
+      const post = await service.create(
+        {
+          title: 'Dahab Diving',
+          body: 'Blue Hole tips and reef safety.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const imageId = new Types.ObjectId();
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(post._id) },
+        {
+          $set: {
+            tags: ['red-sea'],
+            images: [{ _id: imageId, key: 'blog/reef.png' }],
+            likeCount: 4,
+            commentCount: 4,
+          },
+        },
+      );
+
+      const postObjectId = new Types.ObjectId(post._id);
+      const c1 = await commentModel.create({
+        postId: postObjectId,
+        authorId: new Types.ObjectId(activeCommenterId),
+        body: 'First comment',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c2 = await commentModel.create({
+        postId: postObjectId,
+        authorId: new Types.ObjectId(deactivatedCommenterId),
+        body: 'Comment from deactivated user',
+      });
+      await commentModel.create({
+        postId: postObjectId,
+        authorId: new Types.ObjectId(activeCommenterId),
+        body: 'Hidden comment',
+        isHidden: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c3 = await commentModel.create({
+        postId: postObjectId,
+        authorId: new Types.ObjectId(suspendedUserId),
+        body: 'Comment from suspended user',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c4 = await commentModel.create({
+        postId: postObjectId,
+        authorId: new Types.ObjectId(missingCommenterId),
+        body: 'Fourth comment',
+      });
+
+      const detail = await service.getById(post._id);
+
+      expect(detail).toMatchObject({
+        _id: post._id,
+        authorId: ownerId,
+        authorName: 'Aisha Rawahi',
+        title: 'Dahab Diving',
+        body: 'Blue Hole tips and reef safety.',
+        tags: ['red-sea'],
+        images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
+        status: PostStatus.PUBLISHED,
+        likeCount: 4,
+        commentCount: 4,
+        isHidden: false,
+        authorDeactivated: false,
+      });
+      expect(detail.publishedAt).toBeInstanceOf(Date);
+      expect(detail.comments.map((c) => c._id)).toEqual([
+        c1._id.toHexString(),
+        c2._id.toHexString(),
+        c3._id.toHexString(),
+        c4._id.toHexString(),
+      ]);
+      expect(detail.comments.map((c) => c.authorName)).toEqual([
+        'Omar Said',
+        'Deleted user',
+        'Suspended Author',
+        null,
+      ]);
+      expect(detail.comments[0]).toMatchObject({
+        postId: post._id,
+        authorId: activeCommenterId,
+        body: 'First comment',
+        isHidden: false,
+      });
+
+      // A suspended author's own post page still shows their author name (ACC-16).
+      const suspendedPost = await service.create(
+        {
+          title: 'Suspended Author Post',
+          body: 'Still publicly visible.',
+          status: PostStatus.PUBLISHED,
+        },
+        suspendedUserId,
+      );
+      const suspendedDetail = await service.getById(suspendedPost._id);
+      expect(suspendedDetail.authorName).toBe('Suspended Author');
+    });
+
+    it('throws 404 NOT_FOUND for missing, draft, hidden, or deactivated-author posts and 400 for invalid id', async () => {
+      const draft = await service.create(
+        { title: 'Draft', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const deactivatedFlag = await service.create(
+        { title: 'Deactivated', body: 'Body', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedFlag._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      for (const targetId of [
+        new Types.ObjectId().toHexString(),
+        draft._id,
+        hidden._id,
+        deactivatedFlag._id,
+      ]) {
+        try {
+          await service.getById(targetId);
+          expect.unreachable('Expected NotFoundException');
+        } catch (err) {
+          expect(err).toBeInstanceOf(NotFoundException);
+          expect((err as NotFoundException).getResponse()).toMatchObject({
+            code: ErrorCode.NotFound,
+          });
+        }
+      }
+
+      // Also throws 404 if AccountsService reports author status DEACTIVATED before event flag updates.
+      const racePost = await service.create(
+        { title: 'Race Post', body: 'Body', status: PostStatus.PUBLISHED },
+        deactivatedAuthorId,
+      );
+      await expect(service.getById(racePost._id)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      await expect(service.getById('not-an-object-id')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('User deactivation & reactivation events (ACC-12)', () => {
+    it('hides author posts on user.deactivated and restores published non-hidden posts on user.reactivated idempotently', async () => {
+      const ownersPublished = await service.create(
+        { title: 'Owner Pub', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const ownersDraft = await service.create(
+        { title: 'Owner Draft', body: 'Draft', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const ownersHidden = await service.create(
+        { title: 'Owner Hidden', body: 'Hidden', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(ownersHidden._id) },
+        { $set: { isHidden: true } },
+      );
+      const bystandersPublished = await service.create(
+        { title: 'Other Pub', body: 'Other', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+
+      // Deliver via AppEvents (as production emitters do).
+      appEvents.emit(Events.UserDeactivated, { userId: ownerId });
+      await vi.waitFor(async () => {
+        const updated = await postModel.findById(ownersPublished._id).lean();
+        expect(updated?.authorDeactivated).toBe(true);
+      });
+
+      const listAfterDeactivate = await service.listPublished();
+      expect(listAfterDeactivate.items.map((p) => p._id)).toEqual([
+        bystandersPublished._id,
+      ]);
+      await expect(service.getById(ownersPublished._id)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      // Idempotent duplicate deactivation call keeps draft & all owner posts marked deactivated.
+      await eventEmitter.emitAsync(Events.UserDeactivated, { userId: ownerId });
+      const draftDoc = await postModel.findById(ownersDraft._id).lean();
+      expect(draftDoc?.authorDeactivated).toBe(true);
+
+      // Reactivation restores only the published, non-hidden post to public reads.
+      await eventEmitter.emitAsync(Events.UserReactivated, { userId: ownerId });
+      await eventEmitter.emitAsync(Events.UserReactivated, { userId: ownerId });
+
+      const listAfterReactivate = await service.listPublished();
+      expect(listAfterReactivate.items.map((p) => p._id)).toContain(
+        ownersPublished._id,
+      );
+      expect(listAfterReactivate.items.map((p) => p._id)).not.toContain(
+        ownersDraft._id,
+      );
+      expect(listAfterReactivate.items.map((p) => p._id)).not.toContain(
+        ownersHidden._id,
+      );
+
+      const restored = await service.getById(ownersPublished._id);
+      expect(restored._id).toBe(ownersPublished._id);
+      expect(restored.authorName).toBe('Aisha Rawahi');
+      expect(restored.authorDeactivated).toBe(false);
+
+      // Draft and admin-hidden posts stay inaccessible on getById even after reactivation.
+      await expect(service.getById(ownersDraft._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.getById(ownersHidden._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('safely ignores invalid userId payloads in deactivation/reactivation events', async () => {
+      const pub = await service.create(
+        { title: 'Safe Post', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      await expect(
+        eventEmitter.emitAsync(Events.UserDeactivated, { userId: 'bad-id' }),
+      ).resolves.toBeDefined();
+      await expect(
+        eventEmitter.emitAsync(Events.UserReactivated, { userId: 'bad-id' }),
+      ).resolves.toBeDefined();
+
+      const persisted = await postModel.findById(pub._id).lean();
+      expect(persisted?.authorDeactivated).toBe(false);
     });
   });
 });

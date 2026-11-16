@@ -27,24 +27,31 @@ import type { Types } from 'mongoose';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BlogService } from './blog.service.js';
-import type { PostView } from './blog.types.js';
+import type {
+  PostDetailView,
+  PostView,
+  PublishedPostView,
+} from './blog.types.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
+import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
   PaginatedPostResponseDto,
+  PaginatedPublishedPostsResponseDto,
+  PostDetailResponseDto,
   PostResponseDto,
 } from './dto/post.response.dto.js';
 import { UpdatePostDto } from './dto/update-post.dto.js';
 
 @ApiTags('blog')
-@ApiCookieAuth()
-@ApiUnauthorizedResponse({ description: 'Authentication required' })
 @Controller('posts')
 export class BlogController {
   constructor(private readonly blogService: BlogService) {}
 
   @Post()
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-01 Create a post as draft or published' })
   @ApiCreatedResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Validation failed' })
@@ -55,7 +62,22 @@ export class BlogController {
     return this.blogService.create(dto, user.id);
   }
 
+  @Public()
+  @Get()
+  @ApiOperation({
+    summary: 'BLG-02 Browse paginated published posts filterable by tag',
+  })
+  @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid query parameters' })
+  listPublished(
+    @Query() query: ListPostsQueryDto,
+  ): Promise<Paginated<PublishedPostView>> {
+    return this.blogService.listPublished(query);
+  }
+
   @Get('mine')
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-03 List own posts including drafts' })
   @ApiOkResponse({ type: PaginatedPostResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid pagination query' })
@@ -66,7 +88,26 @@ export class BlogController {
     return this.blogService.listMine(user.id, query);
   }
 
+  @Public()
+  @Get(':id')
+  @ApiOperation({
+    summary: 'BLG-02 Read a published post page with author and comments',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PostDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  getById(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<PostDetailView> {
+    return this.blogService.getById(id.toHexString());
+  }
+
   @Patch(':id')
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-04 Edit own post' })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostResponseDto })
@@ -84,6 +125,8 @@ export class BlogController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'BLG-04 Delete own post' })
   @ApiParam({ name: 'id', type: String })
   @ApiNoContentResponse({ description: 'Post deleted' })

@@ -73,3 +73,36 @@ When BLG-10 adds images, deleting a post must also delete its image files, as th
 How the output was used:
 Added @Matches(/\S/) validation on post body without trimming it, wrapped post/comment/like deletion in a Mongoose transaction in BlogService.delete, reverted backend/src/modules/admin/admin.service.ts to match develop, and added DTO, service (including transaction rollback), and API tests on feature/BLG-01-posts.
 ================================================
+
+
+================================================
+Date: 2026-11-15
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-02
+
+Prompt:
+Implement BLG-02 (Sprint 1, package 7, Community & Admin, module: blog) using the existing project conventions: browsing and reading published posts, covering BLG-02 and ACC-12 (hide). First read the BLG-02 and ACC-12 specs and the project skill in docs/ai/skills/travel-platform/, and follow the documented endpoints, naming, pagination conventions and event names exactly without inventing behavior. Confirm the outputs of BLG-01 (#76), PLT-06 (#8) and CTR-01 (#10) are present on develop, and if they aren’t, report it clearly instead of recreating them. Build on the existing blog module and the BLG-01 post model: add a paginated list of published posts that can be filtered by tag, and a post page that returns author, date, body, tags, images, likes and comments, using whatever like and comment read interfaces or stubs the contracts already provide rather than building those features here. Apply the visibility rules so that drafts, hidden posts and posts by hidden or deactivated authors are excluded from the list and return the project’s documented not-found response on the post page, and wire up the events the spec requires so that hiding or deactivating an author affects post visibility as documented. Don’t implement features reserved for later blog tickets (BLG-12 and anything else not listed here), don’t change the frozen schemas, and don’t touch Aya’s booking modules or anything outside the blog module and the shared wiring this task needs. TDD isn’t required, but ship integration tests for the visibility rules and events (published vs draft, hidden post, hidden author, deactivated author, author becoming visible again if the spec allows it) and API tests for the list and post page (pagination boundaries, tag filtering, unknown tag, empty results, missing post, response shape). Update the related documentation (API docs and module docs, plus any index or changelog the project keeps), run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/BLG-02-browse-read-posts, commit and push only the BLG-02 changes with the PR title BLG-02: Browse and read posts in mind, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+Attachments: docs/ai/chat-skill/chat-instructions.txt, docs/ai/chat-skill/SKILL.md
+
+How the output was used:
+Implemented public paginated post browsing with tag filtering (GET /api/posts), post detail reading with author/comments/counts (GET /api/posts/:id), @OnEvent handlers for user.deactivated/user.reactivated, DTOs/Swagger docs, and unit/integration/API tests on feature/BLG-02-browse-read-posts.
+================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-02
+
+Prompt:
+In regards to the implementation of BLG-02, the following fixes are needed: resolveProfiles catches NotImplementedException and returns no names. In production, every author name is null until getProfiles is implemented, and your API tests run against that stub, so no test checks that author names appear. The requirement says the post page shows the author. Remove the catch, use FakeAccountsService in the service and API tests, and assert:
+the post’s author name
+a deactivated commenter shown as “Deleted user”
+a suspended author’s name still shown
+
+How the output was used:
+Removed the NotImplementedException catch from BlogService.resolveProfiles, overrode AccountsService with FakeAccountsService in blog.service.spec.ts and blog.api.spec.ts via Nest DI, and added explicit assertions for the post author name, deactivated commenter "Deleted user", and suspended author name visibility on feature/BLG-02-browse-read-posts.
+================================================

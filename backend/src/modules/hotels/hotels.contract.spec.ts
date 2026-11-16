@@ -5,6 +5,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import { HotelsService } from './hotels.service.js';
 import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
@@ -18,6 +19,7 @@ describe('hotels contracts (stubs)', () => {
       providers: [
         HotelsService,
         { provide: getModelToken(Hotel.name), useValue: {} },
+        { provide: StorageService, useValue: {} },
         {
           provide: ReferenceDataService,
           useValue: new FakeReferenceDataService(),

@@ -2,12 +2,16 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
@@ -26,13 +30,18 @@ describe('HotelsService (HTL-01 integration)', () => {
   let service: HotelsService;
   let hotels: Model<Hotel>;
   let referenceData: FakeReferenceDataService;
+  const storage = new FakeStorageService();
 
   beforeAll(async () => {
     referenceData = new FakeReferenceDataService();
     t = await createTestApp({
       imports: [HotelsModule],
       override: (builder) =>
-        builder.overrideProvider(ReferenceDataService).useValue(referenceData),
+        builder
+          .overrideProvider(ReferenceDataService)
+          .useValue(referenceData)
+          .overrideProvider(StorageService)
+          .useValue(storage),
     });
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
@@ -41,9 +50,229 @@ describe('HotelsService (HTL-01 integration)', () => {
   beforeEach(async () => {
     await clearCollections(t.connection);
     vi.restoreAllMocks();
+    await Promise.all(storage.keys().map((key) => storage.delete(key)));
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('hotel photos', () => {
+    const image: UploadedImage = {
+      buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+      originalname: 'hotel.jpg',
+      mimetype: 'image/jpeg',
+      size: 4,
+    };
+
+    it('stores image references and removes both the file and reference', async () => {
+      const created = await service.create(profile);
+      const updated = await service.addPhoto(created.id, image, created.id);
+      const photo = updated.photos[0]!;
+      expect(updated.photos).toHaveLength(1);
+      expect(storage.bytesOf(photo.key)).toEqual(image.buffer);
+      expect((await service.getHotel(created.id))?.photos).toEqual(
+        updated.photos,
+      );
+      await service.removePhoto(created.id, photo.id, created.id);
+      expect(storage.has(photo.key)).toBe(false);
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+    });
+
+    it('keeps exactly five photos under concurrent uploads and removes rejected files', async () => {
+      const created = await service.create(profile);
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 8 }, () =>
+          service.addPhoto(created.id, image, created.id),
+        ),
+      );
+      expect(
+        outcomes.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(5);
+      const rejected = outcomes.filter(
+        (result) => result.status === 'rejected',
+      );
+      expect(rejected).toHaveLength(3);
+      for (const result of rejected) {
+        expect(result.reason).toMatchObject({
+          response: { code: ErrorCode.LimitExceeded },
+        });
+      }
+      const photos = (await service.getHotel(created.id))!.photos;
+      expect(photos).toHaveLength(5);
+      expect(new Set(photos.map((photo) => photo.id)).size).toBe(5);
+      expect(storage.keys().sort()).toEqual(
+        photos.map((photo) => photo.key).sort(),
+      );
+      await service.removePhoto(created.id, photos[0]!.id, created.id);
+      expect(
+        (await service.addPhoto(created.id, image, created.id)).photos,
+      ).toHaveLength(5);
+    });
+
+    it('checks moderator scope and existence before accessing storage', async () => {
+      const created = await service.create(profile);
+      const photo = (await service.addPhoto(created.id, image, created.id))
+        .photos[0]!;
+      const save = vi.spyOn(storage, 'save');
+      const remove = vi.spyOn(storage, 'delete');
+      const missing = new Types.ObjectId().toHexString();
+      for (const assignment of [undefined, missing]) {
+        await expect(
+          service.addPhoto(created.id, image, assignment),
+        ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+        await expect(
+          service.removePhoto(created.id, photo.id, assignment),
+        ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      }
+      await expect(
+        service.addPhoto(missing, image, missing),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      await expect(
+        service.removePhoto(created.id, missing, created.id),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      expect(save).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(storage.has(photo.key)).toBe(true);
+    });
+
+    it('rejects missing, empty, unsupported and oversized images without attaching a photo', async () => {
+      const created = await service.create(profile);
+      for (const file of [
+        undefined,
+        { ...image, size: 0, buffer: Buffer.alloc(0) },
+        { ...image, mimetype: 'application/pdf' },
+        { ...image, size: MAX_IMAGE_BYTES + 1 },
+      ]) {
+        await expect(
+          service.addPhoto(created.id, file, created.id),
+        ).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+      expect(storage.keys()).toEqual([]);
+    });
+
+    it('never removes a photo belonging to a different hotel', async () => {
+      const created = await service.create(profile);
+      const other = await service.create({ ...profile, name: 'Other Hotel' });
+      const photo = (await service.addPhoto(other.id, image, other.id))
+        .photos[0]!;
+      await expect(
+        service.removePhoto(created.id, photo.id, created.id),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      expect((await service.getHotel(other.id))?.photos).toEqual([photo]);
+      expect(storage.has(photo.key)).toBe(true);
+    });
+
+    it('cleans up an unattached upload when the database write fails', async () => {
+      const created = await service.create(profile);
+      const failure = new Error('Photo database write failed');
+      vi.spyOn(hotels.collection, 'findOneAndUpdate').mockRejectedValueOnce(
+        failure,
+      );
+      await expect(
+        service.addPhoto(created.id, image, created.id),
+      ).rejects.toBe(failure);
+      expect(storage.keys()).toEqual([]);
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+    });
+
+    it('does not delete an attached file when the database reply is lost after writing', async () => {
+      const created = await service.create(profile);
+      const failure = new Error('Photo database reply lost');
+      const write = hotels.collection.findOneAndUpdate.bind(hotels.collection);
+      vi.spyOn(hotels.collection, 'findOneAndUpdate').mockImplementationOnce(
+        async (...args) => {
+          await write(...args);
+          throw failure;
+        },
+      );
+      await expect(
+        service.addPhoto(created.id, image, created.id),
+      ).rejects.toBe(failure);
+      const photos = (await service.getHotel(created.id))!.photos;
+      expect(photos).toHaveLength(1);
+      expect(storage.has(photos[0]!.key)).toBe(true);
+    });
+
+    it('surfaces both errors if an unsuccessful upload cannot be cleaned up', async () => {
+      const created = await service.create(profile);
+      const writeFailure = new Error('Photo database write failed');
+      const cleanupFailure = new Error('Photo storage cleanup failed');
+      vi.spyOn(hotels.collection, 'findOneAndUpdate').mockRejectedValueOnce(
+        writeFailure,
+      );
+      vi.spyOn(storage, 'delete').mockRejectedValueOnce(cleanupFailure);
+      await expect(
+        service.addPhoto(created.id, image, created.id),
+      ).rejects.toMatchObject({
+        errors: [writeFailure, cleanupFailure],
+      });
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+      expect(storage.keys()).toHaveLength(1);
+    });
+
+    it('cleans an upload if its hotel disappears before attachment', async () => {
+      const created = await service.create(profile);
+      const save = storage.save.bind(storage);
+      vi.spyOn(storage, 'save').mockImplementationOnce(async (file) => {
+        const stored = await save(file);
+        await hotels.deleteOne({ _id: created.id });
+        return stored;
+      });
+      await expect(
+        service.addPhoto(created.id, image, created.id),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      expect(storage.keys()).toEqual([]);
+    });
+
+    it('preserves the reference on a storage deletion failure and permits a retry', async () => {
+      const created = await service.create(profile);
+      const photo = (await service.addPhoto(created.id, image, created.id))
+        .photos[0]!;
+      const failure = new Error('Photo deletion failed');
+      vi.spyOn(storage, 'delete').mockRejectedValueOnce(failure);
+      await expect(
+        service.removePhoto(created.id, photo.id, created.id),
+      ).rejects.toBe(failure);
+      expect(storage.has(photo.key)).toBe(true);
+      expect((await service.getHotel(created.id))?.photos).toEqual([photo]);
+      await service.removePhoto(created.id, photo.id, created.id);
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+      expect(storage.keys()).toEqual([]);
+    });
+
+    it('retains the key for retry if the database removal fails after deleting the file', async () => {
+      const created = await service.create(profile);
+      const photo = (await service.addPhoto(created.id, image, created.id))
+        .photos[0]!;
+      const failure = new Error('Photo reference removal failed');
+      vi.spyOn(hotels.collection, 'updateOne').mockRejectedValueOnce(failure);
+      await expect(
+        service.removePhoto(created.id, photo.id, created.id),
+      ).rejects.toBe(failure);
+      expect((await service.getHotel(created.id))?.photos).toEqual([photo]);
+      expect(storage.has(photo.key)).toBe(false);
+      await service.removePhoto(created.id, photo.id, created.id);
+      expect((await service.getHotel(created.id))?.photos).toEqual([]);
+    });
+
+    it('handles simultaneous deletions without losing other photos', async () => {
+      const created = await service.create(profile);
+      await service.addPhoto(created.id, image, created.id);
+      const photos = (await service.addPhoto(created.id, image, created.id))
+        .photos;
+      const results = await Promise.allSettled([
+        service.removePhoto(created.id, photos[0]!.id, created.id),
+        service.removePhoto(created.id, photos[0]!.id, created.id),
+      ]);
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(
+        true,
+      );
+      expect((await service.getHotel(created.id))?.photos).toEqual([photos[1]]);
+      expect(storage.keys()).toEqual([photos[1]!.key]);
+    });
+  });
 
   it('persists a profile, derives country from the reference city, and returns the existing contract shape', async () => {
     const created = await service.create({

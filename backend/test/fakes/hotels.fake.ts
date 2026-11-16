@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { addDays, isDateOnly } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
@@ -17,8 +21,12 @@ import type {
   RoomView,
 } from '../../src/modules/hotels/hotels.types.js';
 import type { RatingSummary } from '../../src/modules/hotels/schemas/hotel.schema.js';
+import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
+import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
+import type { StorageService } from '../../src/modules/storage/storage.service.js';
 import type { PublicApi } from './public-api.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeStorageService } from './storage.fake.js';
 
 export interface HotelDataset {
   hotels: HotelView[];
@@ -57,6 +65,10 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       ReferenceDataService,
       'getCity'
     > = new FakeReferenceDataService(),
+    private readonly storage: Pick<
+      StorageService,
+      'save' | 'delete'
+    > = new FakeStorageService(),
   ) {
     this.data = structuredClone({
       hotels: [],
@@ -119,6 +131,72 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     }
     Object.assign(hotel, fields);
     return structuredClone(hotel);
+  }
+
+  async addPhoto(
+    hotelId: string,
+    file: UploadedImage | undefined,
+    moderatorHotelId: string | undefined,
+  ): Promise<HotelView> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    if (!file) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'An image is required',
+        details: [
+          { field: 'file', message: 'must contain a JPG or PNG image' },
+        ],
+      });
+    }
+    const image = await this.storage.save(file);
+    if (hotel.photos.length >= MAX_IMAGES_PER_ITEM) {
+      const failure = new ConflictException({
+        code: ErrorCode.LimitExceeded,
+        message: 'A hotel can have at most five photos',
+      });
+      try {
+        await this.storage.delete(image.key);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [failure, cleanupError],
+          'Hotel photo cleanup failed',
+        );
+      }
+      throw failure;
+    }
+    hotel.photos.push({ id: image._id.toHexString(), key: image.key });
+    return structuredClone(hotel);
+  }
+
+  async removePhoto(
+    hotelId: string,
+    photoId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<void> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    if (!Types.ObjectId.isValid(photoId)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid ID',
+        details: [{ field: 'photoId', message: 'must be an ObjectId' }],
+      });
+    }
+    const photo = hotel.photos.find((item) => item.id === photoId);
+    if (!photo) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Hotel not found',
+      });
+    }
+    await this.storage.delete(photo.key);
+    const index = hotel.photos.findIndex((item) => item.id === photoId);
+    if (index === -1) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Hotel not found',
+      });
+    }
+    hotel.photos.splice(index, 1);
   }
 
   getHotel(
@@ -306,5 +384,18 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     return city;
+  }
+
+  private assignedHotel(
+    hotelId: string,
+    moderatorHotelId: string | undefined,
+  ): HotelView {
+    if (hotelId !== moderatorHotelId) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Hotel not found',
+      });
+    }
+    return this.requireHotel(hotelId);
   }
 }

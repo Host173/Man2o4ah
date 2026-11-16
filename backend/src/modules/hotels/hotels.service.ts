@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
@@ -11,6 +13,10 @@ import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
+import type { StoredImage } from '../storage/storage.service.js';
 import type { CreateHotelDto } from './dto/create-hotel.dto.js';
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
@@ -41,10 +47,13 @@ type ProfileFields = Pick<
 
 @Injectable()
 export class HotelsService {
+  private readonly logger = new Logger(HotelsService.name);
+
   constructor(
     @InjectModel(Hotel.name) private readonly hotelModel: Model<StoredHotel>,
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
+    @Inject(StorageService) private readonly storage: StorageService,
   ) {}
 
   /** HTL-01: the HTTP controller must restrict creation to admins. */
@@ -60,14 +69,7 @@ export class HotelsService {
     input: UpdateHotelDto,
     moderatorHotelId: string | undefined,
   ): Promise<HotelView> {
-    const id = this.parseId(hotelId);
-    if (
-      moderatorHotelId === undefined ||
-      !Types.ObjectId.isValid(moderatorHotelId) ||
-      !id.equals(moderatorHotelId)
-    ) {
-      throw this.notFound();
-    }
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
     if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
     const fields = await this.profileFields(input);
     const hotel = await this.hotelModel
@@ -80,6 +82,74 @@ export class HotelsService {
       .exec();
     if (!hotel) throw this.notFound();
     return this.toView(hotel);
+  }
+
+  /** HTL-01 / GEN-08: one image per request; the five-photo limit is checked atomically. */
+  async addPhoto(
+    hotelId: string,
+    file: UploadedImage | undefined,
+    moderatorHotelId: string | undefined,
+  ): Promise<HotelView> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
+    if (!file) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'An image is required',
+        details: [
+          { field: 'file', message: 'must contain a JPG or PNG image' },
+        ],
+      });
+    }
+    const image = await this.storage.save(file);
+    try {
+      const hotel = await this.hotelModel
+        .findOneAndUpdate(
+          {
+            _id: id,
+            [`photos.${MAX_IMAGES_PER_ITEM - 1}`]: { $exists: false },
+          },
+          { $push: { photos: image } },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .lean()
+        .exec();
+      if (!hotel) {
+        if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
+        throw new ConflictException({
+          code: ErrorCode.LimitExceeded,
+          message: 'A hotel can have at most five photos',
+        });
+      }
+      return this.toView(hotel);
+    } catch (error) {
+      return this.discardUnattachedPhoto(id, image, error);
+    }
+  }
+
+  /**
+   * HTL-01 / GEN-08: keep the key until storage confirms deletion. If the database
+   * removal then fails, retrying is safe because storage.delete is idempotent.
+   */
+  async removePhoto(
+    hotelId: string,
+    photoId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<void> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    const imageId = this.parseId(photoId, 'photoId');
+    const hotel = await this.hotelModel.findById(id).lean().exec();
+    const photo = hotel?.photos.find((item) => item._id.equals(imageId));
+    if (!photo) throw this.notFound();
+    await this.storage.delete(photo.key);
+    const result = await this.hotelModel
+      .updateOne(
+        { _id: id, 'photos._id': imageId },
+        { $pull: { photos: { _id: imageId } } },
+        { runValidators: true },
+      )
+      .exec();
+    if (!result.matchedCount) throw this.notFound();
   }
 
   /** Includes inactive hotels; the caller checks bookability. Missing IDs return null. */
@@ -186,15 +256,54 @@ export class HotelsService {
     return fields;
   }
 
-  private parseId(hotelId: string): Types.ObjectId {
-    if (!Types.ObjectId.isValid(hotelId)) {
+  private assignedHotelId(
+    hotelId: string,
+    moderatorHotelId: string | undefined,
+  ): Types.ObjectId {
+    const id = this.parseId(hotelId);
+    if (
+      !moderatorHotelId ||
+      !Types.ObjectId.isValid(moderatorHotelId) ||
+      !id.equals(moderatorHotelId)
+    ) {
+      throw this.notFound();
+    }
+    return id;
+  }
+
+  private async discardUnattachedPhoto(
+    hotelId: Types.ObjectId,
+    image: StoredImage,
+    failure: unknown,
+  ): Promise<never> {
+    try {
+      // A rejected database reply does not prove the write was rejected.
+      const attached = await this.hotelModel.exists({
+        _id: hotelId,
+        photos: { $elemMatch: { _id: image._id, key: image.key } },
+      });
+      if (!attached) await this.storage.delete(image.key);
+    } catch (cleanupError) {
+      this.logger.error(
+        `Could not reconcile hotel ${hotelId.toHexString()} photo ${image._id.toHexString()} (key ${image.key})`,
+      );
+      throw new AggregateError(
+        [failure, cleanupError],
+        'Hotel photo cleanup failed',
+      );
+    }
+    throw failure;
+  }
+
+  private parseId(value: string, field = 'hotelId'): Types.ObjectId {
+    if (!Types.ObjectId.isValid(value)) {
       throw new BadRequestException({
         code: ErrorCode.ValidationFailed,
-        message: 'Invalid hotel ID',
-        details: [{ field: 'hotelId', message: 'must be an ObjectId' }],
+        message: 'Invalid ID',
+        details: [{ field, message: 'must be an ObjectId' }],
       });
     }
-    return new Types.ObjectId(hotelId);
+    return new Types.ObjectId(value);
   }
 
   private notFound(): NotFoundException {

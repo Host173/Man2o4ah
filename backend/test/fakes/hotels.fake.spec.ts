@@ -6,6 +6,8 @@ import type {
   RoomView,
 } from '../../src/modules/hotels/hotels.types.js';
 import { FakeHotelsService, FakeRoomNightInventory } from './index.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeStorageService } from './storage.fake.js';
 
 const checkIn = toDateOnly('2026-11-15');
 const checkOut = toDateOnly('2026-11-17');
@@ -65,6 +67,83 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  it('stores detached photo views, enforces five under concurrency, and removes files', async () => {
+    const storage = new FakeStorageService();
+    const fake = new FakeHotelsService(
+      { hotels: [hotel('hotel-1')] },
+      new FakeReferenceDataService(),
+      storage,
+    );
+    const image = {
+      buffer: Buffer.from('image'),
+      originalname: 'hotel.jpg',
+      mimetype: 'image/jpeg',
+      size: 5,
+    };
+    const results = await Promise.allSettled(
+      Array.from({ length: 7 }, () =>
+        fake.addPhoto('hotel-1', image, 'hotel-1'),
+      ),
+    );
+    const successful = results.filter(
+      (result) => result.status === 'fulfilled',
+    );
+    expect(successful).toHaveLength(5);
+    for (const result of results) {
+      if (result.status === 'rejected')
+        expect(result.reason).toMatchObject({
+          response: { code: ErrorCode.LimitExceeded },
+        });
+    }
+    const photos = (await fake.getHotel('hotel-1'))!.photos;
+    expect(photos).toHaveLength(5);
+    expect(storage.keys().sort()).toEqual(
+      photos.map((photo) => photo.key).sort(),
+    );
+    successful[0]!.value.photos.length = 0;
+    expect((await fake.getHotel('hotel-1'))!.photos).toHaveLength(5);
+    await fake.removePhoto('hotel-1', photos[0]!.id, 'hotel-1');
+    expect(storage.has(photos[0]!.key)).toBe(false);
+    expect((await fake.getHotel('hotel-1'))!.photos).toHaveLength(4);
+    expect(
+      (await fake.addPhoto('hotel-1', image, 'hotel-1')).photos,
+    ).toHaveLength(5);
+  });
+
+  it('applies photo scope and validation before changing stored data', async () => {
+    const image = {
+      buffer: Buffer.from('image'),
+      originalname: 'hotel.jpg',
+      mimetype: 'image/jpeg',
+      size: 5,
+    };
+    const photo = (await hotels.addPhoto('hotel-1', image, 'hotel-1'))
+      .photos[0]!;
+    await expect(
+      hotels.addPhoto('hotel-1', image, undefined),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      hotels.removePhoto('hotel-1', photo.id, 'hotel-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      hotels.addPhoto('hotel-1', undefined, 'hotel-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      hotels.addPhoto(
+        'hotel-1',
+        { ...image, mimetype: 'application/pdf' },
+        'hotel-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      hotels.removePhoto('hotel-1', 'invalid', 'hotel-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await hotels.removePhoto('hotel-1', photo.id, 'hotel-1');
+    await expect(
+      hotels.removePhoto('hotel-1', photo.id, 'hotel-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
   it('creates hotel profiles with reference-derived countries and detached defaults', async () => {
     const created = await hotels.create({
       name: '  Dubai Hotel  ',

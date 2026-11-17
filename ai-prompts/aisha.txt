@@ -9164,3 +9164,36 @@ Do not stop for routine implementation choices covered by `SKILL.md` or standard
 How the output was used:
 Changed password-rule.ts, register DTO/tests, added change-password DTO/service/endpoint/tests and auth.md §4 (commits 00f3c8a, a2afa1a, 7dd8061); not pushed: local npm run verify fails on the pre-existing Windows-only common/events suites
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+push it and open the PR, CI will cover the events tests
+
+Proceed with pushing `feature/ACC-08-change-password-forced-change` and opening the PR targeting `develop` titled `ACC-08: Change password and forced password change`.
+
+1. **Override the verify stop condition:**
+   - Because `common/events` (`app-events.service.spec.ts` and `events.spec.ts`) is a documented Windows-only issue in `DECISIONS.md` that passes on Linux CI—and all 960 tests, formatting, lint, typecheck, and build pass—do **not** touch `common/` or `docs/ai/chat-skill/SKILL.md`.
+   - Rely on GitHub Actions CI (Linux) to verify those two suites.
+
+2. **Push and prepare the PR:**
+   - Push `feature/ACC-08-change-password-forced-change` to origin and open the pre-filled PR form targeting `develop` (or create the PR directly if authorized).
+   - Ensure the PR description includes:
+     - **Summary:** `PATCH /api/auth/change-password` (204 response, verifies current password, updates bcrypt hash, clears `mustChangePassword`, revokes all other sessions while keeping current session active), updated 8–72 char password rule across register and change-password, updated `auth.md` §4, and 243 passing `accounts` tests (960 total passing).
+     - **Design decisions:**
+       - Returning `400 VALIDATION_FAILED` on `currentPassword` instead of `401` so the frontend does not trigger a logout/re-auth flow.
+       - Skipping the 8–72 rule on `currentPassword` so legacy and temporary passwords can still be changed.
+       - Conditional compare-and-swap password update on the old hash to prevent race conditions on concurrent password changes.
+     - **Scope notes:** Logout route interaction relies on ACC-06 (covered via guard stand-in test); admin password resets (ACC-16) and `docs/ai/chat-skill/SKILL.md` are out of scope for this ticket.
+     - **Open questions for Kareem:**
+       1. `docs/DECISIONS.md` still lists the 72-char cap as an open proposal—confirming it should be updated to reflect the 17 Nov decision.
+       2. Should the 72-character cap measure JS string length (characters, as currently built) or UTF-8 bytes (given bcrypt's 72-byte truncation limit for non-ASCII input)?
+       3. Confirm `400 VALIDATION_FAILED` for wrong current passwords, and whether failed `change-password` attempts should count toward account lockout.
+       4. Should setting a new password identical to the current password be rejected?
+
+How the output was used:
+Pushed feature/ACC-08-change-password-forced-change and opened GitHub's prefilled PR form "ACC-08: Change password and forced change" into develop (gh CLI not installed; ticket title used); log commit pushed
+================================================

@@ -77,6 +77,10 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     expect(document.paths['/api/posts/{id}/comments']?.post).toBeDefined();
     expect(document.paths['/api/comments/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/comments/{id}']?.delete).toBeDefined();
+    expect(document.paths['/api/tags/{tag}/posts']?.get).toBeDefined();
+    expect(
+      document.paths['/api/tags/{tag}/posts']?.get?.security,
+    ).toBeUndefined();
   });
 
   describe('Authentication & password-change gate', () => {
@@ -1515,6 +1519,254 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       const badLimit = await testApp!
         .http()
         .get(`/api/posts/${postId}/comments?limit=51`);
+      expect(badLimit.status).toBe(400);
+      expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('Tags on create/edit & GET /api/tags/:tag/posts (BLG-08)', () => {
+    it('creates and edits posts with normalised deduplicated tags and filters published posts via GET /api/tags/:tag/posts and GET /api/posts?tag=', async () => {
+      const alice = await loginAs(testApp!.connection, UserRole.USER);
+      const bob = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: alice.id, name: 'Alice Explorer', email: 'alice@example.com' },
+          { id: bob.id, name: 'Bob Nomad', email: 'bob@example.com' },
+        ]),
+      );
+
+      const post1 = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', alice.cookie)
+        .send({
+          title: 'First Travel Post',
+          body: 'Day one notes.',
+          status: PostStatus.PUBLISHED,
+          tags: ['Travel', ' travel ', 'TRAVEL', 'Egypt-2026'],
+        });
+      expect(post1.status).toBe(201);
+      expect(post1.body.tags).toEqual(['travel', 'egypt-2026']);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const draftTagged = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', alice.cookie)
+        .send({
+          title: 'Draft Only Post',
+          body: 'Private notes.',
+          status: PostStatus.DRAFT,
+          tags: ['Travel', 'Draft-Secret'],
+        });
+      expect(draftTagged.status).toBe(201);
+      expect(draftTagged.body.tags).toEqual(['travel', 'draft-secret']);
+
+      const post2 = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', bob.cookie)
+        .send({
+          title: 'Bob Post Before Tag',
+          body: 'To be tagged.',
+          status: PostStatus.PUBLISHED,
+          tags: ['Cairo'],
+        });
+      expect(post2.status).toBe(201);
+      expect(post2.body.tags).toEqual(['cairo']);
+
+      // Editing post2's title only preserves existing tags.
+      const keepTags = await testApp!
+        .http()
+        .patch(`/api/posts/${post2.body._id}`)
+        .set('Cookie', bob.cookie)
+        .send({ title: 'Bob Post Renamed' });
+      expect(keepTags.status).toBe(200);
+      expect(keepTags.body.tags).toEqual(['cairo']);
+
+      // Editing post2's tags replaces and normalises them.
+      const updatedTags = await testApp!
+        .http()
+        .patch(`/api/posts/${post2.body._id}`)
+        .set('Cookie', bob.cookie)
+        .send({ tags: ['  TRAVEL ', 'travel', 'Nile'] });
+      expect(updatedTags.status).toBe(200);
+      expect(updatedTags.body.tags).toEqual(['travel', 'nile']);
+
+      // Hidden published post with 'travel' must stay excluded.
+      const hiddenPost = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', bob.cookie)
+        .send({
+          title: 'Hidden Travel',
+          body: 'Moderated.',
+          status: PostStatus.PUBLISHED,
+          tags: ['travel'],
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hiddenPost.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+
+      // List by different spellings of the same tag via GET /api/tags/:tag/posts.
+      for (const rawTag of ['Travel', 'TRAVEL', '%20travel%20']) {
+        const res = await testApp!.http().get(`/api/tags/${rawTag}/posts`);
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({
+          page: 1,
+          limit: 10,
+          total: 2,
+          totalPages: 1,
+        });
+        expect(res.body.items.map((p: { _id: string }) => p._id)).toEqual([
+          post2.body._id,
+          post1.body._id,
+        ]);
+        expect(res.body.items[0].authorName).toBe('Bob Nomad');
+        expect(res.body.items[1].authorName).toBe('Alice Explorer');
+      }
+
+      // Pagination via GET /api/tags/:tag/posts matches BLG-02 GET /api/posts?tag=...
+      const pagedTag = await testApp!
+        .http()
+        .get('/api/tags/travel/posts?page=2&limit=1');
+      expect(pagedTag.status).toBe(200);
+      expect(pagedTag.body).toMatchObject({
+        page: 2,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(pagedTag.body.items.map((p: { _id: string }) => p._id)).toEqual([
+        post1.body._id,
+      ]);
+
+      const blg02Compat = await testApp!
+        .http()
+        .get('/api/posts?tag=TRAVEL&page=2&limit=1');
+      expect(blg02Compat.status).toBe(200);
+      expect(blg02Compat.body.items.map((p: { _id: string }) => p._id)).toEqual(
+        [post1.body._id],
+      );
+
+      // Tag used only on a draft or completely unknown returns an empty page.
+      const draftTagRes = await testApp!
+        .http()
+        .get('/api/tags/draft-secret/posts');
+      expect(draftTagRes.status).toBe(200);
+      expect(draftTagRes.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const unknownTagRes = await testApp!
+        .http()
+        .get('/api/tags/unknown-tag/posts');
+      expect(unknownTagRes.status).toBe(200);
+      expect(unknownTagRes.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      // Sending tags: [] clears post tags so it no longer matches.
+      const cleared = await testApp!
+        .http()
+        .patch(`/api/posts/${post2.body._id}`)
+        .set('Cookie', bob.cookie)
+        .send({ tags: [] });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.tags).toEqual([]);
+
+      const afterClear = await testApp!.http().get('/api/tags/travel/posts');
+      expect(afterClear.status).toBe(200);
+      expect(afterClear.body.total).toBe(1);
+      expect(afterClear.body.items.map((p: { _id: string }) => p._id)).toEqual([
+        post1.body._id,
+      ]);
+    });
+
+    it('returns 400 VALIDATION_FAILED for invalid tag payloads, tag params, and pagination queries', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({ title: 'Valid', body: 'Body', status: PostStatus.DRAFT });
+
+      for (const badTags of [
+        ['t1', 't2', 't3', 't4', 't5', 't6'],
+        ['a'.repeat(31)],
+        ['   '],
+        [''],
+        null,
+        'egypt',
+        [123],
+      ]) {
+        const createBad = await testApp!
+          .http()
+          .post('/api/posts')
+          .set('Cookie', author.cookie)
+          .send({
+            title: 'Valid',
+            body: 'Body',
+            status: PostStatus.DRAFT,
+            tags: badTags,
+          });
+        expect(createBad.status).toBe(400);
+        expect(createBad.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          createBad.body.details.some(
+            (d: { field: string }) => d.field === 'tags',
+          ),
+        ).toBe(true);
+
+        const patchBad = await testApp!
+          .http()
+          .patch(`/api/posts/${created.body._id}`)
+          .set('Cookie', author.cookie)
+          .send({ tags: badTags });
+        expect(patchBad.status).toBe(400);
+        expect(patchBad.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          patchBad.body.details.some(
+            (d: { field: string }) => d.field === 'tags',
+          ),
+        ).toBe(true);
+      }
+
+      const blankTagParam = await testApp!.http().get('/api/tags/%20%20/posts');
+      expect(blankTagParam.status).toBe(400);
+      expect(blankTagParam.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(
+        blankTagParam.body.details.some(
+          (d: { field: string }) => d.field === 'tag',
+        ),
+      ).toBe(true);
+
+      const longTagParam = await testApp!
+        .http()
+        .get(`/api/tags/${'a'.repeat(31)}/posts`);
+      expect(longTagParam.status).toBe(400);
+      expect(longTagParam.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badPage = await testApp!
+        .http()
+        .get('/api/tags/travel/posts?page=0');
+      expect(badPage.status).toBe(400);
+      expect(badPage.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badLimit = await testApp!
+        .http()
+        .get('/api/tags/travel/posts?limit=51');
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
     });

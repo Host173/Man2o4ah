@@ -7,6 +7,7 @@ import {
   Post,
   Req,
   Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -106,8 +107,10 @@ export class AuthController {
       );
       setAccessCookie(res, accessToken);
     } catch (error) {
-      // The headers stay on the error response, so the browser drops dead cookies.
-      clearAuthCookies(res);
+      // Only a dead session (401 SESSION_EXPIRED) clears the cookies; the
+      // headers stay on the error response, so the browser drops them. A 500
+      // (e.g. the database briefly down) keeps them so the user can retry.
+      if (error instanceof UnauthorizedException) clearAuthCookies(res);
       throw error;
     }
   }

@@ -158,3 +158,17 @@ Also, please check and confirm whether you have added the prompts I gave you int
 How the output was used:
 Started a local MongoDB and the Nest dev server on port 4000, confirmed Swagger and cookie auth, and verified the itinerary endpoints end to end; only `ai-prompts/mokhtar.txt` changed.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+MONGODB_URI=<removed>
+PORT=4000
+FRONTEND_URL=http://localhost:3000
+PLATFORM_CURRENCY=USD add this to the .env
+
+How the output was used:
+Pointed `backend/.env` at the team Atlas cluster and restarted the dev server on it; no source files changed.
+================================================

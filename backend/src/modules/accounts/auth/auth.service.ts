@@ -16,7 +16,11 @@ import type { RegisterDto } from '../dto/register.dto.js';
 import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
-import { REFRESH_TOKEN_BYTES, SESSION_IDLE_MS } from './auth.constants.js';
+import {
+  REFRESH_TOKEN_BYTES,
+  REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
+  SESSION_IDLE_MS,
+} from './auth.constants.js';
 import type { AccessTokenPayload } from './auth.types.js';
 
 /** bcrypt cost factor (auth.md §4). bcrypt adds a random salt to every hash. */
@@ -130,8 +134,9 @@ export class AuthService {
   }
 
   /**
-   * ACC-06, ACC-19 (auth.md §3): `POST /api/auth/refresh`. Finds the live
-   * session (`expiresAt > now`) holding this refresh token's hash, slides its
+   * ACC-06, ACC-19 (auth.md §2, §3): `POST /api/auth/refresh`. Finds the live
+   * session (`expiresAt > now`, created less than 7 days ago) holding this
+   * refresh token's hash, slides its
    * activity to now + 30 minutes and returns a new access token. The refresh
    * token is not rotated, so parallel refreshes all succeed. A missing,
    * unknown, idle-expired or revoked token, or an account that is gone or no
@@ -146,6 +151,9 @@ export class AuthService {
         {
           refreshTokenHash: hashRefreshToken(refreshToken),
           expiresAt: { $gt: new Date(now) },
+          // The 7-day absolute limit is enforced here too, not only by the
+          // cookie's maxAge, so a copied token can't be kept alive forever.
+          createdAt: { $gt: new Date(now - REFRESH_TOKEN_COOKIE_MAX_AGE_MS) },
         },
         { userId: 1 },
       )

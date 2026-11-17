@@ -170,10 +170,7 @@ export class BlogService {
       );
       return toPage(
         items.map((post) =>
-          this.toPublishedView(
-            post,
-            profiles.get(post.authorId.toHexString()),
-          ),
+          this.toPublishedView(post, profiles.get(post.authorId.toHexString())),
         ),
         total,
         page,

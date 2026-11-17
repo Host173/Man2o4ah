@@ -9200,3 +9200,32 @@ Instead, proceed with pushing `feature/ACC-09-profile` and preparing the PR targ
 How the output was used:
 Pushed feature/ACC-09-profile (no files outside accounts changed) and opened GitHub's prefilled PR form "ACC-09: Profile" into develop (gh CLI not installed); log commit pushed
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+GitHub Actions CI on PR #140 (`feature/ACC-09-profile`) failed with **84/85 test files (935/936 tests) passing** and **1 test failing**—the `blog.service.spec.ts` skeleton test (`Cannot read properties of undefined (reading 'Country')`), because `blog.service.spec.ts` manually mocks `AccountsModule`'s Mongoose models without the 5 `ReferenceDataModule` models.
+
+Resolve this cleanly **without violating any rules from the original prompt or touching anything outside `accounts/`**:
+
+1. **Strict Scope & Boundary Rules:**
+   - Do **NOT** edit `backend/src/modules/blog/blog.service.spec.ts` or any file outside `backend/src/modules/accounts/` (and `docs/` only if required by existing prompt rules).
+   - Do **NOT** change any shared contracts, error codes, events, ports, or frozen data models.
+   - Keep TDD commit discipline and append to the prompt log as required by the original prompt.
+
+2. **Fix the Dependency Coupling Inside `accounts/`:**
+   - Instead of importing the full `ReferenceDataModule` into `AccountsModule` (which pulls all 5 Mongoose model tokens—`Country`, `City`, `Airport`, `Attraction`, `Currency`—into any test module like `blog.service.spec.ts` that imports `AccountsModule`), decouple `ProfileService` inside `accounts/` so `AccountsModule` no longer requires those 5 Mongoose model tokens at module initialization—for example, by injecting `ReferenceDataService` via an optional/port token or lightweight provider wrapper inside `accounts/` (while still resolving `ReferenceDataService` at runtime when `ReferenceDataModule` is registered in the app).
+   - Ensure `ProfileService`, `profile.api.spec.ts` (all 23 profile tests), and all `accounts` tests continue to validate `preferredCurrency` identically at runtime and in tests.
+
+3. **Verify, Push, and Update/Create the PR Automatically:**
+   - Run `npm run verify` (or the accounts + blog test suites plus format, lint, typecheck, and build—ignoring any known Windows-only `common/events` load issue if it passes in isolation) to confirm both `accounts` and `blog.service.spec.ts` pass (936/936).
+   - Commit the fix (plus prompt log update) and push to `feature/ACC-09-profile` so PR #140 updates automatically (and if no open PR exists on the pushed branch, automatically create the PR targeting `develop` titled `ACC-09: Profile`).
+   - Update the PR description to remove the `blog.service.spec.ts` blocker note and reflect that all 936 tests now pass without touching `blog/`.
+
+How the output was used:
+ProfileService looks up ReferenceDataService through ModuleRef and AccountsModule no longer imports ReferenceDataModule; committed 1e467ea (wiring test) and 5eae2ce (fix), npm run verify passed (937/937), pushed to PR #140; new PR description copied to clipboard for pasting (gh CLI not installed)
+================================================

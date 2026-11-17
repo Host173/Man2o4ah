@@ -13,6 +13,7 @@ import { AuthService, hashRefreshToken } from './auth.service.js';
 
 const MINUTE = 60_000;
 const IDLE = 30 * MINUTE;
+const WEEK = 7 * 24 * 60 * MINUTE;
 const T0 = new Date('2026-11-20T10:00:00.000Z').getTime();
 
 /** The error code a rejected promise carries. */
@@ -97,6 +98,47 @@ describe('AuthService refresh and logout (integration, ACC-06, ACC-19)', () => {
       const session = await sessions.findOne().lean();
       expect(session?.lastActivityAt).toEqual(new Date(T0 + 20 * MINUTE));
       expect(session?.expiresAt).toEqual(new Date(T0 + 20 * MINUTE + IDLE));
+    });
+  });
+
+  describe('refresh: 7-day absolute lifetime (auth.md §2)', () => {
+    /** Keeps the idle window open so only the absolute limit is tested. */
+    const keepIdleWindowOpen = (at: number) =>
+      sessions.updateMany({}, { $set: { expiresAt: new Date(at + IDLE) } });
+
+    it('works 1 ms before 7 days after login, fails exactly at 7 days', async () => {
+      const { refreshToken } = await loginAt();
+
+      vi.setSystemTime(T0 + WEEK - 1);
+      await keepIdleWindowOpen(T0 + WEEK - 1);
+      await expect(auth.refresh(refreshToken)).resolves.toEqual(
+        expect.any(String),
+      );
+
+      // The refresh above slid the idle window, but the session's age keeps counting.
+      vi.setSystemTime(T0 + WEEK);
+      expect(await codeOf(auth.refresh(refreshToken))).toBe(
+        ErrorCode.SessionExpired,
+      );
+    });
+
+    it('cannot be stretched past 7 days by refreshing every 29 minutes', async () => {
+      const { refreshToken } = await loginAt();
+
+      // Refreshing keeps the session alive while it is younger than 7 days...
+      vi.setSystemTime(T0 + 29 * MINUTE);
+      await auth.refresh(refreshToken);
+      vi.setSystemTime(T0 + WEEK - 29 * MINUTE);
+      await keepIdleWindowOpen(T0 + WEEK - 29 * MINUTE);
+      await auth.refresh(refreshToken);
+      vi.setSystemTime(T0 + WEEK - 1);
+      await auth.refresh(refreshToken);
+
+      // ...and fails after, even though the last refresh was a minute ago.
+      vi.setSystemTime(T0 + WEEK + MINUTE);
+      expect(await codeOf(auth.refresh(refreshToken))).toBe(
+        ErrorCode.SessionExpired,
+      );
     });
   });
 

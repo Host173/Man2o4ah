@@ -183,3 +183,15 @@ this api takes loading so long and it doesnt execcute
 How the output was used:
 Fixed the shared pagination query DTO so Swagger exposes `page` and `limit` as numbers instead of objects, confirmed GET /api/itineraries returns 200, and committed b26f24c.
 ================================================
+
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+did you make tests in a test file for api as project rules or not ?
+
+How the output was used:
+Confirmed the co-located itineraries.api.spec.ts and itineraries.service.spec.ts files. Acting on the PR review afterwards, replaced the NotImplementedExceptions in FakeItinerariesService with in-memory owner-scoped create/list/open/edit/delete, added 	est/fakes/itineraries.fake.spec.ts, attached the Swagger screenshot, and committed f4538ae.
+================================================

@@ -1,0 +1,160 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import type { Types } from 'mongoose';
+import type { Model } from 'mongoose';
+import { ErrorCode } from '../../common/errors/error-codes.js';
+import type { AuthUser } from '../accounts/auth/auth.types.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
+import type { CreateAirlineDto } from './dto/create-airline.dto.js';
+import type { UpdateAirlineDto } from './dto/update-airline.dto.js';
+import type { AirlineView, CancellationTierView } from './flights.types.js';
+import { Airline } from './schemas/airline.schema.js';
+
+type AirlineRecord = Airline & {
+  _id: Types.ObjectId;
+  logo?: { _id: Types.ObjectId; key: string };
+};
+
+/** Airline profile workflows (FLT-01); deactivation is also called by admin (ACC-15). */
+@Injectable()
+export class AirlinesService {
+  constructor(
+    @InjectModel(Airline.name) private readonly airlineModel: Model<Airline>,
+    private readonly storage: StorageService,
+  ) {}
+
+  async create(dto: CreateAirlineDto): Promise<AirlineView> {
+    const airline = await this.airlineModel.create({
+      name: dto.name.trim(),
+      code: dto.code.trim().toUpperCase(),
+    });
+    return this.toView(airline.toObject() as AirlineRecord);
+  }
+
+  async getAirline(airlineId: string): Promise<AirlineView | null> {
+    const airline = await this.airlineModel.findById(airlineId).lean().exec();
+    return airline ? this.toView(airline as AirlineRecord) : null;
+  }
+
+  async update(
+    airlineId: string,
+    dto: UpdateAirlineDto,
+    user: AuthUser,
+  ): Promise<AirlineView> {
+    await this.findOwned(airlineId, user.providerId);
+    const updates = {
+      ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+      ...(dto.code !== undefined
+        ? { code: dto.code.trim().toUpperCase() }
+        : {}),
+    };
+    const airline = await this.airlineModel
+      .findByIdAndUpdate(
+        airlineId,
+        { $set: updates },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!airline) throw this.notFound();
+    return this.toView(airline as AirlineRecord);
+  }
+
+  async updateLogo(
+    airlineId: string,
+    file: UploadedImage | undefined,
+    user: AuthUser,
+  ): Promise<AirlineView> {
+    const current = await this.findOwned(airlineId, user.providerId);
+    if (!file) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'A logo file is required',
+        details: [{ field: 'file', message: 'is required' }],
+      });
+    }
+
+    const stored = await this.storage.save(file);
+    const airline = await this.airlineModel
+      .findByIdAndUpdate(
+        airlineId,
+        { $set: { logo: { _id: stored._id, key: stored.key } } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!airline) {
+      await this.storage.delete(stored.key);
+      throw this.notFound();
+    }
+    if (current.logo) await this.storage.delete(current.logo.key);
+    return this.toView(airline as AirlineRecord);
+  }
+
+  async setAirlineActive(
+    airlineId: string,
+    isActive: boolean,
+  ): Promise<AirlineView> {
+    const airline = await this.airlineModel
+      .findByIdAndUpdate(
+        airlineId,
+        { $set: { isActive } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!airline) throw this.notFound();
+    return this.toView(airline as AirlineRecord);
+  }
+
+  private async findOwned(
+    airlineId: string,
+    providerId: string | undefined,
+  ): Promise<AirlineRecord> {
+    const airline = await this.airlineModel.findById(airlineId).lean().exec();
+    if (!airline || !providerId || airline._id.toString() !== providerId) {
+      throw this.notFound();
+    }
+    return airline as AirlineRecord;
+  }
+
+  private toView(airline: AirlineRecord): AirlineView {
+    const cancellationTiers: CancellationTierView[] =
+      airline.cancellationPolicy.tiers.map((tier) => ({
+        daysBefore: tier.daysBefore,
+        refundPercent: tier.refundPercent,
+      }));
+    return {
+      id: airline._id.toString(),
+      name: airline.name,
+      code: airline.code,
+      isActive: airline.isActive,
+      ...(airline.logo
+        ? {
+            logo: {
+              id: airline.logo._id.toString(),
+              url: this.storage.urlOf(airline.logo.key),
+            },
+          }
+        : {}),
+      baggagePolicy: {
+        extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor,
+        maxExtraBagsPerPassenger:
+          airline.baggagePolicy.maxExtraBagsPerPassenger,
+      },
+      cancellationTiers,
+    };
+  }
+
+  private notFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Airline not found',
+    });
+  }
+}

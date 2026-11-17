@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { AirlinesService } from './airlines.service.js';
 import { FlightsService } from './flights.service.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
@@ -10,6 +11,11 @@ import { Flight } from './schemas/flight.schema.js';
 describe('FlightsService (contract stub)', () => {
   let moduleRef: TestingModule;
   let service: FlightsService;
+
+  const airlineProfiles = {
+    getAirline: vi.fn(),
+    setAirlineActive: vi.fn(),
+  };
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
@@ -20,8 +26,10 @@ describe('FlightsService (contract stub)', () => {
         { provide: ReferenceDataService, useValue: {} },
       ],
     }).compile();
+
     service = moduleRef.get(FlightsService);
   });
+
   afterAll(() => moduleRef.close());
 
   const search = {
@@ -36,6 +44,16 @@ describe('FlightsService (contract stub)', () => {
     limit: 10,
   };
 
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        FlightsService,
+        { provide: AirlinesService, useValue: airlineProfiles },
+      ],
+    }).compile();
+    service = moduleRef.get(FlightsService);
+  });
+
   // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
   it.each([
     ['getFlightsForBooking', () => service.getFlightsForBooking(['f1'])],
@@ -45,9 +63,19 @@ describe('FlightsService (contract stub)', () => {
       'search (round trip)',
       () => service.search({ ...search, returnDate: '2026-11-27' }),
     ],
-    ['getAirline', () => service.getAirline('a1')],
-    ['setAirlineActive', () => service.setAirlineActive('a1', false)],
   ])('%s throws NotImplementedException', (_name, call) => {
     expect(call).toThrow(NotImplementedException);
+  });
+
+  it('delegates public airline operations to the profile service', async () => {
+    airlineProfiles.getAirline.mockResolvedValue(null);
+    airlineProfiles.setAirlineActive.mockResolvedValue({ id: 'a1' });
+
+    await expect(service.getAirline('a1')).resolves.toBeNull();
+    await expect(service.setAirlineActive('a1', false)).resolves.toMatchObject({
+      id: 'a1',
+    });
+    expect(airlineProfiles.getAirline).toHaveBeenCalledWith('a1');
+    expect(airlineProfiles.setAirlineActive).toHaveBeenCalledWith('a1', false);
   });
 });

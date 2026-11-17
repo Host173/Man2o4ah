@@ -15,6 +15,7 @@ import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import type { AirportView } from '../reference-data/reference-data.types.js';
 import { convertFlightTimes } from './flight-time.js';
+import { AirlinesService } from './airlines.service.js';
 import type {
   AirlineView,
   BookabilityResult,
@@ -47,8 +48,14 @@ type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
 @Injectable()
 export class FlightsService {
   constructor(
-    @InjectModel(Flight.name) private readonly flightModel: Model<FlightRecord>,
-    @InjectModel(Airline.name) private readonly airlineModel: Model<Airline>,
+    private readonly airlines: AirlinesService,
+
+    @InjectModel(Flight.name)
+    private readonly flightModel: Model<FlightRecord>,
+
+    @InjectModel(Airline.name)
+    private readonly airlineModel: Model<Airline>,
+
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
   ) {}
@@ -162,6 +169,8 @@ export class FlightsService {
     return toPage(items, total, query.page, query.limit);
   }
 
+
+
   /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
@@ -210,22 +219,17 @@ export class FlightsService {
     throw new NotImplementedException('search: implemented in FLT-11');
   }
 
-  /** One airline by ID, or `null` (ACC-13). Implemented in FLT-01. */
+  /** One airline by ID, or `null` (FLT-01, ACC-13). */
   getAirline(airlineId: string): Promise<AirlineView | null> {
-    void airlineId;
-    throw new NotImplementedException('getAirline: implemented in FLT-01');
+    return this.airlines.getAirline(airlineId);
   }
 
   /**
    * Activate or deactivate an airline (ACC-15) and return it. Idempotent.
-   * Throws 404 `NOT_FOUND` if it doesn't exist. Implemented in FLT-01.
+   * Throws 404 `NOT_FOUND` if it doesn't exist. Admin calls this via ACC-15.
    */
   setAirlineActive(airlineId: string, isActive: boolean): Promise<AirlineView> {
-    void airlineId;
-    void isActive;
-    throw new NotImplementedException(
-      'setAirlineActive: implemented in FLT-01',
-    );
+    return this.airlines.setAirlineActive(airlineId, isActive);
   }
 
   private objectId(id: string): Types.ObjectId {

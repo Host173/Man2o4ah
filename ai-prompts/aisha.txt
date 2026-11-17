@@ -9163,3 +9163,26 @@ STOP and notify Aisha if you hit: `#25 (ACC-04)` missing/unmerged, `develop` not
 How the output was used:
 Added login lockout with tests in backend/src/modules/accounts/auth; committed 654f73b (tests) and a1a6d21 (feature), npm run verify passed, pushed feature/ACC-05-login-lockout for the PR "ACC-05: Login lockout" into develop
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-05
+
+Prompt:
+please make suer that the env is this: 
+
+MONGODB_URI=<removed>
+PORT=4000
+FRONTEND_URL=http://localhost:3000
+PLATFORM_CURRENCY=USD
+
+along with these: [9:33 PM, 11/15/2026] Kareem Sayed: JWT_ACCESS_SECRET=<paste the generated string here>
+[9:33 PM, 11/15/2026] Kareem Sayed: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+and make sure that the agents example md is up to date
+
+How the output was used:
+Created the gitignored backend/.env (not committed) with a generated JWT_ACCESS_SECRET; confirmed AGENTS.example.md and CLAUDE.md are both template 2026-11-15; log committed
+================================================

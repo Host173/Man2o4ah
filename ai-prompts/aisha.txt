@@ -9159,3 +9159,44 @@ Do not stop for routine implementation choices covered by `SKILL.md` or standard
 How the output was used:
 Added GET/PATCH /api/users/me with API tests in backend/src/modules/accounts; committed 92f2a12 (tests) and 192e14f (feature); not pushed: blog.service.spec.ts skeleton test fails and needs a change in the blog module
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+Do NOT modify `backend/src/modules/blog/blog.service.spec.ts` or any file outside `accounts/`, so we strictly respect module ownership and scope boundaries.
+
+Instead, proceed with pushing `feature/ACC-09-profile` and preparing the PR targeting `develop` titled `ACC-09: Profile` (as a Draft PR if CI requires `blog.service.spec.ts` to pass before review, or ready for review with the blocker noted):
+
+1. **Keep scope strictly inside `accounts/`:**
+   - Leave `blog.service.spec.ts` untouched.
+   - Ignore the `common/events` parallel-load crash since those 6/6 tests pass in isolation and are a known Windows issue unrelated to ACC-09.
+
+2. **Push and open the PR form:**
+   - Push `feature/ACC-09-profile` to origin and open the pre-filled PR form targeting `develop` titled `ACC-09: Profile`.
+   - Include the following in the PR description:
+     - **Summary:** View/edit profile endpoints (`GET /api/users/me` or profile routes in `UsersController`, `ProfileService`, `UpdateProfileDto`, `ProfileDto`), `ReferenceDataModule` import (permitted per `data-model.md §6`), and 23/23 new profile API tests passing (929/930 overall; formatting, lint, typecheck, and build all pass).
+     - **Blocker / Cross-Module Test Note (for Kareem & `blog` owner):**
+       - `backend/src/modules/blog/blog.service.spec.ts` (lines 27–50) fails with `Cannot read properties of undefined (reading 'Country')` because `AccountsModule` now imports `ReferenceDataModule`, and `blog.service.spec.ts` manually mocks `AccountsModule`'s transitive model tokens without overriding the 5 reference-data models (`Country`, `City`, `Airport`, `Attraction`, `Currency`).
+       - Per module ownership rules, `blog/` was intentionally not edited in this PR. Please confirm whether I should commit the 5-line model-token override in `blog.service.spec.ts` here, or if the `blog` module owner will apply it.
+     - **Design decisions:**
+       - Accessible to any logged-in role.
+       - Atomic all-or-nothing validation and update (`preferredCurrency` checked before write; single schema-validated update).
+       - Unsupported currency returns `400 UNSUPPORTED_CURRENCY` with `details` targeting `preferredCurrency` (no new error codes).
+       - Reuses `user.schema.ts` phone regex; rejects extra/read-only fields (`email`, `role`, `status`) with `400`.
+       - `name: null` and `preferredCurrency: null` are rejected; `phone: null` clears the phone number.
+       - Swagger tagged `users` with summaries prefixed `ACC-09`.
+     - **Dependencies & Merge Notes:**
+       - `ReferenceDataService.getCurrency` on `develop` currently throws not-implemented until `GEN-12` (#16) lands (`PATCH` with `preferredCurrency` returns 501 at runtime until then; mocked in tests).
+       - Expect a minor merge conflict in `auth.service.ts` once `ACC-08` merges into `develop`.
+     - **Open questions for Kareem:**
+       1. Approve committing the 5-line model override in `blog.service.spec.ts`, or have the `blog` owner apply it?
+       2. Confirm `phone: null` clearing the stored phone number and whether stricter phone validation is needed beyond the current schema pattern.
+       3. Confirm §5.8 design calls (including `USD` as default currency) from `PLT-04`.
+
+How the output was used:
+Pushed feature/ACC-09-profile (no files outside accounts changed) and opened GitHub's prefilled PR form "ACC-09: Profile" into develop (gh CLI not installed); log commit pushed
+================================================

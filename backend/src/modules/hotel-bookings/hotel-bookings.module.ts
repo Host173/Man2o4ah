@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module.js';
+import { PaymentsModule } from '../payments/payments.module.js';
 import { HotelBookingsService } from './hotel-bookings.service.js';
 import { HotelHoldService } from './hotel-hold.service.js';
+import { HotelPayableBooking } from './hotel-payable-booking.js';
 import {
   HotelReservation,
   HotelReservationSchema,
@@ -17,8 +19,10 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
     ]),
     // hotel-bookings may call hotels (data-model 6.1).
     HotelsModule,
+    // Registers HotelPayableBooking with payments' registry (PAY-01).
+    PaymentsModule,
   ],
-  providers: [HotelBookingsService, HotelHoldService],
+  providers: [HotelBookingsService, HotelHoldService, HotelPayableBooking],
   exports: [HotelBookingsService],
 })
 export class HotelBookingsModule {}

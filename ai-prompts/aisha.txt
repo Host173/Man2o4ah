@@ -9089,3 +9089,78 @@ please push if the ACC is complete and verified and safe and fits within the sco
 How the output was used:
 Ran npm run verify (passed) and pre-push checks, pushed feature/ACC-04-login-current-user, and opened GitHub's prefilled PR form "ACC-04: Login and current user" into develop (gh CLI not installed); log commit pushed
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+# AI AGENT PROMPT: ACC-08
+
+## A. Context
+- **You are:** Aisha Al Rawahi, owner of Package 2 · Accounts & Auth (`accounts` module) in `Host173/Man2o4ah` (§2.1).
+- **Ticket:** ACC-08: Change password and forced change (#28) (§15.3).
+- **Branch:** `feature/ACC-08-change-password-forced-change` (§15.3).
+- **PR Target:** Always `develop` (never `main`) (§3.18 rules 1–2, 11; §14.3).
+- **PR Title:** `ACC-08: Change password and forced change` (§15.3).
+- **First action:** Read your agent file, the README "Team rules", `docs/ai/skills/travel-platform/` (including `references/auth.md` if present), and `SKILL.md` (starting with §0), applying `chat-instructions.txt` guidance (rely on `SKILL.md` for project facts, follow conflict order §17 > §3 > §5 > everything else, stick to NestJS 12 ESM, Mongoose 9, MongoDB Atlas, Vitest, Next.js 16 App Router, Stripe test mode, and FXRatesAPI) (§0.1–§0.2, §1, §3.15). Merged repo code and the coding skill win over anything in this prompt.
+
+## B. Preconditions
+1. Run `git checkout develop && git pull origin develop` first so you pull the latest `develop` (never `main`), then create/checkout `feature/ACC-08-change-password-forced-change` from `develop` (§3.18 rules 1–2, 12; §14.1).
+2. Check the repo to confirm `#25 (ACC-04)` is merged and its code is present (§15.3).
+3. Verify live repo state rather than relying on the 2026-11-11 snapshot in §2.2 (§0.2, §2.2). If `develop` isn't prepared yet or `#25 (ACC-04)` is missing, STOP and notify Aisha (§3.18 rule 12).
+
+## C. Acceptance Criteria
+- [ ] Allow a logged-in user to change their password (`PATCH /api/auth/change-password`) by providing the current password and a new password matching the updated password rule, storing only a salted hash, clearing `mustChangePassword`, and deleting the user's other sessions (§5.3.2, §6.1, §7.3–§7.4, ACC-08, ACC-07a, GEN-13).
+- [ ] While `mustChangePassword` is `true`, allow only `GET /api/auth/me`, `PATCH /api/auth/change-password`, and `POST /api/auth/logout`, rejecting other authenticated requests with `403` `PASSWORD_CHANGE_REQUIRED` (§7.4–§7.5, §10.3, ACC-07a).
+- [ ] Apply the team leader's 17 Nov (#126) 8–72 character password rule (`.{8,72}`, at least one letter and one digit) and updated `PASSWORD_RULE_MESSAGE` in the shared password rule module (`accounts/auth/password-rule.ts`—locate exact path in the repo) across registration (`POST /api/auth/register`), password change, forced change, and admin resets, and update `docs/ai/skills/travel-platform/references/auth.md` §4 to match (§5.3.2, §7.4, ACC-01, ACC-07a, ACC-08).
+- [ ] Include boundary tests for 72 characters accepted and 73 characters rejected with `VALIDATION_FAILED` at the DTO level and at the API level for both `POST /api/auth/register` and the change-password endpoint (§10.3, §11.5, §13.3, §13.6).
+
+Exact requirement texts (§17):
+- **ACC-08:** "[M] **ACC-08** (Any logged-in user) The system shall allow a logged-in user to change their password by entering the current password and a new one that meets the rules. | deps: ACC-04 | Low" (§17.1).
+- **ACC-07a:** "[M] **ACC-07a** (Admin) The system shall allow an admin to reset a user's or moderator's password to a temporary password. The account must set a new password that meets the password rules at its next login. | deps: ACC-04, ACC-14 | Low" (§17.1).
+
+## D. Decisions That Apply (with Why)
+- **Layered modular monolith (business rules in services, not controllers):** Keeps logic testable and reusable outside HTTP controllers (§3.1, §11.4).
+- **One owner per collection & no cross-module `populate`:** Isolates changes per module owner and prevents schema coupling or import cycles (§3.3, §5.1.1).
+- **No general repository layer (Mongoose model in service):** Avoids extra boilerplate files over standard NestJS Mongoose model injection (§3.4, §11.4).
+- **72-character password cap (17 Nov, #126):** bcrypt ignores input past 72 bytes, so capping at 72 characters prevents distinct long passwords sharing their first 72 bytes from behaving identically.
+- **Deleting other sessions on password change:** Revokes older sessions immediately after a credential change (§5.3.2, §7.3–§7.4).
+- **Required `typecheck` gate alongside tests/lint/build:** Vitest strips types without type-checking, so `tsc --noEmit` catches type errors (§3.10, §14.4).
+- **Consistent error codes (`common/errors/error-codes.ts`):** Gives clients and tests stable error codes (`PASSWORD_CHANGE_REQUIRED`, `VALIDATION_FAILED`) rather than relying on message wording (§3.17, §10.3).
+- **Per-member prompt log (`ai-prompts/aisha.txt`):** Maintains course prompt-log traceability without merge conflicts (§3.16, §14.5).
+- **Branch from latest `develop`, PRs always target `develop` (never `main`), and merge commits:** Keeps `main` for milestone releases, preserves commit history, and avoids force-push risks (§3.18 rules 1–3, 7, 11; §14.1, §14.3).
+
+## E. Scope
+- **May change:** `accounts` module files (`backend/src/modules/accounts/` and its tests, including the shared password rule file and register/change-password tests) and `docs/ai/skills/travel-platform/references/auth.md` §4 as specified for this ticket (§4.3, §6.1, §7.3–§7.5, §11.4).
+- **Must NOT change without Aisha getting Kareem's approval:** Other modules, `common/`, data models, ports, events, error codes, auth cookies, `DESIGN.md`, or new packages (§3.2, §3.3, §3.17, §5.10).
+- **Downstream consumers:**
+  - `#96 (ACC-07)` (Forgot password, bonus/backlog) and `#31 (ACC-16)` (Account administration logic, end-to-end once merged): consume password rules, `mustChangePassword`, and account/session behaviors (§15.3).
+
+## F. Workflow
+Proceed directly through pulling updates, exploration, planning, tests, implementation, verification, and self-review without pausing for extra approval unless a STOP condition or safety/completeness issue occurs:
+1. Pull latest `develop` first, then explore the repository and check what already exists for `accounts`, the password rule helper, `#25 (ACC-04)`, `CTR-01`, `PLT-04`, `PLT-05`, and `docs/ai/skills/travel-platform/references/auth.md` (§4.3, §14.1).
+2. Form a concise implementation plan aligned with §11.4 ("Module recipe"), §11.5 ("Validation and DTO rules"), §5.3.2, §6.1, §7.3–§7.5, and the ticket's 72-character rule and doc update.
+3. Implement the shared password rule update (8–72 chars + letter & digit + updated `PASSWORD_RULE_MESSAGE`), `PATCH /api/auth/change-password` and session revocation, forced-change guard enforcement, `docs/ai/skills/travel-platform/references/auth.md` §4 update, and tests at the ticket's levels—**Unit** and **API (blocked endpoints while change is required)**, including **72 vs. 73 character boundary tests** at the DTO level and API level for both `POST /api/auth/register` and the change-password endpoint—using §13.3–§13.6 techniques (TDD is not required for this ticket, so tests may be committed in the PR alongside the implementation) (§13.1–§13.2, §15.3).
+4. Run `npm run verify` in `backend/` (§11.1, §14.4).
+5. Make small Conventional Commits with scope `accounts` (or `docs` for skill doc updates) and requirement ID `ACC-08` / `ACC-07a` (§14.2).
+6. Add or verify Swagger `@ApiTags` and `@ApiOperation` summary on `PATCH /api/auth/change-password` (§11.12).
+7. Walk through the §14.6 Definition of Done (backend items) and review your diff, tests, and prompt log entry.
+8. **Conditional Push & PR:**
+   - **If safe and complete** (preconditions met, all acceptance criteria and §14.6 checks satisfied, `npm run verify` passes with zero errors/warnings silenced, no secrets/unwanted files staged, and no STOP conditions triggered): push `feature/ACC-08-change-password-forced-change` and open a PR targeting `develop` (never `main`) with title `ACC-08: Change password and forced change` and a description following `.github/pull_request_template.md` (requirement IDs and summary, design decisions and why, how it was tested, AI usage, checklist, and any contract changes at the top) (§3.18 rules 1–2, 5, 10; §14.3–§14.4).
+   - **If NOT safe and complete** (any precondition/check/verification fails, a STOP condition applies, or anything is incomplete/uncertain): do NOT push or open a PR; STOP and notify Aisha clearly with what failed or needs attention (§0.2, §3.18 rule 10, §14.4).
+9. Deliver the final report: files changed, test results, push/PR status (or reason stopped), PR-ready "design decisions and why", contract changes to call out, and open questions for Kareem.
+
+## G. Prompt-Log Instruction
+Append one entry to `ai-prompts/aisha.txt` per §14.5 (`Date`, `Student: Aisha`, `Tool`, `Related Requirement: ACC-08`, `Prompt` copied verbatim with any attached file content unchanged, and one-line `How the output was used`), replacing any secrets/tokens/connection strings with `<removed>` and never editing earlier entries.
+
+## H. STOP Conditions
+Do not stop for routine implementation choices covered by `SKILL.md` or standard NestJS/Mongoose/DTO mechanics within `accounts/`. Only STOP and notify Aisha if you hit a real blocker: `#25 (ACC-04)` missing/unmerged, `develop` not prepared, a change requiring another module or a shared contract (`common/`, data model, ports, events, error codes, auth cookies, `DESIGN.md`, new packages), an undecided/uncovered rule affecting data/money/status, or a CI gate that can only pass by silencing it (§0.2, §3.18 rule 12, §14.4).
+
+## I. Open Questions for Kareem
+- Does the 72-character password limit apply strictly to character count (`length <= 72` / `.{8,72}`) as stated in the ticket, or byte length in UTF-8, and should any other password-related rules in `accounts` change?
+
+How the output was used:
+Changed password-rule.ts, register DTO/tests, added change-password DTO/service/endpoint/tests and auth.md §4 (commits 00f3c8a, a2afa1a, 7dd8061); not pushed: local npm run verify fails on the pre-existing Windows-only common/events suites
+================================================

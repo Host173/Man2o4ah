@@ -27,3 +27,16 @@ ok start impleming
 How the output was used:
 Implemented room-night-inventory.ts and shared date rules; updated Hotels contract tests/types and fakes, added unit/integration/concurrency tests, and appended ai-prompts/pierre.txt on feature/INV-02-roomnightinventory; backend npm run verify passed with 1104 tests; prior HTL-01 prompt-log changes preserved in stash b7bd4eacf2e48e5cc4cad21854c10da86b49017c; no commit or push.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+make a pr
+
+How the output was used:
+Committed INV-02 tests first as f7aa043 and implementation as 89fb0b6, pushed feature/INV-02-roomnightinventory, opened PR #152 targeting develop with the repository template and Kareem requested as reviewer, and appended ai-prompts/pierre.txt; backend build passed and the existing full verification passed 1104 tests.
+================================================

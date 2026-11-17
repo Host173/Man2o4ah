@@ -101,3 +101,44 @@ Before making any edits, thoroughly read and inspect:
 How the output was used:
 Added the CTR-06 prompt-log entry and corrected the PR #118 description after review; no source changes.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+You are tasked with implementing GitHub Issue #65: "ITN-01: Create and list itineraries". 
+
+Please follow all project conventions, architecture guidelines, and standards.
+
+### 1. Initial Research & Review (Do this first)
+* Read the project skill guidelines located at `docs/ai/skills/travel-platform/` to understand the architecture, patterns, error handling, and coding standards.
+* Inspect the repository structure, existing modules, database models, and API routing conventions (especially around user ownership, validation, and authentication since tests require API owner-only checks).
+* Review existing code in related modules to maintain consistency.
+
+### 2. Branch Setup
+* Create and check out the correct feature branch:
+  `git checkout -b feature/ITN-01-create-list-itineraries`
+
+### 3. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement the following features satisfying requirements **ITN-01** and **ITN-03**:
+* **Create Itinerary:** Allow an authenticated owner to create an itinerary with fields: `title`, `countries`, and `start date`.
+* **Edit Itinerary:** Allow the owner to update/edit an existing itinerary.
+* **Delete Itinerary:** Allow the owner to delete an itinerary.
+* **List Itineraries:** List the current user's itineraries, ordered by **most recently updated first**.
+* **Open/View Itinerary:** Allow the owner to retrieve/open a single itinerary by ID.
+* **Access Control:** Ensure API endpoints are restricted to the owner only (owner-only API access).
+
+### 4. Testing & Verification
+* Write required integration and API tests for the `itineraries` module.
+* Run the test suite and linter to verify that all tests pass cleanly and no regressions are introduced.
+
+### 5. Pull Request Creation
+* Once everything is implemented, verified, and passing tests, commit your changes with clear commit messages.
+* Push the branch and create a Pull Request with the exact title:
+  `ITN-01: Create and list itineraries`
+* Ensure the PR description references issue `#65`.
+
+How the output was used:
+Implemented owner-only create/list/open/edit/delete for itineraries in `itineraries.service.ts`, `itineraries.controller.ts`, the DTOs and types, added service and API tests plus the expanded fake, and committed 4c00728.
+================================================

@@ -9167,3 +9167,32 @@ Do not stop for routine implementation choices covered by `SKILL.md` or standard
 How the output was used:
 Added logout, refresh and idle-expiry tests and code in backend/src/modules/accounts/auth (commits 06e2bef test, 48fcb1e feat); not pushed because npm run verify fails locally in 2 common/events suites (also on develop; local Node 24 vs required 26)
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-06
+
+Prompt:
+Please verify the environment and unblock the PR for `feature/ACC-06-logout-refresh-idle-expiry`:
+
+1. **Switch to Node 26 and verify:**
+   - Ensure the shell is using the Node version specified in `.nvmrc` (Node 26).
+   - In `backend/`, run `npm ci` and `npm run verify`.
+
+2. **Handle the outcome:**
+   - **If `npm run verify` passes:** Push `feature/ACC-06-logout-refresh-idle-expiry` to origin and open a PR targeting `develop` titled `ACC-06: Logout, refresh and idle expiry`.
+   - **If `src/common/events/events.spec.ts` or `app-events.service.spec.ts` still fail on Node 26:** Do **not** modify `common/` or the frozen data model (`refreshTokenHash` index). Stop and report the exact failure output so I can escalate it to Kareem / the `common/events` owner.
+
+3. **Include the following in the PR description when opening it:**
+   - Summary of changes (`POST /api/auth/logout`, `POST /api/auth/refresh`, 30-minute idle expiry boundary tests, and 213 passing `accounts` tests).
+   - Key design decisions: 204 empty responses (no tokens in JSON per ACC-19), single-device logout, rejecting suspended/deactivated accounts on refresh, non-rotated refresh tokens for parallel refresh safety, and conditional session updates to prevent reviving logged-out sessions.
+   - Note about an expected minor merge conflict in `login()` (`auth.service.ts`) once `ACC-05` merges into `develop`.
+   - Open questions for Kareem:
+     1. Should an index on `sessions.refreshTokenHash` be added (given the frozen data model)?
+     2. Should `POST /api/auth/logout` still clear cookies when returning 401 on an already-expired session?
+     3. Confirmation on the §5.8 design calls and session/refresh rules.
+
+How the output was used:
+Ran npm ci and npm run verify on portable Node 26.13.1 (passed: 86 files, 936 tests, build), pushed feature/ACC-06-logout-refresh-idle-expiry, and opened GitHub's prefilled PR form "ACC-06: Logout, refresh and idle expiry" into develop (gh CLI not installed); log commit pushed
+================================================

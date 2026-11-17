@@ -7,6 +7,7 @@ import { createTestApp } from '../../../../test/support/test-app.js';
 import type { TestApp } from '../../../../test/support/test-app.js';
 import { Session } from '../schemas/session.schema.js';
 import { User, UserRole } from '../schemas/user.schema.js';
+import { AuthService } from './auth.service.js';
 
 const EMAIL = 'aisha@example.com';
 const PASSWORD = 'abcdefg1';
@@ -208,6 +209,35 @@ describe('POST /api/auth/logout and /api/auth/refresh (API, ACC-06, ACC-19)', ()
       const cookies = setCookies(res.headers);
       expectCleared(cookies.get('access_token'), 'access_token');
       expectCleared(cookies.get('refresh_token'), 'refresh_token');
+    });
+
+    it('keeps both cookies on a non-401 failure (e.g. the database is briefly down)', async () => {
+      const c = await login();
+      const auth = t.moduleRef.get(AuthService);
+      const spy = vi
+        .spyOn(auth, 'refresh')
+        .mockRejectedValueOnce(new Error('connection reset'));
+
+      try {
+        const res = await t
+          .http()
+          .post('/api/auth/refresh')
+          .set('Cookie', c.refresh);
+
+        expectError(res, 500, ErrorCode.InternalError);
+        const cookies = setCookies(res.headers);
+        expect(cookies.has('access_token')).toBe(false);
+        expect(cookies.has('refresh_token')).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+
+      // The session survived, so the same cookie works once the error is gone.
+      await t
+        .http()
+        .post('/api/auth/refresh')
+        .set('Cookie', c.refresh)
+        .expect(204);
     });
   });
 

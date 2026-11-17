@@ -42,7 +42,10 @@ function invalidTransition(from: BookingStatus, to: BookingStatus) {
  * writers (webhook, expiry job, user cancel) can't both win (GEN-11).
  * `set` holds the fields that change with the status (e.g. `confirmedAt`).
  * Throws 409 INVALID_STATUS_TRANSITION if the move is illegal, or if the
- * booking doesn't exist or is no longer in `from`. Pass `{ session }` inside a transaction.
+ * booking doesn't exist or is no longer in `from`. The `set` fields are checked
+ * against the schema (validators run; an unknown field throws), so a bad value
+ * or a misspelt key fails instead of being saved or silently dropped.
+ * Pass `{ session }` inside a transaction.
  */
 export async function transitionStatus<T extends { status: BookingStatus }>(
   model: Model<T>,
@@ -58,7 +61,7 @@ export async function transitionStatus<T extends { status: BookingStatus }>(
   const result = await model.updateOne(
     { _id: id, status: from } as QueryFilter<T>,
     { $set: { ...set, status: to } } as UpdateQuery<T>,
-    { session: options.session },
+    { session: options.session, runValidators: true, strict: 'throw' },
   );
   if (result.modifiedCount !== 1) {
     throw invalidTransition(from, to);

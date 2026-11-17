@@ -30,11 +30,12 @@ export function refundFor(
   start: Date,
   now: Date,
 ): RefundResult {
-  const msLeft = start.getTime() - now.getTime();
-  if (msLeft < 0) {
-    return { percent: 0, amountMinor: 0 };
+  // An invalid date would make every comparison false and silently refund 0%.
+  if (Number.isNaN(start.getTime()) || Number.isNaN(now.getTime())) {
+    throw new Error('refundFor needs a valid start and now');
   }
-  const daysLeft = Math.floor(msLeft / DAY_MS);
+  // After the start this is negative, so no tier matches and the refund is 0%.
+  const daysLeft = Math.floor((start.getTime() - now.getTime()) / DAY_MS);
 
   let best: RefundTier | undefined;
   for (const tier of tiers) {

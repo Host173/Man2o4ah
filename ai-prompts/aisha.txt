@@ -9089,3 +9089,81 @@ please push if the ACC is complete and verified and safe and fits within the sco
 How the output was used:
 Ran npm run verify (passed) and pre-push checks, pushed feature/ACC-04-login-current-user, and opened GitHub's prefilled PR form "ACC-04: Login and current user" into develop (gh CLI not installed); log commit pushed
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-06
+
+Prompt:
+# AI AGENT PROMPT: ACC-06
+
+## A. Context
+- **You are:** Aisha Al Rawahi, owner of Package 2 · Accounts & Auth (`accounts` module) in `Host173/Man2o4ah` (§2.1)[cite: 2].
+- **Ticket:** ACC-06: Logout, refresh and idle expiry (#27) (§15.3)[cite: 2].
+- **Branch:** `feature/ACC-06-logout-refresh-idle-expiry` (§15.3)[cite: 2].
+- **PR Target:** Always `develop` (never `main`) (§3.18 rules 1–2, 11; §14.3)[cite: 2].
+- **PR Title:** `ACC-06: Logout, refresh and idle expiry` (§15.3)[cite: 2].
+- **First action:** Read your agent file, the README "Team rules", `docs/ai/skills/travel-platform/`, and `SKILL.md` (starting with §0), applying `chat-instructions.txt` guidance (rely on `SKILL.md` for project facts, follow conflict order §17 > §3 > §5 > everything else, stick to NestJS 12 ESM, Mongoose 9, MongoDB Atlas, Vitest, Next.js 16 App Router, Stripe test mode, and FXRatesAPI) (§0.1–§0.2, §1, §3.15)[cite: 1, 2]. Merged repo code and the coding skill win over anything in this prompt[cite: 1, 2].
+
+## B. Preconditions
+1. Pull the latest changes before making any edits so your working state is up to date (§14.1)[cite: 2].
+2. Check the repo to confirm `#25 (ACC-04)` is merged and its code is present (§15.3)[cite: 2].
+3. Verify live repo state rather than relying on the 2026-11-11 snapshot in §2.2 (§0.2, §2.2)[cite: 1, 2].
+4. Branch from the latest `develop` onto `feature/ACC-06-logout-refresh-idle-expiry`; if `develop` isn't prepared yet or `#25 (ACC-04)` is missing, STOP and notify Aisha (§3.18 rule 12)[cite: 2].
+
+## C. Acceptance Criteria
+- [ ] Logout (`POST /api/auth/logout`) deletes the session from `sessions` and clears both `access_token` and `refresh_token` cookies using their matching path (§6.1, §7.2–§7.3, ACC-06, ACC-19)[cite: 2].
+- [ ] Refresh (`POST /api/auth/refresh`) hashes the `refresh_token` cookie, verifies a live session (`expiresAt > now`), slides activity, and issues a new `access_token` cookie without rotating the refresh token; invalid or expired refresh tokens clear both cookies and return `401` `SESSION_EXPIRED` (§6.1, §7.2–§7.3, ACC-06, ACC-19)[cite: 2].
+- [ ] Sessions expire after 30 idle minutes (`expiresAt = lastActivityAt + 30 min`), guards/session checks reject missing or expired sessions with `401` `SESSION_EXPIRED`, and activity slides at most once per 60 s (§4.6.2, §5.3.2, §7.3, §7.5, ACC-06)[cite: 2].
+
+Exact requirement texts (§17):
+- **ACC-06:** "[M] **ACC-06** (Any logged-in user) The system shall allow a logged-in user to log out, which clears the authentication cookies and revokes the refresh token on the server. A session with no authenticated request for 30 minutes shall expire and require a new login. | deps: ACC-04,ACC-19 | Medium" (§17.1)[cite: 2].
+- **ACC-19:** "[M] **ACC-19** (System) The system shall not store authentication tokens or user credentials in localStorage, sessionStorage or any other JavaScript-accessible storage. Access and refresh tokens shall be issued as httpOnly, Secure, SameSite cookies, and the frontend shall obtain the current user from an /auth/me endpoint. | deps: ACC-04, ACC-19 | Medium" (§17.7)[cite: 2].
+
+## D. Decisions That Apply (with Why)
+- **Layered modular monolith (business rules in services, not controllers):** Keeps logic testable and reusable outside HTTP controllers (§3.1, §11.4)[cite: 2].
+- **One owner per collection & no cross-module `populate`:** Isolates changes per module owner and prevents schema coupling or import cycles (§3.3, §5.1.1)[cite: 2].
+- **No general repository layer (Mongoose model in service):** Avoids extra boilerplate files over standard NestJS Mongoose model injection (§3.4, §11.4)[cite: 2].
+- **Server-side `sessions` collection with TTL index & 30-minute idle expiry:** Enables server-side refresh-token revocation on logout and automatic cleanup of expired sessions (§3.9, §4.6.2, §5.3.2, §7.3)[cite: 2].
+- **Non-rotating refresh token on `/api/auth/refresh`:** Parallel requests (such as pre-fetches) can refresh concurrently without failing due to token rotation (§7.3)[cite: 2].
+- **httpOnly cookies & no Passport:** Prevents JS token access (ACC-19) while keeping guards simple and clear for defense (§3.17, §7.2, §18.5)[cite: 2].
+- **TDD required for ACC-06:** Test-first commits make exact 30-minute idle boundary and session/cookie rules clear in git history (§3.12, §13.2, §15.3)[cite: 2].
+- **Required `typecheck` gate alongside tests/lint/build:** Vitest strips types without type-checking, so `tsc --noEmit` catches type errors (§3.10, §14.4)[cite: 2].
+- **Consistent error codes (`common/errors/error-codes.ts`):** Gives clients and tests stable error codes (`SESSION_EXPIRED`) rather than relying on message wording (§3.17, §10.3)[cite: 2].
+- **Per-member prompt log (`ai-prompts/aisha.txt`):** Maintains course prompt-log traceability without merge conflicts (§3.16, §14.5)[cite: 2].
+- **Branch from latest `develop`, PRs always target `develop` (never `main`), and merge commits:** Keeps `main` for milestone releases, preserves TDD/commit history, and avoids force-push risks (§3.18 rules 1–3, 7, 11; §14.1, §14.3)[cite: 2].
+
+## E. Scope
+- **May change:** `accounts` module files (`backend/src/modules/accounts/` and its tests) following §4.3, §5.3.2, §6.1, §7.2–§7.5, and §11.4[cite: 2].
+- **Must NOT change without Aisha getting Kareem's approval:** Other modules, `common/`, data models, ports, events, error codes, auth cookies, `DESIGN.md`, or new packages (§3.2, §3.3, §3.17, §5.10)[cite: 2].
+- **Downstream consumers:**
+  - `#90 (TST-01)` (Backend E2E journeys): exercises account lifecycle flows including logout, refresh, and session expiry (§15.2, §15.3)[cite: 2].
+
+## F. Workflow
+Proceed directly through pulling updates, exploration, planning, TDD tests, implementation, verification, and self-review without pausing for extra approval unless a STOP condition or safety/completeness issue occurs:
+1. Pull latest changes first, then explore the repository and check what already exists for `accounts`, `#25 (ACC-04)`, `CTR-01`, `PLT-04`, and `PLT-05` (§14.1)[cite: 2].
+2. Form a concise implementation plan aligned with §11.4 ("Module recipe"), §11.5 ("Validation and DTO rules"), §5.3.2, §6.1, and §7.2–§7.5[cite: 2].
+3. Write tests at the ticket's levels—**Unit (30-minute boundary)** and **API**—using §13.3–§13.6 techniques (boundary values, equivalence classes, negative tests, fake timers/system time, Supertest status + error-code assertions), and **commit the tests before the implementation commit** because TDD is required (§13.2, §15.3)[cite: 2].
+4. Implement logout (`POST /api/auth/logout`), refresh (`POST /api/auth/refresh`, marked `@Public()`), and 30-minute idle session expiry/sliding activity in `accounts` following `SKILL.md` and the coding skill without inventing unmentioned packages or extra abstractions (§0.2, §6.1, §7.3–§7.5, §11.4)[cite: 1, 2].
+5. Run `npm run verify` in `backend/` (§11.1, §14.4)[cite: 2].
+6. Make small Conventional Commits with scope `accounts` and requirement ID `ACC-06`, respecting TDD commit order (§13.2, §14.2)[cite: 2].
+7. Add or verify Swagger `@ApiTags` and `@ApiOperation` summaries on the endpoints (§11.12)[cite: 2].
+8. Walk through the §14.6 Definition of Done (backend items) and review your diff, tests, and prompt log entry[cite: 2].
+9. **Conditional Push & PR:**
+   - **If safe and complete** (preconditions met, TDD commit order followed, all acceptance criteria and §14.6 checks satisfied, `npm run verify` passes with zero errors/warnings silenced, no secrets/unwanted files staged, and no STOP conditions triggered): push `feature/ACC-06-logout-refresh-idle-expiry` and open a PR targeting `develop` (never `main`) with title `ACC-06: Logout, refresh and idle expiry` and a description following `.github/pull_request_template.md` (requirement IDs and summary, design decisions and why, how it was tested, AI usage, checklist, and any contract changes at the top) (§3.18 rules 1–2, 5, 10; §14.3–§14.4)[cite: 2].
+   - **If NOT safe and complete** (any precondition/check/verification fails, TDD order is broken, a STOP condition applies, or anything is incomplete/uncertain): do NOT push or open a PR; STOP and notify Aisha clearly with what failed or needs attention (§0.2, §3.18 rule 10, §14.4)[cite: 1, 2].
+10. Deliver the final report: files changed, test results, push/PR status (or reason stopped), PR-ready "design decisions and why", contract changes to call out, and open questions for Kareem[cite: 2].
+
+## G. Prompt-Log Instruction
+Append one entry to `ai-prompts/aisha.txt` per §14.5 (`Date`, `Student: Aisha`, `Tool`, `Related Requirement: ACC-06`, `Prompt` copied verbatim with any attached file content unchanged, and one-line `How the output was used`), replacing any secrets/tokens/connection strings with `<removed>` and never editing earlier entries[cite: 2].
+
+## H. STOP Conditions
+Do not stop for routine implementation choices covered by `SKILL.md` or standard NestJS/Mongoose/DTO mechanics within `accounts/`. Only STOP and notify Aisha if you hit a real blocker: `#25 (ACC-04)` missing/unmerged, `develop` not prepared, a change requiring another module or a shared contract (`common/`, data model, ports, events, error codes, auth cookies, `DESIGN.md`, new packages), an undecided/uncovered rule affecting data/money/status, or a CI gate that can only pass by silencing it (§0.2, §3.18 rule 12, §14.4)[cite: 1, 2].
+
+## I. Open Questions for Kareem
+- Have all 15 design calls in §5.8 been confirmed in team review (`PLT-04`), and are there any overrides to §7.2–§7.4 session idle timeout, activity sliding throttle, or refresh cookie behavior?[cite: 2]
+
+How the output was used:
+Added logout, refresh and idle-expiry tests and code in backend/src/modules/accounts/auth (commits 06e2bef test, 48fcb1e feat); not pushed because npm run verify fails locally in 2 common/events suites (also on develop; local Node 24 vs required 26)
+================================================

@@ -11,10 +11,13 @@ export interface RuleSegment {
 /** What the passenger rules need from one passenger, as the user entered it. */
 export interface RulePassenger {
   type: PassengerType;
-  /** A UTC DateOnly. */
-  dateOfBirth: Date;
+  /**
+   * A UTC DateOnly. `undefined` when the date entered doesn't exist: the caller
+   * reports that, and the age rules are skipped for this passenger.
+   */
+  dateOfBirth: Date | undefined;
   extraBagCount: number;
-  /** Weight per extra bag; required when `extraBagCount > 0`. */
+  /** Weight per extra bag; required (> 0) when `extraBagCount > 0`, checked whenever sent. */
   extraBagWeightKg?: number;
 }
 
@@ -42,7 +45,8 @@ export function passengerTypeOn(
 
 /**
  * Every passenger and baggage rule of FLT-12 and FLT-19, checked at once.
- * `travelDate` is the outbound departure's local date (a UTC DateOnly).
+ * `travelDate` is the outbound departure's local date and `today` the current
+ * UTC date (both UTC DateOnly); a date of birth can't be after `today`.
  * Returns one `{ field, message }` per broken rule, for 400 VALIDATION_FAILED
  * `details` (GEN-02); an empty list means the passengers are valid.
  * Extra bags must fit every segment, so the lowest limit across segments applies.
@@ -51,6 +55,7 @@ export function checkPassengers(
   passengers: readonly RulePassenger[],
   segments: readonly RuleSegment[],
   travelDate: Date,
+  today: Date,
 ): ErrorDetail[] {
   const errors: ErrorDetail[] = [];
 
@@ -75,18 +80,21 @@ export function checkPassengers(
   passengers.forEach((passenger, i) => {
     const at = `passengers[${i}]`;
 
-    if (passenger.dateOfBirth > travelDate) {
-      errors.push({
-        field: `${at}.dateOfBirth`,
-        message: 'Date of birth cannot be after the travel date',
-      });
-    } else {
-      const actual = passengerTypeOn(passenger.dateOfBirth, travelDate);
-      if (actual !== passenger.type) {
+    const dateOfBirth = passenger.dateOfBirth;
+    if (dateOfBirth !== undefined) {
+      if (dateOfBirth > today || dateOfBirth > travelDate) {
         errors.push({
-          field: `${at}.type`,
-          message: `This passenger travels as ${actual} (age on the travel date)`,
+          field: `${at}.dateOfBirth`,
+          message: 'Date of birth cannot be in the future',
         });
+      } else {
+        const actual = passengerTypeOn(dateOfBirth, travelDate);
+        if (actual !== passenger.type) {
+          errors.push({
+            field: `${at}.type`,
+            message: `This passenger travels as ${actual} (age on the travel date)`,
+          });
+        }
       }
     }
 
@@ -96,19 +104,18 @@ export function checkPassengers(
         message: `At most ${maxBags} extra bags per passenger on this trip`,
       });
     }
-    if (passenger.extraBagCount > 0) {
-      const weight = passenger.extraBagWeightKg;
-      if (weight === undefined || weight <= 0) {
-        errors.push({
-          field: `${at}.extraBagWeightKg`,
-          message: 'Enter the weight per extra bag',
-        });
-      } else if (weight > maxWeightKg) {
-        errors.push({
-          field: `${at}.extraBagWeightKg`,
-          message: `Each extra bag can weigh at most ${maxWeightKg} kg on this trip`,
-        });
-      }
+    // A weight is checked whenever it is sent; with bags it is also required.
+    const weight = passenger.extraBagWeightKg;
+    if (passenger.extraBagCount > 0 && (weight === undefined || weight <= 0)) {
+      errors.push({
+        field: `${at}.extraBagWeightKg`,
+        message: 'Enter the weight per extra bag',
+      });
+    } else if (weight !== undefined && weight > maxWeightKg) {
+      errors.push({
+        field: `${at}.extraBagWeightKg`,
+        message: `Each extra bag can weigh at most ${maxWeightKg} kg on this trip`,
+      });
     }
   });
 

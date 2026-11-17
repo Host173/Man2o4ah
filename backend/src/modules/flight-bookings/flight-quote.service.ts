@@ -204,33 +204,39 @@ export class FlightQuoteService {
     legs: Leg[],
   ): ErrorDetail[] {
     const errors: ErrorDetail[] = [];
-    const passengers: RulePassenger[] = [];
-    request.passengers.forEach((p, i) => {
+    // Every passenger goes to checkPassengers (it reports by position). An
+    // impossible date becomes `undefined`, so the other rules are still checked.
+    const passengers: RulePassenger[] = request.passengers.map((p, i) => {
+      let dateOfBirth: Date | undefined;
       try {
-        passengers.push({
-          type: p.type,
-          dateOfBirth: toDateOnly(p.dateOfBirth),
-          extraBagCount: p.extraBagCount,
-          extraBagWeightKg: p.extraBagWeightKg,
-        });
+        dateOfBirth = toDateOnly(p.dateOfBirth);
       } catch {
         errors.push({
           field: `passengers[${i}].dateOfBirth`,
           message: 'This date does not exist',
         });
       }
+      return {
+        type: p.type,
+        dateOfBirth,
+        extraBagCount: p.extraBagCount,
+        extraBagWeightKg: p.extraBagWeightKg,
+      };
     });
-    // checkPassengers reports by position, so it needs every passenger.
-    if (errors.length > 0) return errors;
 
-    return checkPassengers(
-      passengers,
-      legs.map(({ airline, cabin }) => ({
-        maxExtraBagsPerPassenger: maxExtraBags(airline),
-        maxBagWeightKg: cabin.maxBagWeightKg,
-      })),
-      toDateOnly(legs[0].flight.departureLocalDate),
-    );
+    const today = toDateOnly(new Date().toISOString().slice(0, 10));
+    return [
+      ...errors,
+      ...checkPassengers(
+        passengers,
+        legs.map(({ airline, cabin }) => ({
+          maxExtraBagsPerPassenger: maxExtraBags(airline),
+          maxBagWeightKg: cabin.maxBagWeightKg,
+        })),
+        toDateOnly(legs[0].flight.departureLocalDate),
+        today,
+      ),
+    ];
   }
 }
 

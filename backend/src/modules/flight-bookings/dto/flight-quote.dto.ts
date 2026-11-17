@@ -9,7 +9,6 @@ import {
   IsMongoId,
   IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   Matches,
   MaxLength,
@@ -75,11 +74,12 @@ export class PassengerRequestDto {
 
   @ApiPropertyOptional({
     example: 20,
-    description: 'Weight per extra bag in kg; required when extraBagCount > 0',
+    description:
+      'Weight per extra bag in kg; required (> 0) when extraBagCount > 0. 0 is allowed with no extra bags.',
   })
   @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   extraBagWeightKg?: number;
 }
 

@@ -79,6 +79,9 @@ function seedFlights(): FakeFlightsData {
   flight('cancelled', 'airline-1', 'CAI', 'DXB', OUT_DEPARTS, undefined, {
     status: 'cancelled',
   });
+  flight('departed', 'airline-1', 'CAI', 'DXB', OUT_DEPARTS, undefined, {
+    status: 'departed',
+  });
   flight('almost-full', 'airline-1', 'CAI', 'DXB', OUT_DEPARTS, [
     cabin('almost-full-eco', 20_000, 1),
   ]);
@@ -245,6 +248,7 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
     it.each([
       ['an inactive airline', 'inactive-flight'],
       ['a cancelled flight', 'cancelled'],
+      ['a departed flight', 'departed'],
     ])('rejects %s', async (_label, flightId) => {
       await expect(quotes.quote(oneWay(flightId))).rejects.toMatchObject(
         invalid('segments[0]'),
@@ -273,6 +277,13 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
     });
   });
 
+  it('answers 400, not 409, when a full cabin also has a broken rule', async () => {
+    // Too few seats AND a passenger with the wrong type: the 400 wins.
+    await expect(
+      quotes.quote(oneWay('almost-full', [adult(), adult({ type: 'child' })])),
+    ).rejects.toMatchObject(invalid('passengers[1].type'));
+  });
+
   it('lets an infant through without a seat when only one seat is left', async () => {
     const quote = await quotes.quote(
       oneWay('almost-full', [adult(), infant()]),
@@ -291,6 +302,35 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
       await expect(
         quotes.quote(oneWay('out', [adult({ dateOfBirth: '1990-02-30' })])),
       ).rejects.toMatchObject(invalid('passengers[0].dateOfBirth'));
+    });
+
+    it('still reports the other rules when a date does not exist', async () => {
+      // An impossible date AND no adult: both are reported at once.
+      const child = adult({ type: 'child', dateOfBirth: '2018-02-30' });
+      const error = await quotes
+        .quote(oneWay('out', [child]))
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject(invalid('passengers[0].dateOfBirth'));
+      expect(error).toMatchObject(invalid('passengers'));
+    });
+
+    it('rejects a date of birth after today, even before the flight', async () => {
+      // Born tomorrow: before the March 2027 flight, but still in the future.
+      const tomorrow = new Date(Date.now() + 24 * 3_600_000)
+        .toISOString()
+        .slice(0, 10);
+      const unborn = infant();
+      unborn.dateOfBirth = tomorrow;
+      await expect(
+        quotes.quote(oneWay('out', [adult(), unborn])),
+      ).rejects.toMatchObject(invalid('passengers[1].dateOfBirth'));
+    });
+
+    it('rejects a bag weight over the limit even with no extra bags', async () => {
+      const heavy = adult({ extraBagCount: 0, extraBagWeightKg: 99 });
+      await expect(quotes.quote(oneWay('out', [heavy]))).rejects.toMatchObject(
+        invalid('passengers[0].extraBagWeightKg'),
+      );
     });
 
     it('rejects extra bags on an airline that sells none', async () => {

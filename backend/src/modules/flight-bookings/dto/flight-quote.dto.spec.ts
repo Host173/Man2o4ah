@@ -156,10 +156,15 @@ describe('FlightQuoteRequestDto (FLT-19)', () => {
       expect((await check(body)).failed).toEqual([]);
     });
 
-    it.each([0, -5])('rejects the weight %d', async (extraBagWeightKg) => {
-      expect((await check(withPassenger({ extraBagWeightKg }))).failed).toEqual(
-        ['passengers.0.extraBagWeightKg'],
-      );
+    it('allows a weight of 0, a form default (the rules require > 0 only with bags)', async () => {
+      const body = withPassenger({ extraBagCount: 0, extraBagWeightKg: 0 });
+      expect((await check(body)).failed).toEqual([]);
+    });
+
+    it('rejects a negative weight', async () => {
+      expect(
+        (await check(withPassenger({ extraBagWeightKg: -5 }))).failed,
+      ).toEqual(['passengers.0.extraBagWeightKg']);
     });
   });
 

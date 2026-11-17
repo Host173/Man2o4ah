@@ -4,6 +4,7 @@ import { FlightsModule } from '../flights/flights.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { FlightBookingsController } from './flight-bookings.controller.js';
 import { FlightBookingsService } from './flight-bookings.service.js';
+import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightPayableBooking } from './flight-payable-booking.js';
 import { FlightQuoteService } from './flight-quote.service.js';
@@ -28,6 +29,7 @@ import {
     FlightQuoteService,
     FlightHoldService,
     FlightPayableBooking,
+    FlightHoldExpiryJob,
   ],
   exports: [FlightBookingsService],
 })

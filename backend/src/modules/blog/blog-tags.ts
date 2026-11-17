@@ -39,4 +39,3 @@ export function normalizeTagsTransform(value: unknown): unknown {
   }
   return normalizeTags(value);
 }
-

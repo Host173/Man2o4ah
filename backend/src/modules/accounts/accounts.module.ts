@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
 import { AccountsService } from './accounts.service.js';
 import {
   ACCESS_TOKEN_ALGORITHM,
@@ -15,14 +16,18 @@ import { RolesGuard } from './auth/roles.guard.js';
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
+import { ProfileService } from './users/profile.service.js';
+import { UsersController } from './users/users.controller.js';
 
 /**
  * Accounts (CTR-01). Registers the global guards: every route needs a
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
- * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user);
- * `AuthService` stays internal. Other
+ * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user)
+ * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
+ * currencies come from `ReferenceDataService`); `AuthService` and
+ * `ProfileService` stay internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
@@ -43,11 +48,13 @@ import { User, UserSchema } from './schemas/user.schema.js';
         },
       }),
     }),
+    ReferenceDataModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, UsersController],
   providers: [
     AccountsService,
     AuthService,
+    ProfileService,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -3,6 +3,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
+import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -11,6 +12,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { BlogModule } from './blog.module.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
@@ -19,6 +21,7 @@ import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
 describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   let testApp: TestApp | undefined;
   const fakeAccounts = new FakeAccountsService();
+  const fakeItineraries = new FakeItinerariesService();
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
@@ -28,7 +31,11 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     testApp = await createTestApp({
       imports: [BlogModule],
       override: (builder) =>
-        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+        builder
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(ItinerariesService)
+          .useValue(fakeItineraries),
     });
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -44,6 +51,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
   beforeEach(async () => {
     Object.assign(fakeAccounts, new FakeAccountsService());
+    Object.assign(fakeItineraries, new FakeItinerariesService());
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -81,6 +89,8 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     expect(
       document.paths['/api/tags/{tag}/posts']?.get?.security,
     ).toBeUndefined();
+    expect(document.paths['/api/authors/{id}']?.get).toBeDefined();
+    expect(document.paths['/api/authors/{id}']?.get?.security).toBeUndefined();
   });
 
   describe('Authentication & password-change gate', () => {
@@ -1767,6 +1777,254 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       const badLimit = await testApp!
         .http()
         .get('/api/tags/travel/posts?limit=51');
+      expect(badLimit.status).toBe(400);
+      expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('GET /api/authors/:id (BLG-12)', () => {
+    it('returns public author page with posts, public itineraries, pagination boundaries, and no private fields', async () => {
+      const aisha = await loginAs(testApp!.connection, UserRole.USER);
+      const bob = await loginAs(testApp!.connection, UserRole.USER);
+      const emptyAuthor = await loginAs(testApp!.connection, UserRole.USER);
+      const joinDate = new Date('2026-09-20T12:00:00.000Z');
+      const emptyJoinDate = new Date('2026-10-15T12:00:00.000Z');
+
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: aisha.id,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            createdAt: joinDate,
+          },
+          { id: bob.id, name: 'Bob Nomad', email: 'bob@example.com' },
+          {
+            id: emptyAuthor.id,
+            name: 'New Traveler',
+            email: 'new@example.com',
+            status: UserStatus.SUSPENDED,
+            createdAt: emptyJoinDate,
+          },
+        ]),
+      );
+
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-public-1',
+            ownerId: aisha.id,
+            title: 'Cairo & Giza 3 Days',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-05T00:00:00.000Z'),
+            dayCount: 3,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-public-2',
+            ownerId: aisha.id,
+            title: 'Red Sea Diving Week',
+            countryCodes: ['EG'],
+            startDate: new Date('2027-01-10T00:00:00.000Z'),
+            dayCount: 7,
+            cityIds: ['hurghada'],
+            updatedAt: new Date('2026-11-14T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-bob',
+            ownerId: bob.id,
+            title: 'Bobs Private-Scope Other Owner Trip',
+            countryCodes: ['JO'],
+            startDate: new Date('2026-12-20T00:00:00.000Z'),
+            dayCount: 4,
+            cityIds: ['amman'],
+            updatedAt: new Date('2026-11-15T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      const p1 = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({ title: 'Post 1', body: 'One', status: PostStatus.PUBLISHED });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({ title: 'Post 2', body: 'Two', status: PostStatus.PUBLISHED });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p3 = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({ title: 'Post 3', body: 'Three', status: PostStatus.PUBLISHED });
+
+      // Excluded items for Aisha: draft and hidden published post, plus Bob's post.
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Aisha Draft',
+          body: 'Draft',
+          status: PostStatus.DRAFT,
+        });
+      const hidden = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Aisha Hidden',
+          body: 'Hidden',
+          status: PostStatus.PUBLISHED,
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', bob.cookie)
+        .send({ title: 'Bob Post', body: 'Bob', status: PostStatus.PUBLISHED });
+
+      // Unauthenticated guest access to page 1 (limit=2).
+      const page1 = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?page=1&limit=2`);
+      expect(page1.status).toBe(200);
+      expect(page1.body).toMatchObject({
+        id: aisha.id,
+        name: 'Aisha Rawahi',
+        createdAt: joinDate.toISOString(),
+        posts: {
+          page: 1,
+          limit: 2,
+          total: 3,
+          totalPages: 2,
+        },
+        itineraries: {
+          page: 1,
+          limit: 10,
+          total: 2,
+          totalPages: 1,
+        },
+      });
+      expect(page1.body.posts.items.map((p: { _id: string }) => p._id)).toEqual(
+        [p3.body._id, p2.body._id],
+      );
+      expect(
+        page1.body.itineraries.items.map((i: { id: string }) => i.id),
+      ).toEqual(['itin-public-2', 'itin-public-1']);
+      expect(Object.keys(page1.body).sort()).toEqual([
+        'createdAt',
+        'id',
+        'itineraries',
+        'name',
+        'posts',
+      ]);
+      for (const secretField of [
+        'email',
+        'role',
+        'status',
+        'passwordHash',
+        'mustChangePassword',
+        'sessionsRevoked',
+      ]) {
+        expect(secretField in page1.body).toBe(false);
+      }
+
+      // Page 2 and out-of-range page 3 boundaries.
+      const page2 = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?page=2&limit=2`);
+      expect(page2.status).toBe(200);
+      expect(page2.body.posts.items.map((p: { _id: string }) => p._id)).toEqual(
+        [p1.body._id],
+      );
+
+      const page3 = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?page=3&limit=2`);
+      expect(page3.status).toBe(200);
+      expect(page3.body.posts).toEqual({
+        items: [],
+        page: 3,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+
+      // Author with neither posts nor itineraries returns empty lists cleanly (also covers suspended author).
+      const emptyRes = await testApp!
+        .http()
+        .get(`/api/authors/${emptyAuthor.id}`);
+      expect(emptyRes.status).toBe(200);
+      expect(emptyRes.body).toEqual({
+        id: emptyAuthor.id,
+        name: 'New Traveler',
+        createdAt: emptyJoinDate.toISOString(),
+        posts: {
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        },
+        itineraries: {
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        },
+      });
+    });
+
+    it('returns 404 NOT_FOUND for deactivated or unknown authors and 400 VALIDATION_FAILED for malformed id or invalid pagination', async () => {
+      const deactivated = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: deactivated.id,
+            name: 'Deactivated Author',
+            email: 'deactivated@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
+      );
+
+      const deactivatedRes = await testApp!
+        .http()
+        .get(`/api/authors/${deactivated.id}`);
+      expect(deactivatedRes.status).toBe(404);
+      expect(deactivatedRes.body.code).toBe(ErrorCode.NotFound);
+
+      const unknownRes = await testApp!
+        .http()
+        .get(`/api/authors/${new Types.ObjectId().toHexString()}`);
+      expect(unknownRes.status).toBe(404);
+      expect(unknownRes.body.code).toBe(ErrorCode.NotFound);
+
+      const badIdRes = await testApp!.http().get('/api/authors/not-an-id');
+      expect(badIdRes.status).toBe(400);
+      expect(badIdRes.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badPage = await testApp!
+        .http()
+        .get(`/api/authors/${deactivated.id}?page=0`);
+      expect(badPage.status).toBe(400);
+      expect(badPage.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badLimit = await testApp!
+        .http()
+        .get(`/api/authors/${deactivated.id}?limit=51`);
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
     });

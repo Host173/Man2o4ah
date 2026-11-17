@@ -30,6 +30,7 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BlogService } from './blog.service.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
   PostView,
@@ -39,6 +40,7 @@ import { CreateCommentDto } from './dto/create-comment.dto.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
   PaginatedPostResponseDto,
@@ -234,5 +236,26 @@ export class BlogController {
     @Query() query: PaginationQueryDto,
   ): Promise<Paginated<PublishedPostView>> {
     return this.blogService.listByTag(tag, query);
+  }
+
+  @Public()
+  @Get('authors/:id')
+  @ApiOperation({
+    summary:
+      'BLG-12 Read a public author page with published posts and public itineraries',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: AuthorPageResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid author ID or pagination query',
+  })
+  @ApiNotFoundResponse({
+    description: 'Author not found or deactivated',
+  })
+  getAuthorPage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: PaginationQueryDto,
+  ): Promise<AuthorPageView> {
+    return this.blogService.getAuthorPage(id.toHexString(), query);
   }
 }

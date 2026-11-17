@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
+import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
@@ -16,6 +17,8 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { AccountsService } from '../accounts/accounts.service.js';
 import { Session } from '../accounts/schemas/session.schema.js';
 import { User, UserStatus } from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -45,6 +48,8 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
+      .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
       .compile();
 
     expect(moduleRef.get(BlogService)).toBeInstanceOf(BlogService);
@@ -55,6 +60,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let testApp: TestApp | undefined;
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
+  const fakeItineraries = new FakeItinerariesService();
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -72,7 +78,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     testApp = await createTestApp({
       imports: [BlogModule],
       override: (builder) =>
-        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+        builder
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(ItinerariesService)
+          .useValue(fakeItineraries),
     });
     service = testApp.moduleRef.get(BlogService);
     appEvents = testApp.moduleRef.get(AppEvents);
@@ -90,6 +100,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    Object.assign(fakeItineraries, new FakeItinerariesService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -1427,6 +1438,164 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
           details: [expect.objectContaining({ field: 'tag' })],
         });
       }
+    });
+  });
+
+  describe('getAuthorPage (BLG-12)', () => {
+    it('returns author display name, join date, paginated visible published posts, and public itineraries without private fields', async () => {
+      const joinDate = new Date('2026-10-05T08:30:00.000Z');
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: ownerId,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            createdAt: joinDate,
+          },
+          {
+            id: otherUserId,
+            name: 'Bob Nomad',
+            email: 'bob@example.com',
+          },
+          {
+            id: suspendedUserId,
+            name: 'Suspended Author',
+            email: 'suspended@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+        ]),
+      );
+
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-1',
+            ownerId,
+            title: 'Upper Egypt Loop',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 5,
+            cityIds: ['cairo', 'luxor'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-other',
+            ownerId: otherUserId,
+            title: 'Other User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-15T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['aswan'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      const p1 = await service.create(
+        {
+          title: 'Older Published',
+          body: 'One',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        {
+          title: 'Newer Published',
+          body: 'Two',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.create(
+        { title: 'Owner Draft', body: 'Secret', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Owner Hidden', body: 'Hidden', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await service.create(
+        { title: 'Other Author Post', body: 'O', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+
+      const page = await service.getAuthorPage(ownerId, { page: 1, limit: 1 });
+      expect(page).toMatchObject({
+        id: ownerId,
+        name: 'Aisha Rawahi',
+        createdAt: joinDate,
+        posts: {
+          page: 1,
+          limit: 1,
+          total: 2,
+          totalPages: 2,
+        },
+        itineraries: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        },
+      });
+      expect(page.posts.items.map((p) => p._id)).toEqual([p2._id]);
+      expect(page.posts.items[0].authorName).toBe('Aisha Rawahi');
+      expect(page.itineraries.items.map((i) => i.id)).toEqual(['itin-1']);
+      expect(Object.keys(page).sort()).toEqual([
+        'createdAt',
+        'id',
+        'itineraries',
+        'name',
+        'posts',
+      ]);
+
+      const page2 = await service.getAuthorPage(ownerId, { page: 2, limit: 1 });
+      expect(page2.posts.items.map((p) => p._id)).toEqual([p1._id]);
+
+      // Author with no posts or itineraries returns empty lists cleanly.
+      const emptyAuthorPage = await service.getAuthorPage(suspendedUserId);
+      expect(emptyAuthorPage).toMatchObject({
+        id: suspendedUserId,
+        name: 'Suspended Author',
+        posts: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+        itineraries: {
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        },
+      });
+    });
+
+    it('throws 404 NOT_FOUND for unknown or deactivated author and 400 for invalid id', async () => {
+      for (const blockedId of [
+        deactivatedAuthorId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const err = await service
+          .getAuthorPage(blockedId)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as NotFoundException).getResponse()).toMatchObject({
+          code: ErrorCode.NotFound,
+        });
+      }
+
+      const badErr = await service
+        .getAuthorPage('bad-id')
+        .catch((caught: unknown) => caught);
+      expect(badErr).toBeInstanceOf(BadRequestException);
+      expect((badErr as BadRequestException).getResponse()).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
     });
   });
 });

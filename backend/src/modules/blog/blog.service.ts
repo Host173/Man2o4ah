@@ -16,6 +16,7 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
 import { UserStatus } from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import {
   MAX_TAG_LENGTH,
   MAX_TAGS_PER_POST,
@@ -24,6 +25,7 @@ import {
   normalizeTags,
 } from './blog-tags.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
   PostView,
@@ -51,7 +53,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post, tag, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, ACC-12).
+ * Travel blog post, tag, author page, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-12, ACC-12).
  * Other blog endpoints and listeners ship in later Sprint 2 tickets.
  */
 @Injectable()
@@ -63,6 +65,7 @@ export class BlogService {
     private readonly commentModel: Model<StoredComment>,
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
     private readonly accountsService: AccountsService,
+    private readonly itinerariesService: ItinerariesService,
   ) {}
 
   /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
@@ -94,29 +97,46 @@ export class BlogService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
-    const filter: QueryFilter<StoredPost> = {
-      status: PostStatus.PUBLISHED,
-      isHidden: false,
-      authorDeactivated: false,
-      ...(tag ? { tags: tag } : {}),
-    };
-    const result = await paginate(
-      this.postModel,
-      filter,
+    return this.paginatePublishedPosts(
+      tag ? { tags: tag } : {},
       { page, limit },
-      { sort: { publishedAt: -1, _id: -1 } },
     );
-    const profiles = await this.resolveProfiles(
-      result.items.map((post) => post.authorId.toHexString()),
-    );
-    return {
-      ...result,
-      items: result.items.map((post) =>
-        this.toPublishedView(
-          post as PostRecord,
-          profiles.get(post.authorId.toHexString()),
-        ),
+  }
+
+  /**
+   * BLG-12: loads the public author page showing display name, join date,
+   * paginated published posts, and public itineraries (`CTR-06`). Throws 404
+   * for unknown or deactivated authors.
+   */
+  async getAuthorPage(
+    authorId: string,
+    query: PaginationQueryDto = new PaginationQueryDto(),
+  ): Promise<AuthorPageView> {
+    const authorObjectId = this.parseId(authorId, 'authorId');
+    const hexId = authorObjectId.toHexString();
+    const profiles = await this.resolveProfiles([hexId]);
+    const author = profiles.get(hexId);
+    if (!author || author.status === UserStatus.DEACTIVATED) {
+      throw this.authorNotFound();
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const [posts, itineraries] = await Promise.all([
+      this.paginatePublishedPosts(
+        { authorId: authorObjectId },
+        { page, limit },
+        profiles,
       ),
+      this.itinerariesService.listPublicByAuthor(hexId),
+    ]);
+
+    return {
+      id: author.id,
+      name: author.name,
+      createdAt: author.createdAt,
+      posts,
+      itineraries,
     };
   }
 
@@ -577,10 +597,50 @@ export class BlogService {
     return new Types.ObjectId(value);
   }
 
+  private async paginatePublishedPosts(
+    extraFilter: QueryFilter<StoredPost>,
+    { page, limit }: { page: number; limit: number },
+    knownProfiles?: Map<string, AccountProfile>,
+  ): Promise<Paginated<PublishedPostView>> {
+    const filter: QueryFilter<StoredPost> = {
+      status: PostStatus.PUBLISHED,
+      isHidden: false,
+      authorDeactivated: false,
+      ...extraFilter,
+    };
+    const result = await paginate(
+      this.postModel,
+      filter,
+      { page, limit },
+      { sort: { publishedAt: -1, _id: -1 } },
+    );
+    const profiles =
+      knownProfiles ??
+      (await this.resolveProfiles(
+        result.items.map((post) => post.authorId.toHexString()),
+      ));
+    return {
+      ...result,
+      items: result.items.map((post) =>
+        this.toPublishedView(
+          post as PostRecord,
+          profiles.get(post.authorId.toHexString()),
+        ),
+      ),
+    };
+  }
+
   private notFound(): NotFoundException {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Post not found',
+    });
+  }
+
+  private authorNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Author not found',
     });
   }
 

@@ -6,10 +6,13 @@ import { CreateCommentDto } from './create-comment.dto.js';
 import { CreatePostDto } from './create-post.dto.js';
 import { ListPostsQueryDto } from './list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
+  PaginatedPublicItinerariesResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PublicItinerarySummaryResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
 import { UpdateCommentDto } from './update-comment.dto.js';
@@ -356,12 +359,22 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const comment = new CommentResponseDto();
       const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
+      const itinerarySummary = new PublicItinerarySummaryResponseDto();
+      const itineraryPage = new PaginatedPublicItinerariesResponseDto();
+      const authorPage = new AuthorPageResponseDto();
 
       expect(published).toBeInstanceOf(PublishedPostResponseDto);
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect(itinerarySummary).toBeInstanceOf(
+        PublicItinerarySummaryResponseDto,
+      );
+      expect(itineraryPage).toBeInstanceOf(
+        PaginatedPublicItinerariesResponseDto,
+      );
+      expect(authorPage).toBeInstanceOf(AuthorPageResponseDto);
       expect('comments' in detail).toBe(false);
     });
   });

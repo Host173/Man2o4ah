@@ -9089,3 +9089,73 @@ please push if the ACC is complete and verified and safe and fits within the sco
 How the output was used:
 Ran npm run verify (passed) and pre-push checks, pushed feature/ACC-04-login-current-user, and opened GitHub's prefilled PR form "ACC-04: Login and current user" into develop (gh CLI not installed); log commit pushed
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+# AI AGENT PROMPT: ACC-09
+
+## A. Context
+- **You are:** Aisha Al Rawahi, owner of Package 2 · Accounts & Auth (`accounts` module) in `Host173/Man2o4ah` (§2.1)[cite: 2].
+- **Ticket:** ACC-09: Profile (#29) (§15.3)[cite: 2].
+- **Branch:** `feature/ACC-09-profile` (§15.3)[cite: 2].
+- **PR Target:** Always `develop` (never `main`) (§3.18 rules 1–2, 11; §14.3)[cite: 2].
+- **PR Title:** `ACC-09: Profile` (§15.3)[cite: 2].
+- **First action:** Read your agent file, the README "Team rules", `docs/ai/skills/travel-platform/`, and `SKILL.md` (starting with §0), applying `chat-instructions.txt` guidance (rely on `SKILL.md` for project facts, follow conflict order §17 > §3 > §5 > everything else, stick to NestJS 12 ESM, Mongoose 9, MongoDB Atlas, Vitest, Next.js 16 App Router, Stripe test mode, and FXRatesAPI) (§0.1–§0.2, §1, §3.15)[cite: 1, 2]. Merged repo code and the coding skill win over anything in this prompt[cite: 1, 2].
+
+## B. Preconditions
+1. Run `git checkout develop && git pull origin develop` first so you pull the latest `develop` (never `main`), then create/checkout `feature/ACC-09-profile` from `develop` (§3.18 rules 1–2, 12; §14.1)[cite: 2].
+2. Check the repo to confirm `#10 (CTR-01)` and `#9 (CTR-05)` are merged and their code is present (§15.3)[cite: 2].
+3. Verify live repo state rather than relying on the 2026-11-11 snapshot in §2.2 (§0.2, §2.2)[cite: 1, 2]. If `develop` isn't prepared yet or either dependency is missing, STOP and notify Aisha (§3.18 rule 12)[cite: 2].
+
+## C. Acceptance Criteria
+- [ ] Allow any logged-in user to view their profile (`GET /api/users/me`) and edit `name`, `phone`, and `preferredCurrency` (`PATCH /api/users/me`) (§5.3.2, §6.1, ACC-09)[cite: 2].
+- [ ] Validate `name` (trimmed, 1–100 chars), `phone` (optional, validated format), and `preferredCurrency` against supported currencies from `ReferenceDataService` / `reference-data`, saving only when all fields pass validation (§4.6.1, §5.3.2, §11.5, ACC-09, GEN-13)[cite: 2].
+
+Exact requirement text (§17):
+- **ACC-09:** "[M] **ACC-09** (Any logged-in user) The system shall allow any logged-in user to edit name, phone number and preferred currency, saving only if all fields pass validation. | deps: ACC-04 | Low" (§17.1)[cite: 2].
+
+## D. Decisions That Apply (with Why)
+- **Layered modular monolith (business rules in services, not controllers):** Keeps logic testable and reusable outside HTTP controllers (§3.1, §11.4)[cite: 2].
+- **One owner per collection & no cross-module `populate`:** Isolates changes per module owner and prevents schema coupling or import cycles (§3.3, §5.1.1)[cite: 2].
+- **Cross-module calls through the owning module's exported service (`ReferenceDataService`):** Enforces module boundaries and avoids direct collection reads across modules (§3.3, §4.6.1, §5.6.1)[cite: 2].
+- **No general repository layer (Mongoose model in service):** Avoids extra boilerplate files over standard NestJS Mongoose model injection (§3.4, §11.4)[cite: 2].
+- **Required `typecheck` gate alongside tests/lint/build:** Vitest strips types without type-checking, so `tsc --noEmit` catches type errors (§3.10, §14.4)[cite: 2].
+- **Consistent error codes (`common/errors/error-codes.ts`):** Gives clients and tests stable error codes rather than relying on message wording (§3.17, §10.3)[cite: 2].
+- **Per-member prompt log (`ai-prompts/aisha.txt`):** Maintains course prompt-log traceability without merge conflicts (§3.16, §14.5)[cite: 2].
+- **Branch from latest `develop`, PRs always target `develop` (never `main`), and merge commits:** Keeps `main` for milestone releases, preserves commit history, and avoids force-push risks (§3.18 rules 1–3, 7, 11; §14.1, §14.3)[cite: 2].
+
+## E. Scope
+- **May change:** `accounts` module files (`backend/src/modules/accounts/` and its tests) following §4.3, §5.3.2, §6.1, §7.5–§7.6, and §11.4[cite: 2].
+- **Must NOT change without Aisha getting Kareem's approval:** Other modules, `common/`, data models, ports, events, error codes, auth cookies, `DESIGN.md`, or new packages (§3.2, §3.3, §3.17, §5.10)[cite: 2].
+- **Downstream consumers:** `#16 (GEN-12)` (Reference data endpoints) is noted in the ticket as working end-to-end once merged; `preferredCurrency` is also used by itinerary budget conversion (`ITN-18`) (§5.3.2, §5.3.8, §15.2–§15.3)[cite: 2].
+
+## F. Workflow
+Proceed directly through pulling updates, exploration, planning, API tests, implementation, verification, self-review, and pushing/opening the PR to `develop` without pausing for extra approval unless a STOP condition or safety/completeness issue occurs:
+1. Pull latest `develop` first, then explore the repository and check what already exists for `accounts`, `#10 (CTR-01)`, `#9 (CTR-05)`, `PLT-04`, and `PLT-05` (§14.1, §15.3)[cite: 2].
+2. Form a concise implementation plan aligned with §11.4 ("Module recipe"), §11.5 ("Validation and DTO rules"), §5.3.2, §6.1, and §7.5–§7.6[cite: 2].
+3. Write **API** tests (the ticket's test level, using §13.3 and §13.6 techniques: Supertest status and error-code assertions, valid updates, invalid/unsupported currency or invalid fields rejected with no partial save, unauthenticated `401` without cookie)[cite: 2].
+4. Implement profile view and update (`GET /api/users/me`, `PATCH /api/users/me`) and supported-currency check via `ReferenceDataService` (using the contract/fake until `#16 (GEN-12)` is merged) following `SKILL.md` and the coding skill without inventing unmentioned packages or extra abstractions (§0.2, §2.1, §6.1, §11.4–§11.5, §13.5)[cite: 1, 2].
+5. Run `npm run verify` in `backend/` (§11.1, §14.4)[cite: 2].
+6. Make small Conventional Commits with scope `accounts` and requirement ID `ACC-09` (§14.2)[cite: 2].
+7. Add or verify Swagger `@ApiTags` and `@ApiOperation` summaries on the profile endpoints (§11.12)[cite: 2].
+8. Walk through the §14.6 Definition of Done (backend items) and review your diff, tests, and prompt log entry[cite: 2].
+9. Push `feature/ACC-09-profile` and open a PR targeting `develop` (never `main`) with title `ACC-09: Profile` and a description following `.github/pull_request_template.md` (requirement IDs and summary, design decisions and why, how it was tested, AI usage, checklist, and any contract changes at the top)—unless a STOP condition or safety/completeness issue occurs, in which case do NOT push or open a PR and STOP to notify Aisha clearly (§0.2, §3.18 rules 1–2, 5, 10; §14.3–§14.4)[cite: 1, 2].
+10. Deliver the final report: files changed, test results, push/PR status (or reason stopped), PR-ready "design decisions and why", contract changes to call out, and open questions for Kareem[cite: 2].
+
+## G. Prompt-Log Instruction
+Append one entry to `ai-prompts/aisha.txt` per §14.5 (`Date`, `Student: Aisha`, `Tool`, `Related Requirement: ACC-09`, `Prompt` copied verbatim with any attached file content unchanged, and one-line `How the output was used`), replacing any secrets/tokens/connection strings with `<removed>` and never editing earlier entries[cite: 2].
+
+## H. STOP Conditions
+Do not stop for routine implementation choices covered by `SKILL.md` or standard NestJS/Mongoose/DTO mechanics within `accounts/`. Only STOP and notify Aisha if you hit a real blocker: `#10 (CTR-01)` or `#9 (CTR-05)` missing/unmerged, `develop` not prepared, a change requiring another module or a shared contract (`common/`, data model, ports, events, error codes, auth cookies, `DESIGN.md`, new packages), an undecided/uncovered rule affecting data/money/status, or a CI gate that can only pass by silencing it (§0.2, §3.18 rule 12, §14.4)[cite: 1, 2].
+
+## I. Open Questions for Kareem
+- Have the 15 design calls in §5.8 (including `USD` as platform currency / default currency) been confirmed in team review (`PLT-04`), and are there specific phone format constraints beyond §5.3.2?[cite: 2]
+
+How the output was used:
+Added GET/PATCH /api/users/me with API tests in backend/src/modules/accounts; committed 92f2a12 (tests) and 192e14f (feature); not pushed: blog.service.spec.ts skeleton test fails and needs a change in the blog module
+================================================

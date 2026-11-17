@@ -9197,3 +9197,37 @@ Proceed with pushing `feature/ACC-08-change-password-forced-change` and opening 
 How the output was used:
 Pushed feature/ACC-08-change-password-forced-change and opened GitHub's prefilled PR form "ACC-08: Change password and forced change" into develop (gh CLI not installed; ticket title used); log commit pushed
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+0. **Verify and Switch to the Target Branch First:**
+   - Run `git status` and `git branch -a`.
+   - Ensure you are checked out on `feature/ACC-08-change-password-forced-change` before making any edits (if on another branch, run `git fetch origin` and switch to `feature/ACC-08-change-password-forced-change`, creating/tracking the remote branch if needed).
+   - Confirm the ACC-08 commits (`00f3c8a`, `a2afa1a`, `7dd8061`, `3da8d20`) are present on the branch and no unintended uncommitted changes are lingering.
+
+Review and resolve the actionable items from the automatic AI review on ACC-08 (`feature/ACC-08-change-password-forced-change`), strictly respecting all rules from the original prompt and repository/module boundaries:
+
+1. **Strict Scope & Contract Rules:**
+   - Do **NOT** change shared error codes, event contracts, ports, or frozen data models, and do **NOT** edit files outside `accounts/` and the specifically authorized docs (`docs/ai/skills/travel-platform/references/auth.md` and `docs/DECISIONS.md` where needed to reconcile the 17 Nov decision).
+   - Keep commit hygiene and append a prompt log entry as required by the original prompt.
+
+2. **Fix ACC-07a Forced-Change Same-Password Bug (Actionable Bug):**
+   - Currently, when `mustChangePassword: true`, sending `newPassword === currentPassword` returns `204` and clears `mustChangePassword`, allowing the account to stay on the temporary password instead of setting a new password per ACC-07a.
+   - Update `PATCH /api/auth/change-password` so that when `mustChangePassword` is `true` and `newPassword === currentPassword`, it rejects with `400 VALIDATION_FAILED` targeting `newPassword` (and does not clear `mustChangePassword` or update the hash).
+   - Add DTO/service/API tests covering this case, and keep normal (non-forced) `newPassword === currentPassword` behavior aligned with the existing ACC-08 decision unless specified otherwise, noting the team leader question in the PR description.
+
+3. **Handle the 72-Character vs. 72-Byte Bcrypt Cap & `docs/DECISIONS.md` Sync:**
+   - Reconcile the discrepancy between `docs/DECISIONS.md` ("Open items to discuss" #1 still listing the 72 cap as a proposal) and `auth.md` §4 / `password-rule.ts` (citing the 17 Nov decision): move the 72-cap entry in `docs/DECISIONS.md` into the recorded decisions section referencing the 17 Nov decision, and clearly state how the cap is currently enforced (`.{8,72}` character length in DTOs/ticket, with a note on the UTF-8 72-byte bcrypt behavior and the open question for the team leader on whether to enforce `Buffer.byteLength(pw, 'utf8') <= 72` or document ASCII-only / byte-cap behavior).
+   - Do **not** silently change the `.{8,72}` rule to a byte check without preserving/updating the boundary tests as appropriate, or keep the `.{8,72}` rule as specified by the ticket and include the exact probe findings (`"a1" + "é"×70` vs `"a1" + "é"×35 + "x"×35`) in the PR notes for the team leader's decision.
+
+4. **Verify, Push, and Update/Open the PR:**
+   - Run verification (`npm run verify` or format, lint, typecheck, build, and tests, ignoring the known Windows-only `common/events` load issue if it passes in isolation).
+   - Commit the changes and prompt log entry, push to `feature/ACC-08-change-password-forced-change`, and ensure the PR targeting `develop` (`ACC-08: Change password and forced password change`) is updated/created with the fix summary and all four open questions for the team leader/Kareem clearly listed (72-char vs. 72-byte bcrypt cap, `mustChangePassword` same-password rejection + whether normal change-password should also reject same password, `DECISIONS.md` sync, and whether wrong `currentPassword` attempts on change-password should count toward ACC-05 lockout).
+
+How the output was used:
+Fixed forced-change same-password bug in auth.service.ts with service/API/DTO tests, synced DECISIONS.md §3 and auth.md §4 (commits d7b1c8c, 8368e11), pushed to PR #139; PR update text prepared for pasting (gh CLI not installed); log commit pushed
+================================================

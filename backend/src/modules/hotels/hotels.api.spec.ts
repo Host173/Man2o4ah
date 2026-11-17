@@ -74,7 +74,7 @@ describe('Hotel profile API (HTL-01)', () => {
           .expect(201);
         for (const photo of response.body.photos) {
           expect(photo).toEqual({
-            id: expect.any(String),
+            _id: expect.any(String),
             key: expect.any(String),
             url: `/uploads/${photo.key}`,
           });
@@ -176,7 +176,7 @@ describe('Hotel profile API (HTL-01)', () => {
         .post(`/api/hotels/${created.id}/photos`)
         .set('Cookie', moderator.cookie)
         .attach('file', bytes, 'extra.jpg')
-        .expect(409);
+        .expect(400);
       expect(response.body.code).toBe(ErrorCode.LimitExceeded);
       expect((await service.getHotel(created.id))!.photos).toHaveLength(5);
       expect(storage.keys()).toHaveLength(5);
@@ -284,7 +284,7 @@ describe('Hotel profile API (HTL-01)', () => {
       .expect(201);
     expect(response.body).toEqual({
       ...profile,
-      id: expect.stringMatching(/^[0-9a-f]{24}$/),
+      _id: expect.stringMatching(/^[0-9a-f]{24}$/),
       countryCode: 'EG',
       photos: [],
       checkInTime: '14:00',
@@ -293,7 +293,8 @@ describe('Hotel profile API (HTL-01)', () => {
       isActive: true,
       ratingSummary: { average: null, count: 0 },
     });
-    expect(await service.getHotel(response.body.id)).toEqual(response.body);
+    const { _id, ...fields } = response.body;
+    expect(await service.getHotel(_id)).toEqual({ id: _id, ...fields });
     expect(await hotels.countDocuments()).toBe(1);
   });
 
@@ -308,13 +309,20 @@ describe('Hotel profile API (HTL-01)', () => {
       .set('Cookie', moderator.cookie)
       .send({ name: '  Dubai View  ', cityId: 'dubai' })
       .expect(200);
+    const { id, ...fields } = created;
     expect(response.body).toEqual({
+      ...fields,
+      _id: id,
+      name: 'Dubai View',
+      cityId: 'dubai',
+      countryCode: 'AE',
+    });
+    expect(await service.getHotel(created.id)).toEqual({
       ...created,
       name: 'Dubai View',
       cityId: 'dubai',
       countryCode: 'AE',
     });
-    expect(await service.getHotel(created.id)).toEqual(response.body);
   });
 
   it('computes photo URLs in HTTP responses without changing the stored or internal view', async () => {
@@ -335,7 +343,7 @@ describe('Hotel profile API (HTL-01)', () => {
       .expect(200);
     expect(response.body.photos).toEqual([
       {
-        id: photoId.toHexString(),
+        _id: photoId.toHexString(),
         key: 'hotel.jpg',
         url: '/uploads/hotel.jpg',
       },
@@ -600,7 +608,8 @@ describe('Hotel profile API (HTL-01)', () => {
       },
     });
     expect(upload?.responses['201']).toBeDefined();
-    expect(upload?.responses['409']).toBeDefined();
+    expect(upload?.responses['400']).toBeDefined();
+    expect(upload?.responses['409']).toBeUndefined();
     expect(remove?.responses['204']).toBeDefined();
     expect(remove?.responses['404']).toBeDefined();
     expect(document.paths['/api/hotels/{id}']?.get).toBeUndefined();

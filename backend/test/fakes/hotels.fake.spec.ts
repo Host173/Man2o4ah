@@ -11,6 +11,9 @@ import { FakeStorageService } from './storage.fake.js';
 
 const checkIn = toDateOnly('2026-11-15');
 const checkOut = toDateOnly('2026-11-17');
+const HOTEL_ID = '507f1f77bcf86cd799439011';
+const OTHER_HOTEL_ID = '507f1f77bcf86cd799439012';
+const MISSING_HOTEL_ID = '507f1f77bcf86cd799439013';
 
 function hotel(id: string, overrides: Partial<HotelView> = {}): HotelView {
   return {
@@ -33,7 +36,7 @@ function hotel(id: string, overrides: Partial<HotelView> = {}): HotelView {
 function room(id: string, overrides: Partial<RoomView> = {}): RoomView {
   return {
     id,
-    hotelId: 'hotel-1',
+    hotelId: HOTEL_ID,
     name: id,
     type: 'Double',
     beds: 1,
@@ -58,7 +61,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-12T12:00:00Z'));
   hotels = new FakeHotelsService({
-    hotels: [hotel('hotel-1')],
+    hotels: [hotel(HOTEL_ID)],
     rooms: [room('room-1'), room('room-2')],
   });
   inventory = new FakeRoomNightInventory(hotels);
@@ -67,10 +70,40 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  it('rejects malformed hotel IDs with the same validation errors as the real service', async () => {
+    const calls = [
+      () => hotels.getHotel('invalid'),
+      () => hotels.update('invalid', {}, 'invalid'),
+      () => hotels.addPhoto('invalid', undefined, 'invalid'),
+      () => hotels.removePhoto('invalid', 'invalid', 'invalid'),
+      () => hotels.setActive('invalid', false),
+      () => hotels.setRatingSummary('invalid', { average: null, count: 0 }),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'hotelId', message: expect.any(String) }],
+        },
+      });
+    }
+  });
+
+  it('normalizes valid ObjectIds without confusing malformed and missing hotel IDs', async () => {
+    expect(await hotels.getHotel(HOTEL_ID.toUpperCase())).toEqual(
+      await hotels.getHotel(HOTEL_ID),
+    );
+    expect(await hotels.getHotel(MISSING_HOTEL_ID)).toBeNull();
+    expect(await hotels.update(HOTEL_ID.toUpperCase(), {}, HOTEL_ID)).toEqual(
+      await hotels.getHotel(HOTEL_ID),
+    );
+  });
+
   it('stores detached photo views, enforces five under concurrency, and removes files', async () => {
     const storage = new FakeStorageService();
     const fake = new FakeHotelsService(
-      { hotels: [hotel('hotel-1')] },
+      { hotels: [hotel(HOTEL_ID)] },
       new FakeReferenceDataService(),
       storage,
     );
@@ -81,9 +114,7 @@ describe('FakeHotelsService', () => {
       size: 5,
     };
     const results = await Promise.allSettled(
-      Array.from({ length: 7 }, () =>
-        fake.addPhoto('hotel-1', image, 'hotel-1'),
-      ),
+      Array.from({ length: 7 }, () => fake.addPhoto(HOTEL_ID, image, HOTEL_ID)),
     );
     const successful = results.filter(
       (result) => result.status === 'fulfilled',
@@ -92,21 +123,22 @@ describe('FakeHotelsService', () => {
     for (const result of results) {
       if (result.status === 'rejected')
         expect(result.reason).toMatchObject({
+          status: 400,
           response: { code: ErrorCode.LimitExceeded },
         });
     }
-    const photos = (await fake.getHotel('hotel-1'))!.photos;
+    const photos = (await fake.getHotel(HOTEL_ID))!.photos;
     expect(photos).toHaveLength(5);
     expect(storage.keys().sort()).toEqual(
       photos.map((photo) => photo.key).sort(),
     );
     successful[0]!.value.photos.length = 0;
-    expect((await fake.getHotel('hotel-1'))!.photos).toHaveLength(5);
-    await fake.removePhoto('hotel-1', photos[0]!.id, 'hotel-1');
+    expect((await fake.getHotel(HOTEL_ID))!.photos).toHaveLength(5);
+    await fake.removePhoto(HOTEL_ID, photos[0]!.id, HOTEL_ID);
     expect(storage.has(photos[0]!.key)).toBe(false);
-    expect((await fake.getHotel('hotel-1'))!.photos).toHaveLength(4);
+    expect((await fake.getHotel(HOTEL_ID))!.photos).toHaveLength(4);
     expect(
-      (await fake.addPhoto('hotel-1', image, 'hotel-1')).photos,
+      (await fake.addPhoto(HOTEL_ID, image, HOTEL_ID)).photos,
     ).toHaveLength(5);
   });
 
@@ -117,30 +149,29 @@ describe('FakeHotelsService', () => {
       mimetype: 'image/jpeg',
       size: 5,
     };
-    const photo = (await hotels.addPhoto('hotel-1', image, 'hotel-1'))
-      .photos[0]!;
+    const photo = (await hotels.addPhoto(HOTEL_ID, image, HOTEL_ID)).photos[0]!;
     await expect(
-      hotels.addPhoto('hotel-1', image, undefined),
+      hotels.addPhoto(HOTEL_ID, image, undefined),
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
     await expect(
-      hotels.removePhoto('hotel-1', photo.id, 'hotel-2'),
+      hotels.removePhoto(HOTEL_ID, photo.id, OTHER_HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
     await expect(
-      hotels.addPhoto('hotel-1', undefined, 'hotel-1'),
+      hotels.addPhoto(HOTEL_ID, undefined, HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
     await expect(
       hotels.addPhoto(
-        'hotel-1',
+        HOTEL_ID,
         { ...image, mimetype: 'application/pdf' },
-        'hotel-1',
+        HOTEL_ID,
       ),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
     await expect(
-      hotels.removePhoto('hotel-1', 'invalid', 'hotel-1'),
+      hotels.removePhoto(HOTEL_ID, 'invalid', HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
-    await hotels.removePhoto('hotel-1', photo.id, 'hotel-1');
+    await hotels.removePhoto(HOTEL_ID, photo.id, HOTEL_ID);
     await expect(
-      hotels.removePhoto('hotel-1', photo.id, 'hotel-1'),
+      hotels.removePhoto(HOTEL_ID, photo.id, HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
   });
 
@@ -179,9 +210,9 @@ describe('FakeHotelsService', () => {
   });
 
   it('updates only supplied profile fields and derives the new country', async () => {
-    const previous = await hotels.getHotel('hotel-1');
+    const previous = await hotels.getHotel(HOTEL_ID);
     const updated = await hotels.update(
-      'hotel-1',
+      HOTEL_ID,
       {
         name: '  Edited  ',
         address: '  New Address  ',
@@ -190,7 +221,7 @@ describe('FakeHotelsService', () => {
         starRating: 4,
         amenities: ['  Wi-Fi  '],
       },
-      'hotel-1',
+      HOTEL_ID,
     );
     expect(updated).toEqual({
       ...previous,
@@ -202,31 +233,27 @@ describe('FakeHotelsService', () => {
       starRating: 4,
       amenities: ['Wi-Fi'],
     });
-    expect(await hotels.update('hotel-1', {}, 'hotel-1')).toEqual(updated);
-    await hotels.update('hotel-1', { amenities: [] }, 'hotel-1');
+    expect(await hotels.update(HOTEL_ID, {}, HOTEL_ID)).toEqual(updated);
+    await hotels.update(HOTEL_ID, { amenities: [] }, HOTEL_ID);
     updated.amenities.push('Detached');
-    expect((await hotels.getHotel('hotel-1'))?.amenities).toEqual([]);
+    expect((await hotels.getHotel(HOTEL_ID))?.amenities).toEqual([]);
   });
 
   it('rejects unassigned hotel edits and unknown cities without partial changes', async () => {
-    const previous = await hotels.getHotel('hotel-1');
+    const previous = await hotels.getHotel(HOTEL_ID);
     await expect(
-      hotels.update('hotel-1', { name: 'Forbidden' }, 'hotel-2'),
+      hotels.update(HOTEL_ID, { name: 'Forbidden' }, OTHER_HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
-    await expect(hotels.update('missing', {}, 'missing')).rejects.toMatchObject(
-      { response: { code: ErrorCode.NotFound } },
-    );
     await expect(
-      hotels.update(
-        'hotel-1',
-        { name: 'Invalid', cityId: 'missing' },
-        'hotel-1',
-      ),
+      hotels.update(MISSING_HOTEL_ID, {}, MISSING_HOTEL_ID),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      hotels.update(HOTEL_ID, { name: 'Invalid', cityId: 'missing' }, HOTEL_ID),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
     await expect(
       hotels.create({ name: 'Invalid', address: 'Address', cityId: 'missing' }),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
-    expect(await hotels.getHotel('hotel-1')).toEqual(previous);
+    expect(await hotels.getHotel(HOTEL_ID)).toEqual(previous);
     expect(hotels.data.hotels).toHaveLength(1);
   });
 
@@ -238,21 +265,21 @@ describe('FakeHotelsService', () => {
   };
 
   it('returns detached hotel data, including booking policies, and null for a missing hotel', async () => {
-    const found = await hotels.getHotel('hotel-1');
+    const found = await hotels.getHotel(HOTEL_ID);
     expect(found?.cancellationPolicy.tiers).toEqual([
       { daysBefore: 7, refundPercent: 100 },
     ]);
     if (!found) throw new Error('Expected fixture hotel');
     found.cancellationPolicy.tiers.length = 0;
     expect(
-      (await hotels.getHotel('hotel-1'))?.cancellationPolicy.tiers,
+      (await hotels.getHotel(HOTEL_ID))?.cancellationPolicy.tiers,
     ).toHaveLength(1);
-    expect(await hotels.getHotel('missing')).toBeNull();
+    expect(await hotels.getHotel(MISSING_HOTEL_ID)).toBeNull();
   });
 
   it('includes inactive rooms for booking validation, scoped to the hotel', async () => {
     await inventory.deactivate('room-1');
-    expect(await hotels.getRooms('hotel-1')).toEqual([
+    expect(await hotels.getRooms(HOTEL_ID)).toEqual([
       expect.objectContaining({ id: 'room-1', isActive: false }),
       expect.objectContaining({ id: 'room-2', isActive: true }),
     ]);
@@ -261,14 +288,14 @@ describe('FakeHotelsService', () => {
 
   it('exposes reservations and blocks over inclusive dates without exposing other hotels', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
       'reservation-1',
     );
     await inventory.block('room-2', checkIn, checkIn);
-    const nights = await hotels.getRoomNights('hotel-1', checkIn, checkIn);
+    const nights = await hotels.getRoomNights(HOTEL_ID, checkIn, checkIn);
     expect(nights).toEqual([
       expect.objectContaining({
         kind: 'reservation',
@@ -296,7 +323,7 @@ describe('FakeHotelsService', () => {
     );
     expect((await hotels.search({ ...query, rooms: 3 })).total).toBe(0);
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
@@ -313,19 +340,19 @@ describe('FakeHotelsService', () => {
 
   it('reflects provider activation without deleting existing reservations', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
       'reservation-1',
     );
-    await hotels.setActive('hotel-1', false);
+    await hotels.setActive(HOTEL_ID, false);
     expect((await hotels.search(query)).total).toBe(0);
-    expect(await hotels.getHotel('hotel-1')).toMatchObject({ isActive: false });
+    expect(await hotels.getHotel(HOTEL_ID)).toMatchObject({ isActive: false });
     expect(
-      await hotels.getRoomNights('hotel-1', checkIn, checkOut),
+      await hotels.getRoomNights(HOTEL_ID, checkIn, checkOut),
     ).toHaveLength(2);
-    await hotels.setActive('hotel-1', true);
+    await hotels.setActive(HOTEL_ID, true);
     expect((await hotels.search(query)).total).toBe(1);
   });
 
@@ -346,7 +373,7 @@ describe('FakeHotelsService', () => {
       0,
     );
     expect((await hotels.search({ ...query, minRating: 1 })).total).toBe(0);
-    await hotels.setRatingSummary('hotel-1', { average: 4.5, count: 2 });
+    await hotels.setRatingSummary(HOTEL_ID, { average: 4.5, count: 2 });
     expect((await hotels.search({ ...query, minRating: 4.5 })).total).toBe(1);
     expect((await hotels.search({ ...query, minRating: 5 })).total).toBe(0);
     expect((await hotels.search({ ...query, cityId: 'dubai' })).total).toBe(0);
@@ -362,10 +389,10 @@ describe('FakeHotelsService', () => {
 
   it('sorts and paginates qualifying hotels using the shared response shape', async () => {
     hotels.data.hotels.push(
-      hotel('hotel-2', { ratingSummary: { average: 5, count: 1 } }),
+      hotel(OTHER_HOTEL_ID, { ratingSummary: { average: 5, count: 1 } }),
     );
     hotels.data.rooms.push(
-      room('room-3', { hotelId: 'hotel-2', pricePerNightMinor: 5000 }),
+      room('room-3', { hotelId: OTHER_HOTEL_ID, pricePerNightMinor: 5000 }),
     );
     const result = await hotels.search({
       ...query,
@@ -379,13 +406,16 @@ describe('FakeHotelsService', () => {
       limit: 1,
       totalPages: 2,
     });
-    expect(result.items.map((item) => item.id)).toEqual(['hotel-1']);
+    expect(result.items.map((item) => item.id)).toEqual([HOTEL_ID]);
     const rated = await hotels.search({
       ...query,
       sortBy: 'rating',
       sortOrder: 'desc',
     });
-    expect(rated.items.map((item) => item.id)).toEqual(['hotel-2', 'hotel-1']);
+    expect(rated.items.map((item) => item.id)).toEqual([
+      OTHER_HOTEL_ID,
+      HOTEL_ID,
+    ]);
   });
 
   it.each([
@@ -406,11 +436,13 @@ describe('FakeHotelsService', () => {
   });
 
   it('reports missing hotels when updating activation or ratings', async () => {
-    await expect(hotels.setActive('missing', false)).rejects.toMatchObject({
+    await expect(
+      hotels.setActive(MISSING_HOTEL_ID, false),
+    ).rejects.toMatchObject({
       response: { code: ErrorCode.NotFound },
     });
     await expect(
-      hotels.setRatingSummary('missing', { average: null, count: 0 }),
+      hotels.setRatingSummary(MISSING_HOTEL_ID, { average: null, count: 0 }),
     ).rejects.toMatchObject({
       response: { code: ErrorCode.NotFound },
     });
@@ -420,19 +452,19 @@ describe('FakeHotelsService', () => {
 describe('FakeRoomNightInventory', () => {
   it('reserves every selected room for check-in through check-out minus one night', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1', 'room-2'],
       checkIn,
       checkOut,
       'reservation-1',
     );
-    const nights = await hotels.getRoomNights('hotel-1', checkIn, checkOut);
+    const nights = await hotels.getRoomNights(HOTEL_ID, checkIn, checkOut);
     expect(nights).toHaveLength(4);
     expect(
       nights.every((night) => night.date >= checkIn && night.date < checkOut),
     ).toBe(true);
     expect(
-      (await hotels.getRooms('hotel-1')).every(
+      (await hotels.getRooms(HOTEL_ID)).every(
         (item) => item.hasEverBeenReserved,
       ),
     ).toBe(true);
@@ -440,7 +472,7 @@ describe('FakeRoomNightInventory', () => {
 
   it('rejects an overlapping reservation without holding any other requested room', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
@@ -448,7 +480,7 @@ describe('FakeRoomNightInventory', () => {
     );
     await expect(
       inventory.reserve(
-        'hotel-1',
+        HOTEL_ID,
         ['room-2', 'room-1'],
         checkIn,
         checkOut,
@@ -456,24 +488,24 @@ describe('FakeRoomNightInventory', () => {
       ),
     ).rejects.toMatchObject({ response: { code: ErrorCode.RoomsUnavailable } });
     expect(
-      await hotels.getRoomNights('hotel-1', checkIn, checkOut),
+      await hotels.getRoomNights(HOTEL_ID, checkIn, checkOut),
     ).toHaveLength(2);
     expect(
-      (await hotels.getRooms('hotel-1')).find((item) => item.id === 'room-2')
+      (await hotels.getRooms(HOTEL_ID)).find((item) => item.id === 'room-2')
         ?.hasEverBeenReserved,
     ).toBe(false);
   });
 
   it('allows a new stay starting on the previous stay checkout date', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
       'reservation-1',
     );
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkOut,
       toDateOnly('2026-11-18'),
@@ -485,7 +517,7 @@ describe('FakeRoomNightInventory', () => {
   it('allows exactly one of two simultaneous overlapping requests', async () => {
     const results = await Promise.allSettled(
       ['reservation-1', 'reservation-2'].map((id) =>
-        inventory.reserve('hotel-1', ['room-1'], checkIn, checkOut, id),
+        inventory.reserve(HOTEL_ID, ['room-1'], checkIn, checkOut, id),
       ),
     );
     expect(
@@ -498,7 +530,8 @@ describe('FakeRoomNightInventory', () => {
     'rejects a room that is %s',
     async (scenario) => {
       if (scenario === 'inactive') await inventory.deactivate('room-1');
-      if (scenario === 'other hotel') hotels.data.rooms[0].hotelId = 'hotel-2';
+      if (scenario === 'other hotel')
+        hotels.data.rooms[0].hotelId = OTHER_HOTEL_ID;
       if (scenario === 'outside availability') {
         await inventory.setAvailability('room-1', [
           { fromDate: checkIn, toDate: checkIn },
@@ -506,7 +539,7 @@ describe('FakeRoomNightInventory', () => {
       }
       await expect(
         inventory.reserve(
-          'hotel-1',
+          HOTEL_ID,
           [scenario === 'missing' ? 'missing' : 'room-1'],
           checkIn,
           checkOut,
@@ -520,10 +553,10 @@ describe('FakeRoomNightInventory', () => {
   );
 
   it('rejects reservations in inactive hotels', async () => {
-    await hotels.setActive('hotel-1', false);
+    await hotels.setActive(HOTEL_ID, false);
     await expect(
       inventory.reserve(
-        'hotel-1',
+        HOTEL_ID,
         ['room-1'],
         checkIn,
         checkOut,
@@ -537,7 +570,7 @@ describe('FakeRoomNightInventory', () => {
     async ({ roomIds }) => {
       await expect(
         inventory.reserve(
-          'hotel-1',
+          HOTEL_ID,
           roomIds,
           checkIn,
           checkOut,
@@ -557,21 +590,21 @@ describe('FakeRoomNightInventory', () => {
     [new Date('2026-11-15T01:00:00Z'), checkOut],
   ])('rejects invalid stay dates: %s to %s', async (from, to) => {
     await expect(
-      inventory.reserve('hotel-1', ['room-1'], from, to, 'reservation-1'),
+      inventory.reserve(HOTEL_ID, ['room-1'], from, to, 'reservation-1'),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
     expect(hotels.data.roomNights).toEqual([]);
   });
 
   it('releases only the selected reservation, is repeatable, and leaves room history and blocks intact', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
       'reservation-1',
     );
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-2'],
       checkIn,
       checkOut,
@@ -581,11 +614,9 @@ describe('FakeRoomNightInventory', () => {
     await inventory.release('reservation-1');
     await inventory.release('reservation-1');
     expect(hotels.data.roomNights).toHaveLength(3);
-    expect((await hotels.getRooms('hotel-1'))[0].hasEverBeenReserved).toBe(
-      true,
-    );
+    expect((await hotels.getRooms(HOTEL_ID))[0].hasEverBeenReserved).toBe(true);
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
@@ -602,7 +633,7 @@ describe('FakeRoomNightInventory', () => {
     expect(hotels.data.roomNights).toHaveLength(2);
     await expect(
       inventory.reserve(
-        'hotel-1',
+        HOTEL_ID,
         ['room-1'],
         checkIn,
         checkOut,
@@ -618,7 +649,7 @@ describe('FakeRoomNightInventory', () => {
     await inventory.unblock(blockId);
     await inventory.unblock(blockId);
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
@@ -637,7 +668,7 @@ describe('FakeRoomNightInventory', () => {
       { fromDate: checkOut, toDate: checkOut },
       { fromDate: checkIn, toDate: toDateOnly('2026-11-16') },
     ]);
-    expect((await hotels.getRooms('hotel-1'))[0].availability).toEqual([
+    expect((await hotels.getRooms(HOTEL_ID))[0].availability).toEqual([
       { fromDate: checkIn, toDate: checkOut },
     ]);
     await expect(
@@ -646,14 +677,14 @@ describe('FakeRoomNightInventory', () => {
         { fromDate: checkOut, toDate: checkOut },
       ]),
     ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
-    expect((await hotels.getRooms('hotel-1'))[0].availability).toEqual([
+    expect((await hotels.getRooms(HOTEL_ID))[0].availability).toEqual([
       { fromDate: checkIn, toDate: checkOut },
     ]);
   });
 
   it('protects reserved nights when editing, deactivating, or deleting a room', async () => {
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       checkIn,
       checkOut,
@@ -679,7 +710,7 @@ describe('FakeRoomNightInventory', () => {
   it('protects today in UTC, but permits availability changes and deactivation after reserved nights have passed', async () => {
     const today = toDateOnly('2026-11-12');
     await inventory.reserve(
-      'hotel-1',
+      HOTEL_ID,
       ['room-1'],
       today,
       toDateOnly('2026-11-13'),
@@ -699,7 +730,7 @@ describe('FakeRoomNightInventory', () => {
   it('deletes never-reserved rooms and their blocks, without deleting another room', async () => {
     await inventory.block('room-1', checkIn, checkOut);
     await inventory.delete('room-1');
-    expect(await hotels.getRooms('hotel-1')).toEqual([
+    expect(await hotels.getRooms(HOTEL_ID)).toEqual([
       expect.objectContaining({ id: 'room-2' }),
     ]);
     expect(hotels.data.roomNights).toEqual([]);

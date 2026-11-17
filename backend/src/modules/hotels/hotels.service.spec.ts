@@ -93,6 +93,7 @@ describe('HotelsService (HTL-01 integration)', () => {
       expect(rejected).toHaveLength(3);
       for (const result of rejected) {
         expect(result.reason).toMatchObject({
+          status: 400,
           response: { code: ErrorCode.LimitExceeded },
         });
       }

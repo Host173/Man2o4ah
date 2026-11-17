@@ -479,3 +479,27 @@ How the output was used:
 FLT-19: merged develop (f64503a), tests d625347, fixes 650031c, npm run verify passed (1001 tests). GEN-11 fixes are on the GEN-11 branch
 GEN-11: merged develop (17a70eb), tests 5ca7aeb, fixes f969653, comments 8fd9a51, npm run verify passed. FLT-19: merged develop, review fixes with tests (see the FLT-19 commits)
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+i want to test it on swagger first
+
+How the output was used:
+Answer only, no files changed (explained why Swagger answers 501 and proposed a local run with the flight fakes)
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+no i will wait for janas stub now i want to move on to HTL 16
+
+How the output was used:
+Answer only, no files changed (HTL-16 plan)
+================================================

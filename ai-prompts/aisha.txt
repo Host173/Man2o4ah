@@ -9231,3 +9231,37 @@ Review and resolve the actionable items from the automatic AI review on ACC-08 (
 How the output was used:
 Fixed forced-change same-password bug in auth.service.ts with service/API/DTO tests, synced DECISIONS.md §3 and auth.md §4 (commits d7b1c8c, 8368e11), pushed to PR #139; PR update text prepared for pasting (gh CLI not installed); log commit pushed
 ================================================
+================================================
+Date: 2026-11-17
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+0. **Verify and Switch to the Target Branch First:**
+   - Run `git status` and `git branch -a`.
+   - Ensure you are checked out on `feature/ACC-08-change-password-forced-change` before making any edits (if on another branch, run `git fetch origin` and switch to `feature/ACC-08-change-password-forced-change`, creating/tracking the remote branch if needed).
+   - Confirm the ACC-08 commits (including `40e91b8`) are present on the branch and no unintended uncommitted changes are lingering.
+
+1. **Original Prompt & Scope Guardrail Check:**
+   - Before and after making changes, verify that no rules or constraints from the original ACC-08 prompt are violated:
+     - Keep changes strictly inside `accounts/` and the specifically authorized docs (`docs/ai/skills/travel-platform/references/auth.md`, `docs/DECISIONS.md`, and `docs/database/data-model.md` for the password rule line below).
+     - Do **not** alter shared contracts, error codes, events, ports, or frozen data models (do **not** change `data-model.md §3 sessions` or `auth.md §3` regarding deleting all sessions vs. other sessions until the team leader confirms).
+     - Append a new entry to the prompt log (append-only).
+
+2. **Doc Fix #1 — Update Password Rule in `docs/database/data-model.md` §3 (`users` Rules):**
+   - In `docs/database/data-model.md` §3 (`users` Rules), update the line that still says `"Password rules (≥ 8 chars, ≥ 1 letter, ≥ 1 digit)"` so it matches the 8–72 character rule and `DECISIONS.md` §3: `"8–72 characters, ≥ 1 letter, ≥ 1 digit (DECISIONS §3)"`.
+
+3. **Doc Fix #2 — Add UTF-8 Byte vs. Character Caveat to `password-rule.ts` Header Comment:**
+   - In `backend/src/modules/accounts/auth/password-rule.ts`, update the header comment so it does not imply that the 72-character cap prevents 72-byte bcrypt collisions for non-ASCII passwords (as shown by `"a1" + "é"×70` vs. `"a1" + "é"×35 + "x"×35`).
+   - Add the caveat that the cap counts characters, not UTF-8 bytes, referencing `DECISIONS` open item 1 (`"counts characters, not UTF-8 bytes; see DECISIONS open item 1"`).
+
+4. **Verify, Commit, Push, and Update the PR:**
+   - Run verification (`npm run verify` or format, lint, typecheck, build, and tests, ignoring any known Windows-only `common/events` load issue if it passes in isolation).
+   - Commit the doc updates and prompt log entry, push to `feature/ACC-08-change-password-forced-change` to update the PR targeting `develop` (`ACC-08: Change password and forced password change`), and include the remaining open questions for the team leader/Kareem in the PR notes:
+     1. Confirming `data-model.md §3` (`sessions` Rules) and `auth.md §3` ("other sessions" vs. "all" sessions on password change).
+     2. Whether TDD ("failing test first") in `DECISIONS.md` applies to review-finding fixes on an unmerged PR (such as `d7b1c8c`), alongside existing open questions on the 72-char vs. 72-byte cap and `failedLoginAttempts` lockout behavior on wrong `currentPassword`.
+
+How the output was used:
+Updated password-rule.ts header comment (commit d4e1edd), pushed to PR #139; data-model.md not edited (frozen per README team rules, raised for Kareem); PR update text prepared for pasting (gh CLI not installed); log commit pushed
+================================================

@@ -1433,3 +1433,16 @@ Ok go then give me a pdf with the 3 questions we have
 How the output was used:
 Marked the data-model §8 design calls confirmed (two parts left open for the TAs) and removed the unused session settings from the api-contract env list; opened a docs PR. Made a PDF of the three TA questions.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-12
+
+Prompt:
+bro ig you have the CSV's so just do it and open a pr , and if you don't have them then you have the pdf that have them,
+
+How the output was used:
+Implemented ReferenceDataService over the seeded collections and the public paginated endpoints for countries, cities, airports (FLT-02), currencies and attractions, with integration and API tests (including a check that the fake answers like the real service); fixed the fake's New York ID to the dataset's. Reviewed the code and the tests before opening the PR.
+================================================

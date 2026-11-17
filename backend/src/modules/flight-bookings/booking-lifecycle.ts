@@ -1,7 +1,7 @@
 /**
- * Booking lifecycle rules shared by flight-bookings and hotel-bookings (GEN-11).
- * Lives here until the team leader decides where shared booking rules belong;
- * hotel-bookings imports it from this file.
+ * The GEN-11 lifecycle for flight bookings. hotel-bookings has its own copy that
+ * must allow the same moves; neither module imports the other (DECISIONS.md §3,
+ * booking rules per module).
  */
 import { ConflictException } from '@nestjs/common';
 import type {
@@ -14,7 +14,7 @@ import type {
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { FlightBookingStatus } from './schemas/flight-booking.schema.js';
 
-/** Flight bookings and hotel reservations share the same five statuses (GEN-11). */
+/** This module's statuses (GEN-11); the hotel copy uses `HotelReservationStatus`. */
 export type BookingStatus = FlightBookingStatus;
 
 /** GEN-11: the only legal moves. A status missing from a list can't be reached from that key. */

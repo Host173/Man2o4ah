@@ -1,7 +1,7 @@
 /**
- * Refund tiers shared by flight-bookings and hotel-bookings (GEN-11). Lives here
- * until the team leader decides where shared booking rules belong; hotel-bookings
- * imports it from this file.
+ * The refund tier rule (FLT-09) for flight bookings. hotel-bookings has its own
+ * copy (HTL-10) that must follow the same rule; neither module imports the
+ * other (DECISIONS.md §3, booking rules per module).
  */
 import { percentOfMinor } from '../../common/money/money.js';
 

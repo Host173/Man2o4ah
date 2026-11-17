@@ -41,7 +41,15 @@ describe('refundFor (FLT-09, HTL-10)', () => {
   it('applies a daysBefore-0 tier until the start, but not after it', () => {
     const sameDay = [{ daysBefore: 0, refundPercent: 25 }];
     expect(refundFor(sameDay, 10_000, start, before(1)).percent).toBe(25);
+    expect(refundFor(sameDay, 10_000, start, before(0)).percent).toBe(25);
     expect(refundFor(sameDay, 10_000, start, before(-1)).percent).toBe(0);
+  });
+
+  it.each([
+    ['now', start, new Date('nope')],
+    ['start', new Date('nope'), before(DAY)],
+  ])('throws when %s is not a valid date', (_label, startAt, now) => {
+    expect(() => refundFor(tiers, 10_000, startAt, now)).toThrow();
   });
 
   it('computes the amount from the total in minor units', () => {

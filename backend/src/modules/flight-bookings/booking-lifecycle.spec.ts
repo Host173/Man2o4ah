@@ -43,6 +43,7 @@ describe('canTransition (GEN-11)', () => {
 interface TestBooking {
   status: BookingStatus;
   confirmedAt?: Date;
+  reference?: string;
 }
 
 describe('transitionStatus (GEN-11)', () => {
@@ -53,7 +54,12 @@ describe('transitionStatus (GEN-11)', () => {
     db = await startTestDatabase('booking-lifecycle');
     bookings = db.connection.model<TestBooking>(
       'LifecycleTestBooking',
-      new Schema<TestBooking>({ status: String, confirmedAt: Date }),
+      // `reference` has the same rule as the real flight booking schema.
+      new Schema<TestBooking>({
+        status: String,
+        confirmedAt: Date,
+        reference: { type: String, match: /^FB[A-Z0-9]{6}$/ },
+      }),
     );
   }, HOOK_TIMEOUT);
 
@@ -80,6 +86,34 @@ describe('transitionStatus (GEN-11)', () => {
 
     const after = await bookings.findById(id).lean();
     expect(after).toMatchObject({ status: 'confirmed', confirmedAt });
+  });
+
+  it('validates the extra fields against the schema and writes nothing when they are invalid', async () => {
+    const id = await pending();
+
+    await expect(
+      transitionStatus(bookings, id, 'pending_payment', 'confirmed', {
+        reference: 'not-a-ref',
+      }),
+    ).rejects.toThrow();
+
+    const after = await bookings.findById(id).lean();
+    expect(after).toMatchObject({ status: 'pending_payment' });
+    expect(after?.reference).toBeUndefined();
+  });
+
+  it('throws on a misspelt field instead of silently dropping it', async () => {
+    const id = await pending();
+
+    await expect(
+      transitionStatus(bookings, id, 'pending_payment', 'confirmed', {
+        confirmAt: new Date(), // typo for confirmedAt
+      }),
+    ).rejects.toThrow();
+
+    expect((await bookings.findById(id).lean())?.status).toBe(
+      'pending_payment',
+    );
   });
 
   it('rejects an illegal move with 409 and writes nothing', async () => {

@@ -16,11 +16,15 @@ import type { RoomNightInventory } from '../../src/modules/hotels/room-night-inv
 import {
   assertDateRange,
   assertStayDates,
-  FakeHotelsService,
-} from './hotels.fake.js';
+  normalizeAvailability,
+} from '../../src/modules/hotels/room-date-ranges.js';
+import { FakeHotelsService } from './hotels.fake.js';
 import type { PublicApi } from './public-api.js';
 
-/** Atomic within this in-memory dataset; does not emulate MongoDB transactions. */
+/**
+ * Atomic within this in-memory dataset; does not emulate MongoDB transactions.
+ * Options may be omitted for fixture setup; the production inventory requires an active transaction.
+ */
 export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
   constructor(private readonly hotels: FakeHotelsService) {}
 
@@ -128,28 +132,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
   ): Promise<void> {
     void options;
     const room = this.requireRoom(roomId);
-    for (const range of ranges) assertDateRange(range.fromDate, range.toDate);
-    const sorted = structuredClone(ranges).sort(
-      (a, b) => a.fromDate.getTime() - b.fromDate.getTime(),
-    );
-    const normalized: RoomDateRange[] = [];
-    for (const range of sorted) {
-      const previous = normalized.at(-1);
-      if (previous && range.fromDate <= previous.toDate) {
-        throw new BadRequestException({
-          code: ErrorCode.ValidationFailed,
-          message: 'Availability ranges must not overlap',
-        });
-      }
-      if (
-        previous &&
-        range.fromDate.getTime() === addDays(previous.toDate, 1).getTime()
-      ) {
-        previous.toDate = range.toDate;
-      } else {
-        normalized.push(range);
-      }
-    }
+    const normalized = normalizeAvailability(ranges);
     if (
       this.futureReservations(roomId).some(
         (night) =>

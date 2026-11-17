@@ -70,6 +70,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     expect(document.paths['/api/posts/{id}']?.get?.security).toBeUndefined();
     expect(document.paths['/api/posts/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/posts/{id}']?.delete).toBeDefined();
+    expect(document.paths['/api/posts/{id}/comments']?.get).toBeDefined();
+    expect(
+      document.paths['/api/posts/{id}/comments']?.get?.security,
+    ).toBeUndefined();
+    expect(document.paths['/api/posts/{id}/comments']?.post).toBeDefined();
+    expect(document.paths['/api/comments/{id}']?.patch).toBeDefined();
+    expect(document.paths['/api/comments/{id}']?.delete).toBeDefined();
   });
 
   describe('Authentication & password-change gate', () => {
@@ -105,6 +112,26 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       const deleteRes = await testApp!.http().delete(`/api/posts/${someId}`);
       expect(deleteRes.status).toBe(401);
       expect(deleteRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const createCommentRes = await testApp!
+        .http()
+        .post(`/api/posts/${someId}/comments`)
+        .send({ body: 'Guest comment' });
+      expect(createCommentRes.status).toBe(401);
+      expect(createCommentRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const patchCommentRes = await testApp!
+        .http()
+        .patch(`/api/comments/${someId}`)
+        .send({ body: 'Updated comment' });
+      expect(patchCommentRes.status).toBe(401);
+      expect(patchCommentRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const deleteCommentRes = await testApp!
+        .http()
+        .delete(`/api/comments/${someId}`);
+      expect(deleteCommentRes.status).toBe(401);
+      expect(deleteCommentRes.body.code).toBe(ErrorCode.NotAuthenticated);
     });
 
     it('rejects expired sessions with 401 and mustChangePassword users with 403 PASSWORD_CHANGE_REQUIRED', async () => {
@@ -806,15 +833,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   });
 
   describe('GET /api/posts/:id (BLG-02)', () => {
-    it('returns the full published post page with author name, suspended author name, and deactivated commenter as "Deleted user"', async () => {
+    it('returns the published post page with author name (including suspended author) and omits embedded comments', async () => {
       const author = await loginAs(testApp!.connection, UserRole.USER);
       const suspendedAuthor = await loginAs(
         testApp!.connection,
         UserRole.USER,
         { status: UserStatus.SUSPENDED },
       );
-      const commenter = await loginAs(testApp!.connection, UserRole.USER);
-      const deactivatedId = new Types.ObjectId().toHexString();
 
       Object.assign(
         fakeAccounts,
@@ -825,13 +850,6 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
             name: 'Suspended Author',
             email: 'suspended@example.com',
             status: UserStatus.SUSPENDED,
-          },
-          { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
-          {
-            id: deactivatedId,
-            name: 'Deleted Author',
-            email: 'deleted@example.com',
-            status: UserStatus.DEACTIVATED,
           },
         ]),
       );
@@ -860,30 +878,6 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         },
       );
 
-      const c1 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(commenter.id),
-        body: 'Incredible lighting!',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c2 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(deactivatedId),
-        body: 'Worth the evening ticket.',
-      });
-      await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(commenter.id),
-        body: 'Moderated spam comment',
-        isHidden: true,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c3 = await commentModel.create({
-        postId,
-        authorId: new Types.ObjectId(suspendedAuthor.id),
-        body: 'Comment from suspended user.',
-      });
-
       const res = await testApp!.http().get(`/api/posts/${created.body._id}`);
 
       expect(res.status).toBe(200);
@@ -904,31 +898,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(typeof res.body.publishedAt).toBe('string');
       expect(typeof res.body.createdAt).toBe('string');
       expect(typeof res.body.updatedAt).toBe('string');
-      expect(res.body.comments).toHaveLength(3);
-      expect(res.body.comments[0]).toMatchObject({
-        _id: c1._id.toHexString(),
-        postId: created.body._id,
-        authorId: commenter.id,
-        authorName: 'Omar Said',
-        body: 'Incredible lighting!',
-        isHidden: false,
-      });
-      expect(res.body.comments[1]).toMatchObject({
-        _id: c2._id.toHexString(),
-        postId: created.body._id,
-        authorId: deactivatedId,
-        authorName: 'Deleted user',
-        body: 'Worth the evening ticket.',
-        isHidden: false,
-      });
-      expect(res.body.comments[2]).toMatchObject({
-        _id: c3._id.toHexString(),
-        postId: created.body._id,
-        authorId: suspendedAuthor.id,
-        authorName: 'Suspended Author',
-        body: 'Comment from suspended user.',
-        isHidden: false,
-      });
+      expect(res.body.comments).toBeUndefined();
 
       // A suspended author's own post page remains visible with their author name shown (ACC-16).
       const suspendedPost = await testApp!
@@ -950,6 +920,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         authorName: 'Suspended Author',
         title: 'Suspended Author Post',
       });
+      expect(suspendedRes.body.comments).toBeUndefined();
     });
 
     it('returns 404 NOT_FOUND for missing, draft (even by owner), hidden, or deactivated-author posts and 400 for malformed id', async () => {
@@ -1023,6 +994,529 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       const badIdRes = await testApp!.http().get('/api/posts/not-an-id');
       expect(badIdRes.status).toBe(400);
       expect(badIdRes.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('POST & GET /api/posts/:id/comments and PATCH & DELETE /api/comments/:id (BLG-05, BLG-07)', () => {
+    it('creates comments, lists them chronologically with resolved author names, and keeps commentCount accurate on create/edit/delete', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter1 = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter2 = await loginAs(testApp!.connection, UserRole.USER);
+      const suspendedCommenter = await loginAs(
+        testApp!.connection,
+        UserRole.USER,
+        { status: UserStatus.SUSPENDED },
+      );
+      const deactivatedCommenterId = new Types.ObjectId().toHexString();
+
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: author.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          { id: commenter1.id, name: 'Omar Said', email: 'omar@example.com' },
+          {
+            id: commenter2.id,
+            name: 'Laila Hassan',
+            email: 'laila@example.com',
+          },
+          {
+            id: suspendedCommenter.id,
+            name: 'Suspended Commenter',
+            email: 'suspended-c@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+          {
+            id: deactivatedCommenterId,
+            name: 'Former User',
+            email: 'former@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
+      );
+
+      const post = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Sinai Trail Notes',
+          body: 'Water sources and camp spots.',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = post.body._id as string;
+
+      // Minimum boundary (1 char after trim).
+      const c1 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/comments`)
+        .set('Cookie', commenter1.cookie)
+        .send({ body: '  a  ' });
+      expect(c1.status).toBe(201);
+      expect(c1.body).toMatchObject({
+        postId,
+        authorId: commenter1.id,
+        authorName: 'Omar Said',
+        body: 'a',
+        isHidden: false,
+      });
+
+      const after1 = await testApp!.http().get(`/api/posts/${postId}`);
+      expect(after1.body.commentCount).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Maximum boundary (500 chars after trim).
+      const maxBody = 'x'.repeat(500);
+      const c2 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/comments`)
+        .set('Cookie', commenter2.cookie)
+        .send({ body: `  ${maxBody}  ` });
+      expect(c2.status).toBe(201);
+      expect(c2.body.body).toBe(maxBody);
+      expect(c2.body.authorName).toBe('Laila Hassan');
+
+      const after2 = await testApp!.http().get(`/api/posts/${postId}`);
+      expect(after2.body.commentCount).toBe(2);
+
+      // Seed an older deactivated comment (visible) + hidden comment + suspended comment to check ordering & visibility.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c3 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/comments`)
+        .set('Cookie', suspendedCommenter.cookie)
+        .send({ body: 'From suspended commenter' });
+      expect(c3.status).toBe(201);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const c4Deactivated = await commentModel.create({
+        postId: new Types.ObjectId(postId),
+        authorId: new Types.ObjectId(deactivatedCommenterId),
+        body: 'Old trip tip',
+      });
+      await commentModel.create({
+        postId: new Types.ObjectId(postId),
+        authorId: new Types.ObjectId(commenter1.id),
+        body: 'Moderated hidden comment',
+        isHidden: true,
+      });
+
+      const guestList = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments`);
+      expect(guestList.status).toBe(200);
+      expect(guestList.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 4,
+        totalPages: 1,
+      });
+      expect(guestList.body.items.map((c: { _id: string }) => c._id)).toEqual([
+        c1.body._id,
+        c2.body._id,
+        c3.body._id,
+        c4Deactivated._id.toHexString(),
+      ]);
+      expect(
+        guestList.body.items.map(
+          (c: { authorName: string | null }) => c.authorName,
+        ),
+      ).toEqual([
+        'Omar Said',
+        'Laila Hassan',
+        'Suspended Commenter',
+        'Deleted user',
+      ]);
+
+      // Post detail page keeps commentCount and does not embed comments (GEN-05).
+      const detail = await testApp!.http().get(`/api/posts/${postId}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.commentCount).toBe(3);
+      expect(detail.body.comments).toBeUndefined();
+
+      // Edit own comment keeps commentCount unchanged.
+      const edited = await testApp!
+        .http()
+        .patch(`/api/comments/${c1.body._id}`)
+        .set('Cookie', commenter1.cookie)
+        .send({ body: '  Updated trail note!  ' });
+      expect(edited.status).toBe(200);
+      expect(edited.body).toMatchObject({
+        _id: c1.body._id,
+        body: 'Updated trail note!',
+        authorName: 'Omar Said',
+      });
+      expect(
+        (await testApp!.http().get(`/api/posts/${postId}`)).body.commentCount,
+      ).toBe(3);
+
+      // Delete own comments decrements commentCount step-by-step and repeated delete returns 404 without going negative.
+      const del1 = await testApp!
+        .http()
+        .delete(`/api/comments/${c1.body._id}`)
+        .set('Cookie', commenter1.cookie);
+      expect(del1.status).toBe(204);
+      expect(
+        (await testApp!.http().get(`/api/posts/${postId}`)).body.commentCount,
+      ).toBe(2);
+
+      const repeatDel = await testApp!
+        .http()
+        .delete(`/api/comments/${c1.body._id}`)
+        .set('Cookie', commenter1.cookie);
+      expect(repeatDel.status).toBe(404);
+      expect(repeatDel.body.code).toBe(ErrorCode.NotFound);
+      expect(
+        (await testApp!.http().get(`/api/posts/${postId}`)).body.commentCount,
+      ).toBe(2);
+
+      expect(
+        (
+          await testApp!
+            .http()
+            .delete(`/api/comments/${c2.body._id}`)
+            .set('Cookie', commenter2.cookie)
+        ).status,
+      ).toBe(204);
+      expect(
+        (
+          await testApp!
+            .http()
+            .delete(`/api/comments/${c3.body._id}`)
+            .set('Cookie', suspendedCommenter.cookie)
+        ).status,
+      ).toBe(204);
+
+      const afterAllDeletes = await testApp!.http().get(`/api/posts/${postId}`);
+      expect(afterAllDeletes.body.commentCount).toBe(0);
+    });
+
+    it('rejects commenting on draft, hidden, deactivated-author, or missing posts and rejects invalid payloads', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter = await loginAs(testApp!.connection, UserRole.USER);
+
+      const draft = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({ title: 'Draft', body: 'Body', status: PostStatus.DRAFT });
+      const hidden = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Hidden',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+      const deactivated = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Deactivated Owner Post',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        });
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: owner.id,
+      });
+
+      const published = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', commenter.cookie)
+        .send({
+          title: 'Valid Post',
+          body: 'Open for comments',
+          status: PostStatus.PUBLISHED,
+        });
+      const publishedId = published.body._id as string;
+
+      for (const targetId of [
+        draft.body._id,
+        hidden.body._id,
+        deactivated.body._id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const postAttempt = await testApp!
+          .http()
+          .post(`/api/posts/${targetId}/comments`)
+          .set('Cookie', commenter.cookie)
+          .send({ body: 'Cannot comment here' });
+        expect(postAttempt.status).toBe(404);
+        expect(postAttempt.body.code).toBe(ErrorCode.NotFound);
+
+        const listAttempt = await testApp!
+          .http()
+          .get(`/api/posts/${targetId}/comments`);
+        expect(listAttempt.status).toBe(404);
+        expect(listAttempt.body.code).toBe(ErrorCode.NotFound);
+      }
+
+      expect(
+        (await postModel.findById(draft.body._id).lean().exec())?.commentCount,
+      ).toBe(0);
+
+      for (const badBody of ['', '   ', 'a'.repeat(501)]) {
+        const res = await testApp!
+          .http()
+          .post(`/api/posts/${publishedId}/comments`)
+          .set('Cookie', commenter.cookie)
+          .send({ body: badBody });
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+
+      const extraField = await testApp!
+        .http()
+        .post(`/api/posts/${publishedId}/comments`)
+        .set('Cookie', commenter.cookie)
+        .send({ body: 'Valid', isHidden: true });
+      expect(extraField.status).toBe(400);
+      expect(extraField.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badPostIdCreate = await testApp!
+        .http()
+        .post('/api/posts/not-an-id/comments')
+        .set('Cookie', commenter.cookie)
+        .send({ body: 'Valid' });
+      expect(badPostIdCreate.status).toBe(400);
+      expect(badPostIdCreate.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badPostIdList = await testApp!
+        .http()
+        .get('/api/posts/not-an-id/comments');
+      expect(badPostIdList.status).toBe(400);
+      expect(badPostIdList.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+
+    it('rejects edits and deletes by non-owners (including admin), missing comments, and invalid comment input or IDs', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const otherUser = await loginAs(testApp!.connection, UserRole.USER);
+      const admin = await loginAs(testApp!.connection, UserRole.ADMIN);
+
+      const post = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Ownership Test',
+          body: 'Post body',
+          status: PostStatus.PUBLISHED,
+        });
+      const comment = await testApp!
+        .http()
+        .post(`/api/posts/${post.body._id}/comments`)
+        .set('Cookie', owner.cookie)
+        .send({ body: 'Original comment' });
+      const commentId = comment.body._id as string;
+
+      for (const intruder of [otherUser, admin]) {
+        const editRes = await testApp!
+          .http()
+          .patch(`/api/comments/${commentId}`)
+          .set('Cookie', intruder.cookie)
+          .send({ body: 'Hijacked' });
+        expect(editRes.status).toBe(404);
+        expect(editRes.body.code).toBe(ErrorCode.NotFound);
+
+        const deleteRes = await testApp!
+          .http()
+          .delete(`/api/comments/${commentId}`)
+          .set('Cookie', intruder.cookie);
+        expect(deleteRes.status).toBe(404);
+        expect(deleteRes.body.code).toBe(ErrorCode.NotFound);
+      }
+
+      const missingId = new Types.ObjectId().toHexString();
+      expect(
+        (
+          await testApp!
+            .http()
+            .patch(`/api/comments/${missingId}`)
+            .set('Cookie', owner.cookie)
+            .send({ body: 'Missing' })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await testApp!
+            .http()
+            .delete(`/api/comments/${missingId}`)
+            .set('Cookie', owner.cookie)
+        ).status,
+      ).toBe(404);
+
+      for (const badBody of ['', '   ', 'a'.repeat(501)]) {
+        const res = await testApp!
+          .http()
+          .patch(`/api/comments/${commentId}`)
+          .set('Cookie', owner.cookie)
+          .send({ body: badBody });
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+
+      expect(
+        (
+          await testApp!
+            .http()
+            .patch('/api/comments/not-an-id')
+            .set('Cookie', owner.cookie)
+            .send({ body: 'Valid' })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await testApp!
+            .http()
+            .delete('/api/comments/not-an-id')
+            .set('Cookie', owner.cookie)
+        ).status,
+      ).toBe(400);
+
+      const detail = await testApp!.http().get(`/api/posts/${post.body._id}`);
+      expect(detail.body.commentCount).toBe(1);
+      expect(detail.body.comments).toBeUndefined();
+
+      const commentsRes = await testApp!
+        .http()
+        .get(`/api/posts/${post.body._id}/comments`);
+      expect(commentsRes.status).toBe(200);
+      expect(commentsRes.body.items[0].body).toBe('Original comment');
+    });
+
+    it('paginates comments (default page size 10), supports page 2, orders oldest first with _id tie-break across pages, and validates pagination params', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: owner.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          { id: commenter.id, name: 'Omar Said', email: 'omar@example.com' },
+        ]),
+      );
+
+      const post = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Paginated Comments Post',
+          body: 'Long discussion',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = post.body._id as string;
+      const postObjectId = new Types.ObjectId(postId);
+      const commenterObjectId = new Types.ObjectId(commenter.id);
+
+      const baseMs = new Date('2026-11-16T10:00:00.000Z').getTime();
+      const tieDate = new Date(baseMs + 90_000);
+      await commentModel.insertMany([
+        ...Array.from({ length: 9 }, (_, i) => ({
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: `Comment ${i + 1}`,
+          isHidden: false,
+          createdAt: new Date(baseMs + i * 10_000),
+          updatedAt: new Date(baseMs + i * 10_000),
+        })),
+        // Intentionally insert higher _id first with identical createdAt to prove _id tie-break across page 1 -> page 2.
+        {
+          _id: new Types.ObjectId('673000000000000000000002'),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 11 (tie _id higher)',
+          isHidden: false,
+          createdAt: tieDate,
+          updatedAt: tieDate,
+        },
+        {
+          _id: new Types.ObjectId('673000000000000000000001'),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 10 (tie _id lower)',
+          isHidden: false,
+          createdAt: tieDate,
+          updatedAt: tieDate,
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Moderated hidden comment',
+          isHidden: true,
+          createdAt: new Date(baseMs + 5_000),
+          updatedAt: new Date(baseMs + 5_000),
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: commenterObjectId,
+          body: 'Comment 12',
+          isHidden: false,
+          createdAt: new Date(baseMs + 100_000),
+          updatedAt: new Date(baseMs + 100_000),
+        },
+      ]);
+
+      const page1 = await testApp!.http().get(`/api/posts/${postId}/comments`);
+      expect(page1.status).toBe(200);
+      expect(page1.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(page1.body.items).toHaveLength(10);
+      expect(page1.body.items.map((c: { body: string }) => c.body)).toEqual([
+        ...Array.from({ length: 9 }, (_, i) => `Comment ${i + 1}`),
+        'Comment 10 (tie _id lower)',
+      ]);
+
+      const page2 = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=2`);
+      expect(page2.status).toBe(200);
+      expect(page2.body).toMatchObject({
+        page: 2,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(page2.body.items.map((c: { body: string }) => c.body)).toEqual([
+        'Comment 11 (tie _id higher)',
+        'Comment 12',
+      ]);
+
+      const pageOut = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=3`);
+      expect(pageOut.status).toBe(200);
+      expect(pageOut.body).toEqual({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+
+      const badPage = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?page=0`);
+      expect(badPage.status).toBe(400);
+      expect(badPage.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badLimit = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments?limit=51`);
+      expect(badLimit.status).toBe(400);
+      expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
     });
   });
 });

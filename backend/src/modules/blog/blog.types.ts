@@ -36,7 +36,7 @@ export interface PublishedPostView extends PostView {
 }
 
 /**
- * Plain view of a visible comment shown on the post page (`BLG-02`).
+ * Plain view of a visible comment on a blog post (`BLG-02`, `BLG-05`, `BLG-07`).
  * Deactivated comment authors resolve to `'Deleted user'` (`ACC-12`).
  */
 export interface CommentView {
@@ -51,9 +51,7 @@ export interface CommentView {
 }
 
 /**
- * Full post page view including author name and visible chronological comments
- * (`BLG-02`).
+ * Public post page view (`BLG-02`).
+ * Comments are loaded separately via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
  */
-export interface PostDetailView extends PublishedPostView {
-  comments: CommentView[];
-}
+export type PostDetailView = PublishedPostView;

@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
 import type {
   CommentView,
-  PostDetailView,
   PostImageView,
   PostView,
   PublishedPostView,
@@ -120,7 +119,7 @@ export class PaginatedPublishedPostsResponseDto implements Paginated<PublishedPo
   totalPages!: number;
 }
 
-/** Swagger response model for a visible comment on a blog post (`BLG-02`). */
+/** Swagger response model for a comment on a blog post (`BLG-02`, `BLG-05`, `BLG-07`). */
 export class CommentResponseDto implements CommentView {
   @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f604' })
   _id!: string;
@@ -155,11 +154,26 @@ export class CommentResponseDto implements CommentView {
   updatedAt!: Date;
 }
 
-/** Swagger response model for the public post page (`BLG-02`). */
-export class PostDetailResponseDto
-  extends PublishedPostResponseDto
-  implements PostDetailView
-{
+/** Swagger response model for a paginated list of comments on a blog post (`BLG-05`). */
+export class PaginatedCommentsResponseDto implements Paginated<CommentResponseDto> {
   @ApiProperty({ type: [CommentResponseDto] })
-  comments!: CommentResponseDto[];
+  items!: CommentResponseDto[];
+
+  @ApiProperty({ example: 1 })
+  page!: number;
+
+  @ApiProperty({ example: 10 })
+  limit!: number;
+
+  @ApiProperty({ example: 1 })
+  total!: number;
+
+  @ApiProperty({ example: 1 })
+  totalPages!: number;
 }
+
+/**
+ * Swagger response model for the public post page (`BLG-02`).
+ * Comments are fetched via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
+ */
+export class PostDetailResponseDto extends PublishedPostResponseDto {}

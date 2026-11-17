@@ -1,6 +1,7 @@
 export const MAX_TAGS_PER_POST = 5;
 export const MIN_TAG_LENGTH = 1;
 export const MAX_TAG_LENGTH = 30;
+export const EXCERPT_MAX_LENGTH = 200;
 
 /**
  * BLG-08: normalises a single tag by trimming surrounding whitespace and
@@ -38,4 +39,21 @@ export function normalizeTagsTransform(value: unknown): unknown {
     return value;
   }
   return normalizeTags(value);
+}
+
+/**
+ * BLG-09: builds a plain-text excerpt (~200 characters) from a post body,
+ * stripping HTML markup tags, collapsing whitespace, and appending `'...'`
+ * when truncated (`domain-rules.md` §6).
+ */
+export function buildExcerpt(body: string): string {
+  if (typeof body !== 'string') return '';
+  const plain = body
+    .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (plain.length <= EXCERPT_MAX_LENGTH) {
+    return plain;
+  }
+  return `${plain.slice(0, EXCERPT_MAX_LENGTH).trimEnd()}...`;
 }

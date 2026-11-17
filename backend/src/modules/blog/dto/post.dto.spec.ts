@@ -1,6 +1,6 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from '../../../common/errors/validation-exception.factory.js';
-import { normalizeTag, normalizeTags } from '../blog-tags.js';
+import { buildExcerpt, normalizeTag, normalizeTags } from '../blog-tags.js';
 import { PostStatus } from '../schemas/post.schema.js';
 import { CreateCommentDto } from './create-comment.dto.js';
 import { CreatePostDto } from './create-post.dto.js';
@@ -301,26 +301,40 @@ describe('CreatePostDto & UpdatePostDto', () => {
       expect(defaults.page).toBe(1);
       expect(defaults.limit).toBe(10);
       expect(defaults.tag).toBeUndefined();
+      expect(defaults.q).toBeUndefined();
 
       const blankTag = (await pipe.transform(
-        { tag: '   ' },
+        { tag: '   ', q: '   ' },
         { type: 'query', metatype: ListPostsQueryDto },
       )) as ListPostsQueryDto;
       expect(blankTag.tag).toBeUndefined();
+      expect(blankTag.q).toBeUndefined();
     });
 
-    it('normalises tag filter (trim and lowercase) alongside pagination params', async () => {
+    it('normalises tag filter and trims search query q alongside pagination params', async () => {
       const query = (await pipe.transform(
-        { page: '2', limit: '5', tag: '  EGYPT-2026  ' },
+        {
+          page: '2',
+          limit: '5',
+          tag: '  EGYPT-2026  ',
+          q: '  Cairo Trip  ',
+        },
         { type: 'query', metatype: ListPostsQueryDto },
       )) as ListPostsQueryDto;
 
       expect(query.page).toBe(2);
       expect(query.limit).toBe(5);
       expect(query.tag).toBe('egypt-2026');
+      expect(query.q).toBe('Cairo Trip');
+
+      const maxQ = (await pipe.transform(
+        { q: 'a'.repeat(150) },
+        { type: 'query', metatype: ListPostsQueryDto },
+      )) as ListPostsQueryDto;
+      expect(maxQ.q).toHaveLength(150);
     });
 
-    it('rejects invalid page, limit, non-string tag, or unknown query params', async () => {
+    it('rejects invalid page, limit, tag, q, or unknown query params', async () => {
       await expectValidationError(
         pipe.transform(
           { page: '0' },
@@ -344,7 +358,21 @@ describe('CreatePostDto & UpdatePostDto', () => {
       );
       await expectValidationError(
         pipe.transform(
-          { q: 'cairo' },
+          { q: 'a'.repeat(151) },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'q',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { q: ['cairo', 'siwa'] },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'q',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { unknownParam: 'cairo' },
           { type: 'query', metatype: ListPostsQueryDto },
         ),
       );
@@ -538,6 +566,27 @@ describe('CreatePostDto & UpdatePostDto', () => {
           'tags',
         );
       }
+    });
+  });
+
+  describe('Excerpt builder (BLG-09)', () => {
+    it('returns short bodies without ellipsis, handles empty/whitespace bodies, strips markup, and truncates long bodies to 200 chars + ellipsis', () => {
+      expect(buildExcerpt('')).toBe('');
+      expect(buildExcerpt('   \n\t  ')).toBe('');
+      expect(buildExcerpt('Short   guide\nfor   Siwa.')).toBe(
+        'Short guide for Siwa.',
+      );
+      expect(buildExcerpt('<h2>Siwa</h2><p>Salt lakes &amp; dunes</p>')).toBe(
+        'Siwa Salt lakes &amp; dunes',
+      );
+
+      const exact200 = 'x'.repeat(200);
+      expect(buildExcerpt(exact200)).toBe(exact200);
+
+      const over200 = `${'y'.repeat(198)}   ${'z'.repeat(20)}`;
+      const excerpt = buildExcerpt(over200);
+      expect(excerpt).toBe(`${'y'.repeat(198)} z...`);
+      expect(excerpt.endsWith('...')).toBe(true);
     });
   });
 });

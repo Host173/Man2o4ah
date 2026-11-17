@@ -29,10 +29,11 @@ export interface PostView {
 
 /**
  * Plain view of a published blog post including the resolved author name
- * (`BLG-02`).
+ * and body excerpt (`BLG-02`, `BLG-09`).
  */
 export interface PublishedPostView extends PostView {
   authorName: string | null;
+  excerpt: string;
 }
 
 /**

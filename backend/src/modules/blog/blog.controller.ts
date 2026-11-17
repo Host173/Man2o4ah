@@ -72,7 +72,7 @@ export class BlogController {
   @Public()
   @Get('posts')
   @ApiOperation({
-    summary: 'BLG-02 Browse paginated published posts filterable by tag',
+    summary: 'BLG-02 / BLG-09 Browse or search paginated published posts',
   })
   @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid query parameters' })

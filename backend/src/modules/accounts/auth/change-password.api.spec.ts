@@ -262,6 +262,43 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
       expect(res.body).toMatchObject({ mustChangePassword: true });
     });
 
+    it('400 VALIDATION_FAILED on newPassword when it equals the temporary password; stays blocked', async () => {
+      const u = await loggedIn(UserRole.USER, true);
+      await extraSession(u.id);
+      const before = await storedHash(u.id);
+
+      const res = await t
+        .http()
+        .patch(URL)
+        .set('Cookie', u.cookie)
+        .send({ currentPassword: CURRENT, newPassword: CURRENT });
+
+      expectError(res, 400, ErrorCode.ValidationFailed);
+      expect(res.body.details).toEqual([
+        expect.objectContaining({ field: 'newPassword' }),
+      ]);
+      expect(await storedHash(u.id)).toBe(before);
+      expect(await mustChange(u.id)).toBe(true);
+      expect(await sessions.countDocuments({ userId: u.id })).toBe(2);
+      const blocked = await t
+        .http()
+        .get('/api/probe/private')
+        .set('Cookie', u.cookie);
+      expectError(blocked, 403, ErrorCode.PasswordChangeRequired);
+    });
+
+    it('a normal change (not forced) may keep the same password: 204', async () => {
+      const u = await loggedIn();
+
+      const res = await t
+        .http()
+        .patch(URL)
+        .set('Cookie', u.cookie)
+        .send({ currentPassword: CURRENT, newPassword: CURRENT });
+
+      expect(res.status).toBe(204);
+    });
+
     it('stays blocked after a failed change attempt', async () => {
       const u = await loggedIn(UserRole.USER, true);
 

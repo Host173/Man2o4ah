@@ -128,6 +128,73 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
     expect(await sessions.countDocuments()).toBe(2);
   });
 
+  describe('new password equal to the current one', () => {
+    it('forced change (ACC-07a) → 400 VALIDATION_FAILED on newPassword; nothing changes', async () => {
+      const user = await createUser(true);
+      const current = await createSession(user._id);
+      await createSession(user._id);
+      const before = await storedHash(user._id);
+
+      await expect(
+        auth.changePassword(user._id.toString(), current._id.toString(), {
+          currentPassword: CURRENT,
+          newPassword: CURRENT,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'newPassword' })],
+        },
+      });
+
+      expect(await storedHash(user._id)).toBe(before);
+      expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+        true,
+      );
+      expect(await sessions.countDocuments()).toBe(2);
+    });
+
+    it('forced change: also rejects a new password bcrypt cannot tell apart from the temporary one', async () => {
+      // Same first 72 bytes ("a1" + 35 × "é" = 72 bytes), different after.
+      const temporary = `a1${'é'.repeat(70)}`;
+      const lookalike = `a1${'é'.repeat(35)}${'x'.repeat(35)}`;
+      const user = await createUser(true);
+      await users.updateOne(
+        { _id: user._id },
+        { $set: { passwordHash: await bcrypt.hash(temporary, 4) } },
+      );
+      const current = await createSession(user._id);
+
+      await expect(
+        auth.changePassword(user._id.toString(), current._id.toString(), {
+          currentPassword: temporary,
+          newPassword: lookalike,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+        true,
+      );
+    });
+
+    it('normal change (no forced change) is still allowed', async () => {
+      const user = await createUser(false);
+      const current = await createSession(user._id);
+
+      await auth.changePassword(user._id.toString(), current._id.toString(), {
+        currentPassword: CURRENT,
+        newPassword: CURRENT,
+      });
+
+      expect(await bcrypt.compare(CURRENT, await storedHash(user._id))).toBe(
+        true,
+      );
+    });
+  });
+
   it('lets exactly one of two parallel changes with the same current password win', async () => {
     const user = await createUser();
     const current = await createSession(user._id);

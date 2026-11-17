@@ -60,6 +60,19 @@ function wrongCurrentPassword() {
   });
 }
 
+/**
+ * A forced change (ACC-07a) that keeps the temporary password: the account
+ * must set a *new* password, so this is a 400 on the `newPassword` field.
+ */
+function sameAsTemporaryPassword() {
+  const message = 'New password must be different from the temporary password';
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details: [{ field: 'newPassword', message }],
+  });
+}
+
 /** SHA-256 of a refresh token, the only form a session stores (auth.md §3). */
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -164,6 +177,9 @@ export class AuthService {
    * salted bcrypt hash, clears `mustChangePassword` and deletes the user's
    * other sessions; the session `sid` making the request stays logged in.
    * A wrong current password → 400 VALIDATION_FAILED on `currentPassword`.
+   * During a forced change (`mustChangePassword`), a new password that still
+   * matches the temporary one → 400 VALIDATION_FAILED on `newPassword`; a
+   * normal change may keep the same password (not decided otherwise).
    * The DTO has already applied the password rule to the new password.
    */
   async changePassword(
@@ -183,6 +199,14 @@ export class AuthService {
     }
     if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
       throw wrongCurrentPassword();
+    }
+    // Compared with the stored hash, not the typed text, so a new password
+    // that bcrypt can't tell apart from the temporary one is caught too.
+    if (
+      user.mustChangePassword &&
+      (await bcrypt.compare(dto.newPassword, user.passwordHash))
+    ) {
+      throw sameAsTemporaryPassword();
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);

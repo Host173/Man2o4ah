@@ -58,6 +58,12 @@ describe('ChangePasswordDto (ACC-08, ACC-07a)', () => {
     });
   });
 
+  it('accepts a new password equal to the current one: only the service knows about a forced change (ACC-07a)', async () => {
+    expect(
+      await check({ currentPassword: 'abcdefg1', newPassword: 'abcdefg1' }),
+    ).toEqual([]);
+  });
+
   it.each([['userId'], ['mustChangePassword'], ['passwordHash']])(
     'rejects a client-supplied %s field',
     async (field) => {

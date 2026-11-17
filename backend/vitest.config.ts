@@ -8,6 +8,11 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // Vitest's default is 5 s per test. Tests that hash passwords (bcrypt cost
+    // 12) or seed the database pass that limit when the full suite shares the
+    // CPU on a member's machine, so they fail at random. A real hang still
+    // fails, just later.
+    testTimeout: 20_000,
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'lcov'],

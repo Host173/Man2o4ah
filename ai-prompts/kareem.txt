@@ -1394,3 +1394,16 @@ ok do the fix/plt while giveing those to mostafa
 How the output was used:
 Gave the reference-data seed tests a 30-second timeout (they could pass the default 5 s under full-suite load, as Mostafa's PR #124 reported); opened a PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-06
+
+Prompt:
+ok fix it and create a pr with it,  and can you test both pr alone ( like each one alone , two separate tasks) i want to make extra sure there is know hidden bugs or something, and make sure the tests include every thing
+
+How the output was used:
+Raised Vitest's default per-test timeout to 20 s (bcrypt and seeding tests timed out under full-suite load, reported in #126 and #131); opened a PR into develop. Separate reviews of #130 and #131 were run; no files changed for them.
+================================================

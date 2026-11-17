@@ -365,3 +365,51 @@ commit and do step 6
 How the output was used:
 Committed 9cc2ed0 (quote endpoint); ran npm run verify twice (flaky accounts timeouts, flight-bookings green); fixed two lint warnings in flight-quote.service.spec.ts; drafted the FLT-19 PR text; no commit yet
 ================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+done now i want to move on to the nexft issue
+
+How the output was used:
+Answer only, no files changed (checked which tickets are unblocked)
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+some changes were requested on the prs i made, can u briefly explain what is wrong and each and start a plan to fix them
+
+How the output was used:
+Answer only, no files changed (read Kareem's develop changes; plan for the GEN-11 fix; asked for the review comments)
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+how do i install gh
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+i mean the second comment not the decisions md
+
+How the output was used:
+Answer only, no files changed
+================================================

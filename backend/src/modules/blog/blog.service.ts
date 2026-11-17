@@ -97,10 +97,10 @@ export class BlogService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
-    return this.paginatePublishedPosts(
-      tag ? { tags: tag } : {},
-      { page, limit },
-    );
+    return this.paginatePublishedPosts(tag ? { tags: tag } : {}, {
+      page,
+      limit,
+    });
   }
 
   /**

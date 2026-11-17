@@ -49,10 +49,12 @@ Login `POST /api/auth/login`, in this order:
 
 `MeDto` (`GET /api/auth/me`): `{ _id, name, email, role, status, preferredCurrency, moderatorOf?, mustChangePassword }`.
 
-Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching `/^(?=.*[A-Za-z])(?=.*\d).{8,}$/`, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
+Password rule (ACC-01, shared by ACC-07a, ACC-08, ACC-13): 8 to 72 characters with at least one letter and one digit, `/^(?=.*[A-Za-z])(?=.*\d).{8,72}$/`, in one place: `accounts/auth/password-rule.ts` (`PASSWORD_RULE`, `PASSWORD_RULE_MESSAGE`). The 72 cap (team leader, 17 Nov, #126): bcrypt ignores everything after 72 bytes. It is applied in DTOs to new passwords only; login and the current password on change-password accept any non-empty string, so temporary passwords and passwords stored before the cap still work.
+
+Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching the password rule, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
 
 Temporary passwords (ACC-07a, ACC-13): the admin sets one, the backend stores the hash, sets `mustChangePassword = true` and deletes the user's sessions. While `mustChangePassword` is true, the guard allows only `GET /auth/me`, `PATCH /auth/change-password` and `POST /auth/logout` and returns `403 PASSWORD_CHANGE_REQUIRED` for anything else.
-Change password (ACC-08): requires the current password; the new one follows the ACC-01 rule; clear `mustChangePassword`; delete the user's other sessions.
+Change password (ACC-08) `PATCH /api/auth/change-password` `{ currentPassword, newPassword }`: requires the current password (wrong → `400 VALIDATION_FAILED` with `details` on `currentPassword`, not 401, since the caller is still logged in); the new one follows the password rule; store a new bcrypt hash and clear `mustChangePassword` in one update conditional on the old hash; delete the user's other sessions (the calling session stays logged in). Returns `204`, no cookie changes.
 
 ## 5. Guards and decorators
 

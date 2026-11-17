@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model, Types, UpdateQuery } from 'mongoose';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
@@ -27,13 +28,27 @@ function toProfile(user: User & { _id: Types.ObjectId }): ProfileDto {
   return profile;
 }
 
-/** ACC-09: the logged-in account's own profile (accounts only, not exported). */
+/**
+ * ACC-09: the logged-in account's own profile (accounts only, not exported).
+ *
+ * `ReferenceDataService` is looked up from the app when a currency is checked,
+ * instead of `AccountsModule` importing `ReferenceDataModule`: every module
+ * that imports `AccountsModule` would otherwise need the five reference-data
+ * models just to start (their wiring tests mock only users and sessions).
+ * `AppModule` registers `ReferenceDataModule`, so the lookup always succeeds
+ * in the app; a test app must import it too.
+ */
 @Injectable()
 export class ProfileService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
-    private readonly referenceData: ReferenceDataService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /** The reference-data module's exported service (data-model.md §6: accounts → reference-data). */
+  private referenceData(): ReferenceDataService {
+    return this.moduleRef.get(ReferenceDataService, { strict: false });
+  }
 
   /** ACC-09: the profile of the logged-in account. */
   async get(userId: string): Promise<ProfileDto> {
@@ -50,7 +65,7 @@ export class ProfileService {
    */
   async update(userId: string, dto: UpdateProfileDto): Promise<ProfileDto> {
     if (dto.preferredCurrency !== undefined) {
-      const currency = await this.referenceData.getCurrency(
+      const currency = await this.referenceData().getCurrency(
         dto.preferredCurrency,
       );
       if (!currency) {

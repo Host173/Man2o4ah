@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
 import { AccountsService } from './accounts.service.js';
 import {
   ACCESS_TOKEN_ALGORITHM,
@@ -26,8 +25,9 @@ import { UsersController } from './users/users.controller.js';
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
  * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user)
  * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
- * currencies come from `ReferenceDataService`); `AuthService` and
- * `ProfileService` stay internal. Other
+ * currencies come from `ReferenceDataService`, looked up from the app, so
+ * `ReferenceDataModule` must be registered beside this module); `AuthService`
+ * and `ProfileService` stay internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
@@ -48,7 +48,6 @@ import { UsersController } from './users/users.controller.js';
         },
       }),
     }),
-    ReferenceDataModule,
   ],
   controllers: [AuthController, UsersController],
   providers: [

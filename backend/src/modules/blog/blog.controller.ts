@@ -57,7 +57,9 @@ export class BlogController {
   @Post('posts')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-01 Create a post as draft or published' })
+  @ApiOperation({
+    summary: 'BLG-01 / BLG-08 Create a post as draft or published',
+  })
   @ApiCreatedResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   create(
@@ -113,7 +115,7 @@ export class BlogController {
   @Patch('posts/:id')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-04 Edit own post' })
+  @ApiOperation({ summary: 'BLG-04 / BLG-08 Edit own post' })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid post ID or body' })
@@ -217,5 +219,20 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.blogService.deleteComment(id.toHexString(), user.id);
+  }
+
+  @Public()
+  @Get('tags/:tag/posts')
+  @ApiOperation({
+    summary: 'BLG-08 List paginated published posts for a tag',
+  })
+  @ApiParam({ name: 'tag', type: String })
+  @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid tag or pagination query' })
+  listByTag(
+    @Param('tag') tag: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<PublishedPostView>> {
+    return this.blogService.listByTag(tag, query);
   }
 }

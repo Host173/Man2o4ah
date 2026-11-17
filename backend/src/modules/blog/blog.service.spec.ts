@@ -1266,4 +1266,167 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(persisted?.authorDeactivated).toBe(false);
     });
   });
+
+  describe('tags & listByTag (BLG-08)', () => {
+    it('attaches, normalises, deduplicates, and updates tags on create and update', async () => {
+      const created = await service.create(
+        {
+          title: 'Siwa Notes',
+          body: 'Salt lakes.',
+          status: PostStatus.PUBLISHED,
+          tags: ['Travel', ' travel ', 'TRAVEL', '  Egypt-2026  '],
+        },
+        ownerId,
+      );
+      expect(created.tags).toEqual(['travel', 'egypt-2026']);
+
+      // Omitting tags in update leaves existing tags untouched.
+      const titleOnly = await service.update(
+        created._id,
+        { title: 'Siwa Notes Edited' },
+        ownerId,
+      );
+      expect(titleOnly.tags).toEqual(['travel', 'egypt-2026']);
+
+      // Updating tags replaces and normalises them.
+      const retagged = await service.update(
+        created._id,
+        { tags: ['  SIWA ', 'Oasis', 'siwa'] },
+        ownerId,
+      );
+      expect(retagged.tags).toEqual(['siwa', 'oasis']);
+
+      // Empty array clears tags.
+      const cleared = await service.update(created._id, { tags: [] }, ownerId);
+      expect(cleared.tags).toEqual([]);
+    });
+
+    it('rejects invalid tags on create and update with 400 VALIDATION_FAILED', async () => {
+      const post = await service.create(
+        { title: 'Base', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+
+      for (const badTags of [
+        ['t1', 't2', 't3', 't4', 't5', 't6'],
+        ['   '],
+        [''],
+        ['a'.repeat(31)],
+        ['valid', 123] as unknown as string[],
+        'not-an-array' as unknown as string[],
+      ]) {
+        const createErr = await service
+          .create(
+            {
+              title: 'Invalid',
+              body: 'Body',
+              status: PostStatus.DRAFT,
+              tags: badTags,
+            },
+            ownerId,
+          )
+          .catch((err: unknown) => err);
+        expect(createErr).toBeInstanceOf(BadRequestException);
+        expect((createErr as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tags' })],
+        });
+
+        const updateErr = await service
+          .update(post._id, { tags: badTags }, ownerId)
+          .catch((err: unknown) => err);
+        expect(updateErr).toBeInstanceOf(BadRequestException);
+        expect((updateErr as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tags' })],
+        });
+      }
+    });
+
+    it('lists paginated visible published posts by normalised tag and validates requested tag', async () => {
+      const p1 = await service.create(
+        {
+          title: 'First Travel',
+          body: 'One',
+          status: PostStatus.PUBLISHED,
+          tags: ['Travel', 'cairo'],
+        },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        {
+          title: 'Second Travel',
+          body: 'Two',
+          status: PostStatus.PUBLISHED,
+          tags: ['  TRAVEL '],
+        },
+        suspendedUserId,
+      );
+      await service.create(
+        {
+          title: 'Draft Only',
+          body: 'Three',
+          status: PostStatus.DRAFT,
+          tags: ['travel', 'draft-only'],
+        },
+        ownerId,
+      );
+      const hiddenPub = await service.create(
+        {
+          title: 'Hidden Pub',
+          body: 'Four',
+          status: PostStatus.PUBLISHED,
+          tags: ['travel'],
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hiddenPub._id) },
+        { $set: { isHidden: true } },
+      );
+      await service.create(
+        {
+          title: 'Deactivated Author Pub',
+          body: 'Five',
+          status: PostStatus.PUBLISHED,
+          tags: ['travel'],
+        },
+        deactivatedAuthorId,
+      );
+      // Mark the deactivated author's post as deactivated to match ACC-12 event state.
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: deactivatedAuthorId,
+      });
+
+      const byUppercase = await service.listByTag('  TRAVEL ');
+      expect(byUppercase.total).toBe(2);
+      expect(byUppercase.items.map((p) => p._id)).toEqual([p2._id, p1._id]);
+      expect(byUppercase.items[0].authorName).toBe('Suspended Author');
+      expect(byUppercase.items[1].authorName).toBe('Aisha Rawahi');
+
+      const draftOnly = await service.listByTag('DRAFT-ONLY');
+      expect(draftOnly).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const unknown = await service.listByTag('nonexistent');
+      expect(unknown.items).toEqual([]);
+
+      for (const invalidTag of ['', '   ', 'a'.repeat(31)]) {
+        const err = await service
+          .listByTag(invalidTag)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tag' })],
+        });
+      }
+    });
+  });
 });

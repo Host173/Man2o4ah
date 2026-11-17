@@ -142,3 +142,19 @@ Implement the following features satisfying requirements **ITN-01** and **ITN-03
 How the output was used:
 Implemented owner-only create/list/open/edit/delete for itineraries in `itineraries.service.ts`, `itineraries.controller.ts`, the DTOs and types, added service and API tests plus the expanded fake, and committed 4c00728.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+Please start the local development server so I can manually test the new itinerary endpoints in Swagger:
+1. Run the application (e.g., `npm run start:dev`).
+2. Provide the exact local Swagger UI URL.
+3. Confirm that session/cookie authentication is configured so I can test the POST, GET, PATCH, and DELETE `/api/itineraries` endpoints.
+
+Also, please check and confirm whether you have added the prompts I gave you into the project's prompts file. If they haven't been added yet, please add them now and confirm where they were saved.
+
+How the output was used:
+Started a local MongoDB and the Nest dev server on port 4000, confirmed Swagger and cookie auth, and verified the itinerary endpoints end to end; only `ai-prompts/mokhtar.txt` changed.
+================================================

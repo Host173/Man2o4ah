@@ -172,3 +172,14 @@ PLATFORM_CURRENCY=USD add this to the .env
 How the output was used:
 Pointed `backend/.env` at the team Atlas cluster and restarted the dev server on it; no source files changed.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+this api takes loading so long and it doesnt execcute
+
+How the output was used:
+Fixed the shared pagination query DTO so Swagger exposes `page` and `limit` as numbers instead of objects, confirmed GET /api/itineraries returns 200, and committed b26f24c.
+================================================

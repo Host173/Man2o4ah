@@ -3,7 +3,7 @@ import type { HotelView } from '../hotels.types.js';
 
 class HotelPhotoResponseDto {
   @ApiProperty()
-  id!: string;
+  _id!: string;
 
   @ApiProperty()
   key!: string;
@@ -33,9 +33,12 @@ class HotelRatingSummaryResponseDto {
   count!: number;
 }
 
-export class HotelProfileResponseDto implements HotelView {
+export class HotelProfileResponseDto implements Omit<
+  HotelView,
+  'id' | 'photos'
+> {
   @ApiProperty()
-  id!: string;
+  _id!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 150 })
   name!: string;
@@ -77,9 +80,12 @@ export class HotelProfileResponseDto implements HotelView {
   ratingSummary!: HotelRatingSummaryResponseDto;
 
   static fromView(hotel: HotelView): HotelProfileResponseDto {
+    const { id, photos, ...profile } = hotel;
     return {
-      ...hotel,
-      photos: hotel.photos.map((photo) => ({
+      _id: id,
+      ...profile,
+      photos: photos.map(({ id: photoId, ...photo }) => ({
+        _id: photoId,
         ...photo,
         url: `/uploads/${photo.key}`,
       })),

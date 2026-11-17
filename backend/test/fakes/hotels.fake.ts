@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { addDays, isDateOnly } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
@@ -109,13 +105,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     input: UpdateHotelDto,
     moderatorHotelId: string | undefined,
   ): Promise<HotelView> {
-    if (hotelId !== moderatorHotelId) {
-      throw new NotFoundException({
-        code: ErrorCode.NotFound,
-        message: 'Hotel not found',
-      });
-    }
-    const hotel = this.requireHotel(hotelId);
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
     const fields: Partial<HotelView> = {};
     if (input.cityId !== undefined) {
       const city = await this.requireCity(input.cityId);
@@ -150,7 +140,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     }
     const image = await this.storage.save(file);
     if (hotel.photos.length >= MAX_IMAGES_PER_ITEM) {
-      const failure = new ConflictException({
+      const failure = new BadRequestException({
         code: ErrorCode.LimitExceeded,
         message: 'A hotel can have at most five photos',
       });
@@ -174,14 +164,8 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     moderatorHotelId: string | undefined,
   ): Promise<void> {
     const hotel = this.assignedHotel(hotelId, moderatorHotelId);
-    if (!Types.ObjectId.isValid(photoId)) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Invalid ID',
-        details: [{ field: 'photoId', message: 'must be an ObjectId' }],
-      });
-    }
-    const photo = hotel.photos.find((item) => item.id === photoId);
+    const imageId = this.parseId(photoId, 'photoId');
+    const photo = hotel.photos.find((item) => item.id === imageId);
     if (!photo) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
@@ -189,7 +173,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     await this.storage.delete(photo.key);
-    const index = hotel.photos.findIndex((item) => item.id === photoId);
+    const index = hotel.photos.findIndex((item) => item.id === imageId);
     if (index === -1) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
@@ -199,15 +183,15 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     hotel.photos.splice(index, 1);
   }
 
-  getHotel(
+  /** Malformed IDs throw 400 VALIDATION_FAILED; missing valid IDs return null. */
+  async getHotel(
     hotelId: string,
     options?: HotelTransactionOptions,
   ): Promise<HotelView | null> {
     void options;
-    return Promise.resolve(
-      structuredClone(
-        this.data.hotels.find((hotel) => hotel.id === hotelId) ?? null,
-      ),
+    const id = this.parseId(hotelId);
+    return structuredClone(
+      this.data.hotels.find((hotel) => hotel.id === id) ?? null,
     );
   }
 
@@ -359,7 +343,8 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
   }
 
   private requireHotel(hotelId: string): HotelView {
-    const hotel = this.data.hotels.find((item) => item.id === hotelId);
+    const id = this.parseId(hotelId);
+    const hotel = this.data.hotels.find((item) => item.id === id);
     if (!hotel) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
@@ -390,12 +375,28 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     hotelId: string,
     moderatorHotelId: string | undefined,
   ): HotelView {
-    if (hotelId !== moderatorHotelId) {
+    const hotel = this.requireHotel(hotelId);
+    if (
+      !moderatorHotelId ||
+      !Types.ObjectId.isValid(moderatorHotelId) ||
+      hotel.id !== new Types.ObjectId(moderatorHotelId).toHexString()
+    ) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
         message: 'Hotel not found',
       });
     }
-    return this.requireHotel(hotelId);
+    return hotel;
+  }
+
+  private parseId(value: string, field = 'hotelId'): string {
+    if (!Types.ObjectId.isValid(value)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid ID',
+        details: [{ field, message: 'must be an ObjectId' }],
+      });
+    }
+    return new Types.ObjectId(value).toHexString();
   }
 }

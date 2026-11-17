@@ -14,7 +14,6 @@ import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
-  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -57,10 +56,7 @@ export class HotelsController {
   @ApiCreatedResponse({ type: HotelProfileResponseDto })
   @ApiBadRequestResponse({
     description:
-      'Missing image, invalid ID, or image is not a non-empty JPG/PNG',
-  })
-  @ApiConflictResponse({
-    description: 'LIMIT_EXCEEDED: the hotel already has five photos',
+      'Missing image, invalid ID, image is not a non-empty JPG/PNG, or LIMIT_EXCEEDED: the hotel already has five photos',
   })
   @ApiPayloadTooLargeResponse({ description: 'The image exceeds 5 MB' })
   @ApiNotFoundResponse({

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -84,7 +83,7 @@ export class HotelsService {
     return this.toView(hotel);
   }
 
-  /** HTL-01 / GEN-08: one image per request; the five-photo limit is checked atomically. */
+  /** HTL-01 / GEN-08: atomic five-photo limit; a sixth image throws 400 LIMIT_EXCEEDED. */
   async addPhoto(
     hotelId: string,
     file: UploadedImage | undefined,
@@ -116,7 +115,7 @@ export class HotelsService {
         .exec();
       if (!hotel) {
         if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
-        throw new ConflictException({
+        throw new BadRequestException({
           code: ErrorCode.LimitExceeded,
           message: 'A hotel can have at most five photos',
         });
@@ -152,7 +151,10 @@ export class HotelsService {
     if (!result.matchedCount) throw this.notFound();
   }
 
-  /** Includes inactive hotels; the caller checks bookability. Missing IDs return null. */
+  /**
+   * Includes inactive hotels; the caller checks bookability. Missing valid IDs return
+   * null; malformed IDs throw 400 VALIDATION_FAILED.
+   */
   async getHotel(
     hotelId: string,
     options?: HotelTransactionOptions,

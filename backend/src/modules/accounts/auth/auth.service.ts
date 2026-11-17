@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -10,6 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import bcrypt from 'bcrypt';
 import type { Model, Types } from 'mongoose';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
+import type { ChangePasswordDto } from '../dto/change-password.dto.js';
 import type { LoginDto } from '../dto/login.dto.js';
 import type { MeDto } from '../dto/me.response.dto.js';
 import type { RegisterDto } from '../dto/register.dto.js';
@@ -41,6 +43,20 @@ function invalidCredentials() {
   return new UnauthorizedException({
     code: ErrorCode.InvalidCredentials,
     message: 'Invalid email or password',
+  });
+}
+
+/**
+ * A wrong current password on change-password (ACC-08): a 400 on the form
+ * field, not a 401, because the caller is still logged in and the frontend
+ * treats 401 as "log in again".
+ */
+function wrongCurrentPassword() {
+  const message = 'Current password is incorrect';
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details: [{ field: 'currentPassword', message }],
   });
 }
 
@@ -141,6 +157,46 @@ export class AuthService {
       });
     }
     return toMe(user);
+  }
+
+  /**
+   * ACC-08, ACC-07a (auth.md §4): checks the current password, stores a new
+   * salted bcrypt hash, clears `mustChangePassword` and deletes the user's
+   * other sessions; the session `sid` making the request stays logged in.
+   * A wrong current password → 400 VALIDATION_FAILED on `currentPassword`.
+   * The DTO has already applied the password rule to the new password.
+   */
+  async changePassword(
+    userId: string,
+    sid: string,
+    dto: ChangePasswordDto,
+  ): Promise<void> {
+    const user = await this.userModel
+      .findById(userId)
+      .select('+passwordHash')
+      .lean();
+    if (!user) {
+      throw new UnauthorizedException({
+        code: ErrorCode.SessionExpired,
+        message: 'Your session has expired. Please log in again.',
+      });
+    }
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw wrongCurrentPassword();
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+    // Conditional on the hash just checked: if a parallel change won, this
+    // one's current password is no longer right (no read-then-write).
+    const result = await this.userModel.updateOne(
+      { _id: user._id, passwordHash: user.passwordHash },
+      { $set: { passwordHash, mustChangePassword: false } },
+    );
+    if (result.modifiedCount === 0) {
+      throw wrongCurrentPassword();
+    }
+
+    await this.sessionModel.deleteMany({ userId: user._id, _id: { $ne: sid } });
   }
 
   /**

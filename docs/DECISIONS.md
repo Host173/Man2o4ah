@@ -3,7 +3,7 @@
 Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
 If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
 
-Last updated: 2026-11-11 (prompt-log format: course fields, copy-only prompt)
+Last updated: 2026-11-17 (booking rules per module; open items)
 
 ---
 
@@ -46,6 +46,7 @@ Infrastructure (not domain modules):
 - **Background jobs live in the module that owns the data:** hold expiry and completion in flight-bookings and hotel-bookings (they own the pending bookings), marking flights departed in flights, rate refresh in fx. No separate jobs module.
 - **A hold is a pending booking.** There is no separate holds collection; the inventory counters/nights live in the provider modules.
 - **Modules talk through services, ports and events.** Lower modules never import higher ones; when they must, the lower module owns an interface (port) or emits an event. The allowed imports, ports and events are listed in `data-model.md` §6.
+- **Booking rules are implemented in each booking module.** The GEN-11 lifecycle (allowed status moves) and the FLT-09/HTL-10 refund tiers are needed by both flight-bookings and hotel-bookings. Each module has its own copy, with its own tests; neither imports the other, and they don't go in `common/` (no business logic there). The two copies must follow the same rule (HTL-10 uses FLT-09's selection rule); only the start date differs (flight: outbound departure; hotel: check-in at 00:00 UTC). Why: each module owns all of its logic, there's no coupling between the booking modules, and one owner (Bookings) keeps both copies in step. Decided 17 Nov (PR #130).
 - **Endpoints that combine provider and booking data live in the booking module** (FLT-29 in flight-bookings; HTL-08 and HTL-22 in hotel-bookings), whatever their URL.
 - **New features:** if a feature fits an existing module's data and rules, it extends that module. A new module is created only for a feature totally different from all current modules (new data no existing module owns).
 - Bonus features that would likely become new modules: favourites, admin analytics. Email notifications would be a channel inside notifications.
@@ -214,5 +215,17 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 
 ## Open items to discuss
 
-- **Reminder for Kareem:** re-check the prompt-log instructions in `AGENTS.example.md` (format follow-up on PLT-03).
-- **GitHub:** Aisha, Jana and Mokhtar have pending invites; once they accept, assign their packages' issues (Sprint 1 + 2).
+**Priority: answer these first** (raised in Aisha's ACC-01 PR #126, merged as is on 15 Nov):
+
+1. **Password maximum length.** bcrypt ignores everything after 72 bytes, so two long passwords that share their first 72 bytes both work. Proposal: add `@MaxLength(72)` to the shared password rule (`accounts/auth/password-rule.ts`), so registration, password change and admin resets all get it.
+2. **Registration response.** `POST /api/auth/register` returns `201 { user: MeDto }`, the same shape as login. Proposal: keep it.
+3. **Auto-login after registering.** Currently no (the `auth.md` default); the frontend sends the user to the login page. Proposal: keep it.
+4. **PLT-04 design calls** (`data-model.md` §8). PLT-04 is closed and its schemas are on develop. Proposal: record them as confirmed.
+
+**Platform follow-ups (Kareem):**
+
+- `common/events/app-events.service.spec.ts` and `events.spec.ts` fail to load in a full local run on Windows (`Cannot read properties of undefined (reading 'config')`); they pass alone and on CI (Linux). Reported in #126.
+
+**Later:**
+
+- A PDF summarising the important decisions and why (for the team and the evaluation), starting with "booking rules per module".

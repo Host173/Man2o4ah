@@ -646,9 +646,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   });
 
   describe('getById (BLG-02)', () => {
-    it('returns published post with author name, suspended author name still shown, and deactivated commenter shown as "Deleted user"', async () => {
-      const missingCommenterId = new Types.ObjectId().toHexString();
-
+    it('returns published post with author name (including suspended author) and omits embedded comments', async () => {
       const post = await service.create(
         {
           title: 'Dahab Diving',
@@ -665,40 +663,15 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
             tags: ['red-sea'],
             images: [{ _id: imageId, key: 'blog/reef.png' }],
             likeCount: 4,
-            commentCount: 4,
+            commentCount: 2,
           },
         },
       );
 
-      const postObjectId = new Types.ObjectId(post._id);
-      const c1 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(activeCommenterId),
-        body: 'First comment',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c2 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(deactivatedCommenterId),
-        body: 'Comment from deactivated user',
-      });
       await commentModel.create({
-        postId: postObjectId,
+        postId: new Types.ObjectId(post._id),
         authorId: new Types.ObjectId(activeCommenterId),
-        body: 'Hidden comment',
-        isHidden: true,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c3 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(suspendedUserId),
-        body: 'Comment from suspended user',
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const c4 = await commentModel.create({
-        postId: postObjectId,
-        authorId: new Types.ObjectId(missingCommenterId),
-        body: 'Fourth comment',
+        body: 'Loaded separately via paginated comments endpoint',
       });
 
       const detail = await service.getById(post._id);
@@ -713,29 +686,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
         status: PostStatus.PUBLISHED,
         likeCount: 4,
-        commentCount: 4,
+        commentCount: 2,
         isHidden: false,
         authorDeactivated: false,
       });
       expect(detail.publishedAt).toBeInstanceOf(Date);
-      expect(detail.comments.map((c) => c._id)).toEqual([
-        c1._id.toHexString(),
-        c2._id.toHexString(),
-        c3._id.toHexString(),
-        c4._id.toHexString(),
-      ]);
-      expect(detail.comments.map((c) => c.authorName)).toEqual([
-        'Omar Said',
-        'Deleted user',
-        'Suspended Author',
-        null,
-      ]);
-      expect(detail.comments[0]).toMatchObject({
-        postId: post._id,
-        authorId: activeCommenterId,
-        body: 'First comment',
-        isHidden: false,
-      });
+      expect('comments' in detail).toBe(false);
 
       // A suspended author's own post page still shows their author name (ACC-16).
       const suspendedPost = await service.create(
@@ -801,6 +757,423 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       await expect(service.getById('not-an-object-id')).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('comments (BLG-05, BLG-07)', () => {
+    it('creates comments on published posts, trims body, resolves author name, and increments commentCount atomically', async () => {
+      const post = await service.create(
+        {
+          title: 'Siwa Spring',
+          body: 'Travel notes',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      const created = await service.createComment(
+        post._id,
+        { body: '  Wonderful guide!  ' },
+        activeCommenterId,
+      );
+
+      expect(created).toMatchObject({
+        postId: post._id,
+        authorId: activeCommenterId,
+        authorName: 'Omar Said',
+        body: 'Wonderful guide!',
+        isHidden: false,
+      });
+      expect(created._id).toMatch(/^[0-9a-f]{24}$/);
+      expect(created.createdAt).toBeInstanceOf(Date);
+      expect(created.updatedAt).toBeInstanceOf(Date);
+
+      const afterFirst = await postModel.findById(post._id).lean().exec();
+      expect(afterFirst?.commentCount).toBe(1);
+
+      const spy = vi
+        .spyOn(commentModel, 'create')
+        .mockRejectedValueOnce(new Error('comment insert failed'));
+      try {
+        await expect(
+          service.createComment(
+            post._id,
+            { body: 'Will roll back' },
+            activeCommenterId,
+          ),
+        ).rejects.toThrow('comment insert failed');
+      } finally {
+        spy.mockRestore();
+      }
+
+      const afterRollback = await postModel.findById(post._id).lean().exec();
+      expect(afterRollback?.commentCount).toBe(1);
+    });
+
+    it('rejects creating comments on draft, hidden, deactivated-author, or missing posts without changing commentCount', async () => {
+      const draft = await service.create(
+        { title: 'Draft', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const deactivated = await service.create(
+        { title: 'Deactivated', body: 'Body', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivated._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      for (const postId of [
+        draft._id,
+        hidden._id,
+        deactivated._id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        await expect(
+          service.createComment(
+            postId,
+            { body: 'Should fail' },
+            activeCommenterId,
+          ),
+        ).rejects.toThrow(NotFoundException);
+      }
+
+      for (const postId of [draft._id, hidden._id, deactivated._id]) {
+        const doc = await postModel.findById(postId).lean().exec();
+        expect(doc?.commentCount).toBe(0);
+      }
+
+      await expect(
+        service.createComment(
+          'bad-id',
+          { body: 'Valid body' },
+          activeCommenterId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      for (const badBody of ['', '   ', 'a'.repeat(501)]) {
+        await expect(
+          service.createComment(
+            hidden._id,
+            { body: badBody },
+            activeCommenterId,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      }
+      await expect(
+        service.createComment(
+          hidden._id,
+          { body: null as unknown as string },
+          activeCommenterId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('lists paginated visible comments oldest first, excludes hidden ones, and resolves Deleted user and suspended author names', async () => {
+      const missingCommenterId = new Types.ObjectId().toHexString();
+      const post = await service.create(
+        { title: 'Red Sea', body: 'Reef notes', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const draft = await service.create(
+        { title: 'Draft', body: 'Secret', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden', body: 'Mod', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      const raceDeactivated = await service.create(
+        { title: 'Deactivated Race', body: 'B', status: PostStatus.PUBLISHED },
+        deactivatedAuthorId,
+      );
+
+      const first = await service.createComment(
+        post._id,
+        { body: 'First chronological' },
+        activeCommenterId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = await service.createComment(
+        post._id,
+        { body: 'Second by deactivated' },
+        deactivatedCommenterId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const third = await service.createComment(
+        post._id,
+        { body: 'Third by suspended' },
+        suspendedUserId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const fourth = await commentModel.create({
+        postId: new Types.ObjectId(post._id),
+        authorId: new Types.ObjectId(missingCommenterId),
+        body: 'Fourth missing profile',
+      });
+      await commentModel.create({
+        postId: new Types.ObjectId(post._id),
+        authorId: new Types.ObjectId(activeCommenterId),
+        body: 'Hidden moderation comment',
+        isHidden: true,
+      });
+
+      const page1 = await service.listComments(post._id);
+      expect(page1.page).toBe(1);
+      expect(page1.limit).toBe(10);
+      expect(page1.total).toBe(4);
+      expect(page1.totalPages).toBe(1);
+      expect(page1.items.map((c) => c._id)).toEqual([
+        first._id,
+        second._id,
+        third._id,
+        fourth._id.toHexString(),
+      ]);
+      expect(page1.items.map((c) => c.authorName)).toEqual([
+        'Omar Said',
+        'Deleted user',
+        'Suspended Author',
+        null,
+      ]);
+
+      for (const hiddenId of [
+        draft._id,
+        hidden._id,
+        raceDeactivated._id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        await expect(service.listComments(hiddenId)).rejects.toThrow(
+          NotFoundException,
+        );
+      }
+      await expect(service.listComments('bad-id')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('paginates comments with default limit 10 across pages ordered by createdAt then _id ascending', async () => {
+      const post = await service.create(
+        {
+          title: 'Long Thread',
+          body: 'Many comments',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const postObjectId = new Types.ObjectId(post._id);
+      const authorObjId = new Types.ObjectId(activeCommenterId);
+      const baseTime = new Date('2026-11-16T10:00:00.000Z').getTime();
+
+      // Insert 12 visible comments (comments #10 and #11 share createdAt to test _id tie-break across pages)
+      // plus 1 hidden comment that must be excluded from items and total.
+      const tieTime = new Date(baseTime + 90_000);
+      const docs = [
+        ...Array.from({ length: 9 }, (_, i) => ({
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: `Comment ${i + 1}`,
+          isHidden: false,
+          createdAt: new Date(baseTime + i * 10_000),
+          updatedAt: new Date(baseTime + i * 10_000),
+        })),
+        {
+          _id: new Types.ObjectId('673000000000000000000002'),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 11 (tie _id higher)',
+          isHidden: false,
+          createdAt: tieTime,
+          updatedAt: tieTime,
+        },
+        {
+          _id: new Types.ObjectId('673000000000000000000001'),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 10 (tie _id lower)',
+          isHidden: false,
+          createdAt: tieTime,
+          updatedAt: tieTime,
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Hidden comment',
+          isHidden: true,
+          createdAt: new Date(baseTime + 5_000),
+          updatedAt: new Date(baseTime + 5_000),
+        },
+        {
+          _id: new Types.ObjectId(),
+          postId: postObjectId,
+          authorId: authorObjId,
+          body: 'Comment 12',
+          isHidden: false,
+          createdAt: new Date(baseTime + 100_000),
+          updatedAt: new Date(baseTime + 100_000),
+        },
+      ];
+      await commentModel.insertMany(docs);
+
+      const page1 = await service.listComments(post._id);
+      expect(page1.page).toBe(1);
+      expect(page1.limit).toBe(10);
+      expect(page1.total).toBe(12);
+      expect(page1.totalPages).toBe(2);
+      expect(page1.items).toHaveLength(10);
+      expect(page1.items.map((c) => c.body)).toEqual([
+        ...Array.from({ length: 9 }, (_, i) => `Comment ${i + 1}`),
+        'Comment 10 (tie _id lower)',
+      ]);
+
+      const page2Query = new PaginationQueryDto();
+      page2Query.page = 2;
+      const page2 = await service.listComments(post._id, page2Query);
+      expect(page2.page).toBe(2);
+      expect(page2.limit).toBe(10);
+      expect(page2.total).toBe(12);
+      expect(page2.totalPages).toBe(2);
+      expect(page2.items.map((c) => c.body)).toEqual([
+        'Comment 11 (tie _id higher)',
+        'Comment 12',
+      ]);
+    });
+
+    it('updates own comment without changing commentCount and rejects non-owners or invalid input', async () => {
+      const post = await service.create(
+        { title: 'Luxor', body: 'Temples', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const comment = await service.createComment(
+        post._id,
+        { body: 'Initial comment' },
+        activeCommenterId,
+      );
+
+      const updated = await service.updateComment(
+        comment._id,
+        { body: '  Updated comment  ' },
+        activeCommenterId,
+      );
+      expect(updated.body).toBe('Updated comment');
+      expect(updated.authorName).toBe('Omar Said');
+
+      const postDoc = await postModel.findById(post._id).lean().exec();
+      expect(postDoc?.commentCount).toBe(1);
+
+      await expect(
+        service.updateComment(comment._id, { body: 'Hijacked' }, otherUserId),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.updateComment(
+          new Types.ObjectId().toHexString(),
+          { body: 'Missing' },
+          activeCommenterId,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.updateComment(comment._id, { body: '   ' }, activeCommenterId),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.updateComment('bad-id', { body: 'Valid' }, activeCommenterId),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('deletes own comment atomically, keeps commentCount accurate and non-negative, and rolls back on failure', async () => {
+      const post = await service.create(
+        { title: 'Aswan', body: 'Nile view', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const c1 = await service.createComment(
+        post._id,
+        { body: 'First' },
+        activeCommenterId,
+      );
+      const c2 = await service.createComment(
+        post._id,
+        { body: 'Second' },
+        otherUserId,
+      );
+
+      // Simulate an already-hidden comment (commentCount stays 2 even though hidden comment exists).
+      const hiddenComment = await commentModel.create({
+        postId: new Types.ObjectId(post._id),
+        authorId: new Types.ObjectId(activeCommenterId),
+        body: 'Hidden comment',
+        isHidden: true,
+      });
+
+      // Non-owner cannot delete.
+      await expect(service.deleteComment(c1._id, otherUserId)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      // Deleting hidden comment must NOT decrement visible commentCount.
+      await service.deleteComment(
+        hiddenComment._id.toHexString(),
+        activeCommenterId,
+      );
+      expect(
+        (await postModel.findById(post._id).lean().exec())?.commentCount,
+      ).toBe(2);
+
+      // Transaction rollback keeps comment intact if post commentCount update fails.
+      const spy = vi.spyOn(postModel, 'updateOne').mockImplementationOnce(
+        () =>
+          ({
+            exec: () => Promise.reject(new Error('count update failed')),
+          }) as never,
+      );
+      await expect(
+        service.deleteComment(c1._id, activeCommenterId),
+      ).rejects.toThrow('count update failed');
+      spy.mockRestore();
+      expect(await commentModel.findById(c1._id).exec()).not.toBeNull();
+      expect(
+        (await postModel.findById(post._id).lean().exec())?.commentCount,
+      ).toBe(2);
+
+      // Deleting visible comments decrements accurately to 0.
+      await service.deleteComment(c1._id, activeCommenterId);
+      expect(
+        (await postModel.findById(post._id).lean().exec())?.commentCount,
+      ).toBe(1);
+      await service.deleteComment(c2._id, otherUserId);
+      expect(
+        (await postModel.findById(post._id).lean().exec())?.commentCount,
+      ).toBe(0);
+
+      // Deleting a drifted visible comment when commentCount is already 0 keeps commentCount at 0.
+      const driftedComment = await commentModel.create({
+        postId: new Types.ObjectId(post._id),
+        authorId: new Types.ObjectId(activeCommenterId),
+        body: 'Drifted visible comment',
+      });
+      await service.deleteComment(
+        driftedComment._id.toHexString(),
+        activeCommenterId,
+      );
+      expect(
+        (await postModel.findById(post._id).lean().exec())?.commentCount,
+      ).toBe(0);
+
+      // Repeated delete returns 404.
+      await expect(
+        service.deleteComment(c1._id, activeCommenterId),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

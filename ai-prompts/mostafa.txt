@@ -106,3 +106,63 @@ a suspended author’s name still shown
 How the output was used:
 Removed the NotImplementedException catch from BlogService.resolveProfiles, overrode AccountsService with FakeAccountsService in blog.service.spec.ts and blog.api.spec.ts via Nest DI, and added explicit assertions for the post author name, deactivated commenter "Deleted user", and suspended author name visibility on feature/BLG-02-browse-read-posts.
 ================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-05
+
+Prompt:
+Implement BLG-05 (Sprint 1, package 7, Community & Admin, module: blog) using the existing project conventions: comments on published posts, covering BLG-05 and BLG-07. First read the BLG-05 and BLG-07 specs and the project skill in docs/ai/skills/travel-platform/, and follow the documented endpoints, naming and error conventions exactly without inventing behavior. Confirm the BLG-01 output (#76) is present on develop, and if it isn’t, report it clearly instead of recreating it. Build on the existing blog module and the BLG-01 post model: add the comment model and persistence following the project’s data conventions, with create, edit and delete operations restricted to the authenticated author of the comment, and a chronological (oldest first) list of comments on a post. Comments are only allowed on published posts, so commenting on a draft, hidden or missing post returns the project’s documented error response. Enforce a body length of 1 to 500 characters, with the trimming and whitespace-only handling the spec defines, and keep the post’s comment count correct on create and delete (and on any other path the spec names) so it never drifts or goes negative. Don’t implement features reserved for later tickets (GEN-10 and anything else not listed here), don’t change the frozen schemas, and don’t touch Aya’s booking modules or anything outside the blog module and the shared wiring this task needs. TDD isn’t required, but ship unit tests for the length boundaries (0, 1, 500 and 501 characters, plus whitespace-only input) and API tests covering create, chronological listing, editing and deleting own comments, rejection of edits and deletes by other users or unauthenticated requests, commenting on a draft or missing post, repeated deletes, and comment count correctness after each operation. Update the related documentation (API docs and module docs, plus any index or changelog the project keeps), run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/BLG-05-comments, commit and push only the BLG-05 changes with the PR title BLG-05: Comments in mind, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+
+How the output was used:
+Added CreateCommentDto and UpdateCommentDto, implemented BLG-05/BLG-07 chronological listing, transactional comment creation/deletion (keeping commentCount accurate), and owner-restricted editing in BlogService and BlogController with Swagger/JSDoc docs and unit/integration/API tests on feature/BLG-05-comments.
+================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-05
+
+Prompt:
+In regards to the implementation of BLG-5, the following CI checks failed: Run npm run format:check
+
+> backend@0.0.1 format:check
+> prettier --ignore-path ../.prettierignore --check "src/**/*.ts" "test/**/*.ts"
+
+Checking formatting...
+[warn] src/modules/blog/dto/create-comment.dto.ts
+[warn] src/modules/blog/dto/update-comment.dto.ts
+[warn] Code style issues found in 2 files. Run Prettier with --write to fix.
+Error: Process completed with exit code 1.
+
+How the output was used:
+Formatted create-comment.dto.ts and update-comment.dto.ts via npm run format, re-verified format:check, lint, typecheck, build, and blog tests on feature/BLG-05-comments.
+================================================
+
+
+
+================================================
+Date: 2026-11-16
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-05
+
+Prompt:
+With reference to the implementation BLG-05, complete the following fixes: GEN-05: lists must be paginated (page size 10)
+The comments code itself is solid: the routes match endpoints.md, the visibility checks, owner-only scoping, the transactional commentCount and the tests are all good. One requirement is missing.
+GEN-05: "The system shall paginate every list longer than 10 rows (page size 10)." Two responses return every comment in one array:
+GET /api/posts/:id/comments (this PR) returns CommentView[]. It should take PaginationQueryDto and return { items, page, limit, total, totalPages }, oldest first, as in backend.md §7 (find().skip().limit() and countDocuments() with the same filter in Promise.all).
+GET /api/posts/:id (from [#128](https://github.com/Host173/Man2o4ah/pull/128)) embeds all comments. Remove comments from the post response; the frontend loads them from the paginated comments endpoint. Update PostDetailResponseDto and its tests.
+Tests to add: page size 10 by default, page 2, total and totalPages, and the order across pages (oldest first, _id as the tie-break).
+Note, no change needed here: when GEN-10 hides or unhides a comment, it must lower or raise commentCount, since the count covers visible comments only (data-model.md, posts).
+
+How the output was used:
+Paginated GET /api/posts/:id/comments using PaginationQueryDto and paginate(), removed embedded comments from GET /api/posts/:id (PostDetailView & PostDetailResponseDto), added PaginatedCommentsResponseDto, and updated/added unit, integration, and API pagination tests on feature/BLG-05-comments.
+================================================

@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { HotelBookingsService } from './hotel-bookings.service.js';
+import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelPayableBooking } from './hotel-payable-booking.js';
 import {
@@ -22,7 +23,12 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
     // Registers HotelPayableBooking with payments' registry (PAY-01).
     PaymentsModule,
   ],
-  providers: [HotelBookingsService, HotelHoldService, HotelPayableBooking],
+  providers: [
+    HotelBookingsService,
+    HotelHoldService,
+    HotelPayableBooking,
+    HotelHoldExpiryJob,
+  ],
   exports: [HotelBookingsService],
 })
 export class HotelBookingsModule {}

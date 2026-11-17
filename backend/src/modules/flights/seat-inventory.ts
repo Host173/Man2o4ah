@@ -1,64 +1,234 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
+import type { Model } from 'mongoose';
+import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { InventoryOptions, SeatItem } from './flights.types.js';
+import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
-/**
- * The only code that changes seat counters (data-model 4.1). Every method takes
- * the caller's transaction and runs inside it; one that cannot apply its change
- * throws, which aborts the whole transaction. Each item is one atomic update
- * (`$elemMatch` + positional `$`), so check and change can't be separated.
- * Implemented in INV-01.
- */
 @Injectable()
 export class SeatInventory {
-  /**
-   * Take the seats of every item only if each cabin has them: `availableSeats` down,
-   * `heldSeats` up, `hasBookings = true`. The flight must be `scheduled` and in the future.
-   * Throws 409 `SEATS_UNAVAILABLE`.
-   */
-  hold(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    void items;
-    void options;
-    throw new NotImplementedException('hold: implemented in INV-01');
-  }
-
-  /** Held seats become booked. Throws 500 `INVENTORY_CORRUPTED` if fewer are held. */
-  confirm(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    void items;
-    void options;
-    throw new NotImplementedException('confirm: implemented in INV-01');
-  }
-
-  /** Held seats become available again (hold expired or payment failed). Throws 500 `INVENTORY_CORRUPTED`. */
-  release(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    void items;
-    void options;
-    throw new NotImplementedException('release: implemented in INV-01');
-  }
-
-  /** Booked seats become available again (cancellation). Throws 500 `INVENTORY_CORRUPTED`. */
-  returnBooked(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    void items;
-    void options;
-    throw new NotImplementedException('returnBooked: implemented in INV-01');
-  }
+  constructor(
+    @InjectModel(Flight.name) private readonly flightModel: Model<Flight>,
+  ) {}
 
   /**
-   * Change a cabin's capacity from `expectedTotal` to `newTotal` (FLT-05). The caller passes the
-   * total it saw, so a parallel change is detected. Throws 409 `CONCURRENT_CHANGE` if the total
-   * is no longer `expectedTotal`, 409 `CAPACITY_BELOW_RESERVED` if held + booked seats exceed `newTotal`.
+   * Reserves seats conditionally on one flight-document update per item.
+   * The caller's transaction makes a multi-item hold all-or-nothing.
    */
-  changeCapacity(
-    flightId: string,
-    cabinId: string,
+  async hold(items: SeatItem[], options: InventoryOptions): Promise<void> {
+    for (const item of items) {
+      this.assertValidSeats(item.seats);
+      const flightId = this.objectId(item.flightId, seatsUnavailable);
+      const cabinId = this.objectId(item.cabinId, seatsUnavailable);
+      const result = await this.flightModel
+        .updateOne(
+          {
+            _id: flightId,
+            status: FlightStatus.SCHEDULED,
+            departureAt: { $gt: new Date() },
+            cabins: {
+              $elemMatch: {
+                _id: cabinId,
+                availableSeats: { $gte: item.seats },
+              },
+            },
+          },
+          {
+            $inc: {
+              'cabins.$.availableSeats': -item.seats,
+              'cabins.$.heldSeats': item.seats,
+            },
+            $set: { hasBookings: true },
+          },
+          { session: options.session },
+        )
+        .exec();
+      if (result.modifiedCount !== 1) throw seatsUnavailable();
+    }
+  }
+
+  /** Converts held seats into booked seats with one conditional update per item. */
+  async confirm(items: SeatItem[], options: InventoryOptions): Promise<void> {
+    await this.moveHeldSeats(items, options, 'bookedSeats');
+  }
+
+  /** Returns held seats to availability with one conditional update per item. */
+  async release(items: SeatItem[], options: InventoryOptions): Promise<void> {
+    await this.moveHeldSeats(items, options, 'availableSeats');
+  }
+
+  /** Returns booked seats to availability with one conditional update per item. */
+  async returnBooked(
+    items: SeatItem[],
+    options: InventoryOptions,
+  ): Promise<void> {
+    for (const item of items) {
+      this.assertValidSeats(item.seats);
+      const flightId = this.objectId(item.flightId, inventoryCorrupted);
+      const cabinId = this.objectId(item.cabinId, inventoryCorrupted);
+      const result = await this.flightModel
+        .updateOne(
+          {
+            _id: flightId,
+            cabins: {
+              $elemMatch: {
+                _id: cabinId,
+                bookedSeats: { $gte: item.seats },
+              },
+            },
+          },
+          {
+            $inc: {
+              'cabins.$.bookedSeats': -item.seats,
+              'cabins.$.availableSeats': item.seats,
+            },
+          },
+          { session: options.session },
+        )
+        .exec();
+      if (result.modifiedCount !== 1) throw inventoryCorrupted();
+    }
+  }
+
+  /**
+   * Changes capacity only when the caller's observed total still matches.
+   * A failed conditional update is inspected in the same session to distinguish
+   * a stale total from a cut below held plus booked seats.
+   */
+  async changeCapacity(
+    flightIdValue: string,
+    cabinIdValue: string,
     newTotal: number,
     expectedTotal: number,
     options: InventoryOptions,
   ): Promise<void> {
-    void flightId;
-    void cabinId;
-    void newTotal;
-    void expectedTotal;
-    void options;
-    throw new NotImplementedException('changeCapacity: implemented in INV-01');
+    if (!Number.isInteger(newTotal) || newTotal < 1) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Capacity must be a positive integer',
+        details: [{ field: 'newTotal', message: 'must be a positive integer' }],
+      });
+    }
+    const flightId = this.objectId(flightIdValue, concurrentChange);
+    const cabinId = this.objectId(cabinIdValue, concurrentChange);
+    const availableReduction = Math.max(0, expectedTotal - newTotal);
+    const result = await this.flightModel
+      .updateOne(
+        {
+          _id: flightId,
+          cabins: {
+            $elemMatch: {
+              _id: cabinId,
+              totalSeats: expectedTotal,
+              availableSeats: { $gte: availableReduction },
+            },
+          },
+        },
+        {
+          $inc: {
+            'cabins.$.totalSeats': newTotal - expectedTotal,
+            'cabins.$.availableSeats': newTotal - expectedTotal,
+          },
+        },
+        { session: options.session },
+      )
+      .exec();
+    if (result.matchedCount === 1) return;
+
+    const flight = await this.flightModel
+      .findOne({
+        _id: flightId,
+        cabins: { $elemMatch: { _id: cabinId } },
+      })
+      .session(options.session)
+      .select({ 'cabins.$': 1 })
+      .lean()
+      .exec();
+    const cabin = flight?.cabins[0];
+    if (!cabin || cabin.totalSeats !== expectedTotal) {
+      throw concurrentChange();
+    }
+    throw capacityBelowReserved();
   }
+
+  private async moveHeldSeats(
+    items: SeatItem[],
+    options: InventoryOptions,
+    destination: 'bookedSeats' | 'availableSeats',
+  ): Promise<void> {
+    for (const item of items) {
+      this.assertValidSeats(item.seats);
+      const flightId = this.objectId(item.flightId, inventoryCorrupted);
+      const cabinId = this.objectId(item.cabinId, inventoryCorrupted);
+      const result = await this.flightModel
+        .updateOne(
+          {
+            _id: flightId,
+            cabins: {
+              $elemMatch: {
+                _id: cabinId,
+                heldSeats: { $gte: item.seats },
+              },
+            },
+          },
+          {
+            $inc: {
+              'cabins.$.heldSeats': -item.seats,
+              [`cabins.$.${destination}`]: item.seats,
+            },
+          },
+          { session: options.session },
+        )
+        .exec();
+      if (result.modifiedCount !== 1) throw inventoryCorrupted();
+    }
+  }
+
+  private objectId(
+    value: string,
+    error: () => ConflictException | InternalServerErrorException,
+  ): Types.ObjectId {
+    if (!Types.ObjectId.isValid(value)) throw error();
+    return new Types.ObjectId(value);
+  }
+
+  private assertValidSeats(seats: number): void {
+    if (!Number.isInteger(seats) || seats < 1) {
+      throw new Error('seats must be a positive integer');
+    }
+  }
+}
+
+function seatsUnavailable(): ConflictException {
+  return new ConflictException({
+    code: ErrorCode.SeatsUnavailable,
+    message: 'Not enough seats available',
+  });
+}
+
+function inventoryCorrupted(): InternalServerErrorException {
+  return new InternalServerErrorException({
+    code: ErrorCode.InventoryCorrupted,
+    message: 'Seat counters are inconsistent',
+  });
+}
+
+function concurrentChange(): ConflictException {
+  return new ConflictException({
+    code: ErrorCode.ConcurrentChange,
+    message: 'The cabin was changed by someone else',
+  });
+}
+
+function capacityBelowReserved(): ConflictException {
+  return new ConflictException({
+    code: ErrorCode.CapacityBelowReserved,
+    message: 'Capacity cannot go below held and booked seats',
+  });
 }

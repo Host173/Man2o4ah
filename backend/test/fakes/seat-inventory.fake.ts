@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -84,6 +85,17 @@ export class FakeSeatInventory implements PublicApi<SeatInventory> {
     newTotal: number,
     expectedTotal: number,
   ): Promise<void> {
+    if (!Number.isInteger(newTotal) || newTotal < 1) {
+      return Promise.reject(
+        new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Capacity must be a positive integer',
+          details: [
+            { field: 'newTotal', message: 'must be a positive integer' },
+          ],
+        }),
+      );
+    }
     const cabin = this.data
       .flight(flightId)
       ?.cabins.find((c) => c.id === cabinId);

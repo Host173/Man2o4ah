@@ -1,3 +1,4 @@
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import type { FakeFlightSeed } from './flights-data.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -289,6 +290,16 @@ describe('FakeSeatInventory', () => {
       await expect(
         inventory.changeCapacity('out', 'nope', 6, 5),
       ).rejects.toMatchObject(conflict('CONCURRENT_CHANGE'));
+    });
+
+    it('rejects a non-positive capacity', async () => {
+      const { inventory } = setup();
+      await expect(
+        inventory.changeCapacity('out', 'out-eco', 0, 5),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect(inventory.counters('out', 'out-eco')?.totalSeats).toBe(5);
     });
   });
 

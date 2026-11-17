@@ -44,6 +44,14 @@ function invalidCredentials() {
   });
 }
 
+/** The session is gone, idle-expired or revoked: log in again (ACC-06). */
+function sessionExpired() {
+  return new UnauthorizedException({
+    code: ErrorCode.SessionExpired,
+    message: 'Your session has expired. Please log in again.',
+  });
+}
+
 /** SHA-256 of a refresh token, the only form a session stores (auth.md §3). */
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -116,16 +124,78 @@ export class AuthService {
       expiresAt: new Date(now + SESSION_IDLE_MS),
     });
 
+    const accessToken = await this.signAccessToken(user, session._id);
+
+    return { user: toMe(user), accessToken, refreshToken };
+  }
+
+  /**
+   * ACC-06, ACC-19 (auth.md §3): `POST /api/auth/refresh`. Finds the live
+   * session (`expiresAt > now`) holding this refresh token's hash, slides its
+   * activity to now + 30 minutes and returns a new access token. The refresh
+   * token is not rotated, so parallel refreshes all succeed. A missing,
+   * unknown, idle-expired or revoked token, or an account that is gone or no
+   * longer active → 401 SESSION_EXPIRED.
+   */
+  async refresh(refreshToken: string | undefined): Promise<string> {
+    if (!refreshToken) throw sessionExpired();
+    const now = Date.now();
+
+    const session = await this.sessionModel
+      .findOne(
+        {
+          refreshTokenHash: hashRefreshToken(refreshToken),
+          expiresAt: { $gt: new Date(now) },
+        },
+        { userId: 1 },
+      )
+      .lean();
+    if (!session) throw sessionExpired();
+
+    const user = await this.userModel
+      .findById(session.userId, { role: 1, status: 1, moderatorOf: 1 })
+      .lean();
+    // Suspension and deactivation delete sessions; this also covers a leftover one.
+    if (!user || user.status !== UserStatus.ACTIVE) throw sessionExpired();
+
+    // Refresh counts as activity. The expiresAt filter stops it from reviving
+    // a session that expired or was revoked a moment ago.
+    const slid = await this.sessionModel.updateOne(
+      { _id: session._id, expiresAt: { $gt: new Date(now) } },
+      {
+        $set: {
+          lastActivityAt: new Date(now),
+          expiresAt: new Date(now + SESSION_IDLE_MS),
+        },
+      },
+    );
+    if (slid.matchedCount === 0) throw sessionExpired();
+
+    return this.signAccessToken(user, session._id);
+  }
+
+  /**
+   * ACC-06 (auth.md §3): `POST /api/auth/logout`. Deletes this device's
+   * session, which revokes its refresh token; the user's other devices stay
+   * logged in. Deleting a session that is already gone is not an error.
+   */
+  async logout(sid: string): Promise<void> {
+    await this.sessionModel.deleteOne({ _id: sid });
+  }
+
+  /** Signs the 15-minute access token `{ sub, role, sid, providerId? }` (auth.md §2). */
+  private signAccessToken(
+    user: Pick<User, 'role' | 'moderatorOf'> & { _id: Types.ObjectId },
+    sid: Types.ObjectId,
+  ): Promise<string> {
     const providerId = user.moderatorOf?.providerId.toString();
     const payload: AccessTokenPayload = {
       sub: user._id.toString(),
       role: user.role,
-      sid: session._id.toString(),
+      sid: sid.toString(),
       ...(providerId ? { providerId } : {}),
     };
-    const accessToken = await this.jwt.signAsync(payload);
-
-    return { user: toMe(user), accessToken, refreshToken };
+    return this.jwt.signAsync(payload);
   }
 
   /**
@@ -134,12 +204,7 @@ export class AuthService {
    */
   async me(userId: string): Promise<MeDto> {
     const user = await this.userModel.findById(userId).lean();
-    if (!user) {
-      throw new UnauthorizedException({
-        code: ErrorCode.SessionExpired,
-        message: 'Your session has expired. Please log in again.',
-      });
-    }
+    if (!user) throw sessionExpired();
     return toMe(user);
   }
 

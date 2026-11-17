@@ -23,12 +23,26 @@ export function setAuthCookies(
   res: Response,
   tokens: { accessToken: string; refreshToken: string },
 ): void {
-  res.cookie(ACCESS_TOKEN_COOKIE, tokens.accessToken, {
-    ...BASE,
-    maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE_MS,
-  });
+  setAccessCookie(res, tokens.accessToken);
   res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
     ...BASE,
     maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   });
+}
+
+/** Sets only the access cookie (after a refresh; the refresh token is not rotated). */
+export function setAccessCookie(res: Response, accessToken: string): void {
+  res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
+    ...BASE,
+    maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE_MS,
+  });
+}
+
+/**
+ * Clears both cookies (logout, dead session). The browser only removes a
+ * cookie whose path matches, so this uses the same options they were set with.
+ */
+export function clearAuthCookies(res: Response): void {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, BASE);
+  res.clearCookie(REFRESH_TOKEN_COOKIE, BASE);
 }

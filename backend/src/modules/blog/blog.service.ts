@@ -22,8 +22,10 @@ import type {
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import type { CreateCommentDto } from './dto/create-comment.dto.js';
 import type { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
+import type { UpdateCommentDto } from './dto/update-comment.dto.js';
 import type { UpdatePostDto } from './dto/update-post.dto.js';
 import { Comment } from './schemas/comment.schema.js';
 import { Like } from './schemas/like.schema.js';
@@ -42,7 +44,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post workflows (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12).
+ * Travel blog post and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, ACC-12).
  * Other blog endpoints and listeners ship in later Sprint 2 tickets.
  */
 @Injectable()
@@ -130,46 +132,155 @@ export class BlogService {
 
   /**
    * BLG-02: loads a publicly visible published post with its resolved author
-   * name and visible chronological comments. Throws 404 for missing, draft,
-   * hidden, or deactivated-author posts.
+   * name. Throws 404 for missing, draft, hidden, or deactivated-author posts.
    */
   async getById(postId: string): Promise<PostDetailView> {
     const id = this.parseId(postId, 'postId');
-    const post = await this.postModel
-      .findOne({
-        _id: id,
-        status: PostStatus.PUBLISHED,
-        isHidden: false,
-        authorDeactivated: false,
-      })
-      .lean()
-      .exec();
-    if (!post) throw this.notFound();
+    const { post, postAuthor } = await this.loadVisiblePublishedPost(id);
+    return this.toPublishedView(post, postAuthor);
+  }
 
-    const comments = await this.commentModel
-      .find({ postId: id, isHidden: false })
-      .sort({ createdAt: 1, _id: 1 })
-      .lean()
-      .exec();
+  /**
+   * BLG-05 / GEN-05: lists paginated visible comments on a published post in
+   * chronological order (oldest first, `_id` as tie-breaker). Throws 404 for
+   * missing, draft, hidden, or deactivated-author posts.
+   */
+  async listComments(
+    postId: string,
+    query: PaginationQueryDto = new PaginationQueryDto(),
+  ): Promise<Paginated<CommentView>> {
+    const id = this.parseId(postId, 'postId');
+    await this.loadVisiblePublishedPost(id);
 
-    const profiles = await this.resolveProfiles([
-      post.authorId.toHexString(),
-      ...comments.map((comment) => comment.authorId.toHexString()),
-    ]);
-    const postAuthor = profiles.get(post.authorId.toHexString());
-    if (postAuthor?.status === UserStatus.DEACTIVATED) {
-      throw this.notFound();
-    }
-
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const result = await paginate(
+      this.commentModel,
+      { postId: id, isHidden: false },
+      { page, limit },
+      { sort: { createdAt: 1, _id: 1 } },
+    );
+    const profiles = await this.resolveProfiles(
+      result.items.map((comment) => comment.authorId.toHexString()),
+    );
     return {
-      ...this.toPublishedView(post as PostRecord, postAuthor),
-      comments: comments.map((comment) =>
+      ...result,
+      items: result.items.map((comment) =>
         this.toCommentView(
           comment as CommentRecord,
           profiles.get(comment.authorId.toHexString()),
         ),
       ),
     };
+  }
+
+  /**
+   * BLG-05: adds a comment (1–500 chars trimmed) to a published post and
+   * increments `commentCount` atomically in a transaction.
+   */
+  async createComment(
+    postId: string,
+    dto: CreateCommentDto,
+    userId: string,
+  ): Promise<CommentView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const authorId = this.parseId(userId, 'userId');
+    const body = this.normalizeCommentBody(dto.body);
+
+    let createdRecord: CommentRecord | undefined;
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const post = await this.postModel
+          .findOneAndUpdate(
+            {
+              _id: postObjectId,
+              status: PostStatus.PUBLISHED,
+              isHidden: false,
+              authorDeactivated: false,
+            },
+            { $inc: { commentCount: 1 } },
+            { session, returnDocument: 'after' },
+          )
+          .lean()
+          .exec();
+        if (!post) throw this.notFound();
+
+        const [created] = await this.commentModel.create(
+          [{ postId: postObjectId, authorId, body }],
+          { session },
+        );
+        createdRecord = created.toObject() as CommentRecord;
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return this.toCommentViewWithProfile(
+      createdRecord!,
+      authorId.toHexString(),
+    );
+  }
+
+  /**
+   * BLG-07: edits the authenticated author's own comment; throws 404 if
+   * missing or owned by another user.
+   */
+  async updateComment(
+    commentId: string,
+    dto: UpdateCommentDto,
+    userId: string,
+  ): Promise<CommentView> {
+    const id = this.parseId(commentId, 'commentId');
+    const authorId = this.parseId(userId, 'userId');
+    const body = this.normalizeCommentBody(dto.body);
+
+    const updated = await this.commentModel
+      .findOneAndUpdate(
+        { _id: id, authorId },
+        { $set: { body } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.commentNotFound();
+
+    return this.toCommentViewWithProfile(
+      updated as CommentRecord,
+      authorId.toHexString(),
+    );
+  }
+
+  /**
+   * BLG-07: deletes the authenticated author's own comment and decrements the
+   * post's `commentCount` (when visible and > 0) atomically in a transaction.
+   */
+  async deleteComment(commentId: string, userId: string): Promise<void> {
+    const id = this.parseId(commentId, 'commentId');
+    const authorId = this.parseId(userId, 'userId');
+
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const deleted = await this.commentModel
+          .findOneAndDelete({ _id: id, authorId }, { session })
+          .lean()
+          .exec();
+        if (!deleted) throw this.commentNotFound();
+
+        if (!deleted.isHidden) {
+          await this.postModel
+            .updateOne(
+              { _id: deleted.postId, commentCount: { $gt: 0 } },
+              { $inc: { commentCount: -1 } },
+              { session },
+            )
+            .exec();
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   /**
@@ -301,6 +412,65 @@ export class BlogService {
     return new Map(profiles.map((profile) => [profile.id, profile]));
   }
 
+  private async loadVisiblePublishedPost(id: Types.ObjectId): Promise<{
+    post: PostRecord;
+    postAuthor: AccountProfile | undefined;
+  }> {
+    const post = await this.postModel
+      .findOne({
+        _id: id,
+        status: PostStatus.PUBLISHED,
+        isHidden: false,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!post) throw this.notFound();
+
+    const profiles = await this.resolveProfiles([post.authorId.toHexString()]);
+    const postAuthor = profiles.get(post.authorId.toHexString());
+    if (postAuthor?.status === UserStatus.DEACTIVATED) {
+      throw this.notFound();
+    }
+
+    return {
+      post: post as PostRecord,
+      postAuthor,
+    };
+  }
+
+  private async toCommentViewWithProfile(
+    comment: CommentRecord,
+    authorId: string,
+  ): Promise<CommentView> {
+    const profiles = await this.resolveProfiles([authorId]);
+    return this.toCommentView(comment, profiles.get(authorId));
+  }
+
+  private normalizeCommentBody(body: string): string {
+    if (typeof body !== 'string') {
+      throw this.invalidCommentBody();
+    }
+    const trimmed = body.trim();
+    if (trimmed.length < 1 || trimmed.length > 500) {
+      throw this.invalidCommentBody();
+    }
+    return trimmed;
+  }
+
+  private invalidCommentBody(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'body',
+          message: 'body must be between 1 and 500 characters',
+        },
+      ],
+    });
+  }
+
   private assertNonBlankBody(body: string): void {
     if (!/\S/.test(body)) {
       throw new BadRequestException({
@@ -326,6 +496,13 @@ export class BlogService {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Post not found',
+    });
+  }
+
+  private commentNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Comment not found',
     });
   }
 

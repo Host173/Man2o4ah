@@ -125,7 +125,7 @@ Local dev: `stripe listen --forward-to localhost:4000/api/payments/webhook` prin
 
 ## 7. Cancellations and refunds
 
-**Tier rule (FLT-09, HTL-10):** `days = floor((start − now) / 1 day)` (flight: outbound departure; hotel: check-in date at 00:00 UTC). Pick the tier with the largest `daysBefore ≤ days`; none → 0%. `refundAmountMinor = round(totalMinor × percent / 100)`. Use the booking's **snapshot** tiers. Write it as a pure function with TDD (decision table + boundaries).
+**Tier rule (FLT-09, HTL-10):** `days = floor((start − now) / 1 day)` (flight: outbound departure; hotel: check-in date at 00:00 UTC). Pick the tier with the largest `daysBefore ≤ days`; none → 0%. `refundAmountMinor = round(totalMinor × percent / 100)`. Use the booking's **snapshot** tiers. Write it as a pure function with TDD (decision table + boundaries). Each booking module has its **own copy** (flight-bookings and hotel-bookings), with its own tests; neither imports the other (`DECISIONS.md` §3).
 
 Preview: `GET /api/flight-bookings/:id/refund-preview`, `GET /api/hotel-bookings/:id/refund-preview` → `{ percent, amountMinor, currency }`.
 

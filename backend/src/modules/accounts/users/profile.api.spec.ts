@@ -5,6 +5,7 @@ import { clearCollections } from '../../../../test/support/clear-collections.js'
 import { HOOK_TIMEOUT } from '../../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../../test/support/test-app.js';
 import type { TestApp } from '../../../../test/support/test-app.js';
+import { ReferenceDataModule } from '../../reference-data/reference-data.module.js';
 import { ReferenceDataService } from '../../reference-data/reference-data.service.js';
 import { User, UserRole } from '../schemas/user.schema.js';
 
@@ -15,6 +16,8 @@ describe('/api/users/me (API, ACC-09)', () => {
 
   beforeAll(async () => {
     t = await createTestApp({
+      // As in AppModule: reference data is registered beside accounts.
+      imports: [ReferenceDataModule],
       // Supported currencies come from reference data (USD, EGP, AED, EUR, JPY in the fake).
       override: (builder) =>
         builder

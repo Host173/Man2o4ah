@@ -1177,6 +1177,228 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     });
   });
 
+  describe('likes (BLG-06)', () => {
+    it('likes and unlikes a published post idempotently and updates likeCount accurately', async () => {
+      const post = await service.create(
+        {
+          title: 'Likeable Post',
+          body: 'Detailed guide to Luxor.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      // Unliking before any like is a no-op and never drives likeCount negative.
+      const initialUnlike = await service.unlikePost(post._id, otherUserId);
+      expect(initialUnlike).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+
+      // First like creates the Like document and increments likeCount to 1.
+      const liked = await service.likePost(post._id, otherUserId);
+      expect(liked).toEqual({
+        postId: post._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+          userId: new Types.ObjectId(otherUserId),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Repeated like by the same user is idempotent and does not double-increment.
+      const doubleLiked = await service.likePost(post._id, otherUserId);
+      expect(doubleLiked).toEqual({
+        postId: post._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Unlike removes the Like document and decrements likeCount back to 0.
+      const unliked = await service.unlikePost(post._id, otherUserId);
+      expect(unliked).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+
+      // Repeated unlike stays at 0 and never goes negative.
+      const unlikedAgain = await service.unlikePost(post._id, otherUserId);
+      expect(unlikedAgain).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+    });
+
+    it('handles parallel likes from the same user and from different users without drifting likeCount', async () => {
+      const post = await service.create(
+        {
+          title: 'Concurrent Likes Post',
+          body: 'Stress test post.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      // Parallel likes from the SAME user must produce exactly 1 Like doc and likeCount === 1.
+      const sameUserResults = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          service.likePost(post._id, otherUserId),
+        ),
+      );
+      for (const res of sameUserResults) {
+        expect(res.postId).toBe(post._id);
+        expect(res.liked).toBe(true);
+      }
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+          userId: new Types.ObjectId(otherUserId),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Parallel likes from DIFFERENT users must increment likeCount once per distinct user.
+      const distinctUsers = [
+        ownerId,
+        activeCommenterId,
+        suspendedUserId,
+        new Types.ObjectId().toHexString(),
+      ];
+      await Promise.all(
+        distinctUsers.map((uid) => service.likePost(post._id, uid)),
+      );
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(5);
+      expect((await service.getById(post._id)).likeCount).toBe(5);
+
+      // Parallel unlikes from the SAME user must decrement only once (5 -> 4, never 0).
+      await Promise.all(
+        Array.from({ length: 4 }, () =>
+          service.unlikePost(post._id, otherUserId),
+        ),
+      );
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(4);
+      expect((await service.getById(post._id)).likeCount).toBe(4);
+    });
+
+    it('rejects likes and unlikes on draft, hidden, deactivated-author, or missing posts and validates IDs', async () => {
+      const draft = await service.create(
+        { title: 'Draft', body: 'Hidden draft', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden', body: 'Moderated', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      const deactivatedFlagged = await service.create(
+        {
+          title: 'Deactivated Flagged',
+          body: 'Author deactivated flag',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedFlagged._id) },
+        { $set: { authorDeactivated: true } },
+      );
+      const deactivatedProfile = await service.create(
+        {
+          title: 'Deactivated Profile',
+          body: 'Profile deactivated',
+          status: PostStatus.PUBLISHED,
+        },
+        deactivatedAuthorId,
+      );
+
+      for (const blockedPostId of [
+        draft._id,
+        hidden._id,
+        deactivatedFlagged._id,
+        deactivatedProfile._id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        await expect(
+          service.likePost(blockedPostId, otherUserId),
+        ).rejects.toThrow(NotFoundException);
+        await expect(
+          service.unlikePost(blockedPostId, otherUserId),
+        ).rejects.toThrow(NotFoundException);
+      }
+
+      const invalidLikeErr = await service
+        .likePost('not-an-object-id', otherUserId)
+        .catch((err: unknown) => err);
+      expect(invalidLikeErr).toBeInstanceOf(BadRequestException);
+      expect(
+        (invalidLikeErr as BadRequestException).getResponse(),
+      ).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+
+      const invalidUserErr = await service
+        .unlikePost(draft._id, 'bad-user-id')
+        .catch((err: unknown) => err);
+      expect(invalidUserErr).toBeInstanceOf(BadRequestException);
+      expect(
+        (invalidUserErr as BadRequestException).getResponse(),
+      ).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+    });
+
+    it('re-throws unexpected non-duplicate database errors during likePost', async () => {
+      const post = await service.create(
+        {
+          title: 'DB Error Post',
+          body: 'Testing unexpected create failure',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      vi.spyOn(likeModel, 'create').mockRejectedValueOnce(
+        new Error('db failure'),
+      );
+
+      await expect(service.likePost(post._id, otherUserId)).rejects.toThrow(
+        'db failure',
+      );
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+    });
+  });
+
   describe('User deactivation & reactivation events (ACC-12)', () => {
     it('hides author posts on user.deactivated and restores published non-hidden posts on user.reactivated idempotently', async () => {
       const ownersPublished = await service.create(

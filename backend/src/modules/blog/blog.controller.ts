@@ -32,6 +32,7 @@ import { BlogService } from './blog.service.js';
 import type {
   CommentView,
   PostDetailView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
@@ -44,6 +45,7 @@ import {
   PaginatedPostResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PostLikeResponseDto,
   PostResponseDto,
 } from './dto/post.response.dto.js';
 import { UpdateCommentDto } from './dto/update-comment.dto.js';
@@ -217,5 +219,43 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.blogService.deleteComment(id.toHexString(), user.id);
+  }
+
+  @Post('posts/:id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-06 Like a published post (idempotent)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  likePost(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostLikeView> {
+    return this.blogService.likePost(id.toHexString(), user.id);
+  }
+
+  @Delete('posts/:id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary: 'BLG-06 Remove like from a published post (idempotent)',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  unlikePost(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostLikeView> {
+    return this.blogService.unlikePost(id.toHexString(), user.id);
   }
 }

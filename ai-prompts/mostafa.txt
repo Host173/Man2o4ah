@@ -166,3 +166,19 @@ Note, no change needed here: when GEN-10 hides or unhides a comment, it must low
 How the output was used:
 Paginated GET /api/posts/:id/comments using PaginationQueryDto and paginate(), removed embedded comments from GET /api/posts/:id (PostDetailView & PostDetailResponseDto), added PaginatedCommentsResponseDto, and updated/added unit, integration, and API pagination tests on feature/BLG-05-comments.
 ================================================
+
+
+
+================================================
+Date: 2026-11-17
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: BLG-06
+
+Prompt:
+Implement BLG-06 (Sprint 1, package 7, Community & Admin, module: blog) using the existing project conventions: liking and unliking posts with a like count that stays correct. First read the BLG-06 spec and the project skill in docs/ai/skills/travel-platform/, and follow the documented endpoints, naming and error conventions exactly without inventing behavior. Confirm the BLG-01 output (#76) is present on develop, and if it isn’t, report it clearly instead of recreating it. Build on the existing blog module and the BLG-01 post model: add the like model and persistence following the project’s data conventions, with a like operation and an unlike operation restricted to the authenticated user, where each user can like a given post only once. Enforce this at the data level with a uniqueness guarantee, not just an application-level check, so a double like or parallel requests can’t create duplicates. Follow the spec for what a repeated like, or an unlike of a post the user hasn’t liked, returns (idempotent success or the documented conflict or not-found error), and for which posts can be liked (published only, if that’s what the spec says), returning the project’s documented error for draft, hidden or missing posts. Keep the post’s like count correct on like and unlike, updated atomically so it never drifts, double counts under concurrency or goes negative. Don’t implement features reserved for later tickets, don’t change the frozen schemas, and don’t touch Aya’s booking modules or anything outside the blog module and the shared wiring this task needs. TDD isn’t required, but ship integration tests for the like logic (like, unlike, double like, unlike without a prior like, parallel likes from the same user and from different users, and like count correctness after each) and API tests covering the endpoints, unauthenticated requests, missing or non-published posts and response shape. Update the related documentation (API docs and module docs, plus any index or changelog the project keeps), run the backend verification checks (lint, typecheck, tests, build), and if my laptop can’t install the locked dependencies, say so honestly instead of claiming local checks passed. Work on branch feature/BLG-06-likes, commit and push only the BLG-06 changes with the PR title BLG-06: Likes in mind, and leave unrelated files alone. Don’t open the PR; I’ll do that manually.
+Attachments: docs/ai/chat-skill/chat-instructions.txt, docs/ai/chat-skill/SKILL.md
+
+How the output was used:
+Implemented idempotent post liking and unliking (POST /api/posts/:id/like and DELETE /api/posts/:id/like) enforced by the { postId, userId } unique index and atomic likeCount updates in BlogService and BlogController, added PostLikeView/PostLikeResponseDto Swagger docs, and added DTO, integration (including concurrent likes/unlikes), and HTTP API tests on feature/BLG-06-likes.
+================================================

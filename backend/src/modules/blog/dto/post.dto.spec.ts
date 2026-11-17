@@ -9,6 +9,7 @@ import {
   PaginatedCommentsResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PostLikeResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
 import { UpdateCommentDto } from './update-comment.dto.js';
@@ -348,12 +349,14 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const comment = new CommentResponseDto();
       const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
+      const like = new PostLikeResponseDto();
 
       expect(published).toBeInstanceOf(PublishedPostResponseDto);
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect(like).toBeInstanceOf(PostLikeResponseDto);
       expect('comments' in detail).toBe(false);
     });
   });

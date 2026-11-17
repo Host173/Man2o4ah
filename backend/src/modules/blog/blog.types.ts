@@ -55,3 +55,10 @@ export interface CommentView {
  * Comments are loaded separately via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
  */
 export type PostDetailView = PublishedPostView;
+
+/** Plain view returned after liking or unliking a post (`BLG-06`). */
+export interface PostLikeView {
+  postId: string;
+  likeCount: number;
+  liked: boolean;
+}

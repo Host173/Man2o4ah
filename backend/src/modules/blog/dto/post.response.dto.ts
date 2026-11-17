@@ -3,6 +3,7 @@ import type { Paginated } from '../../../common/pagination/paginated.js';
 import type {
   CommentView,
   PostImageView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from '../blog.types.js';
@@ -177,3 +178,15 @@ export class PaginatedCommentsResponseDto implements Paginated<CommentResponseDt
  * Comments are fetched via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
  */
 export class PostDetailResponseDto extends PublishedPostResponseDto {}
+
+/** Swagger response model for liking or unliking a post (`BLG-06`). */
+export class PostLikeResponseDto implements PostLikeView {
+  @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f602' })
+  postId!: string;
+
+  @ApiProperty({ example: 1 })
+  likeCount!: number;
+
+  @ApiProperty({ example: true })
+  liked!: boolean;
+}

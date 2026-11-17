@@ -38,4 +38,3 @@ export class AdminController {
     return this.adminService.listBookings(query);
   }
 }
-

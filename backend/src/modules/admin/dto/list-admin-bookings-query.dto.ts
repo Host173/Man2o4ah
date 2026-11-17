@@ -81,4 +81,3 @@ export class ListAdminBookingsQueryDto extends PaginationQueryDto {
   @Validate(IsValidDateOnlyConstraint)
   to?: string;
 }
-

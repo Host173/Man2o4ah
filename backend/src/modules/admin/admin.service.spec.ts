@@ -232,7 +232,9 @@ describe('AdminService', () => {
       }),
     ];
     const service = new AdminService(
-      new FakeFlightBookingsService(flights) as unknown as FlightBookingsService,
+      new FakeFlightBookingsService(
+        flights,
+      ) as unknown as FlightBookingsService,
       new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
     );
 

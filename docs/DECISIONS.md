@@ -229,3 +229,4 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 **Later:**
 
 - A PDF summarising the important decisions and why (for the team and the evaluation), starting with "booking rules per module".
+- **Demo seed with past completed bookings (PLT-08, Kareem):** seed past, Completed hotel reservations with ratings and reviews, and past Completed flight bookings. Why (dependency circle 3): ratings only come from Completed stays, and a stay completes only after its check-out date has really passed (flights: after departure), so a fresh system shows no ratings and no completed bookings. Accepted 17 Nov; to be written into the decisions list when PLT-08 is planned.

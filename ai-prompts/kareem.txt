@@ -1420,3 +1420,16 @@ ok go plus later we will create a doc(pdf) with the important decision we took, 
 How the output was used:
 Recorded "booking rules implemented in each booking module" in docs/DECISIONS.md §3 and bookings-payments.md §5, synced the open items (ACC-01 questions, platform follow-ups, decisions PDF later); opened a docs PR and commented on #130.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-03
+
+Prompt:
+ok i accept both action , so write what Pierre should do in his issues, and save the seed thing in the decisions we will do later
+
+How the output was used:
+Added a "Rating rule (dependency circle 3)" line to the HTL-02 and HTL-11 issues; added the demo-seed item (past completed bookings, PLT-08) to the "Later" open items in docs/DECISIONS.md.
+================================================

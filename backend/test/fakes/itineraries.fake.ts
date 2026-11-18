@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -8,6 +8,7 @@ import {
   cityGroups,
   dayDate,
   dayNumber,
+  MAX_DAYS,
 } from '../../src/modules/itineraries/days.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
@@ -201,6 +202,10 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (dto.notes !== undefined) day.notes = dto.notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  function invalidField(field: string, message: string): never {
+    throw new BadRequestException({ field, message });
   }
 
   private findOwned(itineraryId: string, userId: string): ItineraryDetailView {

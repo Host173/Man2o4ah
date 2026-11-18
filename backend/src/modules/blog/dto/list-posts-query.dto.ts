@@ -2,10 +2,11 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/pagination/pagination-query.dto.js';
+import { normalizeTag } from '../blog-tags.js';
 
 function normalizeTagQuery(value: unknown): unknown {
   if (typeof value !== 'string') return value;
-  const normalized = value.trim().toLowerCase();
+  const normalized = normalizeTag(value);
   return normalized.length > 0 ? normalized : undefined;
 }
 

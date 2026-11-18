@@ -1471,6 +1471,14 @@ Report (short)
 
 How the output was used:
 Created branch fix/PLT-06-windows-vitest-imports from develop and reproduced only (stopped at step 2: the two events specs did not fail in the full run, so no code was changed and nothing was committed); this log entry is the only file change.
+Tool: Claude (claude.ai)
+Related Requirement: PLT-04
+
+Prompt:
+Ok go then give me a pdf with the 3 questions we have
+
+How the output was used:
+Marked the data-model §8 design calls confirmed (two parts left open for the TAs) and removed the unused session settings from the api-contract env list; opened a docs PR. Made a PDF of the three TA questions.
 ================================================
 
 ================================================
@@ -1489,9 +1497,7 @@ says and never changes the lock file). Then repeat step 2's full run once.
 
 How the output was used:
 Ran npm ci in backend/; the full run passed (84 files, 913 tests, no 'config' error), so no code was changed. Switched back to develop and deleted the local branch fix/PLT-06-windows-vitest-imports; the prompt log stays uncommitted.
-================================================
 
-================================================
 Date: 2026-11-17
 Student: Kareem
 Tool: Claude Code
@@ -1504,4 +1510,23 @@ Replace everything above my personal section with the template's text; keep my p
 
 How the output was used:
 Rewrote the gitignored AGENTS.md from AGENTS.example.md 2026-11-15, keeping my About me and My preferences text; CLAUDE.md already only imports @AGENTS.md and was left as is. Nothing committed.
+Tool: Claude (claude.ai)
+Related Requirement: GEN-12
+
+Prompt:
+bro ig you have the CSV's so just do it and open a pr , and if you don't have them then you have the pdf that have them,
+
+How the output was used:
+Implemented ReferenceDataService over the seeded collections and the public paginated endpoints for countries, cities, airports (FLT-02), currencies and attractions, with integration and API tests (including a check that the fake answers like the real service); fixed the fake's New York ID to the dataset's. Reviewed the code and the tests before opening the PR.
+
+Date: 2026-11-18
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: ITN-01
+
+Prompt:
+ok fix it and add it to the pr
+
+How the output was used:
+Merged develop into the ITN-01 branch, stubbed the reference-data models in the blog module setup test (BlogModule now reaches ReferenceDataModule through ItinerariesModule), and made the fake's empty-update test move the clock so it fails without the fix. Checked both tests and ran the full verify before pushing.
 ================================================

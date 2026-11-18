@@ -54,6 +54,158 @@ describe('Hotel profile API (HTL-01)', () => {
   });
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
+  describe('hotel policy endpoint (HTL-09, HTL-10)', () => {
+    const policies = {
+      checkInTime: '15:30',
+      checkOutTime: '11:00',
+      cancellationPolicy: {
+        tiers: [
+          { daysBefore: 7, refundPercent: 100 },
+          { daysBefore: 2, refundPercent: 50 },
+          { daysBefore: 0, refundPercent: 0 },
+        ],
+      },
+    };
+
+    it('lets the assigned moderator replace policies and clear all cancellation tiers', async () => {
+      const created = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: created.id,
+      });
+      const { id, ...fields } = created;
+      const path = `/api/hotels/${id}/policies`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await t
+          .http()
+          .put(path)
+          .set('Cookie', moderator.cookie)
+          .send(policies)
+          .expect(200);
+        expect(response.body).toEqual({ _id: id, ...fields, ...policies });
+      }
+      expect(await service.getHotel(id)).toEqual({ ...created, ...policies });
+      const cleared = {
+        ...policies,
+        checkInTime: '23:59',
+        checkOutTime: '00:00',
+        cancellationPolicy: { tiers: [] },
+      };
+      const response = await t
+        .http()
+        .put(path)
+        .set('Cookie', moderator.cookie)
+        .send(cleared)
+        .expect(200);
+      expect(response.body).toEqual({ _id: id, ...fields, ...cleared });
+      expect(await service.getHotel(id)).toEqual({ ...created, ...cleared });
+    });
+
+    it('requires authentication and the hotel-moderator role without changing policies', async () => {
+      const created = await service.create(profile);
+      const path = `/api/hotels/${created.id}/policies`;
+      const guest = await t.http().put(path).send(policies).expect(401);
+      expect(guest.body.code).toBe(ErrorCode.NotAuthenticated);
+      for (const role of [Role.ADMIN, Role.USER, Role.AIRLINE_MODERATOR]) {
+        const account = await loginAs(t.connection, role);
+        const response = await t
+          .http()
+          .put(path)
+          .set('Cookie', account.cookie)
+          .send(policies)
+          .expect(403);
+        expect(response.body.code).toBe(ErrorCode.ForbiddenRole);
+      }
+      expect(await service.getHotel(created.id)).toEqual(created);
+    });
+
+    it('returns the same 404 for another hotel and a missing assigned hotel', async () => {
+      const created = await service.create(profile);
+      const assigned = await service.create({
+        ...profile,
+        name: 'Other Hotel',
+      });
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: assigned.id,
+      });
+      const other = await t
+        .http()
+        .put(`/api/hotels/${created.id}/policies`)
+        .set('Cookie', moderator.cookie)
+        .send(policies)
+        .expect(404);
+      const missingId = new Types.ObjectId().toHexString();
+      const missingModerator = await loginAs(
+        t.connection,
+        Role.HOTEL_MODERATOR,
+        { providerId: missingId },
+      );
+      const missing = await t
+        .http()
+        .put(`/api/hotels/${missingId}/policies`)
+        .set('Cookie', missingModerator.cookie)
+        .send(policies)
+        .expect(404);
+      expect(other.body.code).toBe(ErrorCode.NotFound);
+      expect(missing.body.code).toBe(ErrorCode.NotFound);
+      expect(other.body.message).toBe(missing.body.message);
+      expect(await service.getHotel(created.id)).toEqual(created);
+      expect(await service.getHotel(assigned.id)).toEqual(assigned);
+    });
+
+    it('rejects invalid and incomplete policies with field errors and no partial writes', async () => {
+      const created = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: created.id,
+      });
+      for (const input of [
+        { ...policies, checkInTime: '24:00' },
+        { ...policies, checkOutTime: '12:60' },
+        { checkInTime: policies.checkInTime },
+        {
+          ...policies,
+          cancellationPolicy: {
+            tiers: [
+              { daysBefore: 7, refundPercent: 100 },
+              { daysBefore: 7, refundPercent: 50 },
+            ],
+          },
+        },
+        {
+          ...policies,
+          cancellationPolicy: {
+            tiers: [{ daysBefore: 1.5, refundPercent: 101 }],
+          },
+        },
+        { ...policies, providerId: created.id },
+        {
+          ...policies,
+          cancellationPolicy: { tiers: [], isActive: false },
+        },
+      ]) {
+        const response = await t
+          .http()
+          .put(`/api/hotels/${created.id}/policies`)
+          .set('Cookie', moderator.cookie)
+          .send(input)
+          .expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: expect.arrayContaining([
+            expect.objectContaining({ field: expect.any(String) }),
+          ]),
+        });
+        expect(await service.getHotel(created.id)).toEqual(created);
+      }
+      const malformed = await t
+        .http()
+        .put('/api/hotels/invalid/policies')
+        .set('Cookie', moderator.cookie)
+        .send(policies)
+        .expect(400);
+      expect(malformed.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
   describe('hotel photo endpoints', () => {
     const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 
@@ -636,6 +788,30 @@ describe('Hotel profile API (HTL-01)', () => {
     expect(upload?.responses['409']).toBeUndefined();
     expect(remove?.responses['204']).toBeDefined();
     expect(remove?.responses['404']).toBeDefined();
+    const policies = document.paths['/api/hotels/{id}/policies']?.put;
+    expect(policies?.security).toEqual([{ cookie: [] }]);
+    expect(policies?.summary).toContain('HTL-09');
+    expect(policies?.summary).toContain('HTL-10');
+    expect(policies?.requestBody).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/UpdateHotelPoliciesDto' },
+        },
+      },
+    });
+    expect(policies?.responses['200']).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/HotelProfileResponseDto' },
+        },
+      },
+    });
+    for (const status of ['400', '401', '403', '404']) {
+      expect(policies?.responses[status]).toBeDefined();
+    }
+    expect(document.components?.schemas?.UpdateHotelPoliciesDto).toMatchObject({
+      required: ['checkInTime', 'checkOutTime', 'cancellationPolicy'],
+    });
     expect(document.paths['/api/hotels/{id}']?.get).toBeUndefined();
   });
 });

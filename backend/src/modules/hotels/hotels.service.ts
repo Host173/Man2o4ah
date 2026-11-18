@@ -17,6 +17,7 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import type { StoredImage } from '../storage/storage.service.js';
 import type { CreateHotelDto } from './dto/create-hotel.dto.js';
+import type { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
   HotelSearchQuery,
@@ -76,6 +77,32 @@ export class HotelsService {
         { _id: id },
         { $set: fields },
         { new: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!hotel) throw this.notFound();
+    return this.toView(hotel);
+  }
+
+  /** HTL-09 / HTL-10: replace the assigned hotel's policies; existing reservation snapshots are unchanged. */
+  async updatePolicies(
+    hotelId: string,
+    input: UpdateHotelPoliciesDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<HotelView> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
+    const hotel = await this.hotelModel
+      .findOneAndUpdate(
+        { _id: id },
+        {
+          $set: {
+            checkInTime: input.checkInTime,
+            checkOutTime: input.checkOutTime,
+            cancellationPolicy: input.cancellationPolicy,
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
       )
       .lean()
       .exec();

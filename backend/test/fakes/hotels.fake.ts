@@ -6,6 +6,7 @@ import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
+import type { UpdateHotelPoliciesDto } from '../../src/modules/hotels/dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
@@ -110,6 +111,22 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     if (input.amenities !== undefined) {
       fields.amenities = input.amenities.map((amenity) => amenity.trim());
     }
+    await this.validate(fields, Object.keys(fields));
+    Object.assign(hotel, fields);
+    return structuredClone(hotel);
+  }
+
+  async updatePolicies(
+    hotelId: string,
+    input: UpdateHotelPoliciesDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<HotelView> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const fields = {
+      checkInTime: input.checkInTime,
+      checkOutTime: input.checkOutTime,
+      cancellationPolicy: structuredClone(input.cancellationPolicy),
+    };
     await this.validate(fields, Object.keys(fields));
     Object.assign(hotel, fields);
     return structuredClone(hotel);

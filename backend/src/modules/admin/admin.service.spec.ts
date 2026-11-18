@@ -95,7 +95,7 @@ describe('AdminService', () => {
     });
   });
 
-  it('sorts merged flight and hotel bookings newest createdAt first with deterministic tiebreaker', async () => {
+  it("keeps each service's order on ties", async () => {
     const sameTs = new Date('2026-11-12T12:00:00.000Z');
     const flights = [
       flightView({ bookingId: 'f-b', createdAt: sameTs }),

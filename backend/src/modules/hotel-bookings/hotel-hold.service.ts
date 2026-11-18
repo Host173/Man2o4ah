@@ -135,6 +135,10 @@ export class HotelHoldService {
 
     // HTL-18: only an unexpired hold blocks a room, and the expiry job may not
     // have run yet. Free the overdue holds on these rooms and nights first.
+    // If one can't be freed (its release failed and was logged by the job), its
+    // nights still block and the new hold gets 409 ROOMS_UNAVAILABLE. That is on
+    // purpose (review #148): a failed release means the inventory needs a look,
+    // and overriding it here could double-book; the next job run retries it.
     await this.expiry.expireDueHolds(createdAt, {
       hotelId: request.hotelId,
       'rooms.roomId': { $in: request.rooms.map((r) => r.roomId) },

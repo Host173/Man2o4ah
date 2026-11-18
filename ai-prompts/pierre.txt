@@ -14,3 +14,592 @@ Implement CTR-03 for my hotels module using the existing project conventions. De
 How the output was used:
 Added hotels contract stubs, in-memory fakes, unit tests, backend documentation, and this newly approved prompt entry; no commit yet.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+ok start impleming
+
+How the output was used:
+Implemented room-night-inventory.ts and shared date rules; updated Hotels contract tests/types and fakes, added unit/integration/concurrency tests, and appended ai-prompts/pierre.txt on feature/INV-02-roomnightinventory; backend npm run verify passed with 1104 tests; prior HTL-01 prompt-log changes preserved in stash b7bd4eacf2e48e5cc4cad21854c10da86b49017c; no commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+make a pr
+
+How the output was used:
+Committed INV-02 tests first as f7aa043 and implementation as 89fb0b6, pushed feature/INV-02-roomnightinventory, opened PR #152 targeting develop with the repository template and Kareem requested as reviewer, and appended ai-prompts/pierre.txt; backend build passed and the existing full verification passed 1104 tests.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+does the pr lacks something or have som takeways ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; reviewed PR #152 and added one inline comment about the fake accepting transaction-free calls; confirmed CI is green, Kareem approval is pending, and automatic Copilot review failed due to billing configuration; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+read the comments on the pr and tell me if it real or not
+
+How the output was used:
+Appended ai-prompts/pierre.txt; checked PR #152 reviews against production and fake identifier handling, confirmed the ObjectId validation/case-normalization finding, and identified the later review's expired-hold clarification as HTL-16 scope; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+ok fixand push
+
+How the output was used:
+Added inventory-ids.ts and shared identifier validation/canonicalization with the production inventory and fake, migrated fake fixtures, added 11 regression cases in test-first commit 6cb6b44, and appended ai-prompts/pierre.txt for PR #152; targeted 87 tests passed and isolated tracked-PR npm run verify passed 1115 tests; main-worktree verification stopped on unrelated untracked HTL-01 type errors, whose files were left untouched.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+read the last comment on the pr
+
+How the output was used:
+Appended ai-prompts/pierre.txt; read the latest review on PR #152 and confirmed that fake setAvailability checks room existence before validating ranges, unlike production; explained the 404 versus 400 mismatch and the requested validation-order fix; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+can you fix it and push the commenting on his comment
+
+How the output was used:
+Added a failing availability error-precedence regression in hotels.fake.spec.ts, committed first as e85228a, then moved range normalization before room lookup in room-night-inventory.fake.ts; all 51 fake tests passed and isolated tracked-PR npm run verify passed all gates with 1116 tests across 94 files; main-workspace verification stopped at unrelated untracked profile type errors, whose files were left untouched; prepared the fix and validation evidence for PR #152 and a reply to Kareem's review.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok fix them and remove the sentence of ai retrospective
+
+How the output was used:
+Added fake profile/rating validation and inactive-hotel API regression tests (test-first commit 853371b), matched fake validation to the production schema, and passed backend verify (1235 tests); preserved the earlier log entry under the append-only rule.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+so remove the whole prompt of the ai retrospective only
+
+How the output was used:
+Removed only the generated HTL-01 entry dated 2026-11-16 after Pierre confirmed Kareem explicitly approved this exception; preserved all other existing entries and made no source-code changes.
+================================================
+
+Historical backfill appended on 2026-11-18 from this session's stored original user messages (turns 13-46 and 49). Dates below are the original recorded days in UTC+02:00, not the recovery date. Prompt text is copied verbatim, including spelling and trailing spaces. Outcomes describe the recorded responses; an absent response is stated explicitly. These are recovered messages, not replacement task briefs. The two already-logged requests (turns 47-48) are not duplicated. Unavailable attachment contents and form responses are not reconstructed or claimed recovered.
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+now i want to start in the tickets assigned to me in sprint 2
+
+How the output was used:
+Answer only, no files changed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+lets begain in htl-01 but before you begain i want to share with me step by step what you do to be understand
+
+How the output was used:
+Answer only, no files changed; explained the planned HTL-01 implementation steps.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok
+
+How the output was used:
+Created the HTL-01 branch and hotel create/update DTOs with validation tests; local tests were dependency-blocked.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+we have already shared database i will provide it
+
+How the output was used:
+Answer only, no files changed; explained private environment configuration and isolated test databases.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is the solution for the npm depeddencies
+
+How the output was used:
+Answer only, no files changed; explained the registry blocker and GitHub Actions validation.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok
+
+How the output was used:
+Implemented the core hotel-profile service and tests, pushed draft PR #122, and verified 668 tests in CI.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+#121 is now merged
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why pr check fails ?
+
+How the output was used:
+Answer only, no files changed; identified the missing prompt-log entry as the failing PR check.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+for every ticket we made after we fifnish make a professional and realistic prompt for what you made
+
+How the output was used:
+Answer only, no files changed; discussed a labelled retrospective rather than an original prompt.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+do you add the prompt
+
+How the output was used:
+Answer only, no files changed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is lacks this pr to publish or complete
+
+How the output was used:
+Answer only, no files changed; listed remaining photo support, verification, logging and review work.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what should i made to comlplete it
+
+How the output was used:
+Answer only, no files changed; explained the remaining HTL-01 work.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you make them ?
+
+How the output was used:
+Implemented photo upload/removal, cleanup and retry handling, tests and Swagger documentation; pushed PR #122 with 968 CI tests passing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is remain fir the pr
+
+How the output was used:
+Answer only, no files changed; listed prompt logging, integration, manual evidence and review.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+add the prompt
+
+How the output was used:
+Added a local prompt-log entry and a labelled task brief; not committed or pushed in this turn.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i daont mean add my prompts i mean make you a professional prompt and add it
+
+How the output was used:
+Changed the uncommitted local HTL-01 entry to a labelled generated task brief; that brief was later removed in 2314b9d.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+commit and push and the tell me what is lacks this pr 
+
+How the output was used:
+Committed and pushed the then-approved log entry as 63093c8 and updated PR #122; CI passed 968 tests.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what i shoukd make in 1 and 2
+
+How the output was used:
+Answer only, no files changed; explained shared-service coordination and manual Swagger verification.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you make 2 ?
+
+How the output was used:
+Attempted Swagger access, found the backend unavailable, and reported blockers without saving or using supplied credentials.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why the swaggar isnt opening
+
+How the output was used:
+Answer only, no files changed; explained the missing running backend, dependencies and environment configuration.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i will do it in another laptop so writ to me a prompt to makr e the test you didnt made and edit them in pr description and make step2 and take the scrreenshots and put in
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i will do it in another laptop so writ to me a prompt to makr e the test you didnt made and edit them in pr description and make step2 and take the scrreenshots and put in make the prompt general for any ticket
+
+How the output was used:
+Answer only, no files changed; supplied a reusable verification and PR-evidence handoff prompt.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+is the provet run with docker or what ?
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+is the project run with docker or what ?
+
+How the output was used:
+Answer only, no files changed; explained the Node/npm runtime and optional local database container.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+if we use docker does the problem of the blocked dependincies will be solved ?
+
+How the output was used:
+Answer only, no files changed; explained that Docker does not inherently bypass npm registry restrictions.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok now pull the last changes of the project and then review the htl 01 ticket branch and pr 
+
+How the output was used:
+Merged develop as 952d746, restored dependencies, ran 981 tests, and recorded hotel contract and screenshot review findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what you have changed in the code
+
+How the output was used:
+Answer only, no files changed; clarified that the preceding turn merged develop but did not fix the review findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what are the issues
+
+How the output was used:
+Answer only, no files changed; explained the fake-ID, HTTP-ID, photo-limit and screenshot findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you fix them
+
+How the output was used:
+Committed regressions in 0899656 and fixes in 4b98104; pushed to PR #122 with 983 tests passing and corrected unsafe screenshot evidence.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+does the pr is ready to be published ?
+
+How the output was used:
+Answer only, no files changed; checked PR readiness and explained remaining real-integration verification.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why gen 8 and gen 12 should be finished first before i open my pr
+
+How the output was used:
+Answer only, no files changed; corrected the distinction between opening a PR and completing real-integration verification.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+are the screenshots correct
+
+How the output was used:
+Answer only, no repository files changed; inspected nine PR images and reported historical ID fields and missing success evidence.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+does this pr is linked with its work item >
+
+How the output was used:
+Answer only, no files changed; confirmed PR #122 is linked to issue #43.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+read the last comment on this ticket
+
+How the output was used:
+Answer only, no files changed; read Kareem's review requesting fake-validation fixes, an inactive-edit test and original prompt records.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+read the last comment in the pr
+
+How the output was used:
+Answer only, no files changed; read Kareem's review confirming the code fixes and requesting original prompts or an explicit loss statement.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+fix the prompts issues
+
+How the output was used:
+Appended recovered original HTL-01 session prompts and their recorded outcomes to ai-prompts/pierre.txt without changing earlier entries or application code.
+================================================
+
+Follow-up during the same 2026-11-18 recovery request: newer develop changes caused merge conflicts after the log-only push. Preserved the complete incoming INV-02 prompt log and the complete recovered HTL-01 suffix. Combined shared date-rule imports and canonical inventory fixtures while retaining profile validation and both features' regression tests; removed obsolete inventory-stub assertions now covered by the merged real-inventory tests. Backend npm run verify passed 1285 tests across 100 files, 98.36% line coverage, service gates and build. The local production-audit attempt was blocked by the managed mirror with HTTP 429; this is not a successful audit result.

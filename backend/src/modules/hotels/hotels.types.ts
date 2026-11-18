@@ -2,7 +2,7 @@ import type { ClientSession } from 'mongoose';
 import type { CancellationPolicy } from '../../common/database/cancellation-policy.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 
-/** Pass the caller's transaction to every read and inventory write in a hold. */
+/** Pass the caller's transaction to every read and inventory write in a hold. Required by all production inventory mutations. */
 export interface HotelTransactionOptions {
   session: ClientSession;
 }

@@ -140,8 +140,8 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
   ): Promise<void> {
     void options;
     roomId = normalizeInventoryId(roomId);
-    const room = this.requireRoom(roomId);
     const normalized = normalizeAvailability(ranges);
+    const room = this.requireRoom(roomId);
     if (
       this.futureReservations(roomId).some(
         (night) =>

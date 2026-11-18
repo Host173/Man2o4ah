@@ -10,6 +10,7 @@ import { HotelsService } from '../hotels/hotels.service.js';
 import type { RoomView } from '../hotels/hotels.types.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
 import type { HotelHoldRequestDto } from './dto/hotel-hold.dto.js';
+import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import type { HeldRoom, HotelHold } from './hotel-bookings.types.js';
 import {
   HotelReservation,
@@ -48,6 +49,7 @@ export class HotelHoldService {
     private readonly reservationModel: Model<HotelReservation>,
     private readonly hotels: HotelsService,
     private readonly roomNights: RoomNightInventory,
+    private readonly expiry: HotelHoldExpiryJob,
   ) {}
 
   async hold(request: HotelHoldRequestDto, userId: string): Promise<HotelHold> {
@@ -130,6 +132,15 @@ export class HotelHoldService {
       // holdExpiresAt is exactly createdAt + 10 minutes.
       createdAt,
     };
+
+    // HTL-18: only an unexpired hold blocks a room, and the expiry job may not
+    // have run yet. Free the overdue holds on these rooms and nights first.
+    await this.expiry.expireDueHolds(createdAt, {
+      hotelId: request.hotelId,
+      'rooms.roomId': { $in: request.rooms.map((r) => r.roomId) },
+      checkInDate: { $lt: checkOutDate },
+      checkOutDate: { $gt: checkInDate },
+    });
 
     const session = await this.connection.startSession();
     try {

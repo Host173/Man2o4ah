@@ -200,7 +200,7 @@ Implemented post search (GET /api/posts?q=) in BlogService.listPublished and Lis
 ================================================
 Date: 2026-11-18
 Student: Mostafa
-Tool: Antigravity
+Tool: Hydrogen
 Related Requirement: BLG-09
 
 Prompt:
@@ -209,4 +209,3 @@ Fix the review comment on BLG-09 (Post search, module: blog) on the existing bra
 How the output was used:
 Updated buildExcerpt to count and slice by Unicode code points in backend/src/modules/blog/blog-tags.ts (78d5787) and added unit tests in backend/src/modules/blog/blog-tags.spec.ts (49a27e1).
 ================================================
-

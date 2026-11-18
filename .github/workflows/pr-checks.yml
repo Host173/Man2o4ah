@@ -77,7 +77,15 @@ jobs:
             echo "$added new entry/entries in $log."
           fi
           # The logs are append-only: no PR may remove or change an existing line.
-          removed=$(git diff --unified=0 "$BASE_SHA...$HEAD_SHA" -- ai-prompts | grep -c '^-[^-]' || true)
+          # Not a change: the last line only gaining its missing newline
+          # ("-X", "\ No newline at end of file", "+X"), which appending does.
+          removed=$(git diff --unified=0 "$BASE_SHA...$HEAD_SHA" -- ai-prompts | awk '
+            /^--- / || /^\+\+\+ / { next }
+            /^-./ { if (rm != "") n++; rm = substr($0, 2); nonl = 0; next }
+            /^\\ No newline/ { if (rm != "") nonl = 1; next }
+            /^\+/ { if (rm != "") { if (!(nonl && substr($0, 2) == rm)) n++; rm = "" } next }
+            { if (rm != "") n++; rm = "" }
+            END { if (rm != "") n++; print n + 0 }')
           if [ "$removed" -gt 0 ]; then
             echo "::error::$removed line(s) removed or changed in ai-prompts/. The logs are append-only."
             fail=1

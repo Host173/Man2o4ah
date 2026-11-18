@@ -22,8 +22,8 @@ export class SeatInventory {
    * The caller's transaction makes a multi-item hold all-or-nothing.
    */
   async hold(items: SeatItem[], options: InventoryOptions): Promise<void> {
+    this.assertValidItems(items);
     for (const item of items) {
-      this.assertValidSeats(item.seats);
       const flightId = this.objectId(item.flightId, seatsUnavailable);
       const cabinId = this.objectId(item.cabinId, seatsUnavailable);
       const result = await this.flightModel
@@ -68,8 +68,8 @@ export class SeatInventory {
     items: SeatItem[],
     options: InventoryOptions,
   ): Promise<void> {
+    this.assertValidItems(items);
     for (const item of items) {
-      this.assertValidSeats(item.seats);
       const flightId = this.objectId(item.flightId, inventoryCorrupted);
       const cabinId = this.objectId(item.cabinId, inventoryCorrupted);
       const result = await this.flightModel
@@ -108,12 +108,19 @@ export class SeatInventory {
     expectedTotal: number,
     options: InventoryOptions,
   ): Promise<void> {
+    const details: ValidationDetail[] = [];
     if (!Number.isInteger(newTotal) || newTotal < 1) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Capacity must be a positive integer',
-        details: [{ field: 'newTotal', message: 'must be a positive integer' }],
+      details.push({
+        field: 'newTotal',
+        message: 'must be a positive integer',
       });
+    }
+    // Without this, Mongoose casts "5" to 5 and turns NaN into a CastError (500).
+    if (!Number.isInteger(expectedTotal)) {
+      details.push({ field: 'expectedTotal', message: 'must be an integer' });
+    }
+    if (details.length > 0) {
+      throw validationFailed('Invalid capacity change', details);
     }
     const flightId = this.objectId(flightIdValue, concurrentChange);
     const cabinId = this.objectId(cabinIdValue, concurrentChange);
@@ -162,8 +169,8 @@ export class SeatInventory {
     options: InventoryOptions,
     destination: 'bookedSeats' | 'availableSeats',
   ): Promise<void> {
+    this.assertValidItems(items);
     for (const item of items) {
-      this.assertValidSeats(item.seats);
       const flightId = this.objectId(item.flightId, inventoryCorrupted);
       const cabinId = this.objectId(item.cabinId, inventoryCorrupted);
       const result = await this.flightModel
@@ -198,11 +205,40 @@ export class SeatInventory {
     return new Types.ObjectId(value);
   }
 
-  private assertValidSeats(seats: number): void {
-    if (!Number.isInteger(seats) || seats < 1) {
-      throw new Error('seats must be a positive integer');
+  /**
+   * Checks every item before any update runs, so a bad later item can never leave
+   * earlier ones applied. A bad `seats` is the caller's input error: 400, not 500.
+   */
+  private assertValidItems(items: SeatItem[]): void {
+    const details: ValidationDetail[] = [];
+    items.forEach((item, index) => {
+      if (!Number.isInteger(item.seats) || item.seats < 1) {
+        details.push({
+          field: `items.${index}.seats`,
+          message: 'must be a positive integer',
+        });
+      }
+    });
+    if (details.length > 0) {
+      throw validationFailed('Seats must be positive integers', details);
     }
   }
+}
+
+interface ValidationDetail {
+  field: string;
+  message: string;
+}
+
+function validationFailed(
+  message: string,
+  details: ValidationDetail[],
+): BadRequestException {
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details,
+  });
 }
 
 function seatsUnavailable(): ConflictException {

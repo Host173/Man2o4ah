@@ -2,14 +2,18 @@ import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from '../../../common/errors/validation-exception.factory.js';
 import { normalizeTag, normalizeTags } from '../blog-tags.js';
 import { PostStatus } from '../schemas/post.schema.js';
+import { AuthorPageQueryDto } from './author-page-query.dto.js';
 import { CreateCommentDto } from './create-comment.dto.js';
 import { CreatePostDto } from './create-post.dto.js';
 import { ListPostsQueryDto } from './list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
+  PaginatedPublicItinerariesResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PublicItinerarySummaryResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
 import { UpdateCommentDto } from './update-comment.dto.js';
@@ -356,12 +360,22 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const comment = new CommentResponseDto();
       const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
+      const itinerarySummary = new PublicItinerarySummaryResponseDto();
+      const itineraryPage = new PaginatedPublicItinerariesResponseDto();
+      const authorPage = new AuthorPageResponseDto();
 
       expect(published).toBeInstanceOf(PublishedPostResponseDto);
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect(itinerarySummary).toBeInstanceOf(
+        PublicItinerarySummaryResponseDto,
+      );
+      expect(itineraryPage).toBeInstanceOf(
+        PaginatedPublicItinerariesResponseDto,
+      );
+      expect(authorPage).toBeInstanceOf(AuthorPageResponseDto);
       expect('comments' in detail).toBe(false);
     });
   });
@@ -536,6 +550,56 @@ describe('CreatePostDto & UpdatePostDto', () => {
             { type: 'body', metatype: UpdatePostDto },
           ),
           'tags',
+        );
+      }
+    });
+  });
+
+  describe('AuthorPageQueryDto (BLG-12)', () => {
+    it('defaults page/limit and itinerariesPage/itinerariesLimit and coerces query string integers', async () => {
+      const defaults = (await pipe.transform(
+        {},
+        { type: 'query', metatype: AuthorPageQueryDto },
+      )) as AuthorPageQueryDto;
+      expect(defaults).toBeInstanceOf(AuthorPageQueryDto);
+      expect(defaults).toMatchObject({
+        page: 1,
+        limit: 10,
+        itinerariesPage: 1,
+        itinerariesLimit: 10,
+      });
+
+      const parsed = (await pipe.transform(
+        {
+          page: '2',
+          limit: '25',
+          itinerariesPage: '3',
+          itinerariesLimit: '50',
+        },
+        { type: 'query', metatype: AuthorPageQueryDto },
+      )) as AuthorPageQueryDto;
+      expect(parsed).toMatchObject({
+        page: 2,
+        limit: 25,
+        itinerariesPage: 3,
+        itinerariesLimit: 50,
+      });
+    });
+
+    it('rejects out-of-range or non-numeric itinerariesPage and itinerariesLimit values with VALIDATION_FAILED', async () => {
+      for (const [query, expectedField] of [
+        [{ itinerariesPage: '0' }, 'itinerariesPage'],
+        [{ itinerariesPage: 'abc' }, 'itinerariesPage'],
+        [{ itinerariesLimit: '0' }, 'itinerariesLimit'],
+        [{ itinerariesLimit: '51' }, 'itinerariesLimit'],
+        [{ itinerariesLimit: 'abc' }, 'itinerariesLimit'],
+      ] as const) {
+        await expectValidationError(
+          pipe.transform(query, {
+            type: 'query',
+            metatype: AuthorPageQueryDto,
+          }),
+          expectedField,
         );
       }
     });

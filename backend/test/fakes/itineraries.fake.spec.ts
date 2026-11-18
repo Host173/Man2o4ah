@@ -286,4 +286,123 @@ describe('FakeItinerariesService owner-only methods', () => {
       itineraries.addDay(created._id, { cityId: 'cairo' }, 'user-2'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('deletes a day and renumbers, re-dates and regroups the rest', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const first = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo', notes: 'Arrival' },
+      'user-1',
+    );
+    const middle = await itineraries.addDay(
+      created._id,
+      { cityId: 'dubai' },
+      'user-1',
+    );
+    const last = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+
+    await itineraries.deleteDay(created._id, middle._id, 'user-1');
+
+    const detail = await itineraries.getById(created._id, 'user-1');
+    expect(detail.days.map((day) => day._id)).toEqual([first._id, last._id]);
+    expect(detail.days.map((day) => day.dayNumber)).toEqual([1, 2]);
+    expect(detail.days.map((day) => day.date)).toEqual([
+      '2027-04-01',
+      '2027-04-02',
+    ]);
+    expect(detail.days[0].notes).toBe('Arrival');
+    expect(detail.dayCount).toBe(2);
+    expect(detail.cityGroups).toEqual([
+      {
+        cityId: 'cairo',
+        fromDay: 1,
+        toDay: 2,
+        dayCount: 2,
+        checkIn: '2027-04-01',
+        checkOut: '2027-04-03',
+      },
+    ]);
+
+    await expect(
+      itineraries.deleteDay(created._id, first._id, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      itineraries.deleteDay('missing', first._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('reorders days and recalculates numbers, dates and city groups', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const first = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo', notes: 'Arrival' },
+      'user-1',
+    );
+    const middle = await itineraries.addDay(
+      created._id,
+      { cityId: 'dubai' },
+      'user-1',
+    );
+    const last = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const order = [last._id, first._id, middle._id];
+
+    const reordered = await itineraries.reorderDays(
+      created._id,
+      { dayIds: order },
+      'user-1',
+    );
+
+    expect(reordered.days.map((day) => day._id)).toEqual(order);
+    expect(reordered.days.map((day) => day.dayNumber)).toEqual([1, 2, 3]);
+    expect(reordered.days.map((day) => day.date)).toEqual([
+      '2027-04-01',
+      '2027-04-02',
+      '2027-04-03',
+    ]);
+    expect(reordered.days.map((day) => day.cityId)).toEqual([
+      'cairo',
+      'cairo',
+      'dubai',
+    ]);
+    expect(reordered.days[1].notes).toBe('Arrival');
+    expect(reordered.cityGroups).toEqual([
+      {
+        cityId: 'cairo',
+        fromDay: 1,
+        toDay: 2,
+        dayCount: 2,
+        checkIn: '2027-04-01',
+        checkOut: '2027-04-03',
+      },
+      {
+        cityId: 'dubai',
+        fromDay: 3,
+        toDay: 3,
+        dayCount: 1,
+        checkIn: '2027-04-03',
+        checkOut: '2027-04-04',
+      },
+    ]);
+
+    const unchanged = await itineraries.reorderDays(
+      created._id,
+      { dayIds: order },
+      'user-1',
+    );
+    expect(unchanged.updatedAt.getTime()).toBe(reordered.updatedAt.getTime());
+
+    await expect(
+      itineraries.reorderDays(created._id, { dayIds: order }, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
 });

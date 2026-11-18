@@ -1,14 +1,19 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from '../../../common/errors/validation-exception.factory.js';
+import { normalizeTag, normalizeTags } from '../blog-tags.js';
 import { PostStatus } from '../schemas/post.schema.js';
+import { AuthorPageQueryDto } from './author-page-query.dto.js';
 import { CreateCommentDto } from './create-comment.dto.js';
 import { CreatePostDto } from './create-post.dto.js';
 import { ListPostsQueryDto } from './list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
+  PaginatedPublicItinerariesResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PublicItinerarySummaryResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
 import { UpdateCommentDto } from './update-comment.dto.js';
@@ -184,7 +189,6 @@ describe('CreatePostDto & UpdatePostDto', () => {
     it('forbids client-controlled and unknown fields', async () => {
       for (const extra of [
         { authorId: '507f1f77bcf86cd799439011' },
-        { tags: ['cairo'] },
         { images: [{ key: 'blog/x.png' }] },
         { publishedAt: new Date().toISOString() },
         { likeCount: 99 },
@@ -217,6 +221,7 @@ describe('CreatePostDto & UpdatePostDto', () => {
       expect(empty.title).toBeUndefined();
       expect(empty.body).toBeUndefined();
       expect(empty.status).toBeUndefined();
+      expect(empty.tags).toBeUndefined();
 
       const partial = (await pipe.transform(
         { title: '  Updated Title  ' },
@@ -248,6 +253,13 @@ describe('CreatePostDto & UpdatePostDto', () => {
           { type: 'body', metatype: UpdatePostDto },
         ),
         'status',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { tags: null },
+          { type: 'body', metatype: UpdatePostDto },
+        ),
+        'tags',
       );
     });
 
@@ -348,12 +360,22 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const comment = new CommentResponseDto();
       const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
+      const itinerarySummary = new PublicItinerarySummaryResponseDto();
+      const itineraryPage = new PaginatedPublicItinerariesResponseDto();
+      const authorPage = new AuthorPageResponseDto();
 
       expect(published).toBeInstanceOf(PublishedPostResponseDto);
       expect(page).toBeInstanceOf(PaginatedPublishedPostsResponseDto);
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect(itinerarySummary).toBeInstanceOf(
+        PublicItinerarySummaryResponseDto,
+      );
+      expect(itineraryPage).toBeInstanceOf(
+        PaginatedPublicItinerariesResponseDto,
+      );
+      expect(authorPage).toBeInstanceOf(AuthorPageResponseDto);
       expect('comments' in detail).toBe(false);
     });
   });
@@ -421,6 +443,164 @@ describe('CreatePostDto & UpdatePostDto', () => {
             ),
           );
         }
+      }
+    });
+  });
+
+  describe('Tag normalisation & limits (BLG-08)', () => {
+    it('normalises single tags and deduplicates tag lists cleanly', () => {
+      expect(normalizeTag('Travel')).toBe('travel');
+      expect(normalizeTag('TRAVEL')).toBe('travel');
+      expect(normalizeTag('  travel  ')).toBe('travel');
+      expect(normalizeTag('\tEgypt-2026\n')).toBe('egypt-2026');
+      expect(normalizeTag('  Red Sea  ')).toBe('red sea');
+      expect(normalizeTag('siwa_oasis')).toBe('siwa_oasis');
+      expect(normalizeTag('  Café & Tea  ')).toBe('café & tea');
+      expect(normalizeTag('')).toBe('');
+      expect(normalizeTag('   ')).toBe('');
+
+      expect(normalizeTags(['Travel', ' travel ', 'TRAVEL'])).toEqual([
+        'travel',
+      ]);
+      expect(
+        normalizeTags(['Egypt', '  nile  ', 'EGYPT', 'Cairo', 'NILE']),
+      ).toEqual(['egypt', 'nile', 'cairo']);
+      expect(normalizeTags(['', '   '])).toEqual(['']);
+    });
+
+    it('accepts 0, 1, and 5 tags and 1- and 30-char boundaries while deduplicating', async () => {
+      const zero = (await pipe.transform(
+        { title: 'Post', body: 'Body', status: PostStatus.DRAFT, tags: [] },
+        { type: 'body', metatype: CreatePostDto },
+      )) as CreatePostDto;
+      expect(zero.tags).toEqual([]);
+
+      const one = (await pipe.transform(
+        {
+          title: 'Post',
+          body: 'Body',
+          status: PostStatus.DRAFT,
+          tags: ['a'],
+        },
+        { type: 'body', metatype: CreatePostDto },
+      )) as CreatePostDto;
+      expect(one.tags).toEqual(['a']);
+
+      const maxTags = ['t1', 't2', 't3', 't4', 't5'];
+      const five = (await pipe.transform(
+        {
+          title: 'Post',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+          tags: maxTags,
+        },
+        { type: 'body', metatype: CreatePostDto },
+      )) as CreatePostDto;
+      expect(five.tags).toEqual(maxTags);
+
+      const paddedAndDeduped = (await pipe.transform(
+        {
+          tags: [
+            'Travel',
+            ' travel ',
+            'TRAVEL',
+            '  Egypt-2026  ',
+            `  ${'b'.repeat(30)} `,
+            'C',
+            'd',
+          ],
+        },
+        { type: 'body', metatype: UpdatePostDto },
+      )) as UpdatePostDto;
+      expect(paddedAndDeduped.tags).toEqual([
+        'travel',
+        'egypt-2026',
+        'b'.repeat(30),
+        'c',
+        'd',
+      ]);
+    });
+
+    it('rejects > 5 distinct tags, empty/whitespace-only tags, > 30-char tags, and invalid types', async () => {
+      const baseCreate = {
+        title: 'Post',
+        body: 'Body',
+        status: PostStatus.PUBLISHED,
+      };
+      for (const invalidTags of [
+        ['t1', 't2', 't3', 't4', 't5', 't6'],
+        [''],
+        ['   '],
+        ['travel', '\t\n '],
+        ['a'.repeat(31)],
+        null,
+        'egypt',
+        [123],
+      ]) {
+        await expectValidationError(
+          pipe.transform(
+            { ...baseCreate, tags: invalidTags },
+            { type: 'body', metatype: CreatePostDto },
+          ),
+          'tags',
+        );
+        await expectValidationError(
+          pipe.transform(
+            { tags: invalidTags },
+            { type: 'body', metatype: UpdatePostDto },
+          ),
+          'tags',
+        );
+      }
+    });
+  });
+
+  describe('AuthorPageQueryDto (BLG-12)', () => {
+    it('defaults page/limit and itinerariesPage/itinerariesLimit and coerces query string integers', async () => {
+      const defaults = (await pipe.transform(
+        {},
+        { type: 'query', metatype: AuthorPageQueryDto },
+      )) as AuthorPageQueryDto;
+      expect(defaults).toBeInstanceOf(AuthorPageQueryDto);
+      expect(defaults).toMatchObject({
+        page: 1,
+        limit: 10,
+        itinerariesPage: 1,
+        itinerariesLimit: 10,
+      });
+
+      const parsed = (await pipe.transform(
+        {
+          page: '2',
+          limit: '25',
+          itinerariesPage: '3',
+          itinerariesLimit: '50',
+        },
+        { type: 'query', metatype: AuthorPageQueryDto },
+      )) as AuthorPageQueryDto;
+      expect(parsed).toMatchObject({
+        page: 2,
+        limit: 25,
+        itinerariesPage: 3,
+        itinerariesLimit: 50,
+      });
+    });
+
+    it('rejects out-of-range or non-numeric itinerariesPage and itinerariesLimit values with VALIDATION_FAILED', async () => {
+      for (const [query, expectedField] of [
+        [{ itinerariesPage: '0' }, 'itinerariesPage'],
+        [{ itinerariesPage: 'abc' }, 'itinerariesPage'],
+        [{ itinerariesLimit: '0' }, 'itinerariesLimit'],
+        [{ itinerariesLimit: '51' }, 'itinerariesLimit'],
+        [{ itinerariesLimit: 'abc' }, 'itinerariesLimit'],
+      ] as const) {
+        await expectValidationError(
+          pipe.transform(query, {
+            type: 'query',
+            metatype: AuthorPageQueryDto,
+          }),
+          expectedField,
+        );
       }
     });
   });

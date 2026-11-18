@@ -30,15 +30,18 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BlogService } from './blog.service.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import { CreateCommentDto } from './dto/create-comment.dto.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
   PaginatedPostResponseDto,
@@ -57,7 +60,9 @@ export class BlogController {
   @Post('posts')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-01 Create a post as draft or published' })
+  @ApiOperation({
+    summary: 'BLG-01 / BLG-08 Create a post as draft or published',
+  })
   @ApiCreatedResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   create(
@@ -113,7 +118,7 @@ export class BlogController {
   @Patch('posts/:id')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-04 Edit own post' })
+  @ApiOperation({ summary: 'BLG-04 / BLG-08 Edit own post' })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid post ID or body' })
@@ -217,5 +222,41 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.blogService.deleteComment(id.toHexString(), user.id);
+  }
+
+  @Public()
+  @Get('tags/:tag/posts')
+  @ApiOperation({
+    summary: 'BLG-08 List paginated published posts for a tag',
+  })
+  @ApiParam({ name: 'tag', type: String })
+  @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid tag or pagination query' })
+  listByTag(
+    @Param('tag') tag: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<PublishedPostView>> {
+    return this.blogService.listByTag(tag, query);
+  }
+
+  @Public()
+  @Get('authors/:id')
+  @ApiOperation({
+    summary:
+      'BLG-12 Read a public author page with published posts and public itineraries',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: AuthorPageResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid author ID or pagination query',
+  })
+  @ApiNotFoundResponse({
+    description: 'Author not found, deactivated, or not a user account',
+  })
+  getAuthorPage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: AuthorPageQueryDto,
+  ): Promise<AuthorPageView> {
+    return this.blogService.getAuthorPage(id.toHexString(), query);
   }
 }

@@ -307,4 +307,56 @@ describe('HotelHoldService.hold (HTL-16, HTL-18)', () => {
       hotels.data.roomNights.filter((n) => n.roomId === ROOM_101),
     ).toHaveLength(3);
   });
+
+  // HTL-18: only an unexpired hold blocks a room; never assume the job already ran.
+  describe('an overdue hold (review #148)', () => {
+    const sameRoom = request({
+      rooms: [{ roomId: ROOM_101, adults: 1, childAges: [] }],
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-12-01T09:00:00.000Z'));
+    });
+
+    it('no longer blocks its room: it is expired and released first', async () => {
+      const old = await holds.hold(sameRoom, USER);
+      // 11 minutes later, before the expiry job has run.
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+      const fresh = await holds.hold(sameRoom, USER);
+
+      expect(fresh.status).toBe('pending_payment');
+      expect(
+        (await reservations.findById(old.reservationId).lean())?.status,
+      ).toBe('expired');
+      expect(nightsOf(old.reservationId)).toHaveLength(0);
+      expect(nightsOf(fresh.reservationId)).toHaveLength(3);
+    });
+
+    it('still blocks while it is within its 10 minutes', async () => {
+      await holds.hold(sameRoom, USER);
+      vi.setSystemTime(new Date('2026-12-01T09:09:59.999Z'));
+
+      await expect(holds.hold(sameRoom, USER)).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'ROOMS_UNAVAILABLE' },
+      });
+    });
+
+    it('leaves overdue holds of other rooms alone', async () => {
+      const other = await holds.hold(
+        request({ rooms: [{ roomId: ROOM_102, adults: 1, childAges: [] }] }),
+        USER,
+      );
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+      await holds.hold(sameRoom, USER);
+
+      // The expiry job will deal with it; the hold only frees what it needs.
+      expect(
+        (await reservations.findById(other.reservationId).lean())?.status,
+      ).toBe('pending_payment');
+    });
+  });
 });

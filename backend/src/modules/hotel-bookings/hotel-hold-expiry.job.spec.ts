@@ -1,3 +1,4 @@
+import { ConflictException, Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
@@ -7,6 +8,7 @@ import { clearCollections } from '../../../test/support/clear-collections.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { HotelsService } from '../hotels/hotels.service.js';
@@ -104,6 +106,10 @@ describe('HotelHoldExpiryJob (HTL-18, GEN-11)', () => {
     Object.assign(hotels, seededHotels());
     events.clear();
     await clearCollections(t.connection);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -213,4 +219,101 @@ describe('HotelHoldExpiryJob (HTL-18, GEN-11)', () => {
       status === 'expired' ? 1 : 0,
     );
   });
+
+  describe('review #148', () => {
+    let logged: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      // These tests make releases fail on purpose; record the error logs quietly.
+      logged = vi
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+    });
+
+    it('logs a release failure, even a 409, instead of treating it as a lost race', async () => {
+      const hold = await holds.hold(stay(), USER);
+      vi.spyOn(
+        t.moduleRef.get(RoomNightInventory),
+        'release',
+      ).mockRejectedValueOnce(
+        new ConflictException({
+          code: ErrorCode.RoomsUnavailable,
+          message: 'inventory conflict',
+        }),
+      );
+
+      await expect(job.expireDueHolds(hold.holdExpiresAt)).resolves.toBe(0);
+
+      expect(logged).toHaveBeenCalledTimes(1);
+      // Rolled back with the failed release: still pending, nights still held.
+      expect(await statusOf(hold.reservationId)).toBe('pending_payment');
+      expect(nightsOf(hold.reservationId)).toHaveLength(2);
+    });
+
+    it('does not log a lost race (INVALID_STATUS_TRANSITION)', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await transitionStatus(
+        reservations,
+        hold.reservationId,
+        'pending_payment',
+        'confirmed',
+        { confirmedAt: new Date() },
+      );
+      // The job read the hold just before it was confirmed.
+      vi.spyOn(reservations, 'find').mockReturnValueOnce({
+        sort: () => ({
+          limit: () => ({
+            lean: () =>
+              Promise.resolve([{ _id: hold.reservationId, userId: USER }]),
+          }),
+        }),
+      } as never);
+
+      await expect(job.expireDueHolds(hold.holdExpiresAt)).resolves.toBe(0);
+
+      expect(logged).not.toHaveBeenCalled();
+      expect(await statusOf(hold.reservationId)).toBe('confirmed');
+    });
+
+    it('does not get stuck behind 100 holds that keep failing', async () => {
+      // 101 one-night holds of room 101, on 101 different nights.
+      let last = await holds.hold(oneNight(0), USER);
+      for (let day = 1; day < 101; day += 1) {
+        last = await holds.hold(oneNight(day), USER);
+      }
+
+      // Releasing fails for the first 100 holds the job tries, then works.
+      const inventory = t.moduleRef.get(RoomNightInventory);
+      const release = inventory.release.bind(inventory);
+      let calls = 0;
+      vi.spyOn(inventory, 'release').mockImplementation(
+        async (reservationId, options) => {
+          calls += 1;
+          if (calls <= 100) throw new Error('inventory down');
+          return release(reservationId, options);
+        },
+      );
+
+      await job.expireDueHolds(last.holdExpiresAt);
+
+      // The 101st hold was still reached and expired in the same run.
+      expect(calls).toBe(101);
+      expect(await reservations.countDocuments({ status: 'expired' })).toBe(1);
+      expect(
+        await reservations.countDocuments({ status: 'pending_payment' }),
+      ).toBe(100);
+    });
+  });
 });
+
+/** A one-night stay in room 101, `day` days after 1 June 2027. */
+function oneNight(day: number): HotelHoldRequestDto {
+  const checkIn = new Date(Date.UTC(2027, 5, 1 + day));
+  const checkOut = new Date(Date.UTC(2027, 5, 2 + day));
+  return {
+    hotelId: HOTEL,
+    checkInDate: checkIn.toISOString().slice(0, 10),
+    checkOutDate: checkOut.toISOString().slice(0, 10),
+    rooms: [{ roomId: ROOM_101, adults: 1, childAges: [] }],
+  };
+}

@@ -94,4 +94,110 @@ describe('SeatInventory unit', () => {
     await inventory.hold([], { session });
     expect(model.updateOne).not.toHaveBeenCalled();
   });
+
+  describe('validation (400 VALIDATION_FAILED)', () => {
+    const item = (seats: number) => ({
+      flightId: flightId.toHexString(),
+      cabinId: cabinId.toHexString(),
+      seats,
+    });
+    const methods = ['hold', 'confirm', 'release', 'returnBooked'] as const;
+    const badSeats: [string, number][] = [
+      ['zero', 0],
+      ['negative', -1],
+      ['a fraction', 1.5],
+      ['NaN', Number.NaN],
+      ['a numeric string', '2' as unknown as number],
+    ];
+
+    describe.each(methods)('%s', (method) => {
+      it.each(badSeats)(
+        'rejects seats that are %s without touching the database',
+        async (_name, seats) => {
+          await expect(
+            inventory[method]([item(seats)], { session }),
+          ).rejects.toMatchObject({
+            status: 400,
+            response: {
+              code: ErrorCode.ValidationFailed,
+              details: [{ field: 'items.0.seats' }],
+            },
+          });
+          expect(model.updateOne).not.toHaveBeenCalled();
+        },
+      );
+
+      it('checks every item before updating any, so a bad later item changes nothing', async () => {
+        await expect(
+          inventory[method]([item(1), item(0)], { session }),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { details: [{ field: 'items.1.seats' }] },
+        });
+        expect(model.updateOne).not.toHaveBeenCalled();
+      });
+
+      it('reports every bad item at once', async () => {
+        await expect(
+          inventory[method]([item(0), item(1), item(-2)], { session }),
+        ).rejects.toMatchObject({
+          response: {
+            details: [{ field: 'items.0.seats' }, { field: 'items.2.seats' }],
+          },
+        });
+      });
+    });
+
+    describe('changeCapacity', () => {
+      const change = (newTotal: number, expectedTotal: number) =>
+        inventory.changeCapacity(
+          flightId.toHexString(),
+          cabinId.toHexString(),
+          newTotal,
+          expectedTotal,
+          { session },
+        );
+      const notIntegers: [string, number][] = [
+        ['NaN', Number.NaN],
+        ['a numeric string', '5' as unknown as number],
+        ['a fraction', 5.5],
+      ];
+
+      it.each([['zero', 0], ['negative', -3], ...notIntegers] as [
+        string,
+        number,
+      ][])('rejects newTotal that is %s', async (_name, newTotal) => {
+        await expect(change(newTotal, 5)).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: ErrorCode.ValidationFailed,
+            details: [{ field: 'newTotal' }],
+          },
+        });
+        expect(model.updateOne).not.toHaveBeenCalled();
+      });
+
+      it.each(notIntegers)(
+        'rejects expectedTotal that is %s instead of casting it',
+        async (_name, expectedTotal) => {
+          await expect(change(6, expectedTotal)).rejects.toMatchObject({
+            status: 400,
+            response: {
+              code: ErrorCode.ValidationFailed,
+              details: [{ field: 'expectedTotal' }],
+            },
+          });
+          expect(model.updateOne).not.toHaveBeenCalled();
+        },
+      );
+
+      it('reports both fields when both are invalid', async () => {
+        await expect(change(0, Number.NaN)).rejects.toMatchObject({
+          response: {
+            details: [{ field: 'newTotal' }, { field: 'expectedTotal' }],
+          },
+        });
+      });
+    });
+  });
 });

@@ -121,6 +121,7 @@ describe('SeatInventory integration (INV-01)', () => {
       heldSeats: 0,
       bookedSeats: 0,
     });
+    await expectHasBookings(flightModel, outbound, false);
     await expectCounters(flightModel, fullReturn, {
       totalSeats: 5,
       availableSeats: 0,
@@ -257,6 +258,152 @@ describe('SeatInventory integration (INV-01)', () => {
       bookedSeats: 0,
     });
   });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['a numeric string, which Mongoose would cast', '5' as unknown as number],
+    ['a fraction', 5.5],
+  ])(
+    'rejects expectedTotal that is %s with 400 and changes nothing',
+    async (_name, expectedTotal) => {
+      const flight = await createFlight(flightModel);
+
+      await expect(
+        inTransaction(testApp!, (session) =>
+          inventory.changeCapacity(
+            flight.id,
+            flight.cabinId,
+            8,
+            expectedTotal,
+            {
+              session,
+            },
+          ),
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'expectedTotal' }],
+        },
+      });
+      await expectCounters(flightModel, flight, {
+        totalSeats: 5,
+        availableSeats: 5,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+    },
+  );
+
+  it.each(['hold', 'confirm', 'release', 'returnBooked'] as const)(
+    '%s rejects seats that are not positive integers with 400 and changes nothing',
+    async (operation) => {
+      const flight = await createFlight(flightModel);
+
+      for (const seats of [0, -1, 1.5]) {
+        await expect(
+          inTransaction(testApp!, (session) =>
+            inventory[operation]([seat(flight, seats)], { session }),
+          ),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      await expectCounters(flightModel, flight, {
+        totalSeats: 5,
+        availableSeats: 5,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      await expectHasBookings(flightModel, flight, false);
+    },
+  );
+
+  it('sets hasBookings when a hold succeeds and leaves it false otherwise', async () => {
+    const held = await createFlight(flightModel, { flightNumber: 'MS-HELD' });
+    const untouched = await createFlight(flightModel, {
+      flightNumber: 'MS-UNTOUCHED',
+    });
+    const cancelled = await createFlight(flightModel, {
+      status: 'cancelled',
+      flightNumber: 'MS-CANCELLED-2',
+    });
+    await expectHasBookings(flightModel, held, false);
+
+    await inTransaction(testApp!, (session) =>
+      inventory.hold([seat(held)], { session }),
+    );
+    await expect(
+      inTransaction(testApp!, (session) =>
+        inventory.hold([seat(cancelled)], { session }),
+      ),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.SeatsUnavailable },
+    });
+
+    await expectHasBookings(flightModel, held, true);
+    await expectHasBookings(flightModel, untouched, false);
+    await expectHasBookings(flightModel, cancelled, false);
+  });
+
+  // FLT-05: a capacity cut may never go below the seats already held or booked,
+  // even when holds are running at the same moment. Which request wins is up to
+  // the database, so every round only asserts what must hold whoever wins.
+  it('never lets a capacity cut go below held seats while holds race it', async () => {
+    for (let round = 0; round < 10; round += 1) {
+      const flight = await createFlight(flightModel, {
+        flightNumber: `MS-RACE-${round}`,
+      });
+
+      const results = await Promise.allSettled([
+        ...Array.from({ length: 3 }, () =>
+          inTransaction(testApp!, (session) =>
+            inventory.hold([seat(flight)], { session }),
+          ),
+        ),
+        inTransaction(testApp!, (session) =>
+          inventory.changeCapacity(flight.id, flight.cabinId, 2, 5, {
+            session,
+          }),
+        ),
+      ]);
+      const holds = results.slice(0, 3);
+      const cut = results[3];
+      const heldByWinners = holds.filter(
+        (result) => result.status === 'fulfilled',
+      ).length;
+
+      const stored = await flightModel.findById(flight.id).lean().exec();
+      const cabin = stored!.cabins[0];
+      // The counters always add up and never go negative or past the capacity.
+      expect(cabin.totalSeats).toBe(
+        cabin.availableSeats + cabin.heldSeats + cabin.bookedSeats,
+      );
+      expect(cabin.availableSeats).toBeGreaterThanOrEqual(0);
+      expect(cabin.heldSeats).toBeLessThanOrEqual(cabin.totalSeats);
+      // Every successful hold is counted, and a failed one only ever lacked seats.
+      expect(cabin.heldSeats).toBe(heldByWinners);
+      for (const hold of holds) {
+        if (hold.status === 'rejected') {
+          expect(hold.reason).toMatchObject({
+            response: { code: ErrorCode.SeatsUnavailable },
+          });
+        }
+      }
+      if (cut.status === 'fulfilled') {
+        expect(cabin.totalSeats).toBe(2);
+      } else {
+        // The cut lost the race: all 3 seats were already held, so it was refused.
+        expect(cut.reason).toMatchObject({
+          response: { code: ErrorCode.CapacityBelowReserved },
+        });
+        expect(cabin.totalSeats).toBe(5);
+        expect(cabin.heldSeats).toBe(3);
+      }
+    }
+  });
 });
 
 interface FlightSeed {
@@ -338,4 +485,13 @@ async function expectCounters(
   expect(counters.totalSeats).toBe(
     counters.availableSeats + counters.heldSeats + counters.bookedSeats,
   );
+}
+
+async function expectHasBookings(
+  flightModel: Model<Flight>,
+  flight: FlightSeed,
+  expected: boolean,
+): Promise<void> {
+  const stored = await flightModel.findById(flight.id).lean().exec();
+  expect(stored?.hasBookings).toBe(expected);
 }

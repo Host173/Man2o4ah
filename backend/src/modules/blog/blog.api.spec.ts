@@ -1973,5 +1973,44 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         ),
       ).toBe(true);
     });
+
+    it.each([
+      { label: '76 x 😀 (152 UTF-16 units)', q: '😀'.repeat(76) },
+      { label: '150 x 😀 (300 UTF-16 units)', q: '😀'.repeat(150) },
+      { label: '150 x "a"', q: 'a'.repeat(150) },
+      {
+        label: 'mixed emoji and letters at 150 code points',
+        q: `${'a'.repeat(50)}${'😀'.repeat(100)}`,
+      },
+    ])('returns 200 for q with $label (BLG-09)', async ({ q }) => {
+      const res = await testApp!
+        .http()
+        .get(`/api/posts?q=${encodeURIComponent(q)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+      });
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(typeof res.body.total).toBe('number');
+      expect(typeof res.body.totalPages).toBe('number');
+    });
+
+    it.each([
+      { label: '151 x 😀', q: '😀'.repeat(151) },
+      { label: '151 x "a"', q: 'a'.repeat(151) },
+    ])(
+      'returns 400 VALIDATION_FAILED for overlong q with $label (BLG-09)',
+      async ({ q }) => {
+        const res = await testApp!
+          .http()
+          .get(`/api/posts?q=${encodeURIComponent(q)}`);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((d: { field: string }) => d.field),
+        ).toContain('q');
+      },
+    );
   });
 });

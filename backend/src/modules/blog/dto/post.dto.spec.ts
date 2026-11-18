@@ -332,6 +332,12 @@ describe('CreatePostDto & UpdatePostDto', () => {
         { type: 'query', metatype: ListPostsQueryDto },
       )) as ListPostsQueryDto;
       expect(maxQ.q).toHaveLength(150);
+
+      const maxEmojiQ = (await pipe.transform(
+        { q: '😀'.repeat(150) },
+        { type: 'query', metatype: ListPostsQueryDto },
+      )) as ListPostsQueryDto;
+      expect(Array.from(maxEmojiQ.q ?? '')).toHaveLength(150);
     });
 
     it('rejects invalid page, limit, tag, q, or unknown query params', async () => {
@@ -359,6 +365,13 @@ describe('CreatePostDto & UpdatePostDto', () => {
       await expectValidationError(
         pipe.transform(
           { q: 'a'.repeat(151) },
+          { type: 'query', metatype: ListPostsQueryDto },
+        ),
+        'q',
+      );
+      await expectValidationError(
+        pipe.transform(
+          { q: '😀'.repeat(151) },
           { type: 'query', metatype: ListPostsQueryDto },
         ),
         'q',

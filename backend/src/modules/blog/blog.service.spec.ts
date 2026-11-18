@@ -1667,7 +1667,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       });
       expect(byDeactivatedAuthor.items).toEqual([]);
 
-      // Blank q acts as unfiltered browse; overlong q throws 400 VALIDATION_FAILED.
+      // Blank q acts as unfiltered browse; 150 emoji (300 UTF-16 units) are accepted cleanly.
       const blankQ = await service.listPublished({
         page: 1,
         limit: 10,
@@ -1675,13 +1675,17 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       });
       expect(blankQ.total).toBe(3);
 
-      const err = await service
-        .listPublished({ page: 1, limit: 10, q: 'q'.repeat(151) })
-        .catch((caught: unknown) => caught);
-      expect(err).toBeInstanceOf(BadRequestException);
-      expect((err as BadRequestException).getResponse()).toMatchObject({
-        code: ErrorCode.ValidationFailed,
-        details: [expect.objectContaining({ field: 'q' })],
+      const emojiSearch = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '😀'.repeat(150),
+      });
+      expect(emojiSearch).toMatchObject({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
       });
     });
   });

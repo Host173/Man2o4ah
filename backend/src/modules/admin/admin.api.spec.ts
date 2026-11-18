@@ -840,5 +840,180 @@ describe('Admin Bookings API (ACC-17)', () => {
         expect(hotelsSpy).not.toHaveBeenCalled();
       }
     });
+
+    it('clamps merged totalPages to reachable 10000-depth pages and rejects last+1 without calling services', async () => {
+      const admin = await loginAs(tieApp!.connection, UserRole.ADMIN);
+      const baseMs = Date.parse('2026-11-18T00:00:00.000Z');
+      const flights10k = Array.from({ length: 10_000 }, (_, idx) =>
+        makeFlight(`f-${idx}`, new Date(baseMs - idx * 2_000)),
+      );
+      const hotels10k = Array.from({ length: 10_000 }, (_, idx) =>
+        makeHotel(`h-${idx}`, new Date(baseMs - (idx * 2 + 1) * 1_000)),
+      );
+      Object.assign(fakeFlights, new FakeFlightBookingsService(flights10k));
+      Object.assign(fakeHotels, new FakeHotelBookingsService(hotels10k));
+      const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+      const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+
+      for (const [limit, expectedTotalPages] of [
+        [50, 200],
+        [1, 10_000],
+        [7, 1428],
+      ] as const) {
+        const lastRes = await tieApp!
+          .http()
+          .get(`/api/admin/bookings?page=${expectedTotalPages}&limit=${limit}`)
+          .set('Cookie', admin.cookie);
+        expect(lastRes.status).toBe(200);
+        expect(lastRes.body.total).toBe(20_000);
+        expect(lastRes.body.totalPages).toBe(expectedTotalPages);
+        expect(lastRes.body.items).toHaveLength(limit);
+
+        flightsSpy.mockClear();
+        hotelsSpy.mockClear();
+        const overRes = await tieApp!
+          .http()
+          .get(
+            `/api/admin/bookings?page=${expectedTotalPages + 1}&limit=${limit}`,
+          )
+          .set('Cookie', admin.cookie);
+        expect(overRes.status).toBe(400);
+        expect(overRes.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          overRes.body.details.map((detail: { field: string }) => detail.field),
+        ).toContain('page');
+        expect(flightsSpy).not.toHaveBeenCalled();
+        expect(hotelsSpy).not.toHaveBeenCalled();
+      }
+
+      Object.assign(
+        fakeFlights,
+        new FakeFlightBookingsService(flights10k.slice(0, 60)),
+      );
+      Object.assign(
+        fakeHotels,
+        new FakeHotelBookingsService(hotels10k.slice(0, 60)),
+      );
+
+      const smallLastRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?page=3&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(smallLastRes.status).toBe(200);
+      expect(smallLastRes.body.total).toBe(120);
+      expect(smallLastRes.body.totalPages).toBe(3);
+      expect(smallLastRes.body.items).toHaveLength(20);
+
+      const smallBeyondRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?page=4&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(smallBeyondRes.status).toBe(200);
+      expect(smallBeyondRes.body.total).toBe(120);
+      expect(smallBeyondRes.body.totalPages).toBe(3);
+      expect(smallBeyondRes.body.items).toEqual([]);
+    });
+
+    it('serves single-type queries past 10000 depth without clamping totalPages', async () => {
+      const admin = await loginAs(tieApp!.connection, UserRole.ADMIN);
+      const baseMs = Date.parse('2026-11-18T00:00:00.000Z');
+      const flights20k = Array.from({ length: 20_000 }, (_, idx) =>
+        makeFlight(`f-${idx}`, new Date(baseMs - idx * 1_000)),
+      );
+      Object.assign(fakeFlights, new FakeFlightBookingsService(flights20k));
+      Object.assign(fakeHotels, new FakeHotelBookingsService([]));
+      const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+      const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+
+      const flightRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=flight&page=201&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(flightRes.status).toBe(200);
+      expect(flightRes.body.total).toBe(20_000);
+      expect(flightRes.body.totalPages).toBe(400);
+      expect(flightRes.body.items).toHaveLength(50);
+      expect(flightsSpy).toHaveBeenCalledTimes(1);
+      expect(flightsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 201, limit: 50 }),
+      );
+      expect(hotelsSpy).not.toHaveBeenCalled();
+
+      const flightLastRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=flight&page=400&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(flightLastRes.status).toBe(200);
+      expect(flightLastRes.body.items).toHaveLength(50);
+
+      const flightBeyondRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=flight&page=401&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(flightBeyondRes.status).toBe(200);
+      expect(flightBeyondRes.body.items).toEqual([]);
+
+      flightsSpy.mockClear();
+      hotelsSpy.mockClear();
+
+      const hotels20k = Array.from({ length: 20_000 }, (_, idx) =>
+        makeHotel(`h-${idx}`, new Date(baseMs - idx * 1_000)),
+      );
+      Object.assign(fakeFlights, new FakeFlightBookingsService([]));
+      Object.assign(fakeHotels, new FakeHotelBookingsService(hotels20k));
+
+      const hotelRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=hotel&page=201&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(hotelRes.status).toBe(200);
+      expect(hotelRes.body.total).toBe(20_000);
+      expect(hotelRes.body.totalPages).toBe(400);
+      expect(hotelRes.body.items).toHaveLength(50);
+      expect(hotelsSpy).toHaveBeenCalledTimes(1);
+      expect(hotelsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 201, limit: 50 }),
+      );
+      expect(flightsSpy).not.toHaveBeenCalled();
+
+      const hotelLastRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=hotel&page=400&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(hotelLastRes.status).toBe(200);
+      expect(hotelLastRes.body.items).toHaveLength(50);
+
+      const hotelBeyondRes = await tieApp!
+        .http()
+        .get('/api/admin/bookings?type=hotel&page=401&limit=50')
+        .set('Cookie', admin.cookie);
+      expect(hotelBeyondRes.status).toBe(200);
+      expect(hotelBeyondRes.body.items).toEqual([]);
+    });
+
+    it('rejects page=1e300 and page=10001 on both unfiltered and type-filtered requests without calling services', async () => {
+      const admin = await loginAs(tieApp!.connection, UserRole.ADMIN);
+      const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+      const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+
+      for (const prefix of ['', 'type=flight&', 'type=hotel&']) {
+        for (const pageVal of ['1e300', '10001']) {
+          flightsSpy.mockClear();
+          hotelsSpy.mockClear();
+
+          const res = await tieApp!
+            .http()
+            .get(`/api/admin/bookings?${prefix}page=${pageVal}`)
+            .set('Cookie', admin.cookie);
+          expect(res.status).toBe(400);
+          expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+          expect(
+            res.body.details.map((detail: { field: string }) => detail.field),
+          ).toContain('page');
+          expect(flightsSpy).not.toHaveBeenCalled();
+          expect(hotelsSpy).not.toHaveBeenCalled();
+        }
+      }
+    });
   });
 });

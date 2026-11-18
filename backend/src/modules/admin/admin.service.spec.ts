@@ -294,4 +294,155 @@ describe('AdminService', () => {
       expect(hotelsSpy).not.toHaveBeenCalled();
     }
   });
+
+  it('clamps merged totalPages to reachable 10000-row depth without altering real total', async () => {
+    const baseMs = Date.parse('2026-11-18T00:00:00.000Z');
+    const flights10k = Array.from({ length: 10_000 }, (_, idx) =>
+      flightView({
+        bookingId: `f-${idx}`,
+        createdAt: new Date(baseMs - idx * 2_000),
+      }),
+    );
+    const hotels10k = Array.from({ length: 10_000 }, (_, idx) =>
+      hotelView({
+        bookingId: `h-${idx}`,
+        createdAt: new Date(baseMs - (idx * 2 + 1) * 1_000),
+      }),
+    );
+    const fakeFlights = new FakeFlightBookingsService(flights10k);
+    const fakeHotels = new FakeHotelBookingsService(hotels10k);
+    const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+    const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+    const service = new AdminService(
+      fakeFlights as unknown as FlightBookingsService,
+      fakeHotels as unknown as HotelBookingsService,
+    );
+
+    for (const [limit, expectedTotalPages] of [
+      [50, 200],
+      [1, 10_000],
+      [7, 1428],
+    ] as const) {
+      const lastPageRes = await service.listBookings(
+        plainToInstance(ListAdminBookingsQueryDto, {
+          page: expectedTotalPages,
+          limit,
+        }),
+      );
+      expect(lastPageRes.total).toBe(20_000);
+      expect(lastPageRes.totalPages).toBe(expectedTotalPages);
+      expect(lastPageRes.items).toHaveLength(limit);
+
+      flightsSpy.mockClear();
+      hotelsSpy.mockClear();
+      await expect(
+        service.listBookings(
+          plainToInstance(ListAdminBookingsQueryDto, {
+            page: expectedTotalPages + 1,
+            limit,
+          }),
+        ),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'page' }],
+        },
+      });
+      expect(flightsSpy).not.toHaveBeenCalled();
+      expect(hotelsSpy).not.toHaveBeenCalled();
+    }
+
+    const smallService = new AdminService(
+      new FakeFlightBookingsService(
+        flights10k.slice(0, 60),
+      ) as unknown as FlightBookingsService,
+      new FakeHotelBookingsService(
+        hotels10k.slice(0, 60),
+      ) as unknown as HotelBookingsService,
+    );
+    const smallLast = await smallService.listBookings(
+      plainToInstance(ListAdminBookingsQueryDto, { page: 3, limit: 50 }),
+    );
+    expect(smallLast.total).toBe(120);
+    expect(smallLast.totalPages).toBe(3);
+    expect(smallLast.items).toHaveLength(20);
+
+    const smallBeyond = await smallService.listBookings(
+      plainToInstance(ListAdminBookingsQueryDto, { page: 4, limit: 50 }),
+    );
+    expect(smallBeyond.total).toBe(120);
+    expect(smallBeyond.totalPages).toBe(3);
+    expect(smallBeyond.items).toEqual([]);
+  });
+
+  it('allows deep pages without clamping totalPages when filtered by type', async () => {
+    const baseMs = Date.parse('2026-11-18T00:00:00.000Z');
+    const flights20k = Array.from({ length: 20_000 }, (_, idx) =>
+      flightView({
+        bookingId: `f-${idx}`,
+        createdAt: new Date(baseMs - idx * 1_000),
+      }),
+    );
+    const hotels20k = Array.from({ length: 20_000 }, (_, idx) =>
+      hotelView({
+        bookingId: `h-${idx}`,
+        createdAt: new Date(baseMs - idx * 1_000),
+      }),
+    );
+    const fakeFlights = new FakeFlightBookingsService(flights20k);
+    const fakeHotels = new FakeHotelBookingsService(hotels20k);
+    const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+    const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+    const service = new AdminService(
+      fakeFlights as unknown as FlightBookingsService,
+      fakeHotels as unknown as HotelBookingsService,
+    );
+
+    const flightRes = await service.listBookings(
+      plainToInstance(ListAdminBookingsQueryDto, {
+        type: BookingType.FLIGHT,
+        page: 201,
+        limit: 50,
+      }),
+    );
+    expect(flightRes.total).toBe(20_000);
+    expect(flightRes.totalPages).toBe(400);
+    expect(flightRes.items).toHaveLength(50);
+    expect(flightsSpy).toHaveBeenCalledTimes(1);
+    expect(flightsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 201, limit: 50 }),
+    );
+    expect(hotelsSpy).not.toHaveBeenCalled();
+
+    flightsSpy.mockClear();
+    hotelsSpy.mockClear();
+
+    const hotelRes = await service.listBookings(
+      plainToInstance(ListAdminBookingsQueryDto, {
+        type: BookingType.HOTEL,
+        page: 201,
+        limit: 50,
+      }),
+    );
+    expect(hotelRes.total).toBe(20_000);
+    expect(hotelRes.totalPages).toBe(400);
+    expect(hotelRes.items).toHaveLength(50);
+    expect(hotelsSpy).toHaveBeenCalledTimes(1);
+    expect(hotelsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 201, limit: 50 }),
+    );
+    expect(flightsSpy).not.toHaveBeenCalled();
+
+    for (const type of [undefined, BookingType.FLIGHT, BookingType.HOTEL]) {
+      for (const page of [10_001, 1e300]) {
+        const dto = plainToInstance(ListAdminBookingsQueryDto, {
+          ...(type !== undefined ? { type } : {}),
+          page,
+        });
+        const errors = await validate(dto);
+        expect(errors.map((err) => err.property)).toContain('page');
+      }
+    }
+  });
 });

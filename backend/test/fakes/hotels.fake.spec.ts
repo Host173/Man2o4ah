@@ -78,6 +78,140 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  describe('room edits and availability (HTL-04 / HTL-05)', () => {
+    it('edits only numeric fields and keeps earlier room views detached', async () => {
+      const quoted = (await hotels.getRooms(ids.hotel1))[0];
+      const supplied = {
+        beds: 2,
+        pricePerNightMinor: 12000,
+        isActive: false,
+        availability: [],
+      };
+      const updated = await hotels.updateRoom(
+        ids.hotel1,
+        ids.room1,
+        supplied,
+        ids.hotel1,
+      );
+      expect(updated).toEqual({
+        ...quoted,
+        beds: 2,
+        pricePerNightMinor: 12000,
+      });
+      expect(quoted.pricePerNightMinor).toBe(10000);
+      await expect(
+        hotels.updateRoom(
+          ids.hotel1,
+          ids.room1,
+          { beds: 3, maxOccupancy: 0 },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({ name: 'ValidationError' });
+      expect((await hotels.getRooms(ids.hotel1))[0]).toEqual(updated);
+    });
+
+    it('reuses inclusive normalization and protects pending reservation nights', async () => {
+      await inventory.reserve(
+        ids.hotel1,
+        [ids.room1],
+        checkIn,
+        checkOut,
+        ids.reservation1,
+      );
+      const added = await hotels.addRoomAvailability(
+        ids.hotel1,
+        ids.room1,
+        { fromDate: '2026-12-01', toDate: '2026-12-01' },
+        ids.hotel1,
+      );
+      expect(added.availability).toEqual([
+        {
+          fromDate: toDateOnly('2026-11-12'),
+          toDate: toDateOnly('2026-12-01'),
+        },
+      ]);
+      await expect(
+        hotels.setRoomAvailability(
+          ids.hotel1,
+          ids.room1,
+          { op: 'SET_RANGES', ranges: [] },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.AvailabilityHasReservations },
+      });
+      await expect(
+        hotels.addRoomAvailability(
+          ids.hotel1,
+          ids.room1,
+          { fromDate: '2026-12-01', toDate: '2026-12-02' },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      const replaced = await hotels.setRoomAvailability(
+        ids.hotel1,
+        ids.room2,
+        {
+          op: 'SET_RANGES',
+          ranges: [{ fromDate: '2026-12-01', toDate: '2026-12-01' }],
+        },
+        ids.hotel1,
+      );
+      expect(replaced.availability).toEqual([
+        {
+          fromDate: toDateOnly('2026-12-01'),
+          toDate: toDateOnly('2026-12-01'),
+        },
+      ]);
+      replaced.availability.length = 0;
+      expect((await hotels.getRooms(ids.hotel1))[1].availability).toHaveLength(
+        1,
+      );
+    });
+
+    it('enforces the assigned hotel and room membership on every mutation', async () => {
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      for (const change of [
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.updateRoom(hotelId, roomId, { beds: 2 }, assigned),
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.addRoomAvailability(
+            hotelId,
+            roomId,
+            { fromDate: '2026-12-01', toDate: '2026-12-01' },
+            assigned,
+          ),
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.setRoomAvailability(
+            hotelId,
+            roomId,
+            { op: 'SET_RANGES', ranges: [] },
+            assigned,
+          ),
+      ]) {
+        await expect(
+          change(ids.hotel1, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel2, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel1, ids.missing, ids.hotel1),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel1, 'invalid', ids.hotel1),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    });
+  });
+
   describe('room creation and listing (HTL-03)', () => {
     const input = {
       name: ' Room A ',

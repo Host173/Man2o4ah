@@ -551,3 +551,15 @@ because the payment could fail in the middle, commit
 How the output was used:
 Committed flight-hold-expiry.job.spec.ts (failing TDD tests for the FLT-22 expiry job)
 ================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+check the new requested changes on those PRs and then fix them
+
+How the output was used:
+FLT-22 (#147): merged develop, tests 5112bb1, fixes 9d23b27 (expiry skips failed holds), 773e8a0 (refuse holds < 10 min before departure), f190e1b (users only); npm run verify passed. HTL-16 fixes on its own branch
+================================================

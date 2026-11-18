@@ -45,6 +45,8 @@ export class ListAdminBookingsQueryDto extends PaginationQueryDto {
     default: 1,
     minimum: 1,
     maximum: MAX_ADMIN_BOOKINGS_DEPTH,
+    description:
+      'Page number (1-based). Without a type filter, page * limit is capped at 10,000 and deeper rows require a type filter.',
   })
   @IsOptional()
   @Type(() => Number)

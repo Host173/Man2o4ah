@@ -27,26 +27,14 @@ export class AdminService {
    * ACC-17: returns a read-only, paginated list of all flight and hotel
    * bookings sorted newest `createdAt` first (preserving each service's order
    * and flights-before-hotels on equal timestamps), filterable by `type`,
-   * `status`, and inclusive `createdAt` date range, capped at `page * limit <= 10000`.
+   * `status`, and inclusive `createdAt` date range. Without a `type` filter,
+   * `page * limit` is capped at `10000` with `totalPages` clamped to reachable pages.
    */
   async listBookings(
     query: ListAdminBookingsQueryDto = new ListAdminBookingsQueryDto(),
   ): Promise<Paginated<AdminBookingView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-
-    if (page * limit > MAX_ADMIN_BOOKINGS_DEPTH) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Validation failed',
-        details: [
-          {
-            field: 'page',
-            message: `page * limit must not exceed ${MAX_ADMIN_BOOKINGS_DEPTH}`,
-          },
-        ],
-      });
-    }
 
     const fromStart =
       query.from !== undefined ? this.parseDate(query.from, 'from') : undefined;
@@ -100,6 +88,19 @@ export class AdminService {
     }
 
     const fetchLimit = page * limit;
+    if (fetchLimit > MAX_ADMIN_BOOKINGS_DEPTH) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'page',
+            message: `page * limit must not exceed ${MAX_ADMIN_BOOKINGS_DEPTH}`,
+          },
+        ],
+      });
+    }
+
     const [flights, hotels] = await Promise.all([
       this.flightBookingsService.listForAdmin({
         status: query.status,
@@ -122,10 +123,16 @@ export class AdminService {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
     const items = merged
-      .slice((page - 1) * limit, page * limit)
+      .slice((page - 1) * limit, fetchLimit)
       .map((item) => this.toPublicRow(item));
 
-    return toPage(items, flights.total + hotels.total, page, limit);
+    const total = flights.total + hotels.total;
+    const pageResult = toPage(items, total, page, limit);
+    const maxMergedPages = Math.floor(MAX_ADMIN_BOOKINGS_DEPTH / limit);
+    return {
+      ...pageResult,
+      totalPages: Math.min(pageResult.totalPages, maxMergedPages),
+    };
   }
 
   private parseDate(value: string, field: 'from' | 'to'): Date {

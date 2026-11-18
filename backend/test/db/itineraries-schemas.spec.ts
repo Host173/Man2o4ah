@@ -180,16 +180,18 @@ describe('itineraries schemas', () => {
   });
 
   it('trims the title and accepts 1-100 characters', async () => {
-    for (const title of ['x'.repeat(101), '   ', undefined]) {
+    for (const title of ['x'.repeat(101), '😀'.repeat(101), '   ', undefined]) {
       await expect(
         new itineraries(itineraryDoc({ title })).validate(),
       ).rejects.toThrow(/title/);
     }
-    const itinerary = new itineraries(
-      itineraryDoc({ title: `  ${'x'.repeat(100)}  ` }),
-    );
-    await expect(itinerary.validate()).resolves.toBeUndefined();
-    expect(itinerary.title).toBe('x'.repeat(100));
+    for (const title of ['x'.repeat(100), '😀'.repeat(100)]) {
+      const itinerary = new itineraries(
+        itineraryDoc({ title: `  ${title}  ` }),
+      );
+      await expect(itinerary.validate()).resolves.toBeUndefined();
+      expect(itinerary.title).toBe(title);
+    }
   });
 
   it('requires at least one country code', async () => {

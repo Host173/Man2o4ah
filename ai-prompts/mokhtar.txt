@@ -101,3 +101,157 @@ Before making any edits, thoroughly read and inspect:
 How the output was used:
 Added the CTR-06 prompt-log entry and corrected the PR #118 description after review; no source changes.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+You are tasked with implementing GitHub Issue #65: "ITN-01: Create and list itineraries". 
+
+Please follow all project conventions, architecture guidelines, and standards.
+
+### 1. Initial Research & Review (Do this first)
+* Read the project skill guidelines located at `docs/ai/skills/travel-platform/` to understand the architecture, patterns, error handling, and coding standards.
+* Inspect the repository structure, existing modules, database models, and API routing conventions (especially around user ownership, validation, and authentication since tests require API owner-only checks).
+* Review existing code in related modules to maintain consistency.
+
+### 2. Branch Setup
+* Create and check out the correct feature branch:
+  `git checkout -b feature/ITN-01-create-list-itineraries`
+
+### 3. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement the following features satisfying requirements **ITN-01** and **ITN-03**:
+* **Create Itinerary:** Allow an authenticated owner to create an itinerary with fields: `title`, `countries`, and `start date`.
+* **Edit Itinerary:** Allow the owner to update/edit an existing itinerary.
+* **Delete Itinerary:** Allow the owner to delete an itinerary.
+* **List Itineraries:** List the current user's itineraries, ordered by **most recently updated first**.
+* **Open/View Itinerary:** Allow the owner to retrieve/open a single itinerary by ID.
+* **Access Control:** Ensure API endpoints are restricted to the owner only (owner-only API access).
+
+### 4. Testing & Verification
+* Write required integration and API tests for the `itineraries` module.
+* Run the test suite and linter to verify that all tests pass cleanly and no regressions are introduced.
+
+### 5. Pull Request Creation
+* Once everything is implemented, verified, and passing tests, commit your changes with clear commit messages.
+* Push the branch and create a Pull Request with the exact title:
+  `ITN-01: Create and list itineraries`
+* Ensure the PR description references issue `#65`.
+
+How the output was used:
+Implemented owner-only create/list/open/edit/delete for itineraries in `itineraries.service.ts`, `itineraries.controller.ts`, the DTOs and types, added service and API tests plus the expanded fake, and committed 4c00728.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+Please start the local development server so I can manually test the new itinerary endpoints in Swagger:
+1. Run the application (e.g., `npm run start:dev`).
+2. Provide the exact local Swagger UI URL.
+3. Confirm that session/cookie authentication is configured so I can test the POST, GET, PATCH, and DELETE `/api/itineraries` endpoints.
+
+Also, please check and confirm whether you have added the prompts I gave you into the project's prompts file. If they haven't been added yet, please add them now and confirm where they were saved.
+
+How the output was used:
+Started a local MongoDB and the Nest dev server on port 4000, confirmed Swagger and cookie auth, and verified the itinerary endpoints end to end; only `ai-prompts/mokhtar.txt` changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+MONGODB_URI=<removed>
+PORT=4000
+FRONTEND_URL=http://localhost:3000
+PLATFORM_CURRENCY=USD add this to the .env
+
+How the output was used:
+Pointed `backend/.env` at the team Atlas cluster and restarted the dev server on it; no source files changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+this api takes loading so long and it doesnt execcute
+
+How the output was used:
+Fixed the shared pagination query DTO so Swagger exposes `page` and `limit` as numbers instead of objects, confirmed GET /api/itineraries returns 200, and committed b26f24c.
+================================================
+
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+did you make tests in a test file for api as project rules or not ?
+
+How the output was used:
+Confirmed the co-located itineraries.api.spec.ts and itineraries.service.spec.ts files. Acting on the PR review afterwards, replaced the NotImplementedExceptions in FakeItinerariesService with in-memory owner-scoped create/list/open/edit/delete, added 	est/fakes/itineraries.fake.spec.ts, attached the Swagger screenshot, and committed f4538ae.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+[Screenshot of an email from kareem sayed]
+every thing is good ready tobe merged just small fixes so we avoid future problems (not now )
+1. The fake (no change needed) ... One tiny difference: an empty update({}) changes updatedAt in the fake but not in the real service. Fix it only if you want.
+2. The emoji title limit (small bug). The DTO's @maxlength(100) counts characters, but normalizeTitle uses .length, which counts an emoji as 2. So a title of 51-100 emoji passes the DTO and then gets a 400 from the service. Suggested fix: count the same way in the service, [...trimmed].length instead of trimmed.length, and add a test with a 100-emoji title.
+and about the screenshot, we don't need it in the repo
+
+How the output was used:
+Counted title characters as code points in the service and the schema (Array.from(value).length), added 100-emoji and 101-emoji tests to the service, API and schema specs, stopped an empty update from bumping updatedAt in the fake, deleted docs/screenshots/itn-01-swagger.jpg and dropped it from the PR description; committed ce48c4e.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+You are tasked with implementing GitHub Issue #66: "ITN-05: Days and city groups".
+
+Please follow all project rules, architecture guidelines, and conventions strictly.
+
+### 1. Initial Research & Full Codebase Overview (Do this first)
+* Read all relevant project documentation and skill files inside `docs/ai/skills/travel-platform/`.
+* Inspect the existing `itineraries` module, shared contracts, schemas/models, DTOs, services, controllers, and test files (including the implementation from dependency `#65` / `ITN-01`) so you have a complete overview of how itineraries, validation, owner scoping, and Swagger documentation are structured.
+* Confirm whether `#65` (`ITN-01`) is already merged into the base branch before branching; if not, let me know how you are basing the branch so there are no conflicts.
+
+### 2. Branch Setup
+* Create and check out the exact feature branch:
+  `git checkout -b feature/ITN-05-days-city-groups`
+
+### 3. Strict TDD Workflow (`TDD required: Yes`)
+Because **TDD is required** for this issue (`tdd` label), you MUST follow Red-Green-Refactor:
+1. **Write failing tests first** before writing any production implementation code:
+   * **Unit tests** covering day numbering, date calculation from the itinerary's `startDate`, and consecutive same-city grouping logic.
+   * **API tests** covering adding days, editing a day's city and notes, owner-only access (`401` without session, `404` on another user's itinerary, `400` on invalid input), and Swagger registration.
+2. Run the test suite to confirm the new tests fail for the expected reasons.
+3. Implement the minimal, clean production code to make all tests pass, then refactor while keeping tests green.
+
+### 4. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement all features satisfying requirements **ITN-05** and **ITN-09**:
+* **Add Days:** Allow the itinerary owner to add days to an itinerary.
+* **Edit Day Details:** Allow the owner to edit each day's `city` and `notes`.
+* **Automatic Numbering & Dating:** Automatically calculate and return day numbers (e.g., Day 1, Day 2...) and exact calendar dates derived sequentially from the itinerary's `startDate`.
+* **Consecutive Same-City Grouping:** Group consecutive days that share the same city into city groups in the response (maintaining chronological order).
+* **Security & Validation:** Enforce session authentication and strict `ownerId` scoping on every read and write operation. Ensure Swagger decorators/schemas are accurately updated.
+
+### 5. Verification, Prompt Logging & Pull Request Creation
+* Run the full verification command (e.g., `npm run verify` — format check, linter, typecheck, unit/integration/API tests, and build) and ensure 100% pass with strong coverage.
+* Log the prompts used for this issue into the project's prompts file following the repo's prompt-tracking rules.
+* Commit your changes cleanly, push the branch, and open a Pull Request with:
+  * **Exact PR Title:** `ITN-05: Days and city groups`
+  * **PR Description:** Include a clear summary of changes, `Closes #66`, test results, and a reminder/placeholder for the Swagger test screenshot.
+
+How the output was used:
+Implemented ITN-05/ITN-09 in the itineraries module (day helpers, DTOs, service, controller, Swagger models and fake), tests first then code; `npm run verify` passed with 1152 tests and 98.17% lines. The branch is based on the latest develop with the unmerged ITN-01 branch merged in; committed e540ae3 (tests) and b0a5186 (implementation).
+================================================

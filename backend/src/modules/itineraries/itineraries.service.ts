@@ -14,14 +14,7 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
-import {
-  cityGroups,
-  cityIdsOf,
-  dayDate,
-  dayNumber,
-  orderDaysById,
-  withoutTransportCostsOf,
-} from './days.js';
+import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
@@ -387,19 +380,42 @@ export class ItinerariesService {
     if (!days.some((day) => day._id.toHexString() === target)) {
       throw this.notFound();
     }
-    const nextDays = days.filter((day) => day._id.toHexString() !== target);
-
-    // The schema checks that every transportCosts.dayId is one of `days`.
-    // That validator needs both arrays in the same document context, so save a
-    // hydrated document rather than doing a query update with runValidators.
-    itinerary.days = nextDays;
-    itinerary.transportCosts = withoutTransportCostsOf(
-      itinerary.transportCosts ?? [],
-      target,
-    );
-    itinerary.dayCount = nextDays.length;
-    itinerary.cityIds = cityIdsOf(nextDays);
-    await itinerary.save();
+    // The schema checks that every transportCosts.dayId is one of `days`, so
+    // both arrays must be rewritten in the same update. The pipeline re-reads
+    // them at write time: an add/edit landing at the same time is preserved.
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $filter: {
+                  input: '$days',
+                  as: 'day',
+                  cond: { $ne: ['$$day._id', targetDayId] },
+                },
+              },
+            },
+          },
+          {
+            $set: {
+              transportCosts: {
+                $filter: {
+                  input: '$transportCosts',
+                  as: 'cost',
+                  cond: { $ne: ['$$cost.dayId', targetDayId] },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
   }
 
   /**
@@ -431,17 +447,49 @@ export class ItinerariesService {
     );
     if (unchanged) return this.toDetailView(itinerary as ItineraryRecord);
 
+    // Rebuild the order from the array as it exists at write time: the
+    // requested days first, then any day added by an overlapping request. The
+    // filter requires all requested days to still exist, so a concurrent
+    // delete cannot silently reorder a stale list (review of ITN-08).
+    const wanted = order.map((id) => new Types.ObjectId(id));
     const updated = await this.itineraryModel
       .findOneAndUpdate(
-        { _id: id, ownerId },
         {
-          $set: {
-            days: ordered,
-            dayCount: ordered.length,
-            cityIds: cityIdsOf(ordered),
-          },
+          _id: id,
+          ownerId,
+          $and: wanted.map((dayId) => ({ 'days._id': dayId })),
         },
-        { returnDocument: 'after', runValidators: true },
+        [
+          {
+            $set: {
+              days: {
+                $concatArrays: [
+                  {
+                    $map: {
+                      input: wanted,
+                      as: 'wantedId',
+                      in: {
+                        $arrayElemAt: [
+                          '$days',
+                          { $indexOfArray: ['$days._id', '$$wantedId'] },
+                        ],
+                      },
+                    },
+                  },
+                  {
+                    $filter: {
+                      input: '$days',
+                      as: 'day',
+                      cond: { $not: { $in: ['$$day._id', wanted] } },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
       )
       .lean()
       .exec();

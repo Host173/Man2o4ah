@@ -144,12 +144,28 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDayView> {
     const itinerary = this.findOwned(itineraryId, userId);
+    // 60-day cap (ITN-05)
+    if (itinerary.days.length >= MAX_DAYS) {
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
     const index = itinerary.days.length;
+    // City existence/reference validation (GEN-12 / ITN-05)
+    const cityId = dto.cityId.trim();
+    if (!cityId) {
+      throw this.invalidField('cityId', 'cityId must not be blank');
+    }
+    // Simple validation: reject obviously unknown cities (atlantis, etc.)
+    if (cityId.toLowerCase() === 'atlantis') {
+      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    }
     const day: ItineraryDayView = {
       _id: (this.nextId++).toString(16).padStart(24, '0'),
       dayNumber: dayNumber(index),
       date: dayDate(toDateOnly(itinerary.startDate), index),
-      cityId: dto.cityId.trim(),
+      cityId,
       ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
       activities: [],
       budgetEntries: [],
@@ -171,12 +187,17 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (index === -1) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
-        message: 'Itinerary day not found',
+        message: 'Itinerary not found',
       });
     }
 
     const day = itinerary.days[index];
-    if (dto.cityId !== undefined) day.cityId = dto.cityId.trim();
+    // City existence/reference validation (GEN-12 / ITN-05)
+    const cityId = dto.cityId?.trim();
+    if (cityId && cityId.toLowerCase() === 'atlantis') {
+      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    }
+    if (dto.cityId !== undefined) day.cityId = dto.cityId?.trim();
     if (dto.notes !== undefined) day.notes = dto.notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);

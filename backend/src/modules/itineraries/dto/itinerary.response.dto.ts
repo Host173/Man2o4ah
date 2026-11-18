@@ -5,6 +5,7 @@ import type {
   ActivityImageView,
   ActivityView,
   BudgetEntryView,
+  CityGroupView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -101,6 +102,27 @@ export class ItineraryDayResponseDto implements ItineraryDayView {
 
   @ApiProperty({ type: [BudgetEntryResponseDto] })
   budgetEntries!: BudgetEntryResponseDto[];
+}
+
+/** Swagger response model for a group of consecutive same-city days (ITN-09). */
+export class CityGroupResponseDto implements CityGroupView {
+  @ApiProperty({ example: 'cairo' })
+  cityId!: string;
+
+  @ApiProperty({ example: 1 })
+  fromDay!: number;
+
+  @ApiProperty({ example: 2 })
+  toDay!: number;
+
+  @ApiProperty({ example: 2 })
+  dayCount!: number;
+
+  @ApiProperty({ type: String, format: 'date', example: '2027-04-01' })
+  checkIn!: string;
+
+  @ApiProperty({ type: String, format: 'date', example: '2027-04-03' })
+  checkOut!: string;
 }
 
 /** Swagger response model for an intercity transport cost (ITN-16). */
@@ -205,6 +227,9 @@ export class ItineraryDetailResponseDto
 {
   @ApiProperty({ type: [ItineraryDayResponseDto] })
   days!: ItineraryDayResponseDto[];
+
+  @ApiProperty({ type: [CityGroupResponseDto] })
+  cityGroups!: CityGroupResponseDto[];
 
   @ApiProperty({ type: [TransportCostResponseDto] })
   transportCosts!: TransportCostResponseDto[];

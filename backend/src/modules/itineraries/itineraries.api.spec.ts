@@ -47,6 +47,35 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
     await testApp.close();
   }, HOOK_TIMEOUT);
 
+  /** Creates an itinerary through the API and returns its ID. */
+  async function createOwnedItinerary(cookie: string): Promise<string> {
+    const response = await testApp
+      .http()
+      .post('/api/itineraries')
+      .set('Cookie', cookie)
+      .send(validBody);
+    return response.body._id as string;
+  }
+
+  /** Inserts `count` days straight into the model, to reach the 60-day limit quickly. */
+  async function seedDays(itineraryId: string, count: number): Promise<void> {
+    await itineraryModel.updateOne(
+      { _id: new Types.ObjectId(itineraryId) },
+      {
+        $set: {
+          days: Array.from({ length: count }, () => ({
+            _id: new Types.ObjectId(),
+            cityId: 'cairo',
+            activities: [],
+            budgetEntries: [],
+          })),
+          dayCount: count,
+          cityIds: ['cairo'],
+        },
+      },
+    );
+  }
+
   it('registers the itinerary endpoints in Swagger as authenticated routes', () => {
     const document = SwaggerModule.createDocument(
       testApp.app,
@@ -62,6 +91,11 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
     expect(document.paths['/api/itineraries/{id}']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.delete).toBeDefined();
+    expect(document.paths['/api/itineraries/{id}/days']?.post).toBeDefined();
+    expect(
+      document.paths['/api/itineraries/{id}/days/{dayId}']?.patch,
+    ).toBeDefined();
+    expect(document.components?.schemas?.CityGroupResponseDto).toBeDefined();
     for (const method of ['post', 'get'] as const) {
       expect(
         document.paths['/api/itineraries']?.[method]?.security,
@@ -71,6 +105,12 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(
         document.paths['/api/itineraries/{id}']?.[method]?.security,
       ).toBeDefined();
+    }
+    for (const [path, method] of [
+      ['/api/itineraries/{id}/days', 'post'],
+      ['/api/itineraries/{id}/days/{dayId}', 'patch'],
+    ] as const) {
+      expect(document.paths[path]?.[method]?.security).toBeDefined();
     }
   });
 
@@ -84,6 +124,14 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         testApp.http().get(`/api/itineraries/${id}`),
         testApp.http().patch(`/api/itineraries/${id}`).send({ title: 'New' }),
         testApp.http().delete(`/api/itineraries/${id}`),
+        testApp
+          .http()
+          .post(`/api/itineraries/${id}/days`)
+          .send({ cityId: 'cairo' }),
+        testApp
+          .http()
+          .patch(`/api/itineraries/${id}/days/${id}`)
+          .send({ cityId: 'dubai' }),
       ]);
 
       for (const response of responses) {
@@ -585,6 +633,374 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
 
       expect(response.status).toBe(400);
       expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('POST /api/itineraries/:id/days (ITN-05)', () => {
+    it('adds days numbered and dated from the start date and returns the city groups', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const first = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: 'Arrival day' });
+
+      expect(first.status).toBe(201);
+      expect(first.body).toMatchObject({
+        dayNumber: 1,
+        date: '2027-04-01',
+        cityId: 'cairo',
+        notes: 'Arrival day',
+        activities: [],
+        budgetEntries: [],
+      });
+      expect(first.body._id).toMatch(/^[0-9a-f]{24}$/);
+
+      const second = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      expect(second.status).toBe(201);
+      expect(second.body).toMatchObject({ dayNumber: 2, date: '2027-04-02' });
+
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+
+      expect(detail.status).toBe(200);
+      expect(detail.body.dayCount).toBe(2);
+      expect(detail.body.days).toHaveLength(2);
+      expect(detail.body.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDay: 1,
+          toDay: 2,
+          dayCount: 2,
+          checkIn: '2027-04-01',
+          checkOut: '2027-04-03',
+        },
+      ]);
+    });
+
+    it('rejects a missing, blank or unknown city with 400 VALIDATION_FAILED', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      for (const body of [
+        {},
+        { cityId: '   ' },
+        { cityId: 'nowhere' },
+        { cityId: 42 },
+      ]) {
+        const response = await testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days`)
+          .set('Cookie', owner.cookie)
+          .send(body);
+
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(errorDetails(response.body)).toContain('cityId');
+      }
+    });
+
+    it('rejects the 61st day and leaves the itinerary at 60 (boundary values)', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      await seedDays(itineraryId, 60);
+
+      const response = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(errorDetails(response.body)).toContain('days');
+
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+      expect(detail.body.dayCount).toBe(60);
+    });
+
+    it('rejects fields the client does not own', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      for (const body of [
+        { cityId: 'cairo', dayNumber: 3 },
+        { cityId: 'cairo', date: '2027-01-01' },
+        { cityId: 'cairo', activities: [] },
+      ]) {
+        const response = await testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days`)
+          .set('Cookie', owner.cookie)
+          .send(body);
+
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+    });
+
+    it('rejects notes longer than 2000 characters', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const response = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: 'n'.repeat(2001) });
+
+      expect(response.status).toBe(400);
+      expect(errorDetails(response.body)).toContain('notes');
+    });
+
+    it('returns 404 for another user’s itinerary and 400 for a malformed ID', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const intruder = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const foreign = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', intruder.cookie)
+        .send({ cityId: 'cairo' });
+      expect(foreign.status).toBe(404);
+      expect(foreign.body.code).toBe(ErrorCode.NotFound);
+
+      const malformed = await testApp
+        .http()
+        .post('/api/itineraries/not-an-id/days')
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+      expect(malformed.status).toBe(400);
+      expect(malformed.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('PATCH /api/itineraries/:id/days/:dayId (ITN-05)', () => {
+    async function addDay(
+      itineraryId: string,
+      cookie: string,
+      body: Record<string, unknown>,
+    ): Promise<string> {
+      const response = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+      return response.body._id as string;
+    }
+
+    it('edits a day’s city and notes and keeps the numbering', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const dayId = await addDay(itineraryId, owner.cookie, {
+        cityId: 'cairo',
+        notes: 'Arrival',
+      });
+
+      const response = await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}/days/${dayId}`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'dubai', notes: 'Moved to Dubai' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        _id: dayId,
+        dayNumber: 1,
+        date: '2027-04-01',
+        cityId: 'dubai',
+        notes: 'Moved to Dubai',
+      });
+
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+      expect(detail.body.cityGroups).toEqual([
+        expect.objectContaining({ cityId: 'dubai', fromDay: 1, toDay: 1 }),
+      ]);
+    });
+
+    it('leaves omitted fields unchanged and accepts an empty body', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const dayId = await addDay(itineraryId, owner.cookie, {
+        cityId: 'cairo',
+        notes: 'Arrival',
+      });
+
+      const notesOnly = await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}/days/${dayId}`)
+        .set('Cookie', owner.cookie)
+        .send({ notes: 'Late arrival' });
+      expect(notesOnly.status).toBe(200);
+      expect(notesOnly.body).toMatchObject({
+        cityId: 'cairo',
+        notes: 'Late arrival',
+      });
+
+      const empty = await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}/days/${dayId}`)
+        .set('Cookie', owner.cookie)
+        .send({});
+      expect(empty.status).toBe(200);
+      expect(empty.body).toEqual(notesOnly.body);
+    });
+
+    it('rejects an unknown city and over-long notes with 400', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const dayId = await addDay(itineraryId, owner.cookie, {
+        cityId: 'cairo',
+      });
+
+      for (const [body, field] of [
+        [{ cityId: 'nowhere' }, 'cityId'],
+        [{ notes: 'n'.repeat(2001) }, 'notes'],
+        [{ dayNumber: 2 }, 'dayNumber'],
+      ] as const) {
+        const response = await testApp
+          .http()
+          .patch(`/api/itineraries/${itineraryId}/days/${dayId}`)
+          .set('Cookie', owner.cookie)
+          .send(body);
+
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(errorDetails(response.body)).toContain(field);
+      }
+    });
+
+    it('returns 404 for a foreign itinerary, an unknown day and a day of another itinerary', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const intruder = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const otherId = await createOwnedItinerary(owner.cookie);
+      const dayId = await addDay(itineraryId, owner.cookie, {
+        cityId: 'cairo',
+      });
+      const otherDayId = await addDay(otherId, owner.cookie, {
+        cityId: 'dubai',
+      });
+
+      for (const [id, day, cookie] of [
+        [itineraryId, dayId, intruder.cookie],
+        [itineraryId, new Types.ObjectId().toHexString(), owner.cookie],
+        [itineraryId, otherDayId, owner.cookie],
+      ] as const) {
+        const response = await testApp
+          .http()
+          .patch(`/api/itineraries/${id}/days/${day}`)
+          .set('Cookie', cookie)
+          .send({ cityId: 'dubai' });
+
+        expect(response.status).toBe(404);
+        expect(response.body.code).toBe(ErrorCode.NotFound);
+      }
+    });
+
+    it('rejects malformed itinerary and day IDs with 400', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const dayId = await addDay(itineraryId, owner.cookie, {
+        cityId: 'cairo',
+      });
+
+      for (const [id, day] of [
+        ['not-an-id', dayId],
+        [itineraryId, 'not-an-id'],
+      ]) {
+        const response = await testApp
+          .http()
+          .patch(`/api/itineraries/${id}/days/${day}`)
+          .set('Cookie', owner.cookie)
+          .send({ cityId: 'dubai' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+    });
+  });
+
+  describe('concurrent day writes (ITN-05 review)', () => {
+    it('keeps every day when ten adds overlap', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, index) =>
+          testApp
+            .http()
+            .post(`/api/itineraries/${itineraryId}/days`)
+            .set('Cookie', owner.cookie)
+            .send({ cityId: 'cairo', notes: `day-${index}` }),
+        ),
+      );
+
+      let successes = 0;
+      for (const result of results) {
+        expect(result.status).toBe('fulfilled');
+        if (result.status === 'fulfilled') {
+          expect(result.value.status).toBe(201);
+          successes += 1;
+        }
+      }
+      expect(successes).toBe(10);
+
+      const stored = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(stored?.days).toHaveLength(successes);
+      expect(stored?.dayCount).toBe(successes);
+      expect(new Set(stored?.days.map((day) => day.notes)).size).toBe(10);
+    });
+
+    it('keeps both an add and a day edit when they overlap', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const first = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: 'original' });
+      const firstId = first.body._id as string;
+
+      const results = await Promise.allSettled([
+        testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days`)
+          .set('Cookie', owner.cookie)
+          .send({ cityId: 'dubai', notes: 'second' }),
+        testApp
+          .http()
+          .patch(`/api/itineraries/${itineraryId}/days/${firstId}`)
+          .set('Cookie', owner.cookie)
+          .send({ notes: 'edited' }),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+      expect(detail.body.days).toHaveLength(2);
+      expect(
+        detail.body.days.map((day: { notes: string }) => day.notes),
+      ).toEqual(expect.arrayContaining(['edited', 'second']));
     });
   });
 });

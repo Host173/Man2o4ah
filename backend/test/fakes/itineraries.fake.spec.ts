@@ -1,4 +1,8 @@
+import { NotFoundException } from '@nestjs/common';
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
+import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import { FakeItinerariesService } from './itineraries.fake.js';
 
 function itinerary(
@@ -104,5 +108,107 @@ describe('FakeItinerariesService.listPublicByAuthor', () => {
     first.items[0].title = 'Changed again';
     const second = await itineraries.listPublicByAuthor('user-1');
     expect(second.items[0].title).toBe('Trip i-1');
+  });
+});
+
+function createDto(
+  overrides: Partial<CreateItineraryDto> = {},
+): CreateItineraryDto {
+  return {
+    title: '  Egypt in a week  ',
+    countryCodes: ['EG'],
+    startDate: '2027-04-01',
+    ...overrides,
+  };
+}
+
+describe('FakeItinerariesService owner-only methods', () => {
+  it('creates a private itinerary and lists it for its owner only', async () => {
+    const itineraries = new FakeItinerariesService();
+
+    const created = await itineraries.create(createDto(), 'user-1');
+    expect(created).toMatchObject({
+      ownerId: 'user-1',
+      title: 'Egypt in a week',
+      countryCodes: ['EG'],
+      startDate: '2027-04-01',
+      dayCount: 0,
+      visibility: ItineraryVisibility.PRIVATE,
+      days: [],
+      transportCosts: [],
+    });
+
+    const mine = await itineraries.listMine('user-1');
+    expect(mine.items.map((item) => item._id)).toEqual([created._id]);
+
+    const other = await itineraries.listMine('user-2');
+    expect(other).toMatchObject({ items: [], total: 0 });
+  });
+
+  it('lists newest updatedAt first and paginates', async () => {
+    const itineraries = new FakeItinerariesService();
+    const first = await itineraries.create(
+      createDto({ title: 'First' }),
+      'user-1',
+    );
+    const second = await itineraries.create(
+      createDto({ title: 'Second' }),
+      'user-1',
+    );
+
+    const page = await itineraries.listMine('user-1', {
+      page: 1,
+      limit: 1,
+    });
+    expect(page.items.map((item) => item._id)).toEqual([second._id]);
+    expect(page).toMatchObject({ page: 1, limit: 1, total: 2, totalPages: 2 });
+
+    const pageTwo = await itineraries.listMine('user-1', {
+      page: 2,
+      limit: 1,
+    });
+    expect(pageTwo.items.map((item) => item._id)).toEqual([first._id]);
+  });
+
+  it('opens, edits and deletes only its owner’s itinerary', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    await expect(
+      itineraries.getById(created._id, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      itineraries.update(created._id, { title: 'Mine' }, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      itineraries.delete(created._id, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const updated = await itineraries.update(
+      created._id,
+      { title: '  New title  ', countryCodes: ['EG', 'AE'] },
+      'user-1',
+    );
+    expect(updated).toMatchObject({
+      title: 'New title',
+      countryCodes: ['EG', 'AE'],
+      startDate: '2027-04-01',
+    });
+
+    await expect(
+      itineraries.getById(created._id, 'user-1'),
+    ).resolves.toBeDefined();
+    await itineraries.delete(created._id, 'user-1');
+    await expect(
+      itineraries.getById(created._id, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
+  it('leaves updatedAt alone when an update changes nothing', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    const unchanged = await itineraries.update(created._id, {}, 'user-1');
+    expect(unchanged.updatedAt).toEqual(created.updatedAt);
   });
 });

@@ -936,4 +936,71 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       }
     });
   });
+
+  describe('concurrent day writes (ITN-05 review)', () => {
+    it('keeps every day when ten adds overlap', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, index) =>
+          testApp
+            .http()
+            .post(`/api/itineraries/${itineraryId}/days`)
+            .set('Cookie', owner.cookie)
+            .send({ cityId: 'cairo', notes: `day-${index}` }),
+        ),
+      );
+
+      let successes = 0;
+      for (const result of results) {
+        expect(result.status).toBe('fulfilled');
+        if (result.status === 'fulfilled') {
+          expect(result.value.status).toBe(201);
+          successes += 1;
+        }
+      }
+      expect(successes).toBe(10);
+
+      const stored = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(stored?.days).toHaveLength(successes);
+      expect(stored?.dayCount).toBe(successes);
+      expect(new Set(stored?.days.map((day) => day.notes)).size).toBe(10);
+    });
+
+    it('keeps both an add and a day edit when they overlap', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const first = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: 'original' });
+      const firstId = first.body._id as string;
+
+      const results = await Promise.allSettled([
+        testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days`)
+          .set('Cookie', owner.cookie)
+          .send({ cityId: 'dubai', notes: 'second' }),
+        testApp
+          .http()
+          .patch(`/api/itineraries/${itineraryId}/days/${firstId}`)
+          .set('Cookie', owner.cookie)
+          .send({ notes: 'edited' }),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+      expect(detail.body.days).toHaveLength(2);
+      expect(
+        detail.body.days.map((day: { notes: string }) => day.notes),
+      ).toEqual(expect.arrayContaining(['edited', 'second']));
+    });
+  });
 });

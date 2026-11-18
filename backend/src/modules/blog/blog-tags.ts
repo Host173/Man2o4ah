@@ -52,8 +52,9 @@ export function buildExcerpt(body: string): string {
     .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (plain.length <= EXCERPT_MAX_LENGTH) {
+  const codePoints = Array.from(plain);
+  if (codePoints.length <= EXCERPT_MAX_LENGTH) {
     return plain;
   }
-  return `${plain.slice(0, EXCERPT_MAX_LENGTH).trimEnd()}...`;
+  return `${codePoints.slice(0, EXCERPT_MAX_LENGTH).join('').trimEnd()}...`;
 }

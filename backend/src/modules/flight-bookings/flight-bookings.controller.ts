@@ -4,13 +4,15 @@ import {
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser } from '../accounts/auth/decorators.js';
+import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
 import { FlightHoldResponseDto } from './dto/flight-hold.response.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
@@ -47,6 +49,8 @@ export class FlightBookingsController {
 
   /** The owner is the logged-in user; a client can't book for someone else. */
   @Post('hold')
+  // Users only (endpoints.md): admins and moderators never hold bookings.
+  @Roles(Role.USER)
   @ApiOperation({
     summary: 'FLT-22 Hold the seats for 10 minutes as a pending booking',
     description:
@@ -57,6 +61,7 @@ export class FlightBookingsController {
     description: 'VALIDATION_FAILED, with field details',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiConflictResponse({ description: 'SEATS_UNAVAILABLE' })
   hold(
     @Body() body: FlightQuoteRequestDto,

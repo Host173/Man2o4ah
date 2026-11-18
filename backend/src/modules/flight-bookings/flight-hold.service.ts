@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
+import { ErrorCode } from '../../common/errors/error-codes.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
 import type { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import type { FlightHold, FlightQuote } from './flight-bookings.types.js';
@@ -41,6 +42,20 @@ export class FlightHoldService {
     const holdExpiresAt = new Date(
       createdAt.getTime() + HOLD_MINUTES * 60 * 1000,
     );
+    // A hold must not outlive the flight: the whole 10 minutes must fit
+    // before the outbound departure (decided on review #147).
+    if (quote.segments[0].departureAt < holdExpiresAt) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'The booking request is not valid',
+        details: [
+          {
+            field: 'segments[0]',
+            message: `This flight leaves in less than ${HOLD_MINUTES} minutes and can no longer be held`,
+          },
+        ],
+      });
+    }
 
     let bookingId = '';
     const session = await this.connection.startSession();

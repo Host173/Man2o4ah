@@ -4,12 +4,14 @@ import {
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser } from '../accounts/auth/decorators.js';
+import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
 import { HotelHoldRequestDto } from './dto/hotel-hold.dto.js';
 import { HotelHoldResponseDto } from './dto/hotel-hold.response.dto.js';
 import type { HotelHold } from './hotel-bookings.types.js';
@@ -23,6 +25,8 @@ export class HotelBookingsController {
 
   /** The owner is the logged-in user; a client can't book for someone else. */
   @Post()
+  // Users only (endpoints.md): admins and moderators never hold bookings.
+  @Roles(Role.USER)
   @ApiOperation({
     summary:
       'HTL-16 Hold one or more rooms for 10 minutes as a pending reservation (HTL-18)',
@@ -34,6 +38,7 @@ export class HotelBookingsController {
     description: 'VALIDATION_FAILED, with field details',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiConflictResponse({ description: 'ROOMS_UNAVAILABLE' })
   hold(
     @Body() body: HotelHoldRequestDto,

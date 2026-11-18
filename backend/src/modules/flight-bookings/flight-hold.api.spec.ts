@@ -126,6 +126,23 @@ describe('POST /api/flight-bookings/hold (FLT-22)', () => {
     expect(res.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
+  // endpoints.md: the hold is for users; admins never modify bookings (auth.md).
+  it.each([
+    UserRole.ADMIN,
+    UserRole.AIRLINE_MODERATOR,
+    UserRole.HOTEL_MODERATOR,
+  ])('answers 403 FORBIDDEN_ROLE for %s', async (role) => {
+    const account = await loginAs(t.connection, role);
+    const res = await t
+      .http()
+      .post(URL)
+      .set('Cookie', account.cookie)
+      .send(body());
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe(ErrorCode.ForbiddenRole);
+  });
+
   it('answers 401 NOT_AUTHENTICATED without a login', async () => {
     const res = await t.http().post(URL).send(body());
     expect(res.status).toBe(401);

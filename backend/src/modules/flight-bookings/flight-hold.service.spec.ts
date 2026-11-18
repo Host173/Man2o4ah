@@ -138,6 +138,7 @@ describe('FlightHoldService.hold (FLT-22)', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -284,6 +285,105 @@ describe('FlightHoldService.hold (FLT-22)', () => {
     expect(seats.counters(OUT, OUT_ECO)).toMatchObject({
       availableSeats: 0,
       heldSeats: 50,
+    });
+  });
+
+  describe('transaction (review #147)', () => {
+    // A stand-in for the real SeatInventory (INV-01): it writes inside the
+    // caller's session, so only a real transaction can undo it.
+    function holdWritesInSession(): void {
+      const inventory = t.moduleRef.get(SeatInventory);
+      vi.spyOn(inventory, 'hold').mockImplementationOnce(
+        async (_items, options) => {
+          await t.connection
+            .collection('inventory_writes')
+            .insertOne({ kind: 'hold' }, { session: options.session });
+        },
+      );
+    }
+
+    it('rolls the held seats back when saving the booking fails', async () => {
+      holdWritesInSession();
+      vi.spyOn(bookings, 'create').mockRejectedValueOnce(
+        new Error('write failed'),
+      );
+
+      await expect(holds.hold(oneWay(), USER)).rejects.toThrow('write failed');
+
+      // Without the transaction the seat write would still be there.
+      expect(
+        await t.connection.collection('inventory_writes').countDocuments(),
+      ).toBe(0);
+      expect(await bookings.countDocuments()).toBe(0);
+    });
+
+    it('commits the seats and the booking together when both succeed', async () => {
+      holdWritesInSession();
+
+      await holds.hold(oneWay(), USER);
+
+      expect(
+        await t.connection.collection('inventory_writes').countDocuments(),
+      ).toBe(1);
+      expect(await bookings.countDocuments()).toBe(1);
+    });
+  });
+
+  describe('close to departure (review #147)', () => {
+    const SOON = '6553a1f0c2b4e8a9d0f1b006';
+    const SOON_ECO = '6553a1f0c2b4e8a9d0f1b007';
+    const NOW = new Date('2027-03-01T08:00:00.000Z');
+
+    /** Adds a flight that leaves `msAfterNow` after NOW. */
+    function flightLeavingIn(msAfterNow: number): FlightQuoteRequestDto {
+      const departureAt = new Date(NOW.getTime() + msAfterNow);
+      flights.data.addFlight({
+        id: SOON,
+        airlineId: AIRLINE,
+        flightNumber: 'MS200',
+        departureAirportId: 'CAI',
+        arrivalAirportId: 'DXB',
+        departureAt,
+        arrivalAt: new Date(departureAt.getTime() + 4 * 3_600_000),
+        cabins: [
+          {
+            id: SOON_ECO,
+            cabinClass: 'economy',
+            totalSeats: 50,
+            priceMinor: 20_000,
+          },
+        ],
+      });
+      return {
+        tripType: 'one_way',
+        segments: [{ flightId: SOON, cabinId: SOON_ECO }],
+        passengers: [adult()],
+      };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(NOW);
+    });
+
+    // A hold must not outlive the flight: at least the 10-minute hold must fit.
+    it('holds a flight that leaves exactly 10 minutes from now', async () => {
+      const hold = await holds.hold(flightLeavingIn(TEN_MINUTES), USER);
+      expect(hold.status).toBe('pending_payment');
+    });
+
+    it('refuses a flight that leaves in less than 10 minutes, and holds nothing', async () => {
+      await expect(
+        holds.hold(flightLeavingIn(TEN_MINUTES - 1), USER),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'VALIDATION_FAILED',
+          details: [expect.objectContaining({ field: 'segments[0]' })],
+        },
+      });
+      expect(await bookings.countDocuments()).toBe(0);
+      expect(seats.counters(SOON, SOON_ECO)?.heldSeats).toBe(0);
     });
   });
 });

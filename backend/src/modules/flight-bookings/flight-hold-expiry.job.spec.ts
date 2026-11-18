@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { FakeFlightsData } from '../../../test/fakes/flights-data.fake.js';
@@ -25,6 +26,10 @@ const BACK = '6553a1f0c2b4e8a9d0f1d004';
 const BACK_ECO = '6553a1f0c2b4e8a9d0f1d005';
 const USER = '6553a1f0c2b4e8a9d0f1d099';
 
+// A 200-seat flight for the "many holds" test.
+const BIG = '6553a1f0c2b4e8a9d0f1d006';
+const BIG_ECO = '6553a1f0c2b4e8a9d0f1d007';
+
 function seedFlights(): FakeFlightsData {
   const data = new FakeFlightsData();
   data.addAirline({ id: AIRLINE, code: 'MS' });
@@ -47,11 +52,12 @@ function seedFlights(): FakeFlightsData {
         {
           id: cabinId,
           cabinClass: 'economy',
-          totalSeats: 50,
+          totalSeats: id === BIG ? 200 : 50,
           priceMinor: 20_000,
         },
       ],
     });
+  flight(BIG, BIG_ECO, 'CAI', 'JED', new Date('2027-03-20T08:00:00Z'));
   flight(OUT, OUT_ECO, 'CAI', 'DXB', new Date('2027-03-10T08:00:00Z'));
   flight(BACK, BACK_ECO, 'DXB', 'CAI', new Date('2027-03-17T08:00:00Z'));
   return data;
@@ -115,6 +121,10 @@ describe('FlightHoldExpiryJob (FLT-22, GEN-11)', () => {
     Object.assign(seats, new FakeSeatInventory(data));
     events.clear();
     await clearCollections(t.connection);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -240,5 +250,59 @@ describe('FlightHoldExpiryJob (FLT-22, GEN-11)', () => {
     expect(events.payloadsOf(Events.FlightBookingExpired)).toHaveLength(
       status === 'expired' ? 1 : 0,
     );
+  });
+
+  describe('review #147', () => {
+    beforeEach(() => {
+      // These tests make releases fail on purpose; keep the expected error logs quiet.
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    });
+
+    it('rolls the expiry back when releasing the seats fails', async () => {
+      const hold = await holds.hold(oneWay, USER);
+      vi.spyOn(t.moduleRef.get(SeatInventory), 'release').mockRejectedValueOnce(
+        new Error('inventory down'),
+      );
+
+      await expect(job.expireDueHolds(hold.holdExpiresAt)).resolves.toBe(0);
+
+      // The status change was undone with the failed release.
+      expect((await bookings.findById(hold.bookingId).lean())?.status).toBe(
+        'pending_payment',
+      );
+      expect(seats.counters(OUT, OUT_ECO)?.heldSeats).toBe(2);
+      expect(events.emitted).toEqual([]);
+    });
+
+    it('does not get stuck behind 100 holds that keep failing', async () => {
+      const oneSeat: FlightQuoteRequestDto = {
+        tripType: 'one_way',
+        segments: [{ flightId: BIG, cabinId: BIG_ECO }],
+        passengers: [adult],
+      };
+      let last = await holds.hold(oneSeat, USER);
+      for (let i = 1; i < 101; i += 1) last = await holds.hold(oneSeat, USER);
+
+      // Releasing fails for the first 100 holds the job tries, then works.
+      const inventory = t.moduleRef.get(SeatInventory);
+      const release = inventory.release.bind(inventory);
+      let calls = 0;
+      vi.spyOn(inventory, 'release').mockImplementation(
+        async (items, options) => {
+          calls += 1;
+          if (calls <= 100) throw new Error('inventory down');
+          return release(items, options);
+        },
+      );
+
+      await job.expireDueHolds(last.holdExpiresAt);
+
+      // The 101st hold was still reached and expired in the same run.
+      expect(calls).toBe(101);
+      expect(await bookings.countDocuments({ status: 'expired' })).toBe(1);
+      expect(await bookings.countDocuments({ status: 'pending_payment' })).toBe(
+        100,
+      );
+    });
   });
 });

@@ -1420,3 +1420,88 @@ ok go plus later we will create a doc(pdf) with the important decision we took, 
 How the output was used:
 Recorded "booking rules implemented in each booking module" in docs/DECISIONS.md §3 and bookings-payments.md §5, synced the open items (ACC-01 questions, platform follow-ups, decisions PDF later); opened a docs PR and commented on #130.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-06
+
+Prompt:
+Task: find and fix why two backend test files fail only on Windows (Man2o4ah, ticket PLT-06).
+
+Context
+- Reported in PR #126: in a FULL local run on Windows, these two files fail to load with
+  "Cannot read properties of undefined (reading 'config')":
+    backend/src/common/events/app-events.service.spec.ts
+    backend/src/common/events/events.spec.ts
+  They pass when run alone, and the full suite passes on CI (Linux).
+- Suspected cause: only 3 spec files in the backend import from 'vitest' directly
+  (these two and backend/src/modules/blog/blog.service.spec.ts). Every other spec uses the
+  globals (vitest.config.ts has `globals: true`). On Windows the explicit import may load a
+  second Vitest instance (e.g. a path-case difference), whose runner config is undefined.
+- Rules: follow AGENTS.md and the project skill in docs/ai/skills/travel-platform/. Never weaken,
+  skip or delete a test. Don't change vitest.config.ts or any other file unless step 4 shows
+  the suspected cause is wrong.
+
+Steps
+1. Branch from the latest develop: `fix/PLT-06-windows-vitest-imports`.
+2. Reproduce: in backend/, run the full suite once (`npx vitest run`) and record whether the two
+   files fail and the exact error. Then run only `npx vitest run src/common/events` and record
+   the result. If the full run does NOT fail, stop here and report (nothing to fix on this machine).
+3. Fix: in the two events spec files only, remove the `import { ... } from 'vitest'` line and use
+   the globals (describe, it, expect, expectTypeOf, beforeAll, afterAll are all global). Keep every
+   test and assertion exactly as it is. Don't touch blog.service.spec.ts (another member's file).
+4. Verify on this machine:
+   a. `npx vitest run src/common/events`: passes, same test count as before.
+   b. The full suite (`npx vitest run`): the two files load and pass. If they still fail, undo
+      step 3, investigate the real cause (e.g. print `process.cwd()` and the resolved vitest path,
+      check drive-letter casing), and report what you find instead of guessing.
+   c. `npm run typecheck` and `npm run lint` pass.
+5. Commit on the branch (`test(events): use Vitest globals in the events specs (PLT-06)`).
+   Don't push and don't open a PR.
+6. Log this prompt in ai-prompts/kareem.txt in the usual format (Related Requirement: PLT-06).
+
+Report (short)
+- Step 2 result: did the full run fail, with the exact error.
+- What you changed (files and lines).
+- Step 4 results: a, b, c with the test counts.
+- If the suspected cause was wrong: what the real cause was.
+- The commit hash.
+
+How the output was used:
+Created branch fix/PLT-06-windows-vitest-imports from develop and reproduced only (stopped at step 2: the two events specs did not fail in the full run, so no code was changed and nothing was committed); this log entry is the only file change.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-06
+
+Prompt:
+Continue. In backend/, run `npm ci` (not `npm install`: it installs exactly what package-lock.json
+says and never changes the lock file). Then repeat step 2's full run once.
+- If the two events specs now fail with the 'config' error: do steps 3–6 as written.
+- If everything passes: change no code. Keep the prompt-log entry uncommitted, switch back to
+  develop, delete the local branch fix/PLT-06-windows-vitest-imports, and report the full-run
+  numbers (files and tests passed).
+
+How the output was used:
+Ran npm ci in backend/; the full run passed (84 files, 913 tests, no 'config' error), so no code was changed. Switched back to develop and deleted the local branch fix/PLT-06-windows-vitest-imports; the prompt log stays uncommitted.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Kareem
+Tool: Claude Code
+Related Requirement: none
+
+Prompt:
+Update my AGENTS.md and CLAUDE.md to match the current AGENTS.example.md (version 2026-11-15).
+Replace everything above my personal section with the template's text; keep my personal section
+(at the end) exactly as it is. Show me the diff; don't commit (these files are gitignored).
+
+How the output was used:
+Rewrote the gitignored AGENTS.md from AGENTS.example.md 2026-11-15, keeping my About me and My preferences text; CLAUDE.md already only imports @AGENTS.md and was left as is. Nothing committed.
+================================================

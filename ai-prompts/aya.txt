@@ -503,3 +503,15 @@ no i will wait for janas stub now i want to move on to HTL 16
 How the output was used:
 Answer only, no files changed (HTL-16 plan)
 ================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+check the new requested changes on those PRs and then fix them
+
+How the output was used:
+HTL-16 (#148): merged develop, tests fa91ab1, fixes 20ec367 (expiry skips failed holds, logs non-race errors), 0dc9917 (release overdue holds before reserving), 57e8c2f (users only); npm run verify passed
+================================================

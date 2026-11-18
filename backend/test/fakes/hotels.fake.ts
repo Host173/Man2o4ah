@@ -9,6 +9,7 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import type { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
+import { escapeRegex } from '../../src/common/text/escape-regex.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
 import type { CreateRoomDto } from '../../src/modules/hotels/dto/create-room.dto.js';
@@ -206,16 +207,17 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     const hotel = this.assignedHotel(hotelId, moderatorHotelId);
     const document = new RoomValidationModel({
       hotelId: hotel.id,
-      name: input.name,
+      name: input.name.trim().toLowerCase(),
       type: input.type,
       beds: input.beds,
       maxOccupancy: input.maxOccupancy,
       pricePerNightMinor: input.pricePerNightMinor,
     });
     await document.validate();
+    const sameName = new RegExp(`^${escapeRegex(document.name)}$`, 'i');
     if (
       this.data.rooms.some(
-        (room) => room.hotelId === hotel.id && room.name === document.name,
+        (room) => room.hotelId === hotel.id && sameName.test(room.name),
       )
     ) {
       throw new ConflictException({

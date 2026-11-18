@@ -14,6 +14,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { escapeRegex } from '../../common/text/escape-regex.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
@@ -172,7 +173,11 @@ export class HotelsService {
     return hotel ? this.toView(hotel) : null;
   }
 
-  /** HTL-03: assignment comes from the authenticated account; new rooms have no bookable dates. */
+  /**
+   * HTL-03: assignment comes from the authenticated account. Names are stored
+   * trimmed and lowercase; case-insensitive collisions include legacy names.
+   * New rooms have no bookable dates.
+   */
   async createRoom(
     hotelId: string,
     input: CreateRoomDto,
@@ -181,21 +186,29 @@ export class HotelsService {
     const id = this.assignedHotelId(hotelId, moderatorHotelId);
     if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
     try {
-      const room = await this.roomModel.create({
+      const room = new this.roomModel({
         hotelId: id,
-        name: input.name,
+        name: input.name.trim().toLowerCase(),
         type: input.type,
         beds: input.beds,
         maxOccupancy: input.maxOccupancy,
         pricePerNightMinor: input.pricePerNightMinor,
       });
+      await room.validate();
+      // Protect legacy mixed-case names; the existing unique index handles concurrent lowercase inserts.
+      if (
+        await this.roomModel.exists({
+          hotelId: id,
+          name: new RegExp(`^${escapeRegex(room.name)}$`, 'i'),
+        })
+      ) {
+        throw this.roomNameConflict();
+      }
+      await room.save();
       return this.toRoomView(room);
     } catch (error) {
       if (error instanceof mongo.MongoServerError && error.code === 11000) {
-        throw new ConflictException({
-          code: ErrorCode.Conflict,
-          message: 'A room with this name already exists in this hotel',
-        });
+        throw this.roomNameConflict();
       }
       throw error;
     }
@@ -373,6 +386,13 @@ export class HotelsService {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Hotel not found',
+    });
+  }
+
+  private roomNameConflict(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.Conflict,
+      message: 'A room with this name already exists in this hotel',
     });
   }
 

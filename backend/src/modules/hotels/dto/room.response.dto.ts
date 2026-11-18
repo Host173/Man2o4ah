@@ -17,7 +17,10 @@ export class RoomResponseDto implements Omit<RoomView, 'id' | 'availability'> {
   @ApiProperty()
   hotelId!: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'New room names are trimmed and lowercase; legacy names retain their stored capitalization',
+  })
   name!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 50 })

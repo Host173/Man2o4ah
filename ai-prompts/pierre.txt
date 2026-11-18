@@ -774,3 +774,5 @@ Kareem approved lowercase storage; implement it and push the fixes
 How the output was used:
 Appended ai-prompts/pierre.txt; recorded the user's confirmation of Kareem's approval for lowercase storage and proceeded with service/API/fake regressions without changing schema definitions, indexes or shared database records.
 ================================================
+
+Follow-up for the same 2026-11-18 approved implementation request: committed failing naming regressions first as 920b754, then implemented trimmed lowercase storage and escaped exact case-insensitive legacy-name collision checks in hotels.service.ts and hotels.fake.ts; updated create-room.dto.ts, room.response.dto.ts and hotels.types.ts to document the approved behavior. Focused hotel tests passed 153 cases; backend npm run verify passed all gates, 1308 tests across 100 files, coverage thresholds and build. Existing mixed-case records are not rewritten; schemas and indexes are unchanged. Prepared both numeric-fix commits and naming-fix commits for the requested push and PR #159 description update.

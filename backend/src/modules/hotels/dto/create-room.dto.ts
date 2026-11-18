@@ -10,7 +10,11 @@ import {
 } from 'class-validator';
 
 export class CreateRoomDto {
-  @ApiProperty({ minLength: 1, description: 'Unique within the hotel' })
+  @ApiProperty({
+    minLength: 1,
+    description:
+      'Stored trimmed and lowercase; unique within the hotel ignoring case',
+  })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(1)

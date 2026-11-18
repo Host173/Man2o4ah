@@ -40,3 +40,42 @@ make a pr
 How the output was used:
 Committed INV-02 tests first as f7aa043 and implementation as 89fb0b6, pushed feature/INV-02-roomnightinventory, opened PR #152 targeting develop with the repository template and Kareem requested as reviewer, and appended ai-prompts/pierre.txt; backend build passed and the existing full verification passed 1104 tests.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+does the pr lacks something or have som takeways ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; reviewed PR #152 and added one inline comment about the fake accepting transaction-free calls; confirmed CI is green, Kareem approval is pending, and automatic Copilot review failed due to billing configuration; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+read the comments on the pr and tell me if it real or not
+
+How the output was used:
+Appended ai-prompts/pierre.txt; checked PR #152 reviews against production and fake identifier handling, confirmed the ObjectId validation/case-normalization finding, and identified the later review's expired-hold clarification as HTL-16 scope; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: INV-02
+
+Prompt:
+ok fixand push
+
+How the output was used:
+Added inventory-ids.ts and shared identifier validation/canonicalization with the production inventory and fake, migrated fake fixtures, added 11 regression cases in test-first commit 6cb6b44, and appended ai-prompts/pierre.txt for PR #152; targeted 87 tests passed and isolated tracked-PR npm run verify passed 1115 tests; main-worktree verification stopped on unrelated untracked HTL-01 type errors, whose files were left untouched.
+================================================

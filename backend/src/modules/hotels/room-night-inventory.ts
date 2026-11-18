@@ -11,6 +11,7 @@ import type { ClientSession, Model } from 'mongoose';
 import { addDays } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { HotelTransactionOptions, RoomDateRange } from './hotels.types.js';
+import { normalizeInventoryId } from './inventory-ids.js';
 import {
   assertDateRange,
   assertStayDates,
@@ -45,7 +46,7 @@ export class RoomNightInventory {
     this.assertIds([hotelId, reservationId, ...roomIds]);
     assertStayDates(checkIn, checkOut);
     // ObjectId strings differing only in letter case still identify the same room.
-    const selected = roomIds.map((id) => new Types.ObjectId(id).toHexString());
+    const selected = roomIds.map(normalizeInventoryId);
     if (!selected.length || new Set(selected).size !== selected.length) {
       throw new BadRequestException({
         code: ErrorCode.ValidationFailed,
@@ -254,12 +255,7 @@ export class RoomNightInventory {
   }
 
   private assertIds(ids: string[]): void {
-    if (ids.some((id) => !Types.ObjectId.isValid(id))) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Inventory IDs must be valid ObjectIds',
-      });
-    }
+    ids.forEach(normalizeInventoryId);
   }
 
   private async touchRoom(roomId: string, session: ClientSession) {

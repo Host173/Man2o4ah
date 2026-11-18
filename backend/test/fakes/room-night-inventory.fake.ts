@@ -13,6 +13,7 @@ import type {
   RoomView,
 } from '../../src/modules/hotels/hotels.types.js';
 import type { RoomNightInventory } from '../../src/modules/hotels/room-night-inventory.js';
+import { normalizeInventoryId } from '../../src/modules/hotels/inventory-ids.js';
 import {
   assertDateRange,
   assertStayDates,
@@ -24,6 +25,7 @@ import type { PublicApi } from './public-api.js';
 /**
  * Atomic within this in-memory dataset; does not emulate MongoDB transactions.
  * Options may be omitted for fixture setup; the production inventory requires an active transaction.
+ * Identifier validation and canonicalization match the production inventory.
  */
 export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
   constructor(private readonly hotels: FakeHotelsService) {}
@@ -37,6 +39,9 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    hotelId = normalizeInventoryId(hotelId);
+    reservationId = normalizeInventoryId(reservationId);
+    roomIds = roomIds.map(normalizeInventoryId);
     assertStayDates(checkIn, checkOut);
     if (roomIds.length === 0 || new Set(roomIds).size !== roomIds.length) {
       throw new BadRequestException({
@@ -74,6 +79,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    reservationId = normalizeInventoryId(reservationId);
     this.removeNights(
       (night) =>
         night.kind === 'reservation' && night.reservationId === reservationId,
@@ -87,6 +93,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<string> {
     void options;
+    roomId = normalizeInventoryId(roomId);
     assertDateRange(fromDate, toDate);
     const room = this.requireRoom(roomId);
     if (
@@ -120,6 +127,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    blockId = normalizeInventoryId(blockId);
     this.removeNights(
       (night) => night.kind === 'blocked' && night.blockId === blockId,
     );
@@ -131,6 +139,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    roomId = normalizeInventoryId(roomId);
     const room = this.requireRoom(roomId);
     const normalized = normalizeAvailability(ranges);
     if (
@@ -155,6 +164,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    roomId = normalizeInventoryId(roomId);
     const room = this.requireRoom(roomId);
     this.assertNoFutureReservations(roomId);
     room.isActive = false;
@@ -165,6 +175,7 @@ export class FakeRoomNightInventory implements PublicApi<RoomNightInventory> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
+    roomId = normalizeInventoryId(roomId);
     const room = this.requireRoom(roomId);
     this.assertNoFutureReservations(roomId);
     if (room.hasEverBeenReserved) {

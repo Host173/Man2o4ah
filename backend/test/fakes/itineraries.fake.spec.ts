@@ -203,4 +203,12 @@ describe('FakeItinerariesService owner-only methods', () => {
       itineraries.getById(created._id, 'user-1'),
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
   });
+
+  it('leaves updatedAt alone when an update changes nothing', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    const unchanged = await itineraries.update(created._id, {}, 'user-1');
+    expect(unchanged.updatedAt).toEqual(created.updatedAt);
+  });
 });

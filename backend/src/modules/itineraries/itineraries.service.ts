@@ -231,7 +231,10 @@ export class ItinerariesService {
       throw this.invalidField('title', 'title must be a string');
     }
     const trimmed = title.trim();
-    if (trimmed.length < 1 || trimmed.length > MAX_TITLE_LENGTH) {
+    // Count characters, not UTF-16 code units: an emoji is one character, and
+    // the DTO's `MaxLength` already counts it that way (validator.js isLength).
+    const length = Array.from(trimmed).length;
+    if (length < 1 || length > MAX_TITLE_LENGTH) {
       throw this.invalidField(
         'title',
         `title must be between 1 and ${MAX_TITLE_LENGTH} characters`,

@@ -140,7 +140,13 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
     it('accepts the title boundaries of 1 and 100 characters', async () => {
       const owner = await loginAs(testApp.connection, UserRole.USER);
 
-      for (const title of ['x', `  ${'x'.repeat(100)}  `]) {
+      // Emoji count as one character each, not two UTF-16 code units.
+      for (const title of [
+        'x',
+        '😀',
+        `  ${'x'.repeat(100)}  `,
+        `  ${'😀'.repeat(100)}  `,
+      ]) {
         const response = await testApp
           .http()
           .post('/api/itineraries')
@@ -157,6 +163,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       const cases: { body: Record<string, unknown>; field: string }[] = [
         { body: { ...validBody, title: '   ' }, field: 'title' },
         { body: { ...validBody, title: 'x'.repeat(101) }, field: 'title' },
+        { body: { ...validBody, title: '😀'.repeat(101) }, field: 'title' },
         { body: { ...validBody, title: undefined }, field: 'title' },
         { body: { ...validBody, countryCodes: [] }, field: 'countryCodes' },
         {
@@ -436,6 +443,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         { body: { title: null }, field: 'title' },
         { body: { title: '   ' }, field: 'title' },
         { body: { title: 'x'.repeat(101) }, field: 'title' },
+        { body: { title: '😀'.repeat(101) }, field: 'title' },
         { body: { countryCodes: [] }, field: 'countryCodes' },
         { body: { countryCodes: ['ZZ'] }, field: 'countryCodes' },
         { body: { startDate: '2027-02-30' }, field: 'startDate' },

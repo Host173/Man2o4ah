@@ -100,17 +100,25 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       );
       expect(shortest.title).toBe('x');
 
-      const longest = await itineraries.create(
-        createDto({ title: `  ${'x'.repeat(100)}  ` }),
-        owner.id,
-      );
-      expect(longest.title).toBe('x'.repeat(100));
+      // Emoji count as one character each, not two UTF-16 code units.
+      for (const title of ['x'.repeat(100), '😀'.repeat(100)]) {
+        const longest = await itineraries.create(
+          createDto({ title: `  ${title}  ` }),
+          owner.id,
+        );
+        expect(longest.title).toBe(title);
+      }
     });
 
     it('rejects blank, non-string and over-long titles with 400 VALIDATION_FAILED', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
 
-      for (const title of ['   ', 'x'.repeat(101), undefined as never]) {
+      for (const title of [
+        '   ',
+        'x'.repeat(101),
+        '😀'.repeat(101),
+        undefined as never,
+      ]) {
         const error = await itineraries
           .create(createDto({ title }), owner.id)
           .catch((caught: unknown) => caught);

@@ -105,12 +105,21 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDetailView> {
     const itinerary = this.findOwned(itineraryId, userId);
-    if (dto.title !== undefined) itinerary.title = dto.title.trim();
+    let changed = false;
+    if (dto.title !== undefined) {
+      itinerary.title = dto.title.trim();
+      changed = true;
+    }
     if (dto.countryCodes !== undefined) {
       itinerary.countryCodes = [...dto.countryCodes];
+      changed = true;
     }
-    if (dto.startDate !== undefined) itinerary.startDate = dto.startDate;
-    itinerary.updatedAt = new Date();
+    if (dto.startDate !== undefined) {
+      itinerary.startDate = dto.startDate;
+      changed = true;
+    }
+    // The real service returns the itinerary untouched when nothing changed.
+    if (changed) itinerary.updatedAt = new Date();
     return structuredClone(itinerary);
   }
 

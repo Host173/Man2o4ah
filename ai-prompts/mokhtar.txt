@@ -210,3 +210,48 @@ and about the screenshot, we don't need it in the repo
 How the output was used:
 Counted title characters as code points in the service and the schema (Array.from(value).length), added 100-emoji and 101-emoji tests to the service, API and schema specs, stopped an empty update from bumping updatedAt in the fake, deleted docs/screenshots/itn-01-swagger.jpg and dropped it from the PR description; committed ce48c4e.
 ================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+You are tasked with implementing GitHub Issue #66: "ITN-05: Days and city groups".
+
+Please follow all project rules, architecture guidelines, and conventions strictly.
+
+### 1. Initial Research & Full Codebase Overview (Do this first)
+* Read all relevant project documentation and skill files inside `docs/ai/skills/travel-platform/`.
+* Inspect the existing `itineraries` module, shared contracts, schemas/models, DTOs, services, controllers, and test files (including the implementation from dependency `#65` / `ITN-01`) so you have a complete overview of how itineraries, validation, owner scoping, and Swagger documentation are structured.
+* Confirm whether `#65` (`ITN-01`) is already merged into the base branch before branching; if not, let me know how you are basing the branch so there are no conflicts.
+
+### 2. Branch Setup
+* Create and check out the exact feature branch:
+  `git checkout -b feature/ITN-05-days-city-groups`
+
+### 3. Strict TDD Workflow (`TDD required: Yes`)
+Because **TDD is required** for this issue (`tdd` label), you MUST follow Red-Green-Refactor:
+1. **Write failing tests first** before writing any production implementation code:
+   * **Unit tests** covering day numbering, date calculation from the itinerary's `startDate`, and consecutive same-city grouping logic.
+   * **API tests** covering adding days, editing a day's city and notes, owner-only access (`401` without session, `404` on another user's itinerary, `400` on invalid input), and Swagger registration.
+2. Run the test suite to confirm the new tests fail for the expected reasons.
+3. Implement the minimal, clean production code to make all tests pass, then refactor while keeping tests green.
+
+### 4. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement all features satisfying requirements **ITN-05** and **ITN-09**:
+* **Add Days:** Allow the itinerary owner to add days to an itinerary.
+* **Edit Day Details:** Allow the owner to edit each day's `city` and `notes`.
+* **Automatic Numbering & Dating:** Automatically calculate and return day numbers (e.g., Day 1, Day 2...) and exact calendar dates derived sequentially from the itinerary's `startDate`.
+* **Consecutive Same-City Grouping:** Group consecutive days that share the same city into city groups in the response (maintaining chronological order).
+* **Security & Validation:** Enforce session authentication and strict `ownerId` scoping on every read and write operation. Ensure Swagger decorators/schemas are accurately updated.
+
+### 5. Verification, Prompt Logging & Pull Request Creation
+* Run the full verification command (e.g., `npm run verify` — format check, linter, typecheck, unit/integration/API tests, and build) and ensure 100% pass with strong coverage.
+* Log the prompts used for this issue into the project's prompts file following the repo's prompt-tracking rules.
+* Commit your changes cleanly, push the branch, and open a Pull Request with:
+  * **Exact PR Title:** `ITN-05: Days and city groups`
+  * **PR Description:** Include a clear summary of changes, `Closes #66`, test results, and a reminder/placeholder for the Swagger test screenshot.
+
+How the output was used:
+Implemented ITN-05/ITN-09 in the itineraries module (day helpers, DTOs, service, controller, Swagger models and fake), tests first then code; `npm run verify` passed with 1152 tests and 98.17% lines. The branch is based on the latest develop with the unmerged ITN-01 branch merged in; committed e540ae3 (tests) and b0a5186 (implementation).
+================================================

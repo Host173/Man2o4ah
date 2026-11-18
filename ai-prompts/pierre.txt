@@ -608,6 +608,19 @@ Follow-up during the same 2026-11-18 recovery request: newer develop changes cau
 Date: 2026-11-18
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: HTL-09
+
+Prompt:
+implemnet this tickect and the make pr linked with this work item
+
+How the output was used:
+Changed the hotels policy DTO, service, controller, tests and hotels fake; commit: feat(hotels): implement hotel policies (HTL-09).
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
 Related Requirement: HTL-03
 
 Prompt:
@@ -815,3 +828,5 @@ true
 How the output was used:
 Appended ai-prompts/pierre.txt; recorded confirmation to merge origin/develop into feature/HTL-03-rooms, preserve the room and policy features, run backend verification and push the resolution.
 ================================================
+
+Follow-up for the same 2026-11-18 approved synchronization request: resolved all seven conflicts while merging develop at 44f62f5, preserving HTL-03 rooms, upstream HTL-09 policies and all incoming blog/CI changes. Verified that the merged prompt log retains the exact upstream prefix and complete local append-only suffix, and that all 12 incoming policy methods/tests in conflicted TypeScript files are unchanged. Focused hotel tests passed 223 cases across eight files. Backend npm run verify passed formatting, lint, typecheck, 1339 tests across 102 files, coverage gates and build; overall line coverage was 98.42%, and HotelsService covered 106/106 lines. One pre-existing reference-data lint warning remains. No rebase or force-push was used; prepared the verified merge for the authorized push to PR #159.

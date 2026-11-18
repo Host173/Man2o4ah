@@ -858,7 +858,9 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
 
-      const unknownParam = await testApp!.http().get('/api/posts?q=search');
+      const unknownParam = await testApp!
+        .http()
+        .get('/api/posts?unknownParam=search');
       expect(unknownParam.status).toBe(400);
       expect(unknownParam.body.code).toBe(ErrorCode.ValidationFailed);
     });
@@ -2587,5 +2589,245 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(userControlRes.body.posts.items).toHaveLength(1);
       expect(userControlRes.body.itineraries.items).toHaveLength(1);
     });
+  });
+
+  describe('GET /api/posts?q= search (BLG-09)', () => {
+    it('searches published posts by title, tag, and author name, orders by engagement then date, includes excerpts, and handles edge cases', async () => {
+      const aisha = await loginAs(testApp!.connection, UserRole.USER);
+      const tariq = await loginAs(testApp!.connection, UserRole.USER);
+      const deactivated = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: aisha.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          { id: tariq.id, name: 'Tariq Oasis', email: 'tariq@example.com' },
+          {
+            id: deactivated.id,
+            name: 'Deactivated Writer',
+            email: 'deactivated@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
+      );
+
+      const postByTitle = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Backpacking Siwa (2026) & Caves',
+          body: '<p>Short plain summary for Siwa.</p>',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        });
+      const postByTag = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Western Desert Itinerary',
+          body: `Detailed route ${'B'.repeat(210)}`,
+          status: PostStatus.PUBLISHED,
+          tags: ['Siwa-Camps', 'egypt'],
+        });
+      const postByAuthor = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', tariq.cookie)
+        .send({
+          title: 'Morning Coffee',
+          body: 'Quiet streets.',
+          status: PostStatus.PUBLISHED,
+          tags: ['lifestyle'],
+        });
+
+      // Draft and hidden posts must never show up in search.
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Siwa Draft Notes',
+          body: 'Private.',
+          status: PostStatus.DRAFT,
+          tags: ['siwa'],
+        });
+      const hidden = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Siwa Hidden Notes',
+          body: 'Moderated.',
+          status: PostStatus.PUBLISHED,
+          tags: ['siwa'],
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+
+      // Deactivated author's post marked via event must never appear even if searched by author name.
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', deactivated.cookie)
+        .send({
+          title: 'Siwa Deactivated Post',
+          body: 'Gone.',
+          status: PostStatus.PUBLISHED,
+          tags: ['siwa'],
+        });
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: deactivated.id,
+      });
+
+      // Raise engagement on postByTag so it outranks postByTitle when both match "siwa".
+      await testApp!
+        .http()
+        .post(`/api/posts/${postByTag.body._id}/comments`)
+        .set('Cookie', tariq.cookie)
+        .send({ body: 'Awesome Siwa guide!' });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(postByTag.body._id as string) },
+        { $inc: { likeCount: 3 } },
+      );
+
+      // Search by partial case-insensitive keyword matching both title and tag; check engagement sort + excerpt + response shape.
+      const siwaPage1 = await testApp!
+        .http()
+        .get('/api/posts?q=%20SIWA%20&page=1&limit=1');
+      expect(siwaPage1.status).toBe(200);
+      expect(siwaPage1.body).toMatchObject({
+        page: 1,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(siwaPage1.body.items[0]).toMatchObject({
+        _id: postByTag.body._id,
+        authorName: 'Aisha Rawahi',
+        title: 'Western Desert Itinerary',
+        likeCount: 3,
+        commentCount: 1,
+        excerpt: `Detailed route ${'B'.repeat(185)}...`,
+      });
+
+      const siwaPage2 = await testApp!
+        .http()
+        .get('/api/posts?q=siwa&page=2&limit=1');
+      expect(siwaPage2.status).toBe(200);
+      expect(siwaPage2.body.items[0]).toMatchObject({
+        _id: postByTitle.body._id,
+        authorName: 'Aisha Rawahi',
+        excerpt: 'Short plain summary for Siwa.',
+      });
+
+      // Combine q + tag filter.
+      const combined = await testApp!
+        .http()
+        .get('/api/posts?q=siwa&tag=DESERT');
+      expect(combined.status).toBe(200);
+      expect(combined.body.items.map((p: { _id: string }) => p._id)).toEqual([
+        postByTitle.body._id,
+      ]);
+
+      // Search by partial case-insensitive author name.
+      const authorSearch = await testApp!.http().get('/api/posts?q=tari');
+      expect(authorSearch.status).toBe(200);
+      expect(
+        authorSearch.body.items.map((p: { _id: string }) => p._id),
+      ).toEqual([postByAuthor.body._id]);
+      expect(authorSearch.body.items[0].authorName).toBe('Tariq Oasis');
+      expect(authorSearch.body.items[0].excerpt).toBe('Quiet streets.');
+
+      // Special regex characters match literally without 500 error.
+      const specialCharSearch = await testApp!
+        .http()
+        .get('/api/posts?q=(2026)%20%26');
+      expect(specialCharSearch.status).toBe(200);
+      expect(
+        specialCharSearch.body.items.map((p: { _id: string }) => p._id),
+      ).toEqual([postByTitle.body._id]);
+
+      // Deactivated author search returns empty page; unknown query returns empty page.
+      const deactivatedSearch = await testApp!
+        .http()
+        .get('/api/posts?q=Deactivated');
+      expect(deactivatedSearch.status).toBe(200);
+      expect(deactivatedSearch.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const noResults = await testApp!.http().get('/api/posts?q=patagonia');
+      expect(noResults.status).toBe(200);
+      expect(noResults.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      // Empty or whitespace-only q acts as unfiltered published browse.
+      const blankSearch = await testApp!.http().get('/api/posts?q=%20%20%20');
+      expect(blankSearch.status).toBe(200);
+      expect(blankSearch.body.total).toBe(3);
+
+      // Overlong q (> 150 chars) fails validation cleanly with 400 VALIDATION_FAILED on field 'q'.
+      const overlongSearch = await testApp!
+        .http()
+        .get(`/api/posts?q=${'x'.repeat(151)}`);
+      expect(overlongSearch.status).toBe(400);
+      expect(overlongSearch.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(
+        overlongSearch.body.details.some(
+          (d: { field: string }) => d.field === 'q',
+        ),
+      ).toBe(true);
+    });
+
+    it.each([
+      { label: '76 x 😀 (152 UTF-16 units)', q: '😀'.repeat(76) },
+      { label: '150 x 😀 (300 UTF-16 units)', q: '😀'.repeat(150) },
+      { label: '150 x "a"', q: 'a'.repeat(150) },
+      {
+        label: 'mixed emoji and letters at 150 code points',
+        q: `${'a'.repeat(50)}${'😀'.repeat(100)}`,
+      },
+    ])('returns 200 for q with $label (BLG-09)', async ({ q }) => {
+      const res = await testApp!
+        .http()
+        .get(`/api/posts?q=${encodeURIComponent(q)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+      });
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(typeof res.body.total).toBe('number');
+      expect(typeof res.body.totalPages).toBe('number');
+    });
+
+    it.each([
+      { label: '151 x 😀', q: '😀'.repeat(151) },
+      { label: '151 x "a"', q: 'a'.repeat(151) },
+    ])(
+      'returns 400 VALIDATION_FAILED for overlong q with $label (BLG-09)',
+      async ({ q }) => {
+        const res = await testApp!
+          .http()
+          .get(`/api/posts?q=${encodeURIComponent(q)}`);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((d: { field: string }) => d.field),
+        ).toContain('q');
+      },
+    );
   });
 });

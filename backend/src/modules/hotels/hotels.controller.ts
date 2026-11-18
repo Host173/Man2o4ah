@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
 } from '@nestjs/common';
@@ -38,6 +39,7 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 import { HotelProfileResponseDto } from './dto/hotel-profile.response.dto.js';
+import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import {
   PaginatedRoomsResponseDto,
@@ -102,6 +104,35 @@ export class HotelsController {
       ...result,
       items: result.items.map((room) => RoomResponseDto.fromView(room)),
     };
+  }
+
+  @Put(':id/policies')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'HTL-09 / HTL-10 Replace check-in/out times and cancellation tiers',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: HotelProfileResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid ID, HH:mm times, or cancellation tiers (unique non-negative integer daysBefore and integer refundPercent from 0 to 100)',
+  })
+  @ApiNotFoundResponse({
+    description: 'Hotel not found or not assigned to this moderator',
+  })
+  async updatePolicies(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() input: UpdateHotelPoliciesDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<HotelProfileResponseDto> {
+    return HotelProfileResponseDto.fromView(
+      await this.hotels.updatePolicies(
+        id.toHexString(),
+        input,
+        user.providerId,
+      ),
+    );
   }
 
   @Post(':id/photos')

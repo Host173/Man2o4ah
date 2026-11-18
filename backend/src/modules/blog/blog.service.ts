@@ -11,13 +11,16 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
+import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
 import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import {
+  buildExcerpt,
   MAX_TAG_LENGTH,
   MAX_TAGS_PER_POST,
   MIN_TAG_LENGTH,
@@ -55,7 +58,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post, tag, author page, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-12, ACC-12).
+ * Travel blog post, tag, search, author page, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, BLG-12, ACC-12).
  * Other blog endpoints and listeners ship in later Sprint 2 tickets.
  */
 @Injectable()
@@ -89,9 +92,10 @@ export class BlogService {
   }
 
   /**
-   * BLG-02 / BLG-08: lists paginated published posts (newest `publishedAt`
-   * first), optionally filtered by normalised tag, excluding drafts, hidden
-   * posts and deactivated authors' posts.
+   * BLG-02 / BLG-08 / BLG-09: lists or searches paginated published posts,
+   * excluding drafts, hidden posts and deactivated authors' posts. When `q` is
+   * provided, matches title, normalised tags, or author name and orders by
+   * engagement (`likeCount + commentCount` desc) then newest `publishedAt` desc.
    */
   async listPublished(
     query: ListPostsQueryDto = new ListPostsQueryDto(),
@@ -99,6 +103,70 @@ export class BlogService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
+    const q = query.q !== undefined ? query.q.trim() : undefined;
+
+    if (q && q.length > 0) {
+      const matchedUserIds = await this.accountsService.findUserIdsByName(q);
+      const validAuthorIds = matchedUserIds.filter((id) =>
+        OBJECT_ID_HEX_RE.test(id),
+      );
+      const matchedAuthorProfiles = await this.resolveProfiles(validAuthorIds);
+      const authorObjectIds = validAuthorIds
+        .filter(
+          (id) =>
+            matchedAuthorProfiles.get(id)?.status !== UserStatus.DEACTIVATED,
+        )
+        .map((id) => new Types.ObjectId(id));
+
+      const titleRegex = keywordRegex(q);
+      const normalizedQueryTag = normalizeTag(q);
+      const tagRegex = new RegExp(escapeRegex(normalizedQueryTag), 'i');
+
+      const matchFilter: QueryFilter<StoredPost> = {
+        status: PostStatus.PUBLISHED,
+        isHidden: false,
+        authorDeactivated: false,
+        ...(tag ? { tags: tag } : {}),
+        $or: [
+          { title: titleRegex },
+          { tags: tagRegex },
+          ...(authorObjectIds.length > 0
+            ? [{ authorId: { $in: authorObjectIds } }]
+            : []),
+        ],
+      };
+
+      const [items, total] = await Promise.all([
+        this.postModel
+          .aggregate<PostRecord>([
+            { $match: matchFilter },
+            {
+              $addFields: {
+                interactionScore: { $add: ['$likeCount', '$commentCount'] },
+              },
+            },
+            { $sort: { interactionScore: -1, publishedAt: -1, _id: -1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            { $project: { interactionScore: 0 } },
+          ])
+          .exec(),
+        this.postModel.countDocuments(matchFilter).exec(),
+      ]);
+
+      const profiles = await this.resolveProfiles(
+        items.map((post) => post.authorId.toHexString()),
+      );
+      return toPage(
+        items.map((post) =>
+          this.toPublishedView(post, profiles.get(post.authorId.toHexString())),
+        ),
+        total,
+        page,
+        limit,
+      );
+    }
+
     return this.paginatePublishedPosts(tag ? { tags: tag } : {}, {
       page,
       limit,
@@ -815,6 +883,7 @@ export class BlogService {
     return {
       ...this.toView(post),
       authorName: profile?.name ?? null,
+      excerpt: buildExcerpt(post.body),
     };
   }
 

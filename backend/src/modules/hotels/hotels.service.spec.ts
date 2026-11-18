@@ -59,6 +59,93 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
+  describe('hotel policies (HTL-09, HTL-10)', () => {
+    const policies = {
+      checkInTime: '15:30',
+      checkOutTime: '11:00',
+      cancellationPolicy: {
+        tiers: [
+          { daysBefore: 0, refundPercent: 0 },
+          { daysBefore: 7, refundPercent: 100 },
+          { daysBefore: 2, refundPercent: 50 },
+        ],
+      },
+    };
+
+    it('replaces only policy fields and leaves previously read policies detached', async () => {
+      const created = await service.create(profile);
+      const updated = await service.updatePolicies(
+        created.id,
+        policies,
+        created.id,
+      );
+      expect(updated).toEqual({ ...created, ...policies });
+      expect(await service.getHotel(created.id)).toEqual(updated);
+      const cleared = { ...policies, cancellationPolicy: { tiers: [] } };
+      expect(
+        await service.updatePolicies(created.id, cleared, created.id),
+      ).toEqual({ ...created, ...cleared });
+      expect(updated.cancellationPolicy).toEqual(policies.cancellationPolicy);
+      expect(created.cancellationPolicy).toEqual({ tiers: [] });
+    });
+
+    it('validates the entire policy update before saving any field', async () => {
+      const created = await service.create(profile);
+      for (const invalid of [
+        { ...policies, checkInTime: '24:00' },
+        { ...policies, checkOutTime: '12:60' },
+        {
+          ...policies,
+          cancellationPolicy: {
+            tiers: [
+              { daysBefore: 7, refundPercent: 100 },
+              { daysBefore: 7, refundPercent: 50 },
+            ],
+          },
+        },
+        {
+          ...policies,
+          cancellationPolicy: {
+            tiers: [{ daysBefore: -1, refundPercent: 101 }],
+          },
+        },
+      ]) {
+        await expect(
+          service.updatePolicies(created.id, invalid, created.id),
+        ).rejects.toMatchObject({ name: 'ValidationError' });
+        expect(await service.getHotel(created.id)).toEqual(created);
+      }
+    });
+
+    it('rejects missing assignments, other hotels, missing hotels and malformed IDs', async () => {
+      const created = await service.create(profile);
+      const missing = new Types.ObjectId().toHexString();
+      for (const assignment of [undefined, missing, 'invalid']) {
+        await expect(
+          service.updatePolicies(created.id, policies, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      for (const input of [policies, { ...policies, checkInTime: '24:00' }]) {
+        await expect(
+          service.updatePolicies(missing, input, missing),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      await expect(
+        service.updatePolicies('invalid', policies, created.id),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect(await service.getHotel(created.id)).toEqual(created);
+    });
+  });
+
   describe('rooms (HTL-03)', () => {
     const input = {
       name: '101',

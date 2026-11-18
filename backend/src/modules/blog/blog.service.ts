@@ -15,7 +15,7 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
-import { UserStatus } from '../accounts/schemas/user.schema.js';
+import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import {
   MAX_TAG_LENGTH,
@@ -31,6 +31,7 @@ import type {
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import type { CreateCommentDto } from './dto/create-comment.dto.js';
 import type { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -105,30 +106,39 @@ export class BlogService {
 
   /**
    * BLG-12: loads the public author page showing display name, join date,
-   * paginated published posts, and public itineraries (`CTR-06`). Throws 404
-   * for unknown or deactivated authors.
+   * independently paginated published posts and public itineraries (`CTR-06`).
+   * Throws 404 for unknown, deactivated, or non-user (admin/moderator) accounts.
    */
   async getAuthorPage(
     authorId: string,
-    query: PaginationQueryDto = new PaginationQueryDto(),
+    query: Partial<AuthorPageQueryDto> = new AuthorPageQueryDto(),
   ): Promise<AuthorPageView> {
     const authorObjectId = this.parseId(authorId, 'authorId');
     const hexId = authorObjectId.toHexString();
     const profiles = await this.resolveProfiles([hexId]);
     const author = profiles.get(hexId);
-    if (!author || author.status === UserStatus.DEACTIVATED) {
+    if (
+      !author ||
+      author.status === UserStatus.DEACTIVATED ||
+      !(await this.isRegularUserAccount(author))
+    ) {
       throw this.authorNotFound();
     }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
+    const itinerariesPage = query.itinerariesPage ?? 1;
+    const itinerariesLimit = query.itinerariesLimit ?? 10;
     const [posts, itineraries] = await Promise.all([
       this.paginatePublishedPosts(
         { authorId: authorObjectId },
         { page, limit },
         profiles,
       ),
-      this.itinerariesService.listPublicByAuthor(hexId),
+      this.itinerariesService.listPublicByAuthor(hexId, {
+        page: itinerariesPage,
+        limit: itinerariesLimit,
+      }),
     ]);
 
     return {
@@ -138,6 +148,29 @@ export class BlogService {
       posts,
       itineraries,
     };
+  }
+
+  /**
+   * Checks account role via `AccountsService` (`CTR-01`) so admin and
+   * moderator accounts never expose an author page.
+   */
+  private async isRegularUserAccount(author: AccountProfile): Promise<boolean> {
+    const trimmedName = author.name.trim();
+    for (let page = 1; ; page += 1) {
+      const accountsPage = await this.accountsService.listAccounts({
+        page,
+        limit: 50,
+        ...(trimmedName !== '' ? { q: trimmedName } : {}),
+        status: author.status,
+      });
+      const match = accountsPage.items.find((item) => item.id === author.id);
+      if (match) {
+        return match.role === UserRole.USER;
+      }
+      if (page >= accountsPage.totalPages || accountsPage.items.length === 0) {
+        return false;
+      }
+    }
   }
 
   /**

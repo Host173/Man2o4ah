@@ -36,6 +36,7 @@ import type {
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import { CreateCommentDto } from './dto/create-comment.dto.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -250,11 +251,11 @@ export class BlogController {
     description: 'Invalid author ID or pagination query',
   })
   @ApiNotFoundResponse({
-    description: 'Author not found or deactivated',
+    description: 'Author not found, deactivated, or not a user account',
   })
   getAuthorPage(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
-    @Query() query: PaginationQueryDto,
+    @Query() query: AuthorPageQueryDto,
   ): Promise<AuthorPageView> {
     return this.blogService.getAuthorPage(id.toHexString(), query);
   }

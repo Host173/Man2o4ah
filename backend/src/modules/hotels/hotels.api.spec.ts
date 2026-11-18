@@ -138,6 +138,35 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
       expect(await nights.countDocuments()).toBe(0);
     });
 
+    it('rejects oversized blocks before inventory writes with a field-level validation error', async () => {
+      const user = await moderator();
+      const block = vi
+        .spyOn(inventory, 'block')
+        .mockResolvedValue(new Types.ObjectId().toHexString());
+      for (const toDate of ['2028-12-31', '2999-12-31']) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send({ op: 'BLOCK', fromDate: '2028-01-01', toDate })
+          .expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [
+            {
+              field: 'toDate',
+              message: expect.any(String),
+            },
+          ],
+        });
+      }
+      expect(block).not.toHaveBeenCalled();
+      expect(await nights.countDocuments()).toBe(0);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 0,
+      });
+    });
+
     it('returns a plain inactive room with calendar dates, and deletes a never-reserved room with its blocks', async () => {
       const user = await moderator();
       const response = await mutation('DEACTIVATE')

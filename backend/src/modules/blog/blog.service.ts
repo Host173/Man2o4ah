@@ -354,7 +354,7 @@ export class BlogService {
       if (!updated) throw this.notFound();
       return {
         postId: postObjectId.toHexString(),
-        likeCount: updated.likeCount,
+        likeCount: Math.max(0, updated.likeCount),
         liked: true,
       };
     }
@@ -363,7 +363,7 @@ export class BlogService {
     if (!current) throw this.notFound();
     return {
       postId: postObjectId.toHexString(),
-      likeCount: current.likeCount,
+      likeCount: Math.max(0, current.likeCount),
       liked: true,
     };
   }
@@ -389,18 +389,16 @@ export class BlogService {
     if (deleted) {
       const updated = await this.postModel
         .findOneAndUpdate(
-          { _id: postObjectId, likeCount: { $gt: 0 } },
+          { _id: postObjectId },
           { $inc: { likeCount: -1 } },
           { returnDocument: 'after' },
         )
         .lean()
         .exec();
-      const current =
-        updated ?? (await this.postModel.findById(postObjectId).lean().exec());
-      if (!current) throw this.notFound();
+      if (!updated) throw this.notFound();
       return {
         postId: postObjectId.toHexString(),
-        likeCount: current.likeCount,
+        likeCount: Math.max(0, updated.likeCount),
         liked: false,
       };
     }
@@ -409,7 +407,7 @@ export class BlogService {
     if (!current) throw this.notFound();
     return {
       postId: postObjectId.toHexString(),
-      likeCount: current.likeCount,
+      likeCount: Math.max(0, current.likeCount),
       liked: false,
     };
   }
@@ -705,7 +703,7 @@ export class BlogService {
       ...(post.publishedAt !== undefined
         ? { publishedAt: post.publishedAt }
         : {}),
-      likeCount: post.likeCount,
+      likeCount: Math.max(0, post.likeCount),
       commentCount: post.commentCount,
       isHidden: post.isHidden,
       authorDeactivated: post.authorDeactivated,

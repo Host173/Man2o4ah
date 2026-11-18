@@ -616,3 +616,217 @@ implemnet this tickect and the make pr linked with this work item
 How the output was used:
 Changed the hotels policy DTO, service, controller, tests and hotels fake; commit: feat(hotels): implement hotel policies (HTL-09).
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+NO MAKE PROMPT INSTRUCTION I TOLD TO YOU AND START IN IMPLMENTING
+
+How the output was used:
+Implemented HTL-03 on feature/HTL-03-rooms in an isolated worktree from latest develop: added create-room.dto.ts and room.response.dto.ts; updated hotels.service.ts, hotels.controller.ts, hotels.contract.spec.ts, hotels.service.spec.ts, hotels.api.spec.ts, hotels.fake.ts and hotels.fake.spec.ts for moderator-scoped room creation, paginated listing, transaction-aware getRooms, trimmed-name uniqueness and contract parity; appended ai-prompts/pierre.txt. Focused tests passed 146 cases; backend npm run verify passed formatting, lint, typecheck, all 1301 tests across 100 files, per-service coverage gates and build; HotelsService line coverage was 100%. Original worktree files were preserved; no commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+make a pr
+
+How the output was used:
+Reviewed and staged the HTL-03 implementation and tests, appended ai-prompts/pierre.txt, and prepared commit and pull request publication against develop using the repository template; npm run build passed, with the implementation already validated by npm run verify (1301 tests, all service coverage gates, and build).
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+does the pr lacks somthing?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; checked PR #159 against HTL-03 and the completion rules, confirmed all applicable CI checks passed with no merge conflicts, and identified the remaining manual Swagger validation, required approval, and failed Copilot review configuration; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+is Test: Manually exercise the endpoints in Swagger—success, invalid input, wrong role and another hotel’s resource—as required by the completion checklist. This has not been done.  needed in every ticket ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that the current completion checklist requires Swagger checks for affected backend endpoints, including HTL-03, rather than manually retesting the whole API for every ticket; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+should i add screenshots ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended representative Swagger screenshots for HTL-03, distinguished screenshot evidence from the required manual checks, and warned against exposing credentials; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+cna you review the last comment on the pr  and give your opinion
+
+How the output was used:
+Appended ai-prompts/pierre.txt; read Kareem's latest review and approval on PR #159, checked the DTO, numeric validators, data-model money rules and existing tests, and confirmed with class-validator that unsafe integers are accepted; recommended safe-integer input bounds plus booking-total overflow checks, retaining case-sensitive room names, and treating the extra API boundary cases as optional; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what u reccomend we fix then ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended a focused safe-integer validation fix with test-first regression coverage and Swagger limits, leaving case sensitivity unchanged and booking-total overflow protection to the booking owner; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+fix that + fix the case-sesitive names make it non-sensitve
+
+How the output was used:
+Added safe-integer regression cases to hotels.api.spec.ts and appended ai-prompts/pierre.txt; three new tests reproduced unsafe values receiving 201 instead of 400, while the maximum-safe boundary passed. Case-insensitive uniqueness remains pending Kareem's approval and the required separate data-model/index change process.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+why it si changes the frozen database index and conflicts ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained that the existing case-sensitive unique index cannot enforce case-insensitive uniqueness under concurrency, clarified that HTL-03 itself does not prohibit case-insensitive names, and continued the safe-integer fix without altering the frozen schema or index.
+================================================
+
+Follow-up for the same 2026-11-18 numeric-fix request: committed the failing regression tests first as 75197a1, then added Number.MAX_SAFE_INTEGER bounds and matching Swagger maxima to all three numeric inputs in create-room.dto.ts. The hotel API suite passed all 35 tests; after correcting DTO formatting, backend npm run verify passed all gates, 1305 tests across 100 files, service coverage thresholds and build. No name-uniqueness, schema or index changes; no push.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+case-insenstive names problem does it has a simplier solution like a simple condiotin without reaching to the database level or what ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that canonical lowercase storage can reuse the existing unique index without changing its definition, but changes displayed names and needs existing-data normalization and collision handling; explained that a condition-only duplicate lookup is unsafe under concurrency and preserving original capitalization calls for database-backed case-insensitive uniqueness; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+i didnt understand the simpler solution
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained lowercase storage with a concrete Room A example, its displayed-name tradeoff, and the need to normalize existing names before relying on the current unique index; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+ok make this solution the push these all fixes
+
+How the output was used:
+Added and updated test-first lowercase-name regressions in hotels.service.spec.ts, hotels.api.spec.ts and hotels.fake.spec.ts, and appended ai-prompts/pierre.txt; seven selected cases failed as expected before implementation, covering lowercase responses, concurrent case variants and literal legacy mixed-case collisions. Prepared the existing numeric commits and the approved naming fix for publication to PR #159.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+Kareem approved lowercase storage; implement it and push the fixes
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded the user's confirmation of Kareem's approval for lowercase storage and proceeded with service/API/fake regressions without changing schema definitions, indexes or shared database records.
+================================================
+
+Follow-up for the same 2026-11-18 approved implementation request: committed failing naming regressions first as 920b754, then implemented trimmed lowercase storage and escaped exact case-insensitive legacy-name collision checks in hotels.service.ts and hotels.fake.ts; updated create-room.dto.ts, room.response.dto.ts and hotels.types.ts to document the approved behavior. Focused hotel tests passed 153 cases; backend npm run verify passed all gates, 1308 tests across 100 files, coverage thresholds and build. Existing mixed-case records are not rewritten; schemas and indexes are unchanged. Prepared both numeric-fix commits and naming-fix commits for the requested push and PR #159 description update.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what you change in lowercase fix ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained the pushed lowercase-storage normalization, literal case-insensitive legacy-name collision check, existing unique-index concurrency protection, unchanged old records and matching fake/documentation/tests; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+please rebase this branch with the updated main to merge without conflicts
+
+How the output was used:
+Appended ai-prompts/pierre.txt; fetched origin, confirmed PR #159 conflicts with its develop target and already contains main, and explained that repository rules require merging develop rather than rebasing; prepared the topic branch for the confirmed merge and conflict resolution.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+true
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded confirmation to merge origin/develop into feature/HTL-03-rooms, preserve the room and policy features, run backend verification and push the resolution.
+================================================
+
+Follow-up for the same 2026-11-18 approved synchronization request: resolved all seven conflicts while merging develop at 44f62f5, preserving HTL-03 rooms, upstream HTL-09 policies and all incoming blog/CI changes. Verified that the merged prompt log retains the exact upstream prefix and complete local append-only suffix, and that all 12 incoming policy methods/tests in conflicted TypeScript files are unchanged. Focused hotel tests passed 223 cases across eight files. Backend npm run verify passed formatting, lint, typecheck, 1339 tests across 102 files, coverage gates and build; overall line coverage was 98.42%, and HotelsService covered 106/106 lines. One pre-existing reference-data lint warning remains. No rebase or force-push was used; prepared the verified merge for the authorized push to PR #159.

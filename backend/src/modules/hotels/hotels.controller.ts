@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Inject,
@@ -9,12 +10,14 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UploadedFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -27,15 +30,21 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
 import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
+import { CreateRoomDto } from './dto/create-room.dto.js';
 import { HotelProfileResponseDto } from './dto/hotel-profile.response.dto.js';
 import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import { UpdateHotelDto } from './dto/update-hotel.dto.js';
+import {
+  PaginatedRoomsResponseDto,
+  RoomResponseDto,
+} from './dto/room.response.dto.js';
 import { HotelsService } from './hotels.service.js';
 
 @ApiTags('hotels')
@@ -49,6 +58,53 @@ import { HotelsService } from './hotels.service.js';
 @Controller('hotels')
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
+
+  @Post(':id/rooms')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({ summary: 'HTL-03 Add a room to the assigned hotel' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid hotel ID or room fields' })
+  @ApiNotFoundResponse({
+    description: 'Hotel not found or not assigned to this moderator',
+  })
+  @ApiConflictResponse({
+    description: 'CONFLICT: the room name already exists within this hotel',
+  })
+  async createRoom(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() input: CreateRoomDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    return RoomResponseDto.fromView(
+      await this.hotels.createRoom(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Get(':id/rooms')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({ summary: 'HTL-03 List rooms of the assigned hotel' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PaginatedRoomsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid hotel ID or pagination' })
+  @ApiNotFoundResponse({
+    description: 'Hotel not found or not assigned to this moderator',
+  })
+  async listRooms(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PaginatedRoomsResponseDto> {
+    const result = await this.hotels.listRooms(
+      id.toHexString(),
+      query,
+      user.providerId,
+    );
+    return {
+      ...result,
+      items: result.items.map((room) => RoomResponseDto.fromView(room)),
+    };
+  }
 
   @Put(':id/policies')
   @Roles(Role.HOTEL_MODERATOR)

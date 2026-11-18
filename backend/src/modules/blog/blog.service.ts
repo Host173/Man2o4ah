@@ -16,6 +16,13 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
 import { UserStatus } from '../accounts/schemas/user.schema.js';
+import {
+  MAX_TAG_LENGTH,
+  MAX_TAGS_PER_POST,
+  MIN_TAG_LENGTH,
+  normalizeTag,
+  normalizeTags,
+} from './blog-tags.js';
 import type {
   CommentView,
   PostDetailView,
@@ -45,7 +52,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post, comment, and like workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-06, BLG-07, ACC-12).
+ * Travel blog post, tag, comment, and like workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-06, BLG-07, BLG-08, ACC-12).
  * Other blog endpoints and listeners ship in later Sprint 2 tickets.
  */
 @Injectable()
@@ -59,14 +66,16 @@ export class BlogService {
     private readonly accountsService: AccountsService,
   ) {}
 
-  /** BLG-01: creates a post as draft or published owned by the authenticated user. */
+  /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
   async create(dto: CreatePostDto, userId: string): Promise<PostView> {
     const authorId = this.parseId(userId, 'userId');
     this.assertNonBlankBody(dto.body);
+    const tags = dto.tags !== undefined ? this.prepareTags(dto.tags) : [];
     const created = await this.postModel.create({
       authorId,
       title: dto.title.trim(),
       body: dto.body,
+      tags,
       status: dto.status,
       ...(dto.status === PostStatus.PUBLISHED
         ? { publishedAt: new Date() }
@@ -76,20 +85,21 @@ export class BlogService {
   }
 
   /**
-   * BLG-02: lists paginated published posts (newest `publishedAt` first),
-   * optionally filtered by tag, excluding drafts, hidden posts and
-   * deactivated authors' posts.
+   * BLG-02 / BLG-08: lists paginated published posts (newest `publishedAt`
+   * first), optionally filtered by normalised tag, excluding drafts, hidden
+   * posts and deactivated authors' posts.
    */
   async listPublished(
     query: ListPostsQueryDto = new ListPostsQueryDto(),
   ): Promise<Paginated<PublishedPostView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
+    const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
     const filter: QueryFilter<StoredPost> = {
       status: PostStatus.PUBLISHED,
       isHidden: false,
       authorDeactivated: false,
-      ...(query.tag ? { tags: query.tag } : {}),
+      ...(tag ? { tags: tag } : {}),
     };
     const result = await paginate(
       this.postModel,
@@ -109,6 +119,28 @@ export class BlogService {
         ),
       ),
     };
+  }
+
+  /**
+   * BLG-08: lists paginated published posts matching the normalised tag,
+   * excluding drafts, hidden posts and deactivated authors' posts.
+   */
+  async listByTag(
+    tag: string,
+    query: PaginationQueryDto = new PaginationQueryDto(),
+  ): Promise<Paginated<PublishedPostView>> {
+    const normalizedTag = typeof tag === 'string' ? normalizeTag(tag) : '';
+    if (
+      normalizedTag.length < MIN_TAG_LENGTH ||
+      normalizedTag.length > MAX_TAG_LENGTH
+    ) {
+      throw this.invalidTag();
+    }
+    const listQuery = new ListPostsQueryDto();
+    listQuery.page = query.page;
+    listQuery.limit = query.limit;
+    listQuery.tag = normalizedTag;
+    return this.listPublished(listQuery);
   }
 
   /** BLG-03: lists the authenticated author's posts (draft and published), newest updated first. */
@@ -383,8 +415,9 @@ export class BlogService {
   }
 
   /**
-   * BLG-04: updates the authenticated owner's post. Sets `publishedAt` the first
-   * time the post is published; throws 404 if missing or owned by someone else.
+   * BLG-04 / BLG-08: updates the authenticated owner's post. Sets
+   * `publishedAt` the first time the post is published; throws 404 if missing
+   * or owned by someone else.
    */
   async update(
     postId: string,
@@ -397,6 +430,8 @@ export class BlogService {
     if (dto.body !== undefined) {
       this.assertNonBlankBody(dto.body);
     }
+    const normalizedTags =
+      dto.tags !== undefined ? this.prepareTags(dto.tags) : undefined;
 
     const existing = await this.postModel
       .findOne({ _id: id, authorId })
@@ -407,6 +442,7 @@ export class BlogService {
     const updates: {
       title?: string;
       body?: string;
+      tags?: string[];
       status?: PostStatus;
       publishedAt?: Date;
     } = {};
@@ -416,6 +452,9 @@ export class BlogService {
     }
     if (dto.body !== undefined) {
       updates.body = dto.body;
+    }
+    if (normalizedTags !== undefined) {
+      updates.tags = normalizedTags;
     }
     if (dto.status !== undefined) {
       updates.status = dto.status;
@@ -578,6 +617,52 @@ export class BlogService {
         details: [{ field: 'body', message: 'body must not be blank' }],
       });
     }
+  }
+
+  private prepareTags(tags: string[]): string[] {
+    if (
+      !Array.isArray(tags) ||
+      !tags.every((item): item is string => typeof item === 'string')
+    ) {
+      throw this.invalidTags('tags must be an array of strings');
+    }
+    const normalized = normalizeTags(tags);
+    if (normalized.length > MAX_TAGS_PER_POST) {
+      throw this.invalidTags(
+        `tags must contain no more than ${MAX_TAGS_PER_POST} items`,
+      );
+    }
+    if (
+      normalized.some(
+        (tag) => tag.length < MIN_TAG_LENGTH || tag.length > MAX_TAG_LENGTH,
+      )
+    ) {
+      throw this.invalidTags(
+        `each tag must be between ${MIN_TAG_LENGTH} and ${MAX_TAG_LENGTH} characters`,
+      );
+    }
+    return normalized;
+  }
+
+  private invalidTags(message: string): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [{ field: 'tags', message }],
+    });
+  }
+
+  private invalidTag(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'tag',
+          message: `tag must be between ${MIN_TAG_LENGTH} and ${MAX_TAG_LENGTH} characters`,
+        },
+      ],
+    });
   }
 
   private parseId(value: string, field: string): Types.ObjectId {

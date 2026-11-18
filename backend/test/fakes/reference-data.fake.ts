@@ -36,7 +36,7 @@ const DEFAULT_DATASET: ReferenceDataset = {
     {
       code: 'JFK',
       name: 'John F. Kennedy International Airport',
-      cityId: 'new-york',
+      cityId: 'new_york',
       countryCode: 'US',
       timeZone: 'America/New_York',
     },
@@ -44,7 +44,7 @@ const DEFAULT_DATASET: ReferenceDataset = {
   cities: [
     { id: 'cairo', name: 'Cairo', countryCode: 'EG' },
     { id: 'dubai', name: 'Dubai', countryCode: 'AE' },
-    { id: 'new-york', name: 'New York', countryCode: 'US' },
+    { id: 'new_york', name: 'New York', countryCode: 'US' },
   ],
   countries: [
     { code: 'EG', name: 'Egypt', currency: 'EGP' },

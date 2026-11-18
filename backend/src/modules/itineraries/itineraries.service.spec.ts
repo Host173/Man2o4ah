@@ -1262,6 +1262,75 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
     });
   });
 
+  describe('concurrent day writes (ITN-07/08 review)', () => {
+    it('keeps an overlapping add when a day is deleted', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+
+      const results = await Promise.allSettled([
+        itineraries.deleteDay(created._id, seeded.dayIds[1], owner.id),
+        itineraries.addDay(
+          created._id,
+          dayDto({ cityId: 'new_york' }),
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(3);
+      expect(detail.days.map((day) => day._id)).not.toContain(seeded.dayIds[1]);
+      expect(detail.days.map((day) => day.cityId)).toEqual(
+        expect.arrayContaining(['cairo', 'new_york']),
+      );
+      expect(detail.dayCount).toBe(3);
+      expect(detail.transportCosts.map((cost) => cost.dayId)).toEqual([
+        seeded.dayIds[0],
+        seeded.dayIds[2],
+      ]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(3);
+      expect(stored?.transportCosts).toHaveLength(2);
+    });
+
+    it('keeps an overlapping add when the days are reordered', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+
+      const results = await Promise.allSettled([
+        itineraries.reorderDays(
+          created._id,
+          { dayIds: [last, first, middle] },
+          owner.id,
+        ),
+        itineraries.addDay(
+          created._id,
+          dayDto({ cityId: 'new_york' }),
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(4);
+      expect(detail.days.map((day) => day._id)).toEqual(
+        expect.arrayContaining([...seeded.dayIds]),
+      );
+      expect(detail.dayCount).toBe(4);
+      expect(detail.days.map((day) => day.dayNumber)).toEqual([1, 2, 3, 4]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(4);
+      expect(stored?.dayCount).toBe(4);
+    });
+  });
+
   describe('concurrent day writes (ITN-05 review)', () => {
     it('does not lose a day edit when adds overlap', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);

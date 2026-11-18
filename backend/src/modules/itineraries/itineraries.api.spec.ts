@@ -1182,7 +1182,10 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       const owner = await loginAs(testApp.connection, UserRole.USER);
       const itineraryId = await createOwnedItinerary(owner.cookie);
       const seeded = await seedTrip(itineraryId);
-      const before = await itineraryModel.findById(itineraryId).lean().exec();
+      const before = (await itineraryModel
+        .findById(itineraryId)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
 
       const response = await testApp
         .http()
@@ -1191,7 +1194,10 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         .send({ dayIds: seeded.dayIds });
 
       expect(response.status).toBe(200);
-      const after = await itineraryModel.findById(itineraryId).lean().exec();
+      const after = (await itineraryModel
+        .findById(itineraryId)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
       expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
     });
 

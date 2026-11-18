@@ -30,6 +30,7 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser } from '../accounts/auth/decorators.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
+import { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import {
   ItineraryDayResponseDto,
   ItineraryDetailResponseDto,
@@ -126,6 +127,32 @@ export class ItinerariesController {
     await this.itinerariesService.delete(id.toHexString(), user.id);
   }
 
+  @Delete(':id/days/:dayId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary:
+      'ITN-07 Delete a day and cascade its activities, budgets and costs',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'dayId', type: String })
+  @ApiNoContentResponse({ description: 'Day deleted' })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary or day ID' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or day not found, or owned by another user',
+  })
+  async deleteDay(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('dayId', ParseObjectIdPipe) dayId: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.itinerariesService.deleteDay(
+      id.toHexString(),
+      dayId.toHexString(),
+      user.id,
+    );
+  }
+
   @Post(':id/days')
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiOperation({ summary: 'ITN-05 Add a day to my itinerary' })
@@ -143,6 +170,28 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDayView> {
     return this.itinerariesService.addDay(id.toHexString(), dto, user.id);
+  }
+
+  /**
+   * Declared before `:dayId`, so Express never tries to parse "reorder" as an
+   * ObjectId. Returns the full view because the numbers, dates and groups all
+   * change with the order (ITN-08).
+   */
+  @Patch(':id/days/reorder')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'ITN-08 Move a day to a new position' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID or day order' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary not found or owned by another user',
+  })
+  reorderDays(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: ReorderDaysDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDetailView> {
+    return this.itinerariesService.reorderDays(id.toHexString(), dto, user.id);
   }
 
   @Patch(':id/days/:dayId')

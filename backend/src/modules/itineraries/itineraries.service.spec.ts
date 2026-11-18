@@ -1153,7 +1153,9 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         middle,
       ]);
       expect(
-        stored?.transportCosts.map((cost) => cost._id.toHexString()),
+        stored?.transportCosts.map((cost) =>
+          (cost as unknown as { _id: Types.ObjectId })._id.toHexString(),
+        ),
       ).toEqual(seeded.costIds);
     });
 
@@ -1161,7 +1163,10 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const created = await itineraries.create(createDto(), owner.id);
       const seeded = await seedTrip(created._id);
-      const before = await itineraryModel.findById(created._id).lean().exec();
+      const before = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
 
       const result = await itineraries.reorderDays(
         created._id,
@@ -1169,7 +1174,10 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         owner.id,
       );
 
-      const after = await itineraryModel.findById(created._id).lean().exec();
+      const after = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
       expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
       expect(result.days.map((day) => day._id)).toEqual(seeded.dayIds);
     });

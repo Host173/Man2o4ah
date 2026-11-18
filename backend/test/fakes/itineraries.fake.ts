@@ -8,9 +8,12 @@ import {
   cityGroups,
   dayDate,
   dayNumber,
+  orderDaysById,
+  withoutTransportCostsOf,
 } from '../../src/modules/itineraries/days.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
+import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
@@ -180,6 +183,48 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (dto.notes !== undefined) day.notes = dto.notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  async deleteDay(
+    itineraryId: string,
+    dayId: string,
+    userId: string,
+  ): Promise<void> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === dayId);
+    if (index === -1) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    // The day's activities and budget entries are embedded in it; transport
+    // costs live in a separate array and must be filtered (ITN-07).
+    itinerary.days.splice(index, 1);
+    itinerary.transportCosts = withoutTransportCostsOf(
+      itinerary.transportCosts,
+      dayId,
+    );
+    itinerary.dayCount = itinerary.days.length;
+    itinerary.updatedAt = new Date();
+  }
+
+  async reorderDays(
+    itineraryId: string,
+    dto: ReorderDaysDto,
+    userId: string,
+  ): Promise<ItineraryDetailView> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const ordered = orderDaysById(itinerary.days, dto.dayIds, (day) => day._id);
+    const unchanged = itinerary.days.every(
+      (day, index) => day._id === ordered[index]._id,
+    );
+    if (!unchanged) {
+      itinerary.days = ordered;
+      itinerary.dayCount = ordered.length;
+      itinerary.updatedAt = new Date();
+    }
+    return this.toDetail(itinerary);
   }
 
   private findOwned(itineraryId: string, userId: string): ItineraryDetailView {

@@ -50,10 +50,14 @@ export class FlightHoldExpiryJob {
   /** Expires every hold due at `now`; returns how many were expired. */
   async expireDueHolds(now: Date): Promise<number> {
     let expired = 0;
+    // Holds that couldn't be expired in this run. They're skipped by the next
+    // batches, so they can't hide the holds behind them; the next run retries them.
+    const failed: Types.ObjectId[] = [];
     for (;;) {
       const batch = await this.bookingModel
         .find(
           {
+            _id: { $nin: failed },
             status: FlightBookingStatus.PENDING_PAYMENT,
             holdExpiresAt: { $lte: now },
           },
@@ -68,15 +72,14 @@ export class FlightHoldExpiryJob {
         .limit(BATCH_SIZE)
         .lean<DueHold[]>();
 
-      let expiredInBatch = 0;
       for (const hold of batch) {
-        if (await this.expire(hold, now)) expiredInBatch += 1;
+        if (await this.expire(hold, now)) expired += 1;
+        else failed.push(hold._id);
       }
-      expired += expiredInBatch;
 
-      // Stop when the batch wasn't full, or when nothing in it could be expired
-      // (so a booking that keeps failing can't make the job loop forever).
-      if (batch.length < BATCH_SIZE || expiredInBatch === 0) return expired;
+      // Every batch holds only new ids, so this always ends: a batch that isn't
+      // full means nothing is left.
+      if (batch.length < BATCH_SIZE) return expired;
     }
   }
 

@@ -1,4 +1,5 @@
 import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -8,8 +9,8 @@ import {
   cityGroups,
   dayDate,
   dayNumber,
-  MAX_DAYS,
 } from '../../src/modules/itineraries/days.js';
+import { MAX_DAYS } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
@@ -41,9 +42,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   private readonly owned = new Map<string, ItineraryDetailView>();
   private nextId = 1;
 
-  constructor(itineraries: PublicItinerarySummary[] = []) {
+  private readonly referenceData: FakeReferenceDataService;
+
+  constructor(
+    itineraries: PublicItinerarySummary[] = [],
+    referenceData: FakeReferenceDataService = new FakeReferenceDataService(),
+  ) {
     // A deep copy, so a test that changes its fixtures can't affect another test.
     this.itineraries = structuredClone(itineraries);
+    this.referenceData = referenceData;
   }
 
   listPublicByAuthor(
@@ -154,12 +161,12 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     }
     const index = itinerary.days.length;
     // City existence/reference validation (GEN-12 / ITN-05)
-    const cityId = dto.cityId.trim();
+    const cityId = dto.cityId?.trim();
     if (!cityId) {
       throw this.invalidField('cityId', 'cityId must not be blank');
     }
-    // Simple validation: reject obviously unknown cities (atlantis, etc.)
-    if (cityId.toLowerCase() === 'atlantis') {
+    const knownCities = await this.referenceData.getCities([cityId]);
+    if (!knownCities.has(cityId)) {
       throw this.invalidField('cityId', `Unknown city: ${cityId}`);
     }
     const day: ItineraryDayView = {
@@ -195,16 +202,19 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     const day = itinerary.days[index];
     // City existence/reference validation (GEN-12 / ITN-05)
     const cityId = dto.cityId?.trim();
-    if (cityId && cityId.toLowerCase() === 'atlantis') {
-      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    if (cityId) {
+      const knownCities = await this.referenceData.getCities([cityId]);
+      if (!knownCities.has(cityId)) {
+        throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+      }
+      day.cityId = cityId;
     }
-    if (dto.cityId !== undefined) day.cityId = dto.cityId?.trim();
     if (dto.notes !== undefined) day.notes = dto.notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
   }
 
-  function invalidField(field: string, message: string): never {
+  invalidField(field: string, message: string): never {
     throw new BadRequestException({ field, message });
   }
 

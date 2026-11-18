@@ -72,7 +72,7 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
       const hotel = await service.create(profile);
       const supplied = {
         ...input,
-        name: ' 101 ',
+        name: ' Room A ',
         type: ' Deluxe King ',
         hotelId: new Types.ObjectId().toHexString(),
         isActive: false,
@@ -87,6 +87,7 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
       );
       expect(room).toEqual({
         ...input,
+        name: 'room a',
         id: expect.stringMatching(/^[a-f0-9]{24}$/),
         hotelId: hotel.id,
         isActive: true,
@@ -98,13 +99,13 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
         inventoryVersion: 0,
       });
       room.name = 'Changed response';
-      expect((await service.getRooms(hotel.id))[0]?.name).toBe('101');
+      expect((await service.getRooms(hotel.id))[0]?.name).toBe('room a');
     });
 
-    it('enforces trimmed name uniqueness under concurrency, but allows the same name in another hotel', async () => {
+    it('enforces case-insensitive trimmed name uniqueness under concurrency, but allows the same name in another hotel', async () => {
       const hotel = await service.create(profile);
       const results = await Promise.allSettled(
-        ['101', ' 101 ', '101 '].map((name) =>
+        ['Room A', ' ROOM a ', 'room A'].map((name) =>
           service.createRoom(hotel.id, { ...input, name }, hotel.id),
         ),
       );
@@ -121,12 +122,46 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
       }
       expect(await rooms.countDocuments({ hotelId: hotel.id })).toBe(1);
       const other = await service.create({ ...profile, name: 'Other Hotel' });
-      expect(await service.createRoom(other.id, input, other.id)).toMatchObject(
-        {
-          name: '101',
-          hotelId: other.id,
-        },
+      expect((await service.getRooms(hotel.id))[0]?.name).toBe('room a');
+      expect(
+        await service.createRoom(
+          other.id,
+          { ...input, name: 'ROOM A' },
+          other.id,
+        ),
+      ).toMatchObject({ name: 'room a', hotelId: other.id });
+    });
+
+    it('rejects legacy mixed-case name collisions literally, including inactive rooms, without rewriting stored names', async () => {
+      const hotel = await service.create(profile);
+      const legacy = await rooms.create({
+        ...input,
+        name: 'Suite [A].* (East)?$',
+        hotelId: hotel.id,
+        isActive: false,
+      });
+      await expect(
+        service.createRoom(
+          hotel.id,
+          { ...input, name: ' suite [a].* (east)?$ ' },
+          hotel.id,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+      expect(await rooms.countDocuments({ hotelId: hotel.id })).toBe(1);
+      expect((await rooms.findById(legacy._id).lean())?.name).toBe(
+        'Suite [A].* (East)?$',
       );
+      for (const name of [
+        'Suite A East',
+        'Prefix Suite [A].* (East)?$ Suffix',
+      ]) {
+        expect(
+          await service.createRoom(hotel.id, { ...input, name }, hotel.id),
+        ).toMatchObject({ name: name.toLowerCase() });
+      }
     });
 
     it('checks assignment and hotel existence for both moderator operations before writing', async () => {

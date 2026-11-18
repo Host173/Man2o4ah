@@ -80,7 +80,7 @@ afterEach(() => vi.useRealTimers());
 describe('FakeHotelsService', () => {
   describe('room creation and listing (HTL-03)', () => {
     const input = {
-      name: ' 101 ',
+      name: ' Room A ',
       type: ' Deluxe King ',
       beds: 1,
       maxOccupancy: 2,
@@ -102,7 +102,7 @@ describe('FakeHotelsService', () => {
       );
       expect(created).toEqual({
         ...input,
-        name: '101',
+        name: 'room a',
         type: 'Deluxe King',
         id: expect.stringMatching(/^[a-f0-9]{24}$/),
         hotelId: ids.hotel1,
@@ -112,7 +112,7 @@ describe('FakeHotelsService', () => {
       });
       created.name = 'Changed response';
       const all = await hotels.getRooms(ids.hotel1);
-      expect(all.find((item) => item.id === created.id)?.name).toBe('101');
+      expect(all.find((item) => item.id === created.id)?.name).toBe('room a');
       expect(
         await hotels.listRooms(ids.hotel1, { page: 2, limit: 2 }, ids.hotel1),
       ).toEqual({
@@ -134,10 +134,10 @@ describe('FakeHotelsService', () => {
       });
     });
 
-    it('rejects duplicate trimmed names under concurrency but permits the same name in another hotel', async () => {
+    it('rejects case-variant trimmed names under concurrency but permits the same name in another hotel', async () => {
       const outcomes = await Promise.allSettled(
-        Array.from({ length: 3 }, () =>
-          hotels.createRoom(ids.hotel1, input, ids.hotel1),
+        ['Room A', ' ROOM a ', 'room A'].map((name) =>
+          hotels.createRoom(ids.hotel1, { ...input, name }, ids.hotel1),
         ),
       );
       expect(
@@ -154,9 +154,40 @@ describe('FakeHotelsService', () => {
       expect(
         await hotels.createRoom(ids.hotel2, input, ids.hotel2),
       ).toMatchObject({
-        name: '101',
+        name: 'room a',
         hotelId: ids.hotel2,
       });
+    });
+
+    it('matches legacy mixed-case name collisions literally without rewriting inactive fixtures', async () => {
+      hotels.data.rooms.push(
+        room(ids.room3, {
+          name: 'Suite [A].* (East)?$',
+          isActive: false,
+        }),
+      );
+      await expect(
+        hotels.createRoom(
+          ids.hotel1,
+          { ...input, name: ' suite [a].* (east)?$ ' },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+      expect(hotels.data.rooms).toHaveLength(3);
+      expect(
+        hotels.data.rooms.find((item) => item.id === ids.room3)?.name,
+      ).toBe('Suite [A].* (East)?$');
+      for (const name of [
+        'Suite A East',
+        'Prefix Suite [A].* (East)?$ Suffix',
+      ]) {
+        expect(
+          await hotels.createRoom(ids.hotel1, { ...input, name }, ids.hotel1),
+        ).toMatchObject({ name: name.toLowerCase() });
+      }
     });
 
     it('matches assignment, missing-hotel and schema-validation failures without inserting rooms', async () => {

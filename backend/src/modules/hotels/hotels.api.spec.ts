@@ -155,6 +155,48 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
       ]);
     });
 
+    it('stores lowercase names, rejects case-only duplicates, and allows the same name in another hotel', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      const path = `/api/hotels/${hotel.id}/rooms`;
+      const created = await t
+        .http()
+        .post(path)
+        .set('Cookie', moderator.cookie)
+        .send({ ...input, name: ' Room A ' })
+        .expect(201);
+      expect(created.body.name).toBe('room a');
+      const duplicate = await t
+        .http()
+        .post(path)
+        .set('Cookie', moderator.cookie)
+        .send({ ...input, name: 'ROOM a' })
+        .expect(409);
+      expect(duplicate.body.code).toBe(ErrorCode.Conflict);
+      const list = await t
+        .http()
+        .get(path)
+        .set('Cookie', moderator.cookie)
+        .expect(200);
+      expect(list.body.items).toEqual([created.body]);
+      const other = await service.create({ ...profile, name: 'Other Hotel' });
+      const otherModerator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: other.id,
+      });
+      const otherRoom = await t
+        .http()
+        .post(`/api/hotels/${other.id}/rooms`)
+        .set('Cookie', otherModerator.cookie)
+        .send({ ...input, name: 'ROOM A' })
+        .expect(201);
+      expect(otherRoom.body).toMatchObject({
+        hotelId: other.id,
+        name: 'room a',
+      });
+    });
+
     it('returns 409 CONFLICT for a duplicate trimmed name without changing the existing room', async () => {
       const hotel = await service.create(profile);
       const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {

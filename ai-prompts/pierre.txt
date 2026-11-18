@@ -722,3 +722,55 @@ Appended ai-prompts/pierre.txt; explained that the existing case-sensitive uniqu
 ================================================
 
 Follow-up for the same 2026-11-18 numeric-fix request: committed the failing regression tests first as 75197a1, then added Number.MAX_SAFE_INTEGER bounds and matching Swagger maxima to all three numeric inputs in create-room.dto.ts. The hotel API suite passed all 35 tests; after correcting DTO formatting, backend npm run verify passed all gates, 1305 tests across 100 files, service coverage thresholds and build. No name-uniqueness, schema or index changes; no push.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+case-insenstive names problem does it has a simplier solution like a simple condiotin without reaching to the database level or what ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that canonical lowercase storage can reuse the existing unique index without changing its definition, but changes displayed names and needs existing-data normalization and collision handling; explained that a condition-only duplicate lookup is unsafe under concurrency and preserving original capitalization calls for database-backed case-insensitive uniqueness; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+i didnt understand the simpler solution
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained lowercase storage with a concrete Room A example, its displayed-name tradeoff, and the need to normalize existing names before relying on the current unique index; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+ok make this solution the push these all fixes
+
+How the output was used:
+Added and updated test-first lowercase-name regressions in hotels.service.spec.ts, hotels.api.spec.ts and hotels.fake.spec.ts, and appended ai-prompts/pierre.txt; seven selected cases failed as expected before implementation, covering lowercase responses, concurrent case variants and literal legacy mixed-case collisions. Prepared the existing numeric commits and the approved naming fix for publication to PR #159.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+Kareem approved lowercase storage; implement it and push the fixes
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded the user's confirmation of Kareem's approval for lowercase storage and proceeded with service/API/fake regressions without changing schema definitions, indexes or shared database records.
+================================================

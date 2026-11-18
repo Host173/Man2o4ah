@@ -211,4 +211,79 @@ describe('FakeItinerariesService owner-only methods', () => {
     const unchanged = await itineraries.update(created._id, {}, 'user-1');
     expect(unchanged.updatedAt).toEqual(created.updatedAt);
   });
+
+  it('adds days numbered and dated from the start date, and groups them by city', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    const first = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo', notes: 'Arrival' },
+      'user-1',
+    );
+    expect(first).toMatchObject({
+      dayNumber: 1,
+      date: '2027-04-01',
+      cityId: 'cairo',
+      notes: 'Arrival',
+      activities: [],
+      budgetEntries: [],
+    });
+
+    await itineraries.addDay(created._id, { cityId: 'dubai' }, 'user-1');
+
+    const detail = await itineraries.getById(created._id, 'user-1');
+    expect(detail.days.map((day) => day.date)).toEqual([
+      '2027-04-01',
+      '2027-04-02',
+    ]);
+    expect(detail.cityGroups).toEqual([
+      {
+        cityId: 'cairo',
+        fromDay: 1,
+        toDay: 1,
+        dayCount: 1,
+        checkIn: '2027-04-01',
+        checkOut: '2027-04-02',
+      },
+      {
+        cityId: 'dubai',
+        fromDay: 2,
+        toDay: 2,
+        dayCount: 1,
+        checkIn: '2027-04-02',
+        checkOut: '2027-04-03',
+      },
+    ]);
+  });
+
+  it('edits a day and scopes days to their owner', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+
+    const updated = await itineraries.updateDay(
+      created._id,
+      day._id,
+      { cityId: 'dubai', notes: 'Moved' },
+      'user-1',
+    );
+    expect(updated).toMatchObject({ cityId: 'dubai', notes: 'Moved' });
+
+    await expect(
+      itineraries.updateDay(
+        created._id,
+        day._id,
+        { cityId: 'cairo' },
+        'user-2',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      itineraries.addDay(created._id, { cityId: 'cairo' }, 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
 });

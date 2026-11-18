@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
-import { addDays, isDateOnly } from '../../src/common/dates/date-only.js';
+import { addDays } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -25,6 +25,10 @@ import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import type { StorageService } from '../../src/modules/storage/storage.service.js';
 import type { PublicApi } from './public-api.js';
+import {
+  assertDateRange,
+  assertStayDates,
+} from '../../src/modules/hotels/room-date-ranges.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
 
@@ -35,27 +39,6 @@ export interface HotelDataset {
   hotels: HotelView[];
   rooms: RoomView[];
   roomNights: RoomNightView[];
-}
-
-export function assertDateRange(fromDate: Date, toDate: Date): void {
-  if (!isDateOnly(fromDate) || !isDateOnly(toDate) || toDate < fromDate) {
-    throw new BadRequestException({
-      code: ErrorCode.ValidationFailed,
-      message: 'Dates must be UTC calendar dates in ascending order',
-    });
-  }
-}
-
-export function assertStayDates(checkIn: Date, checkOut: Date): void {
-  assertDateRange(checkIn, checkOut);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (checkOut <= checkIn || checkIn < today) {
-    throw new BadRequestException({
-      code: ErrorCode.ValidationFailed,
-      message: 'Check-in cannot be in the past; check-out must follow check-in',
-    });
-  }
 }
 
 /** Shared with FakeRoomNightInventory; sessions are accepted but not simulated. */

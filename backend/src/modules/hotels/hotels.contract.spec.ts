@@ -7,13 +7,11 @@ import { toDateOnly } from '../../common/dates/date-only.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { HotelsService } from './hotels.service.js';
-import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 
 describe('hotels contracts (stubs)', () => {
   let module: TestingModule;
   let hotels: HotelsService;
-  const inventory = new RoomNightInventory();
   beforeAll(async () => {
     module = await Test.createTestingModule({
       providers: [
@@ -38,29 +36,6 @@ describe('hotels contracts (stubs)', () => {
       'search',
       () => hotels.search({ cityId: 'cairo', checkIn, checkOut, guests: 2 }),
     ],
-    [
-      'reserve',
-      () =>
-        inventory.reserve(
-          'hotel-1',
-          ['room-1'],
-          checkIn,
-          checkOut,
-          'reservation-1',
-        ),
-    ],
-    ['release', () => inventory.release('reservation-1')],
-    ['block', () => inventory.block('room-1', checkIn, checkOut)],
-    ['unblock', () => inventory.unblock('block-1')],
-    [
-      'setAvailability',
-      () =>
-        inventory.setAvailability('room-1', [
-          { fromDate: checkIn, toDate: checkOut },
-        ]),
-    ],
-    ['deactivate', () => inventory.deactivate('room-1')],
-    ['delete', () => inventory.delete('room-1')],
   ];
 
   it.each(calls)(

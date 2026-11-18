@@ -255,3 +255,58 @@ Implement all features satisfying requirements **ITN-05** and **ITN-09**:
 How the output was used:
 Implemented ITN-05/ITN-09 in the itineraries module (day helpers, DTOs, service, controller, Swagger models and fake), tests first then code; `npm run verify` passed with 1152 tests and 98.17% lines. The branch is based on the latest develop with the unmerged ITN-01 branch merged in; committed e540ae3 (tests) and b0a5186 (implementation).
 ================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-07
+
+Prompt:
+You are tasked with implementing GitHub Issue #67: "ITN-07: Delete and reorder days".
+
+Please adhere strictly to all project rules, architectural conventions, and workflows.
+
+### 1. Initial Research & Full Codebase Overview (Do this first)
+* Read all project skill files and architectural guidelines in `docs/ai/skills/travel-platform/`.
+* Perform a full read of the `itineraries` module—including schemas/models, DTOs, services, controllers, shared contracts, Swagger decorators, and existing test suites.
+* Specifically examine how days, activities, budget entries, transport costs, day numbering, calendar date derivations, consecutive city grouping, and itinerary totals are currently implemented across dependencies `#66` (ITN-05), `#71` (ITN-16), and `#69` (ITN-12).
+* Check whether dependencies `#66`, `#71`, and `#69` are merged into the base branch; if any are still open, inform me before branching so we base the branch cleanly without merge conflicts.
+
+### 2. Branch Setup
+* Create and check out the exact feature branch:
+  `git checkout -b feature/ITN-07-delete-reorder-days`
+
+### 3. Strict TDD Workflow (`TDD required: Yes`)
+Because **TDD is strictly required** for this issue (`tdd` label), follow the Red-Green-Refactor cycle without exception:
+1. **Write failing tests first** before writing any production implementation code:
+   * **Unit tests** covering:
+     * Day renumbering after deleting a day or moving/reordering a day.
+     * Cascading deletion of all associated activities, budget entries, and transport costs when a day is deleted.
+     * Recalculation of calendar dates from `startDate`, consecutive same-city groups, and itinerary totals after deletion or reordering.
+   * **API tests** covering:
+     * Deleting a day (`DELETE`) and moving/reordering a day.
+     * Owner-only access enforcement (`401` without session, `404` for non-existent or foreign itinerary/day, `400` for invalid reorder indices/payloads).
+     * Swagger documentation registration with cookie auth.
+2. Run the test suite to verify the new tests fail for the expected reasons.
+3. Implement clean, minimal production code to pass all tests, then refactor while keeping the suite green.
+
+### 4. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement all requirements for **ITN-07** and **ITN-08**:
+* **Delete Day (Cascading):** Allow the authenticated itinerary owner to delete a specific day. Deleting a day must cleanly cascade-delete all associated activities, budget entries, and transport costs tied to that day.
+* **Move / Reorder Day:** Allow the owner to move a day to a new position/order within the itinerary.
+* **Automatic Recalculation:** After any deletion or reorder operation:
+  * Sequential day numbers (`1..N`) must automatically renumber.
+  * Calendar dates must update sequentially from the itinerary's `startDate`.
+  * Consecutive same-city groups must dynamically regroup based on the updated day sequence.
+  * Itinerary totals (budgets/costs) must accurately recalculate and reflect the current days.
+* **Security & Validation:** Scope every read and write operation strictly by `ownerId` from the active session, returning `400 VALIDATION_FAILED` on invalid inputs/positions and `404 NOT_FOUND` on missing or foreign resources.
+
+### 5. Verification, Prompt Logging & Pull Request Creation
+* Run the full verification pipeline (`npm run verify` — formatting, linting, typechecking, all unit/integration/API tests, and build) and verify everything passes with high coverage.
+* Log the prompts used for this task into the project's prompts file according to the repository guidelines.
+* Commit your changes cleanly, push the branch, and create a Pull Request with:
+  * **Exact PR Title:** `ITN-07: Delete and reorder days`
+  * **PR Description:** Include a concise summary of changes, `Closes #67`, test results, and a placeholder section for Swagger verification screenshots.
+
+How the output was used:
+Implemented ITN-07/ITN-08 in the itineraries module with strict TDD: red tests first (commit 0e328f5), then production code (commit b4d173f). Added `DELETE /api/itineraries/:id/days/:dayId` (204) with cascade of embedded activities/budget entries and filtering of transport costs by dayId, and `PATCH /api/itineraries/:id/days/reorder` (200) with permutation validation and a no-op that leaves updatedAt unchanged. Numbers/dates/groups are derived from array order; dayCount/cityIds are recomputed in the same write. Deleted activity image files are deferred to ITN-12/GEN-08 (StorageService.delete is a stub) and budget summaries to ITN-14/18, documented in code and the PR. The branch is based on the latest develop with the unmerged ITN-05 branch merged in (dependency #66, PR #154 still open); #71 and #69 have no PRs. `npm run verify` passed with 1181 tests and 98.21% lines.
+================================================

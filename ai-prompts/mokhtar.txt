@@ -195,3 +195,18 @@ did you make tests in a test file for api as project rules or not ?
 How the output was used:
 Confirmed the co-located itineraries.api.spec.ts and itineraries.service.spec.ts files. Acting on the PR review afterwards, replaced the NotImplementedExceptions in FakeItinerariesService with in-memory owner-scoped create/list/open/edit/delete, added 	est/fakes/itineraries.fake.spec.ts, attached the Swagger screenshot, and committed f4538ae.
 ================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+[Screenshot of an email from kareem sayed]
+every thing is good ready tobe merged just small fixes so we avoid future problems (not now )
+1. The fake (no change needed) ... One tiny difference: an empty update({}) changes updatedAt in the fake but not in the real service. Fix it only if you want.
+2. The emoji title limit (small bug). The DTO's @maxlength(100) counts characters, but normalizeTitle uses .length, which counts an emoji as 2. So a title of 51-100 emoji passes the DTO and then gets a 400 from the service. Suggested fix: count the same way in the service, [...trimmed].length instead of trimmed.length, and add a test with a 100-emoji title.
+and about the screenshot, we don't need it in the repo
+
+How the output was used:
+Counted title characters as code points in the service and the schema (Array.from(value).length), added 100-emoji and 101-emoji tests to the service, API and schema specs, stopped an empty update from bumping updatedAt in the fake, deleted docs/screenshots/itn-01-swagger.jpg and dropped it from the PR description; committed ce48c4e.
+================================================

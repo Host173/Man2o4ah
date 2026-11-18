@@ -539,3 +539,15 @@ he made new comments that may be optional can you asses them and tell me if they
 How the output was used:
 Answer only, no files changed (assessed the optional review comments on #147 and #148)
 ================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+do them all
+
+How the output was used:
+HTL-16: tests f33ca83 (adjacent nights stay held, a shared night is freed, the pre-clear emits the expired event), comment eac89ad (why a hold that can't be freed still blocks); npm run verify passed
+================================================

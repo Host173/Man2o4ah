@@ -16,24 +16,6 @@ Added hotels contract stubs, in-memory fakes, unit tests, backend documentation,
 ================================================
 
 ================================================
-Date: 2026-11-16
-Student: Pierre
-Tool: Copilot SDK in VS Code
-Related Requirement: HTL-01
-Entry type: AI-generated retrospective task brief, prepared after implementation; not an original user prompt.
-
-Prompt:
-Implement HTL-01 hotel profiles within my hotels package, following the project skill, frozen data model, and published contracts. Explain each major step in plain language. Add validated profile creation and editing, derive the country from the selected city through ReferenceDataService, and preserve the existing plain HotelView contract. Reuse the shared authentication guards: only admins create hotels, and hotel moderators edit only their assigned hotel. Implement the internal hotel lookup, activation, and rating-summary operations without adding future-ticket room, search, or inventory features.
-
-Add assigned-moderator photo upload and removal through the shared ImageUpload decorator and StorageService, without changing another owner's modules. Accept one JPG or PNG up to 5 MB per upload and enforce five photos per hotel atomically. Clean up rejected uploads without deleting a file that attached successfully after an ambiguous database reply. Surface storage and database failures explicitly and keep photo removal retryable.
-
-Add focused DTO, service-integration, API, and fake tests for validation, permissions, ownership, file-size boundaries, concurrent uploads, cleanup, and deletion retries. Use the existing test helpers, isolated in-memory MongoDB, and published dependency fakes; never access the shared Atlas database. Document the endpoints in Swagger and run the existing backend quality gates. Report local dependency failures honestly and distinguish remote CI results from manual verification. Keep the PR draft while real shared-storage/reference-data integration and full-flow Swagger evidence remain pending.
-
-How the output was used:
-Documented the HTL-01 hotel profile/photo implementation through f58313a, including DTOs, service/controller, fakes, and tests; CI run 43934828995 passed 968 tests; real shared-service integration and manual Swagger evidence remain pending.
-================================================
-
-================================================
 Date: 2026-11-18
 Student: Pierre
 Tool: Copilot SDK in VS Code
@@ -44,4 +26,17 @@ ok fix them and remove the sentence of ai retrospective
 
 How the output was used:
 Added fake profile/rating validation and inactive-hotel API regression tests (test-first commit 853371b), matched fake validation to the production schema, and passed backend verify (1235 tests); preserved the earlier log entry under the append-only rule.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+so remove the whole prompt of the ai retrospective only
+
+How the output was used:
+Removed only the generated HTL-01 entry dated 2026-11-16 after Pierre confirmed Kareem explicitly approved this exception; preserved all other existing entries and made no source-code changes.
 ================================================

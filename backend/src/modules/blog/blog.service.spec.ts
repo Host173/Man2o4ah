@@ -24,6 +24,11 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { Airport } from '../reference-data/schemas/airport.schema.js';
+import { Attraction } from '../reference-data/schemas/attraction.schema.js';
+import { City } from '../reference-data/schemas/city.schema.js';
+import { Country } from '../reference-data/schemas/country.schema.js';
+import { Currency } from '../reference-data/schemas/currency.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -54,6 +59,17 @@ describe('BlogService (skeleton)', () => {
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
+      // ItinerariesModule imports ReferenceDataModule (ITN-01).
+      .overrideProvider(getModelToken(Country.name))
+      .useValue({})
+      .overrideProvider(getModelToken(City.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Airport.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Attraction.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Currency.name))
       .useValue({})
       .compile();
 

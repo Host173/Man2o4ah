@@ -348,4 +348,31 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
       expect(quote.passengers[0].type).toBe('adult');
     });
   });
+
+  // Review #147: a hold lasts 10 minutes and must not outlive the flight, so
+  // the quote already refuses what the hold would refuse (no 400 on Pay).
+  describe('close to departure', () => {
+    const TEN_MINUTES = 10 * 60 * 1000;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('quotes a flight that leaves exactly 10 minutes from now', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(OUT_DEPARTS.getTime() - TEN_MINUTES));
+
+      const quote = await quotes.quote(oneWay());
+      expect(quote.pricing.totalMinor).toBe(20_000);
+    });
+
+    it('refuses a flight that leaves in less than 10 minutes', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(OUT_DEPARTS.getTime() - TEN_MINUTES + 1));
+
+      await expect(quotes.quote(oneWay())).rejects.toMatchObject(
+        invalid('segments[0]'),
+      );
+    });
+  });
 });

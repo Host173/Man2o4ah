@@ -317,6 +317,19 @@ describe('FlightHoldService.hold (FLT-22)', () => {
       expect(await bookings.countDocuments()).toBe(0);
     });
 
+    // Without the session, a retried transaction could save a second booking.
+    it('saves the booking inside the transaction (create gets the session)', async () => {
+      const create = vi.spyOn(bookings, 'create');
+
+      await holds.hold(oneWay(), USER);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ session: expect.anything() }),
+      );
+    });
+
     it('commits the seats and the booking together when both succeed', async () => {
       holdWritesInSession();
 

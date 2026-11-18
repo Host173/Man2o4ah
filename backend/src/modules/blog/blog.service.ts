@@ -380,22 +380,22 @@ export class BlogService {
     await this.loadVisiblePublishedPost(postObjectId);
 
     // Handle the unique-index insert outside a transaction because E11000 aborts a MongoDB transaction.
-    let inserted = false;
+    let insertedLikeId: Types.ObjectId | undefined;
     try {
-      await this.likeModel.create({
+      const created = await this.likeModel.create({
         postId: postObjectId,
         userId: userObjectId,
       });
-      inserted = true;
+      insertedLikeId = created._id;
     } catch (error) {
       if ((error as { code?: number })?.code === 11000) {
-        inserted = false;
+        insertedLikeId = undefined;
       } else {
         throw error;
       }
     }
 
-    if (inserted) {
+    if (insertedLikeId !== undefined) {
       const updated = await this.postModel
         .findOneAndUpdate(
           { _id: postObjectId },
@@ -404,7 +404,10 @@ export class BlogService {
         )
         .lean()
         .exec();
-      if (!updated) throw this.notFound();
+      if (!updated) {
+        await this.likeModel.deleteOne({ _id: insertedLikeId }).exec();
+        throw this.notFound();
+      }
       return {
         postId: postObjectId.toHexString(),
         likeCount: Math.max(0, updated.likeCount),

@@ -37,7 +37,7 @@ function isDuplicateKeyError(error: unknown): boolean {
 export class ModerationService {
   constructor(
     @InjectModel(Report.name)
-    private readonly reportModel: Model<Report>,
+    private readonly reportModel: Model<StoredReport>,
     private readonly registry: ReportableContentRegistry,
   ) {}
 
@@ -82,7 +82,7 @@ export class ModerationService {
         targetId: targetObjectId,
         reason,
       });
-      return this.toView(created.toObject() as ReportRecord);
+      return this.toView(created.toObject());
     } catch (error: unknown) {
       if (isDuplicateKeyError(error)) {
         throw new ConflictException({

@@ -229,18 +229,25 @@ export class ItinerariesService {
       .findOneAndUpdate(
         { _id: id, ownerId, [`days.${MAX_DAYS - 1}`]: { $exists: false } },
         [
-          { $set: {
-            days: { $concatArrays: ['$days',
-              [
-                { _id: day._id,
-                  cityId: { $literal: cityId },
-                  notes: notes !== undefined ? { $literal: notes } : undefined,
-                  activities: day.activities,
-                  budgetEntries: day.budgetEntries,
-                }
-              ]
-            ]}
-          }},
+          {
+            $set: {
+              days: {
+                $concatArrays: [
+                  '$days',
+                  [
+                    {
+                      _id: day._id,
+                      cityId: { $literal: cityId },
+                      notes:
+                        notes !== undefined ? { $literal: notes } : undefined,
+                      activities: day.activities,
+                      budgetEntries: day.budgetEntries,
+                    },
+                  ],
+                ],
+              },
+            },
+          },
           ...this.recomputeDayFields(),
         ],
         { returnDocument: 'after', runValidators: true, updatePipeline: true },

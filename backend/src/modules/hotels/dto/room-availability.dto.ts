@@ -23,7 +23,8 @@ export class RoomAvailabilityDto {
     type: String,
     format: 'date',
     example: '2026-12-05',
-    description: 'Last bookable night, inclusive; not a checkout date',
+    description:
+      'Last bookable night, inclusive; not a checkout date. Ranges entirely in the past are allowed, but booking check-in dates cannot be in the past.',
   })
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   @IsISO8601({ strict: true })

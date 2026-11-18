@@ -68,6 +68,8 @@ export class HotelsController {
   @Roles(Role.HOTEL_MODERATOR)
   @ApiOperation({
     summary: 'HTL-05 Edit room beds, occupancy and nightly price',
+    description:
+      'Beds and maximum occupancy may be reduced even when a future reservation has more guests. Existing reservations are not modified or invalidated; occupancy limits are checked when booking. Price changes do not affect existing reservation snapshots.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'roomId', type: String })

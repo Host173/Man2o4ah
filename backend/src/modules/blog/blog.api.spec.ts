@@ -11,7 +11,11 @@ import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
 import { AccountsService } from '../accounts/accounts.service.js';
-import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
+import {
+  ProviderType,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { BlogModule } from './blog.module.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
@@ -2027,6 +2031,327 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .get(`/api/authors/${deactivated.id}?limit=51`);
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+
+    it('paginates 25 itineraries independently via itinerariesPage/itinerariesLimit and validates invalid query parameters (BLG-12)', async () => {
+      const aisha = await loginAs(testApp!.connection, UserRole.USER);
+      const joinDate = new Date('2026-09-20T12:00:00.000Z');
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: aisha.id,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            role: UserRole.USER,
+            createdAt: joinDate,
+          },
+        ]),
+      );
+
+      const baseUpdatedAt = new Date('2026-11-01T00:00:00.000Z').getTime();
+      const itineraries = Array.from({ length: 25 }, (_, index) => ({
+        id: `itin-${String(index + 1).padStart(2, '0')}`,
+        ownerId: aisha.id,
+        title: `Public Trip ${index + 1}`,
+        countryCodes: ['EG'],
+        startDate: new Date('2026-12-01T00:00:00.000Z'),
+        dayCount: 4,
+        cityIds: ['cairo'],
+        updatedAt: new Date(baseUpdatedAt + (25 - index) * 60_000),
+      }));
+      Object.assign(fakeItineraries, new FakeItinerariesService(itineraries));
+
+      const createdPosts: string[] = [];
+      for (const title of ['Post 1', 'Post 2', 'Post 3']) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const res = await testApp!
+          .http()
+          .post('/api/posts')
+          .set('Cookie', aisha.cookie)
+          .send({ title, body: `Body ${title}`, status: PostStatus.PUBLISHED });
+        createdPosts.push(res.body._id as string);
+      }
+
+      // Defaults when query parameters are omitted.
+      const defaultsRes = await testApp!.http().get(`/api/authors/${aisha.id}`);
+      expect(defaultsRes.status).toBe(200);
+      expect(defaultsRes.body.posts).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 3,
+        totalPages: 1,
+      });
+      expect(defaultsRes.body.itineraries).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+      expect(defaultsRes.body.itineraries.items).toHaveLength(10);
+
+      // Page through itinerariesPage=1, 2, 3 -> 10, 10, 5 items with no duplicates or gaps.
+      const collectedIds: string[] = [];
+      for (const [pageNum, expectedLength] of [
+        [1, 10],
+        [2, 10],
+        [3, 5],
+      ] as const) {
+        const res = await testApp!
+          .http()
+          .get(`/api/authors/${aisha.id}?itinerariesPage=${pageNum}`);
+        expect(res.status).toBe(200);
+        expect(res.body.itineraries).toMatchObject({
+          page: pageNum,
+          limit: 10,
+          total: 25,
+          totalPages: 3,
+        });
+        expect(res.body.itineraries.items).toHaveLength(expectedLength);
+        // Moving itinerariesPage leaves posts on page 1.
+        expect(res.body.posts).toMatchObject({
+          page: 1,
+          limit: 10,
+          total: 3,
+          totalPages: 1,
+        });
+        expect(res.body.posts.items).toHaveLength(3);
+        collectedIds.push(
+          ...res.body.itineraries.items.map((item: { id: string }) => item.id),
+        );
+      }
+      expect(collectedIds).toHaveLength(25);
+      expect(new Set(collectedIds).size).toBe(25);
+      expect(collectedIds).toEqual(itineraries.map((item) => item.id));
+
+      // Out-of-range page returns empty items cleanly, not an error.
+      const pastEndRes = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?itinerariesPage=4`);
+      expect(pastEndRes.status).toBe(200);
+      expect(pastEndRes.body.itineraries).toEqual({
+        items: [],
+        page: 4,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+
+      // itinerariesLimit=50 returns all 25 items and reports limit: 50.
+      const limit50Res = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?itinerariesLimit=50`);
+      expect(limit50Res.status).toBe(200);
+      expect(limit50Res.body.itineraries).toMatchObject({
+        page: 1,
+        limit: 50,
+        total: 25,
+        totalPages: 1,
+      });
+      expect(limit50Res.body.itineraries.items).toHaveLength(25);
+
+      // Moving posts page=2&limit=2 leaves itineraries on page 1 limit 10.
+      const postsMovedRes = await testApp!
+        .http()
+        .get(`/api/authors/${aisha.id}?page=2&limit=2`);
+      expect(postsMovedRes.status).toBe(200);
+      expect(postsMovedRes.body.posts).toMatchObject({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(
+        postsMovedRes.body.posts.items.map((p: { _id: string }) => p._id),
+      ).toEqual([createdPosts[0]]);
+      expect(postsMovedRes.body.itineraries).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+      expect(
+        postsMovedRes.body.itineraries.items.map((i: { id: string }) => i.id),
+      ).toEqual(itineraries.slice(0, 10).map((i) => i.id));
+
+      // Moving both independently at the same time.
+      const bothMovedRes = await testApp!
+        .http()
+        .get(
+          `/api/authors/${aisha.id}?page=2&limit=2&itinerariesPage=3&itinerariesLimit=5`,
+        );
+      expect(bothMovedRes.status).toBe(200);
+      expect(bothMovedRes.body.posts).toMatchObject({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(bothMovedRes.body.itineraries).toMatchObject({
+        page: 3,
+        limit: 5,
+        total: 25,
+        totalPages: 5,
+      });
+      expect(
+        bothMovedRes.body.itineraries.items.map((i: { id: string }) => i.id),
+      ).toEqual(itineraries.slice(10, 15).map((i) => i.id));
+
+      // Invalid itinerariesPage / itinerariesLimit values return 400 VALIDATION_FAILED with field details.
+      for (const [queryStr, expectedField] of [
+        ['itinerariesPage=0', 'itinerariesPage'],
+        ['itinerariesLimit=0', 'itinerariesLimit'],
+        ['itinerariesLimit=51', 'itinerariesLimit'],
+        ['itinerariesPage=abc', 'itinerariesPage'],
+        ['itinerariesLimit=abc', 'itinerariesLimit'],
+      ] as const) {
+        const badRes = await testApp!
+          .http()
+          .get(`/api/authors/${aisha.id}?${queryStr}`);
+        expect(badRes.status).toBe(400);
+        expect(badRes.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          badRes.body.details.map((d: { field: string }) => d.field),
+        ).toContain(expectedField);
+      }
+    });
+
+    it('returns 404 NOT_FOUND with no leaked data for admin and moderator accounts, and 200 for a normal user (BLG-12)', async () => {
+      const normalUser = await loginAs(testApp!.connection, UserRole.USER);
+      const admin = await loginAs(testApp!.connection, UserRole.ADMIN);
+      const airlineMod = await loginAs(
+        testApp!.connection,
+        UserRole.AIRLINE_MODERATOR,
+      );
+      const hotelMod = await loginAs(
+        testApp!.connection,
+        UserRole.HOTEL_MODERATOR,
+      );
+
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: normalUser.id,
+            name: 'Normal Traveler',
+            email: 'normal@example.com',
+            role: UserRole.USER,
+          },
+          {
+            id: admin.id,
+            name: 'Admin Account',
+            email: 'admin@example.com',
+            role: UserRole.ADMIN,
+          },
+          {
+            id: airlineMod.id,
+            name: 'Airline Moderator',
+            email: 'airline-mod@example.com',
+            role: UserRole.AIRLINE_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.AIRLINE,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+          {
+            id: hotelMod.id,
+            name: 'Hotel Moderator',
+            email: 'hotel-mod@example.com',
+            role: UserRole.HOTEL_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.HOTEL,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+        ]),
+      );
+
+      for (const accountId of [
+        normalUser.id,
+        admin.id,
+        airlineMod.id,
+        hotelMod.id,
+      ]) {
+        await postModel.create({
+          authorId: new Types.ObjectId(accountId),
+          title: `Post for ${accountId}`,
+          body: 'Published post body',
+          status: PostStatus.PUBLISHED,
+          publishedAt: new Date(),
+        });
+      }
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-normal',
+            ownerId: normalUser.id,
+            title: 'User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 3,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-admin',
+            ownerId: admin.id,
+            title: 'Admin Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 3,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-airline',
+            ownerId: airlineMod.id,
+            title: 'Airline Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 3,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-hotel',
+            ownerId: hotelMod.id,
+            title: 'Hotel Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 3,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      for (const nonUser of [admin, airlineMod, hotelMod]) {
+        const res = await testApp!.http().get(`/api/authors/${nonUser.id}`);
+        expect(res.status).toBe(404);
+        expect(res.body.code).toBe(ErrorCode.NotFound);
+        for (const leakedKey of [
+          'id',
+          'name',
+          'email',
+          'role',
+          'status',
+          'createdAt',
+          'posts',
+          'itineraries',
+        ]) {
+          expect(leakedKey in res.body).toBe(false);
+        }
+      }
+
+      const userControlRes = await testApp!
+        .http()
+        .get(`/api/authors/${normalUser.id}`);
+      expect(userControlRes.status).toBe(200);
+      expect(userControlRes.body.id).toBe(normalUser.id);
+      expect(userControlRes.body.name).toBe('Normal Traveler');
+      expect(userControlRes.body.posts.items).toHaveLength(1);
+      expect(userControlRes.body.itineraries.items).toHaveLength(1);
     });
   });
 });

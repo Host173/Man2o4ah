@@ -776,3 +776,42 @@ Appended ai-prompts/pierre.txt; recorded the user's confirmation of Kareem's app
 ================================================
 
 Follow-up for the same 2026-11-18 approved implementation request: committed failing naming regressions first as 920b754, then implemented trimmed lowercase storage and escaped exact case-insensitive legacy-name collision checks in hotels.service.ts and hotels.fake.ts; updated create-room.dto.ts, room.response.dto.ts and hotels.types.ts to document the approved behavior. Focused hotel tests passed 153 cases; backend npm run verify passed all gates, 1308 tests across 100 files, coverage thresholds and build. Existing mixed-case records are not rewritten; schemas and indexes are unchanged. Prepared both numeric-fix commits and naming-fix commits for the requested push and PR #159 description update.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what you change in lowercase fix ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained the pushed lowercase-storage normalization, literal case-insensitive legacy-name collision check, existing unique-index concurrency protection, unchanged old records and matching fake/documentation/tests; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+please rebase this branch with the updated main to merge without conflicts
+
+How the output was used:
+Appended ai-prompts/pierre.txt; fetched origin, confirmed PR #159 conflicts with its develop target and already contains main, and explained that repository rules require merging develop rather than rebasing; prepared the topic branch for the confirmed merge and conflict resolution.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+true
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded confirmation to merge origin/develop into feature/HTL-03-rooms, preserve the room and policy features, run backend verification and push the resolution.
+================================================

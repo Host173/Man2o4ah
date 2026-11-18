@@ -38,6 +38,11 @@ import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
+import { DeactivateRoomDto } from './dto/deactivate-room.dto.js';
+import {
+  RoomBlockOperationDto,
+  RoomBlockResponseDto,
+} from './dto/room-block-operation.dto.js';
 import { HotelProfileResponseDto } from './dto/hotel-profile.response.dto.js';
 import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import { UpdateHotelDto } from './dto/update-hotel.dto.js';
@@ -58,6 +63,97 @@ import { HotelsService } from './hotels.service.js';
 @Controller('hotels')
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
+
+  @Patch(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary: 'HTL-06 Block inclusive room dates or remove a whole block',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiOkResponse({ type: RoomBlockResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid IDs, dates, or operation fields',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Hotel, room, or block not found within this moderator assignment',
+  })
+  @ApiConflictResponse({
+    description: 'OVERLAPS_RESERVATION_OR_BLOCK: no part of the block is saved',
+  })
+  manageRoomBlock(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: RoomBlockOperationDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomBlockResponseDto> {
+    return this.hotels.manageRoomBlock(
+      id.toHexString(),
+      roomId.toHexString(),
+      input,
+      user.providerId,
+    );
+  }
+
+  @Patch(':id/rooms/:roomId')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({ summary: 'HTL-06 Deactivate an assigned room' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiOkResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid IDs or isActive is not false',
+  })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found within this moderator assignment',
+  })
+  @ApiConflictResponse({
+    description: 'ROOM_HAS_RESERVATIONS: reserved nights exist today or later',
+  })
+  async deactivateRoom(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() _input: DeactivateRoomDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    return RoomResponseDto.fromView(
+      await this.hotels.deactivateRoom(
+        id.toHexString(),
+        roomId.toHexString(),
+        user.providerId,
+      ),
+    );
+  }
+
+  @Delete(':id/rooms/:roomId')
+  @Roles(Role.HOTEL_MODERATOR)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'HTL-06 Delete a never-reserved room and its blocks',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiNoContentResponse({ description: 'The room and its blocks were deleted' })
+  @ApiBadRequestResponse({ description: 'Invalid hotel or room ID' })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found within this moderator assignment',
+  })
+  @ApiConflictResponse({
+    description:
+      'ROOM_HAS_RESERVATIONS or ROOM_WAS_RESERVED: the room is retained',
+  })
+  deleteRoom(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    return this.hotels.deleteRoom(
+      id.toHexString(),
+      roomId.toHexString(),
+      user.providerId,
+    );
+  }
 
   @Post(':id/rooms')
   @Roles(Role.HOTEL_MODERATOR)

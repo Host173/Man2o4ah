@@ -10,7 +10,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
-import { toDateOnly } from '../../common/dates/date-only.js';
+import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
@@ -19,6 +19,8 @@ import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
+import { RoomNight } from './schemas/room-night.schema.js';
+import { RoomNightInventory } from './room-night-inventory.js';
 
 const profile = {
   name: 'Nile View Hotel',
@@ -29,11 +31,13 @@ const profile = {
   amenities: ['Wi-Fi', 'Pool'],
 };
 
-describe('Hotels API (HTL-01 / HTL-03)', () => {
+describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
   let t: TestApp;
   let service: HotelsService;
   let hotels: Model<Hotel>;
   let rooms: Model<Room>;
+  let nights: Model<RoomNight>;
+  let inventory: RoomNightInventory;
   const storage = new FakeStorageService();
 
   beforeAll(async () => {
@@ -49,6 +53,8 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
     rooms = t.moduleRef.get<Model<Room>>(getModelToken(Room.name));
+    nights = t.moduleRef.get<Model<RoomNight>>(getModelToken(RoomNight.name));
+    inventory = t.moduleRef.get(RoomNightInventory);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -57,6 +63,348 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
     await Promise.all(storage.keys().map((key) => storage.delete(key)));
   });
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('room management endpoints (HTL-06)', () => {
+    let hotelId: string;
+    let roomId: string;
+    let path: string;
+    let fromDate: Date;
+    let toDate: Date;
+    let blockBody: { op: 'BLOCK'; fromDate: string; toDate: string };
+    const actions = ['BLOCK', 'UNBLOCK', 'DEACTIVATE', 'DELETE'] as const;
+    type Action = (typeof actions)[number];
+
+    beforeEach(async () => {
+      hotelId = (await service.create(profile)).id;
+      const today = toDateOnly(new Date().toISOString().slice(0, 10));
+      fromDate = addDays(today, 2);
+      toDate = addDays(today, 4);
+      const room = await rooms.create({
+        hotelId,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        availability: [{ fromDate: today, toDate: addDays(today, 30) }],
+      });
+      roomId = room._id.toHexString();
+      path = `/api/hotels/${hotelId}/rooms/${roomId}`;
+      blockBody = {
+        op: 'BLOCK',
+        fromDate: fromDate.toISOString().slice(0, 10),
+        toDate: toDate.toISOString().slice(0, 10),
+      };
+    });
+
+    function mutation(action: Action, target = path) {
+      if (action === 'DELETE') return t.http().delete(target);
+      if (action === 'DEACTIVATE')
+        return t.http().patch(target).send({ isActive: false });
+      return t
+        .http()
+        .patch(`${target}/availability`)
+        .send(
+          action === 'BLOCK'
+            ? blockBody
+            : { op: 'UNBLOCK', blockId: new Types.ObjectId().toHexString() },
+        );
+    }
+
+    async function moderator() {
+      return loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotelId,
+      });
+    }
+
+    it('blocks inclusive dates, returns the block ID and removes exactly that block', async () => {
+      const user = await moderator();
+      const created = await mutation('BLOCK')
+        .set('Cookie', user.cookie)
+        .expect(200);
+      expect(created.body).toEqual({
+        blockId: expect.stringMatching(/^[a-f0-9]{24}$/),
+      });
+      expect(
+        await nights.countDocuments({ blockId: created.body.blockId }),
+      ).toBe(3);
+      const unblocked = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', user.cookie)
+        .send({ op: 'UNBLOCK', blockId: created.body.blockId })
+        .expect(200);
+      expect(unblocked.body).toEqual(created.body);
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it('returns a plain inactive room with calendar dates, and deletes a never-reserved room with its blocks', async () => {
+      const user = await moderator();
+      const response = await mutation('DEACTIVATE')
+        .set('Cookie', user.cookie)
+        .expect(200);
+      expect(response.body).toEqual({
+        _id: roomId,
+        hotelId,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        isActive: false,
+        hasEverBeenReserved: false,
+        availability: [
+          {
+            fromDate: toDateOnly(new Date().toISOString().slice(0, 10))
+              .toISOString()
+              .slice(0, 10),
+            toDate: addDays(
+              toDateOnly(new Date().toISOString().slice(0, 10)),
+              30,
+            )
+              .toISOString()
+              .slice(0, 10),
+          },
+        ],
+      });
+      await mutation('BLOCK').set('Cookie', user.cookie).expect(200);
+      const deleted = await mutation('DELETE')
+        .set('Cookie', user.cookie)
+        .expect(204);
+      expect(deleted.text).toBe('');
+      expect(await rooms.findById(roomId)).toBeNull();
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it.each(actions)(
+      'enforces login, moderator role and hotel/room scope for %s',
+      async (action) => {
+        const unauthenticated = await mutation(action).expect(401);
+        expect(unauthenticated.body.code).toBe(ErrorCode.NotAuthenticated);
+        for (const role of [Role.USER, Role.ADMIN, Role.AIRLINE_MODERATOR]) {
+          const user = await loginAs(t.connection, role);
+          const forbidden = await mutation(action)
+            .set('Cookie', user.cookie)
+            .expect(403);
+          expect(forbidden.body.code).toBe(ErrorCode.ForbiddenRole);
+        }
+        const otherHotelId = (
+          await service.create({ ...profile, name: 'Other Hotel' })
+        ).id;
+        const user = await moderator();
+        const other = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+          providerId: otherHotelId,
+        });
+        const wrongAssignment = await mutation(action)
+          .set('Cookie', other.cookie)
+          .expect(404);
+        expect(wrongAssignment.body.code).toBe(ErrorCode.NotFound);
+        for (const target of [
+          `/api/hotels/${otherHotelId}/rooms/${roomId}`,
+          `/api/hotels/${hotelId}/rooms/${new Types.ObjectId().toHexString()}`,
+        ]) {
+          const missing = await mutation(action, target)
+            .set('Cookie', user.cookie)
+            .expect(404);
+          expect(missing.body.code).toBe(ErrorCode.NotFound);
+        }
+        const ownOtherHotel = await mutation(
+          action,
+          `/api/hotels/${otherHotelId}/rooms/${roomId}`,
+        )
+          .set('Cookie', other.cookie)
+          .expect(404);
+        expect(ownOtherHotel.body.code).toBe(ErrorCode.NotFound);
+        const badId = await mutation(
+          action,
+          `/api/hotels/${hotelId}/rooms/invalid`,
+        )
+          .set('Cookie', user.cookie)
+          .expect(400);
+        expect(badId.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(await rooms.findById(roomId).lean()).toMatchObject({
+          isActive: true,
+          inventoryVersion: 0,
+        });
+        expect(await nights.countDocuments()).toBe(0);
+      },
+    );
+
+    it('does not unblock another room or mistake a reservation ID for a block ID', async () => {
+      const user = await moderator();
+      const otherRoom = await rooms.create({
+        hotelId,
+        name: '102',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+      });
+      const block = await service.manageRoomBlock(
+        hotelId,
+        otherRoom._id.toHexString(),
+        blockBody,
+        hotelId,
+      );
+      const reservationId = new Types.ObjectId().toHexString();
+      await t.connection.transaction((session) =>
+        inventory.reserve(
+          hotelId,
+          [roomId],
+          fromDate,
+          addDays(toDate, 1),
+          reservationId,
+          { session },
+        ),
+      );
+      for (const blockId of [
+        block.blockId,
+        reservationId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send({ op: 'UNBLOCK', blockId })
+          .expect(404);
+        expect(response.body.code).toBe(ErrorCode.NotFound);
+      }
+      expect(await nights.countDocuments({ blockId: block.blockId })).toBe(3);
+      expect(await nights.countDocuments({ reservationId })).toBe(3);
+    });
+
+    it('rejects invalid and mixed operation fields without writing any nights', async () => {
+      const user = await moderator();
+      for (const body of [
+        {},
+        { op: 'OTHER' },
+        { op: 'BLOCK' },
+        { ...blockBody, fromDate: null },
+        { ...blockBody, fromDate: '2026-02-29' },
+        { ...blockBody, toDate: '2026-12-01T00:00:00Z' },
+        {
+          ...blockBody,
+          fromDate: blockBody.toDate,
+          toDate: blockBody.fromDate,
+        },
+        { ...blockBody, blockId: new Types.ObjectId().toHexString() },
+        { ...blockBody, reservationId: new Types.ObjectId().toHexString() },
+        { op: 'UNBLOCK' },
+        { op: 'UNBLOCK', blockId: null },
+        { op: 'UNBLOCK', blockId: 'invalid' },
+        {
+          ...blockBody,
+          op: 'UNBLOCK',
+          blockId: new Types.ObjectId().toHexString(),
+        },
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send(body)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      for (const body of [
+        {},
+        { isActive: true },
+        { isActive: null },
+        { isActive: 'false' },
+        { isActive: false, inventoryVersion: 9 },
+      ]) {
+        const response = await t
+          .http()
+          .patch(path)
+          .set('Cookie', user.cookie)
+          .send(body)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      expect(await nights.countDocuments()).toBe(0);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 0,
+        isActive: true,
+      });
+    });
+
+    it('returns reservation conflicts without partial changes, and retains history after release', async () => {
+      const user = await moderator();
+      const reservationId = new Types.ObjectId().toHexString();
+      await t.connection.transaction((session) =>
+        inventory.reserve(
+          hotelId,
+          [roomId],
+          fromDate,
+          addDays(toDate, 1),
+          reservationId,
+          { session },
+        ),
+      );
+      for (const [action, code] of [
+        ['BLOCK', ErrorCode.OverlapsReservationOrBlock],
+        ['DEACTIVATE', ErrorCode.RoomHasReservations],
+        ['DELETE', ErrorCode.RoomHasReservations],
+      ] as const) {
+        const response = await mutation(action)
+          .set('Cookie', user.cookie)
+          .expect(409);
+        expect(response.body.code).toBe(code);
+      }
+      expect(await nights.countDocuments()).toBe(3);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        isActive: true,
+        inventoryVersion: 1,
+      });
+      await t.connection.transaction((session) =>
+        inventory.release(reservationId, { session }),
+      );
+      const response = await mutation('DELETE')
+        .set('Cookie', user.cookie)
+        .expect(409);
+      expect(response.body.code).toBe(ErrorCode.RoomWasReserved);
+      await mutation('DEACTIVATE').set('Cookie', user.cookie).expect(200);
+    });
+
+    it('documents the HTL-06 operations, request/response types, authentication and conflicts in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      const availability =
+        document.paths['/api/hotels/{id}/rooms/{roomId}/availability']?.patch;
+      const room = document.paths['/api/hotels/{id}/rooms/{roomId}'];
+      for (const endpoint of [availability, room?.patch, room?.delete]) {
+        expect(endpoint).toMatchObject({
+          summary: expect.stringContaining('HTL-06'),
+          security: [{ cookie: [] }],
+          responses: {
+            '400': expect.any(Object),
+            '401': expect.any(Object),
+            '403': expect.any(Object),
+            '404': expect.any(Object),
+            '409': expect.any(Object),
+          },
+        });
+      }
+      expect(availability?.requestBody).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/RoomBlockOperationDto' },
+          },
+        },
+      });
+      expect(room?.patch?.requestBody).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/DeactivateRoomDto' },
+          },
+        },
+      });
+      expect(room?.delete?.responses).toHaveProperty('204');
+    });
+  });
 
   describe('room endpoints (HTL-03)', () => {
     const input = {

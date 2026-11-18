@@ -13,6 +13,11 @@ import { escapeRegex } from '../../src/common/text/escape-regex.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
 import type { CreateRoomDto } from '../../src/modules/hotels/dto/create-room.dto.js';
+import type {
+  RoomBlockOperationDto,
+  RoomBlockResponseDto,
+} from '../../src/modules/hotels/dto/room-block-operation.dto.js';
+import { parseRoomBlockOperation } from '../../src/modules/hotels/room-block-operation.js';
 import type { UpdateHotelPoliciesDto } from '../../src/modules/hotels/dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
@@ -43,6 +48,7 @@ import {
 } from '../../src/modules/hotels/room-date-ranges.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+import { FakeRoomNightInventory } from './room-night-inventory.fake.js';
 
 // Disconnected: share production validators without opening a database connection.
 const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
@@ -286,6 +292,60 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     );
   }
 
+  async manageRoomBlock(
+    hotelId: string,
+    roomId: string,
+    input: RoomBlockOperationDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomBlockResponseDto> {
+    const operation = parseRoomBlockOperation(input);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    const inventory = new FakeRoomNightInventory(this);
+    if (operation.op === 'BLOCK') {
+      return {
+        blockId: await inventory.block(
+          room.id,
+          operation.fromDate,
+          operation.toDate,
+        ),
+      };
+    }
+    if (
+      !this.data.roomNights.some(
+        (night) =>
+          night.roomId === room.id &&
+          night.kind === 'blocked' &&
+          night.blockId === operation.blockId,
+      )
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Block not found',
+      });
+    }
+    await inventory.unblock(operation.blockId);
+    return { blockId: operation.blockId };
+  }
+
+  async deactivateRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).deactivate(room.id);
+    return structuredClone(room);
+  }
+
+  async deleteRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<void> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).delete(room.id);
+  }
+
   async getRoomNights(
     hotelId: string,
     fromDate: Date,
@@ -468,6 +528,25 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     return hotel;
+  }
+
+  private assignedRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): RoomView {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const id = this.parseId(roomId, 'roomId');
+    const room = this.data.rooms.find(
+      (item) => item.id === id && item.hotelId === hotel.id,
+    );
+    if (!room) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Room not found',
+      });
+    }
+    return room;
   }
 
   private parseId(value: string, field = 'hotelId'): string {

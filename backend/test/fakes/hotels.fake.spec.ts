@@ -78,6 +78,128 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  describe('room management (HTL-06)', () => {
+    const block = {
+      op: 'BLOCK' as const,
+      fromDate: '2026-11-15',
+      toDate: '2026-11-17',
+    };
+
+    it('blocks/unblocks through the same dataset and deletes never-reserved rooms with their blocks', async () => {
+      const created = await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room1,
+        block,
+        ids.hotel1,
+      );
+      expect(hotels.data.roomNights).toHaveLength(3);
+      await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room1,
+        { op: 'UNBLOCK', blockId: created.blockId.toUpperCase() },
+        ids.hotel1,
+      );
+      expect(hotels.data.roomNights).toHaveLength(0);
+      await hotels.manageRoomBlock(ids.hotel1, ids.room1, block, ids.hotel1);
+      await hotels.deleteRoom(ids.hotel1, ids.room1, ids.hotel1);
+      expect(hotels.data.rooms.map((item) => item.id)).toEqual([ids.room2]);
+      expect(hotels.data.roomNights).toHaveLength(0);
+    });
+
+    it('preserves reservation conflicts, permanent reservation history and detached inactive views', async () => {
+      await inventory.reserve(
+        ids.hotel1,
+        [ids.room1],
+        checkIn,
+        checkOut,
+        ids.reservation1,
+      );
+      await expect(
+        hotels.manageRoomBlock(ids.hotel1, ids.room1, block, ids.hotel1),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.OverlapsReservationOrBlock },
+      });
+      for (const action of ['deactivateRoom', 'deleteRoom'] as const) {
+        await expect(
+          hotels[action](ids.hotel1, ids.room1, ids.hotel1),
+        ).rejects.toMatchObject({
+          response: { code: ErrorCode.RoomHasReservations },
+        });
+      }
+      await inventory.release(ids.reservation1);
+      await expect(
+        hotels.deleteRoom(ids.hotel1, ids.room1, ids.hotel1),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.RoomWasReserved },
+      });
+      const room = await hotels.deactivateRoom(
+        ids.hotel1,
+        ids.room1,
+        ids.hotel1,
+      );
+      expect(room.isActive).toBe(false);
+      room.isActive = true;
+      expect(hotels.data.rooms[0].isActive).toBe(false);
+    });
+
+    it('scopes rooms and blocks to the assigned hotel and validates operation fields', async () => {
+      const created = await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room2,
+        block,
+        ids.hotel1,
+      );
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { op: 'UNBLOCK', blockId: created.blockId },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { op: 'UNBLOCK', blockId: ids.missing },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { ...block, blockId: created.blockId },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      for (const action of ['deactivateRoom', 'deleteRoom'] as const) {
+        await expect(
+          hotels[action](ids.hotel1, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+        await expect(
+          hotels[action](ids.hotel1, ids.missing, ids.hotel1),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      expect(hotels.data.roomNights).toHaveLength(3);
+    });
+  });
+
   describe('room creation and listing (HTL-03)', () => {
     const input = {
       name: ' Room A ',

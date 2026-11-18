@@ -8,6 +8,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
@@ -17,6 +18,8 @@ import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
+import { RoomNight } from './schemas/room-night.schema.js';
+import { RoomNightInventory } from './room-night-inventory.js';
 
 const profile = {
   name: 'Nile View Hotel',
@@ -27,11 +30,13 @@ const profile = {
   amenities: ['Wi-Fi', 'Pool'],
 };
 
-describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
+describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
   let t: TestApp;
   let service: HotelsService;
   let hotels: Model<Hotel>;
   let rooms: Model<Room>;
+  let nights: Model<RoomNight>;
+  let inventory: RoomNightInventory;
   let referenceData: FakeReferenceDataService;
   const storage = new FakeStorageService();
 
@@ -49,6 +54,8 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
     rooms = t.moduleRef.get<Model<Room>>(getModelToken(Room.name));
+    nights = t.moduleRef.get<Model<RoomNight>>(getModelToken(RoomNight.name));
+    inventory = t.moduleRef.get(RoomNightInventory);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -58,6 +65,286 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('room blocks, deactivation and deletion (HTL-06)', () => {
+    let hotelId: string;
+    let roomId: string;
+    let today: Date;
+    let fromDate: Date;
+    let toDate: Date;
+
+    beforeEach(async () => {
+      today = toDateOnly(new Date().toISOString().slice(0, 10));
+      fromDate = addDays(today, 2);
+      toDate = addDays(today, 4);
+      hotelId = (await service.create(profile)).id;
+      const room = await rooms.create({
+        hotelId,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        availability: [{ fromDate: today, toDate: addDays(today, 30) }],
+      });
+      roomId = room._id.toHexString();
+    });
+
+    function blockInput(from = fromDate, to = toDate) {
+      return {
+        op: 'BLOCK' as const,
+        fromDate: from.toISOString().slice(0, 10),
+        toDate: to.toISOString().slice(0, 10),
+      };
+    }
+
+    async function reserve(from = fromDate, to = addDays(toDate, 1)) {
+      const reservationId = new Types.ObjectId().toHexString();
+      await t.connection.transaction((session) =>
+        inventory.reserve(hotelId, [roomId], from, to, reservationId, {
+          session,
+        }),
+      );
+      return reservationId;
+    }
+
+    it('blocks inclusive nights and rolls back an entire overlapping block, including its room version', async () => {
+      const { blockId } = await service.manageRoomBlock(
+        hotelId.toUpperCase(),
+        roomId.toUpperCase(),
+        blockInput(),
+        hotelId,
+      );
+      expect(
+        await nights.find({ blockId }).sort({ date: 1 }).distinct('date'),
+      ).toEqual([fromDate, addDays(fromDate, 1), toDate]);
+      const before = await rooms.findById(roomId).lean();
+      await expect(
+        service.manageRoomBlock(
+          hotelId,
+          roomId,
+          blockInput(toDate, addDays(toDate, 2)),
+          hotelId,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.OverlapsReservationOrBlock },
+      });
+      expect(await nights.countDocuments()).toBe(3);
+      expect(await rooms.findById(roomId).lean()).toEqual(before);
+      await service.manageRoomBlock(
+        hotelId,
+        roomId,
+        blockInput(addDays(toDate, 1), addDays(toDate, 1)),
+        hotelId,
+      );
+      expect(await nights.countDocuments()).toBe(4);
+    });
+
+    it('unblocks only the named room block, preserving another block and reservation nights', async () => {
+      const first = await service.manageRoomBlock(
+        hotelId,
+        roomId,
+        blockInput(),
+        hotelId,
+      );
+      const second = await service.manageRoomBlock(
+        hotelId,
+        roomId,
+        blockInput(addDays(toDate, 2), addDays(toDate, 2)),
+        hotelId,
+      );
+      const reservationId = await reserve(
+        addDays(toDate, 3),
+        addDays(toDate, 4),
+      );
+      expect(
+        await service.manageRoomBlock(
+          hotelId,
+          roomId,
+          { op: 'UNBLOCK', blockId: first.blockId.toUpperCase() },
+          hotelId,
+        ),
+      ).toEqual(first);
+      expect(await nights.countDocuments({ blockId: first.blockId })).toBe(0);
+      expect(await nights.countDocuments({ blockId: second.blockId })).toBe(1);
+      expect(await nights.countDocuments({ reservationId })).toBe(1);
+      await expect(
+        service.manageRoomBlock(
+          hotelId,
+          roomId,
+          { op: 'UNBLOCK', blockId: first.blockId },
+          hotelId,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    });
+
+    it.each([0, 2])(
+      'rejects blocking, deactivation and deletion for reservation nights %i days from today without partial changes',
+      async (offset) => {
+        const from = addDays(today, offset);
+        await reserve(from, addDays(from, 1));
+        const before = await rooms.findById(roomId).lean();
+        for (const [action, code] of [
+          [
+            () =>
+              service.manageRoomBlock(
+                hotelId,
+                roomId,
+                blockInput(from, from),
+                hotelId,
+              ),
+            ErrorCode.OverlapsReservationOrBlock,
+          ],
+          [
+            () => service.deactivateRoom(hotelId, roomId, hotelId),
+            ErrorCode.RoomHasReservations,
+          ],
+          [
+            () => service.deleteRoom(hotelId, roomId, hotelId),
+            ErrorCode.RoomHasReservations,
+          ],
+        ] as const) {
+          await expect(action()).rejects.toMatchObject({
+            status: 409,
+            response: { code },
+          });
+          expect(await rooms.findById(roomId).lean()).toEqual(before);
+          expect(await nights.countDocuments()).toBe(1);
+        }
+      },
+    );
+
+    it('allows deactivation after release but never deletion of a previously reserved room', async () => {
+      const reservationId = await reserve();
+      await t.connection.transaction((session) =>
+        inventory.release(reservationId, { session }),
+      );
+      const deactivated = await service.deactivateRoom(
+        hotelId,
+        roomId,
+        hotelId,
+      );
+      expect(deactivated).toMatchObject({
+        id: roomId,
+        isActive: false,
+        hasEverBeenReserved: true,
+      });
+      await expect(reserve()).rejects.toMatchObject({
+        response: { code: ErrorCode.RoomsUnavailable },
+      });
+      await expect(
+        service.deleteRoom(hotelId, roomId, hotelId),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.RoomWasReserved },
+      });
+      expect(await rooms.countDocuments()).toBe(1);
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it('permits deactivation with only past reservation nights, but preserves the room and history', async () => {
+      await rooms.updateOne(
+        { _id: roomId },
+        { $set: { hasEverBeenReserved: true } },
+      );
+      await nights.create({
+        roomId,
+        hotelId,
+        date: addDays(today, -1),
+        kind: 'reservation',
+        reservationId: new Types.ObjectId(),
+      });
+      expect(
+        await service.deactivateRoom(hotelId, roomId, hotelId),
+      ).toMatchObject({ isActive: false });
+      expect(await nights.countDocuments()).toBe(1);
+      await expect(
+        service.deleteRoom(hotelId, roomId, hotelId),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.RoomWasReserved },
+      });
+    });
+
+    it('deletes a never-reserved room and every blocked night in the same transaction', async () => {
+      await service.manageRoomBlock(hotelId, roomId, blockInput(), hotelId);
+      await service.deleteRoom(hotelId, roomId, hotelId);
+      expect(await rooms.findById(roomId)).toBeNull();
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it.each(['BLOCK', 'DEACTIVATE', 'DELETE'] as const)(
+      'preserves inventory when a booking races %s through the service',
+      async (action) => {
+        const change = () =>
+          action === 'BLOCK'
+            ? service.manageRoomBlock(hotelId, roomId, blockInput(), hotelId)
+            : action === 'DEACTIVATE'
+              ? service.deactivateRoom(hotelId, roomId, hotelId)
+              : service.deleteRoom(hotelId, roomId, hotelId);
+        const results = await Promise.allSettled([reserve(), change()]);
+        expect(
+          results.filter((result) => result.status === 'fulfilled'),
+        ).toHaveLength(1);
+        expect(
+          results.filter((result) => result.status === 'rejected'),
+        ).toHaveLength(1);
+        const reserved = await nights.countDocuments({ kind: 'reservation' });
+        const blocked = await nights.countDocuments({ kind: 'blocked' });
+        const room = await rooms.findById(roomId).lean();
+        if (reserved > 0) {
+          expect(reserved).toBe(3);
+          expect(blocked).toBe(0);
+          expect(room).toMatchObject({
+            isActive: true,
+            hasEverBeenReserved: true,
+          });
+        } else if (action === 'BLOCK') {
+          expect(blocked).toBe(3);
+          expect(room).toMatchObject({
+            isActive: true,
+            hasEverBeenReserved: false,
+          });
+        } else if (action === 'DEACTIVATE') {
+          expect(blocked).toBe(0);
+          expect(room).toMatchObject({
+            isActive: false,
+            hasEverBeenReserved: false,
+          });
+        } else {
+          expect(blocked).toBe(0);
+          expect(room).toBeNull();
+        }
+      },
+    );
+
+    it('validates operation-specific fields and dates before changing inventory', async () => {
+      for (const input of [
+        { op: 'BLOCK' as const },
+        { ...blockInput(), fromDate: '2026-02-29' },
+        { ...blockInput(), toDate: '2026-02-30' },
+        { ...blockInput(), fromDate: '2026-12-10', toDate: '2026-12-09' },
+        { ...blockInput(), blockId: new Types.ObjectId().toHexString() },
+        { op: 'UNBLOCK' as const },
+        { op: 'UNBLOCK' as const, blockId: 'invalid' },
+      ]) {
+        await expect(
+          service.manageRoomBlock(hotelId, roomId, input, hotelId),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      expect(await nights.countDocuments()).toBe(0);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 0,
+        isActive: true,
+      });
+    });
+  });
 
   describe('hotel policies (HTL-09, HTL-10)', () => {
     const policies = {

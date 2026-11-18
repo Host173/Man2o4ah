@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { vi } from 'vitest';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
@@ -205,10 +206,17 @@ describe('FakeItinerariesService owner-only methods', () => {
   });
 
   it('leaves updatedAt alone when an update changes nothing', async () => {
-    const itineraries = new FakeItinerariesService();
-    const created = await itineraries.create(createDto(), 'user-1');
+    vi.useFakeTimers({ now: new Date('2027-01-01T00:00:00.000Z') });
+    try {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
 
-    const unchanged = await itineraries.update(created._id, {}, 'user-1');
-    expect(unchanged.updatedAt).toEqual(created.updatedAt);
+      // Move the clock on, so a bump would show up as a different updatedAt.
+      vi.setSystemTime(new Date('2027-01-02T00:00:00.000Z'));
+      const unchanged = await itineraries.update(created._id, {}, 'user-1');
+      expect(unchanged.updatedAt).toEqual(created.updatedAt);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

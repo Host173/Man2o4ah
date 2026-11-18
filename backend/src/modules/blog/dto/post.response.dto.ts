@@ -191,6 +191,8 @@ export class PostLikeResponseDto implements PostLikeView {
 
   @ApiProperty({ example: true })
   liked!: boolean;
+}
+
 /** Swagger response model for a public itinerary summary on the author page (`BLG-12`, `CTR-06`). */
 export class PublicItinerarySummaryResponseDto implements PublicItinerarySummary {
   @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f610' })

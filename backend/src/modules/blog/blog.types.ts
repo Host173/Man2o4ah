@@ -63,6 +63,8 @@ export interface PostLikeView {
   postId: string;
   likeCount: number;
   liked: boolean;
+}
+
 /**
  * Public author profile page view (`BLG-12`).
  * Exposes only public author fields (`id`, `name`, `createdAt`), paginated

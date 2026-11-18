@@ -7,7 +7,10 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { AdminBookingView } from './admin.types.js';
-import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
+import {
+  ListAdminBookingsQueryDto,
+  MAX_ADMIN_BOOKINGS_DEPTH,
+} from './dto/list-admin-bookings-query.dto.js';
 
 /**
  * Admin read-only booking list and platform administration workflows (`ACC-17`).
@@ -22,14 +25,28 @@ export class AdminService {
 
   /**
    * ACC-17: returns a read-only, paginated list of all flight and hotel
-   * bookings sorted newest `createdAt` first (deterministic tiebreaker),
-   * filterable by `type`, `status`, and inclusive `createdAt` date range.
+   * bookings sorted newest `createdAt` first (preserving each service's order
+   * and flights-before-hotels on equal timestamps), filterable by `type`,
+   * `status`, and inclusive `createdAt` date range, capped at `page * limit <= 10000`.
    */
   async listBookings(
     query: ListAdminBookingsQueryDto = new ListAdminBookingsQueryDto(),
   ): Promise<Paginated<AdminBookingView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
+
+    if (page * limit > MAX_ADMIN_BOOKINGS_DEPTH) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'page',
+            message: `page * limit must not exceed ${MAX_ADMIN_BOOKINGS_DEPTH}`,
+          },
+        ],
+      });
+    }
 
     const fromStart =
       query.from !== undefined ? this.parseDate(query.from, 'from') : undefined;
@@ -102,9 +119,7 @@ export class AdminService {
 
     const merged = [...flights.items, ...hotels.items].sort(
       (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
-        a.bookingType.localeCompare(b.bookingType) ||
-        a.bookingId.localeCompare(b.bookingId),
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
     const items = merged
       .slice((page - 1) * limit, page * limit)

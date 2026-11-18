@@ -1,8 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsIn,
+  IsInt,
   IsOptional,
   Matches,
+  Max,
+  Min,
   Validate,
   ValidatorConstraint,
 } from 'class-validator';
@@ -15,6 +19,8 @@ import {
   ADMIN_BOOKING_STATUSES,
   type AdminBookingStatus,
 } from '../admin.types.js';
+
+export const MAX_ADMIN_BOOKINGS_DEPTH = 10_000;
 
 @ValidatorConstraint({ name: 'isValidDateOnlyString', async: false })
 class IsValidDateOnlyConstraint implements ValidatorConstraintInterface {
@@ -35,6 +41,18 @@ class IsValidDateOnlyConstraint implements ValidatorConstraintInterface {
 
 /** Query parameters for the read-only admin booking list (`ACC-17`, `CTR-04`). */
 export class ListAdminBookingsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    default: 1,
+    minimum: 1,
+    maximum: MAX_ADMIN_BOOKINGS_DEPTH,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_ADMIN_BOOKINGS_DEPTH)
+  override page = 1;
+
   @ApiPropertyOptional({
     enum: Object.values(BookingType),
     description: 'Filter by booking type (flight or hotel)',

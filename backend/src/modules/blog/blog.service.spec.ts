@@ -1484,6 +1484,154 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         expect(storedPost?.likeCount).toBe(storedLikes);
       }
     });
+
+    it('cleans up newly inserted orphan like by _id if the post is deleted between visibility check and $inc (BLG-06)', async () => {
+      const target = await service.create(
+        {
+          title: 'Target Post',
+          body: 'Will be deleted mid-like.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const bystander = await service.create(
+        {
+          title: 'Bystander Post',
+          body: 'Existing like must stay intact.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const normalPost = await service.create(
+        {
+          title: 'Normal Post',
+          body: 'Control normal/idempotent like and prior-delete.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const alreadyDeleted = await service.create(
+        {
+          title: 'Already Deleted Post',
+          body: 'Deleted before likePost is invoked.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      const targetObjectId = new Types.ObjectId(target._id);
+      const bystanderObjectId = new Types.ObjectId(bystander._id);
+      const normalObjectId = new Types.ObjectId(normalPost._id);
+      const alreadyDeletedObjectId = new Types.ObjectId(alreadyDeleted._id);
+      const likerObjectId = new Types.ObjectId(otherUserId);
+
+      // Normal like + idempotent double like on normalPost.
+      const normalLike = await service.likePost(normalPost._id, otherUserId);
+      expect(normalLike).toEqual({
+        postId: normalPost._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: normalObjectId }).exec(),
+      ).toBe(1);
+      expect((await service.getById(normalPost._id)).likeCount).toBe(1);
+
+      const repeatNormalLike = await service.likePost(
+        normalPost._id,
+        otherUserId,
+      );
+      expect(repeatNormalLike).toEqual({
+        postId: normalPost._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: normalObjectId }).exec(),
+      ).toBe(1);
+      expect((await service.getById(normalPost._id)).likeCount).toBe(1);
+
+      // Same user likes bystander post before the race; it must stay unaffected.
+      await service.likePost(bystander._id, otherUserId);
+      expect(
+        await likeModel
+          .countDocuments({
+            postId: bystanderObjectId,
+            userId: likerObjectId,
+          })
+          .exec(),
+      ).toBe(1);
+
+      // Liking an already-deleted post returns 404 NOT_FOUND with 0 likes.
+      await postModel.deleteOne({ _id: alreadyDeletedObjectId }).exec();
+      const preDeletedErr = await service
+        .likePost(alreadyDeleted._id, otherUserId)
+        .catch((err: unknown) => err);
+      expect(preDeletedErr).toBeInstanceOf(NotFoundException);
+      expect((preDeletedErr as NotFoundException).getStatus()).toBe(404);
+      expect((preDeletedErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel
+          .countDocuments({ postId: alreadyDeletedObjectId })
+          .exec(),
+      ).toBe(0);
+
+      // Deterministic race: delete target directly just before delegating to real likeModel.create.
+      type CreateDoc = { postId: Types.ObjectId; userId: Types.ObjectId };
+      const realCreate = likeModel.create.bind(likeModel) as (
+        doc: CreateDoc,
+      ) => Promise<LikeDocument>;
+      const createSpy = vi
+        .spyOn(likeModel, 'create')
+        .mockImplementationOnce((async (doc: CreateDoc) => {
+          await postModel.deleteOne({ _id: targetObjectId }).exec();
+          return realCreate(doc);
+        }) as never);
+
+      let raceErr: unknown;
+      try {
+        raceErr = await service
+          .likePost(target._id, otherUserId)
+          .catch((err: unknown) => err);
+      } finally {
+        createSpy.mockRestore();
+      }
+
+      expect(raceErr).toBeInstanceOf(NotFoundException);
+      expect((raceErr as NotFoundException).getStatus()).toBe(404);
+      expect((raceErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(0);
+
+      // Re-liking the now-deleted post after the race still returns 404 NOT_FOUND and 0 likes.
+      const retryErr = await service
+        .likePost(target._id, otherUserId)
+        .catch((err: unknown) => err);
+      expect(retryErr).toBeInstanceOf(NotFoundException);
+      expect((retryErr as NotFoundException).getStatus()).toBe(404);
+      expect((retryErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(0);
+
+      // Bystander post's like by the same user remains intact.
+      expect(
+        await likeModel
+          .countDocuments({
+            postId: bystanderObjectId,
+            userId: likerObjectId,
+          })
+          .exec(),
+      ).toBe(1);
+      expect((await service.getById(bystander._id)).likeCount).toBe(1);
+    });
   });
 
   describe('User deactivation & reactivation events (ACC-12)', () => {

@@ -86,6 +86,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     likeModel = testApp.moduleRef.get<Model<LikeDocument>>(
       getModelToken(Like.name),
     );
+    await Promise.all([
+      postModel.init(),
+      commentModel.init(),
+      likeModel.init(),
+    ]);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -1396,6 +1401,56 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         'db failure',
       );
       expect((await service.getById(post._id)).likeCount).toBe(0);
+    });
+
+    it('preserves stored likeCount === like document count (0 or 1) across rounds of concurrent mixed likePost and unlikePost calls from the same user', async () => {
+      const post = await service.create(
+        {
+          title: 'Mixed Race Post',
+          body: 'Testing concurrent like/unlike interleaving from one user.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const postObjectId = new Types.ObjectId(post._id);
+      const userObjectId = new Types.ObjectId(otherUserId);
+
+      for (let round = 0; round < 10; round += 1) {
+        const calls = Array.from({ length: 20 }, (_, index) => {
+          const isLike = (index + round) % 2 === 0;
+          const delayMs = round % 2 === 0 ? 0 : index % 3;
+          const invoke = () =>
+            isLike
+              ? service.likePost(post._id, otherUserId)
+              : service.unlikePost(post._id, otherUserId);
+          return delayMs === 0
+            ? invoke()
+            : new Promise((resolve) => setTimeout(resolve, delayMs)).then(
+                invoke,
+              );
+        });
+
+        const settled = await Promise.allSettled(calls);
+        for (const outcome of settled) {
+          expect(outcome.status).toBe('fulfilled');
+          if (outcome.status === 'fulfilled') {
+            expect(outcome.value.postId).toBe(post._id);
+            expect(typeof outcome.value.liked).toBe('boolean');
+            expect(outcome.value.likeCount).toBeGreaterThanOrEqual(0);
+          }
+        }
+
+        const [storedPost, storedLikes] = await Promise.all([
+          postModel.findById(postObjectId).lean().exec(),
+          likeModel.countDocuments({
+            postId: postObjectId,
+            userId: userObjectId,
+          }),
+        ]);
+
+        expect([0, 1]).toContain(storedLikes);
+        expect(storedPost?.likeCount).toBe(storedLikes);
+      }
     });
   });
 

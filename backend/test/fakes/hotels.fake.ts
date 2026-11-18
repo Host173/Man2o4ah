@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Types } from 'mongoose';
+import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { addDays, isDateOnly } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
@@ -16,6 +16,10 @@ import type {
   RoomNightView,
   RoomView,
 } from '../../src/modules/hotels/hotels.types.js';
+import {
+  Hotel,
+  HotelSchema,
+} from '../../src/modules/hotels/schemas/hotel.schema.js';
 import type { RatingSummary } from '../../src/modules/hotels/schemas/hotel.schema.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
@@ -23,6 +27,9 @@ import type { StorageService } from '../../src/modules/storage/storage.service.j
 import type { PublicApi } from './public-api.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+
+// Disconnected: share production validators without opening a database connection.
+const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
 
 export interface HotelDataset {
   hotels: HotelView[];
@@ -96,6 +103,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       isActive: true,
       ratingSummary: { average: null, count: 0 },
     };
+    await this.validate(hotel);
     this.data.hotels.push(hotel);
     return structuredClone(hotel);
   }
@@ -119,6 +127,7 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     if (input.amenities !== undefined) {
       fields.amenities = input.amenities.map((amenity) => amenity.trim());
     }
+    await this.validate(fields, Object.keys(fields));
     Object.assign(hotel, fields);
     return structuredClone(hotel);
   }
@@ -330,7 +339,9 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     options?: HotelTransactionOptions,
   ): Promise<void> {
     void options;
-    this.requireHotel(hotelId).ratingSummary = structuredClone(summary);
+    const id = this.parseId(hotelId);
+    await this.validate({ ratingSummary: summary }, ['ratingSummary']);
+    this.requireHotel(id).ratingSummary = structuredClone(summary);
   }
 
   async setActive(
@@ -398,5 +409,22 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     return new Types.ObjectId(value).toHexString();
+  }
+
+  private async validate(
+    fields: Partial<HotelView>,
+    paths?: string[],
+  ): Promise<void> {
+    try {
+      await new HotelValidationModel(fields).validate(paths);
+    } catch (error) {
+      if (paths && error instanceof MongooseError.ValidationError) {
+        // Mongoose updates throw cast errors directly, unlike document creation.
+        for (const fieldError of Object.values(error.errors)) {
+          if (fieldError instanceof MongooseError.CastError) throw fieldError;
+        }
+      }
+      throw error;
+    }
   }
 }

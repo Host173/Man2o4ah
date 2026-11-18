@@ -195,7 +195,10 @@ export class HotelsService {
     throw new NotImplementedException('search: implemented in HTL-11');
   }
 
-  /** Writes the summary computed by hotel-bookings; missing hotels throw NOT_FOUND. */
+  /**
+   * Writes the summary computed by hotel-bookings; schema/cast errors map to
+   * 400 VALIDATION_FAILED. Missing valid hotel IDs throw NOT_FOUND.
+   */
   async setRatingSummary(
     hotelId: string,
     summary: RatingSummary,

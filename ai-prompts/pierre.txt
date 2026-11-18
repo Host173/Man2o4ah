@@ -32,3 +32,16 @@ Add focused DTO, service-integration, API, and fake tests for validation, permis
 How the output was used:
 Documented the HTL-01 hotel profile/photo implementation through f58313a, including DTOs, service/controller, fakes, and tests; CI run 43934828995 passed 968 tests; real shared-service integration and manual Swagger evidence remain pending.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok fix them and remove the sentence of ai retrospective
+
+How the output was used:
+Added fake profile/rating validation and inactive-hotel API regression tests (test-first commit 853371b), matched fake validation to the production schema, and passed backend verify (1235 tests); preserved the earlier log entry under the append-only rule.
+================================================

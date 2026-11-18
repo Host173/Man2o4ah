@@ -1,8 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
+import type { PublicItinerarySummary } from '../../itineraries/itineraries.types.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostImageView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from '../blog.types.js';
@@ -184,3 +187,90 @@ export class PaginatedCommentsResponseDto implements Paginated<CommentResponseDt
  * Comments are fetched via paginated `GET /api/posts/:id/comments` (`BLG-05`, `GEN-05`).
  */
 export class PostDetailResponseDto extends PublishedPostResponseDto {}
+
+/** Swagger response model for liking or unliking a post (`BLG-06`). */
+export class PostLikeResponseDto implements PostLikeView {
+  @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f602' })
+  postId!: string;
+
+  @ApiProperty({ example: 1 })
+  likeCount!: number;
+
+  @ApiProperty({ example: true })
+  liked!: boolean;
+}
+
+/** Swagger response model for a public itinerary summary on the author page (`BLG-12`, `CTR-06`). */
+export class PublicItinerarySummaryResponseDto implements PublicItinerarySummary {
+  @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f610' })
+  id!: string;
+
+  @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f603' })
+  ownerId!: string;
+
+  @ApiProperty({ example: 'Classic Nile & Red Sea' })
+  title!: string;
+
+  @ApiProperty({ type: [String], example: ['EG'] })
+  countryCodes!: string[];
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-12-01T00:00:00.000Z',
+  })
+  startDate!: Date;
+
+  @ApiProperty({ example: 5 })
+  dayCount!: number;
+
+  @ApiProperty({ type: [String], example: ['cairo', 'luxor'] })
+  cityIds!: string[];
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-11-15T12:00:00.000Z',
+  })
+  updatedAt!: Date;
+}
+
+/** Swagger response model for a paginated list of public itineraries (`BLG-12`, `CTR-06`). */
+export class PaginatedPublicItinerariesResponseDto implements Paginated<PublicItinerarySummaryResponseDto> {
+  @ApiProperty({ type: [PublicItinerarySummaryResponseDto] })
+  items!: PublicItinerarySummaryResponseDto[];
+
+  @ApiProperty({ example: 1 })
+  page!: number;
+
+  @ApiProperty({ example: 10 })
+  limit!: number;
+
+  @ApiProperty({ example: 1 })
+  total!: number;
+
+  @ApiProperty({ example: 1 })
+  totalPages!: number;
+}
+
+/** Swagger response model for the public author page (`BLG-12`). */
+export class AuthorPageResponseDto implements AuthorPageView {
+  @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f603' })
+  id!: string;
+
+  @ApiProperty({ example: 'Aisha Rawahi' })
+  name!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    example: '2026-10-01T09:00:00.000Z',
+  })
+  createdAt!: Date;
+
+  @ApiProperty({ type: PaginatedPublishedPostsResponseDto })
+  posts!: PaginatedPublishedPostsResponseDto;
+
+  @ApiProperty({ type: PaginatedPublicItinerariesResponseDto })
+  itineraries!: PaginatedPublicItinerariesResponseDto;
+}

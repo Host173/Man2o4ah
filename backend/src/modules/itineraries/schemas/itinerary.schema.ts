@@ -180,13 +180,21 @@ export class Itinerary {
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   ownerId!: Types.ObjectId;
 
-  /** ITN-01 */
+  /** ITN-01: trimmed, 1-100 characters (code points, so an emoji is one). */
   @Prop({
     type: String,
     required: true,
     trim: true,
-    minlength: 1,
-    maxlength: 100,
+    validate: [
+      {
+        validator: (title: string) => Array.from(title).length >= 1,
+        message: 'title must have at least 1 character.',
+      },
+      {
+        validator: (title: string) => Array.from(title).length <= 100,
+        message: 'title must have at most 100 characters.',
+      },
+    ],
   })
   title!: string;
 

@@ -17,7 +17,8 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
-import { UserStatus } from '../accounts/schemas/user.schema.js';
+import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import {
   buildExcerpt,
   MAX_TAG_LENGTH,
@@ -27,11 +28,14 @@ import {
   normalizeTags,
 } from './blog-tags.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import type { CreateCommentDto } from './dto/create-comment.dto.js';
 import type { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -54,7 +58,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post, tag, search, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, ACC-12).
+ * Travel blog post, tag, search, author page, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, BLG-12, ACC-12).
  * Other blog endpoints and listeners ship in later Sprint 2 tickets.
  */
 @Injectable()
@@ -66,6 +70,7 @@ export class BlogService {
     private readonly commentModel: Model<StoredComment>,
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
     private readonly accountsService: AccountsService,
+    private readonly itinerariesService: ItinerariesService,
   ) {}
 
   /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
@@ -162,30 +167,79 @@ export class BlogService {
       );
     }
 
-    const filter: QueryFilter<StoredPost> = {
-      status: PostStatus.PUBLISHED,
-      isHidden: false,
-      authorDeactivated: false,
-      ...(tag ? { tags: tag } : {}),
-    };
-    const result = await paginate(
-      this.postModel,
-      filter,
-      { page, limit },
-      { sort: { publishedAt: -1, _id: -1 } },
-    );
-    const profiles = await this.resolveProfiles(
-      result.items.map((post) => post.authorId.toHexString()),
-    );
-    return {
-      ...result,
-      items: result.items.map((post) =>
-        this.toPublishedView(
-          post as PostRecord,
-          profiles.get(post.authorId.toHexString()),
-        ),
+    return this.paginatePublishedPosts(tag ? { tags: tag } : {}, {
+      page,
+      limit,
+    });
+  }
+
+  /**
+   * BLG-12: loads the public author page showing display name, join date,
+   * independently paginated published posts and public itineraries (`CTR-06`).
+   * Throws 404 for unknown, deactivated, or non-user (admin/moderator) accounts.
+   */
+  async getAuthorPage(
+    authorId: string,
+    query: Partial<AuthorPageQueryDto> = new AuthorPageQueryDto(),
+  ): Promise<AuthorPageView> {
+    const authorObjectId = this.parseId(authorId, 'authorId');
+    const hexId = authorObjectId.toHexString();
+    const profiles = await this.resolveProfiles([hexId]);
+    const author = profiles.get(hexId);
+    if (
+      !author ||
+      author.status === UserStatus.DEACTIVATED ||
+      !(await this.isRegularUserAccount(author))
+    ) {
+      throw this.authorNotFound();
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const itinerariesPage = query.itinerariesPage ?? 1;
+    const itinerariesLimit = query.itinerariesLimit ?? 10;
+    const [posts, itineraries] = await Promise.all([
+      this.paginatePublishedPosts(
+        { authorId: authorObjectId },
+        { page, limit },
+        profiles,
       ),
+      this.itinerariesService.listPublicByAuthor(hexId, {
+        page: itinerariesPage,
+        limit: itinerariesLimit,
+      }),
+    ]);
+
+    return {
+      id: author.id,
+      name: author.name,
+      createdAt: author.createdAt,
+      posts,
+      itineraries,
     };
+  }
+
+  /**
+   * Checks account role via `AccountsService` (`CTR-01`) so admin and
+   * moderator accounts never expose an author page.
+   */
+  private async isRegularUserAccount(author: AccountProfile): Promise<boolean> {
+    const trimmedName = author.name.trim();
+    for (let page = 1; ; page += 1) {
+      const accountsPage = await this.accountsService.listAccounts({
+        page,
+        limit: 50,
+        ...(trimmedName !== '' ? { q: trimmedName } : {}),
+        status: author.status,
+      });
+      const match = accountsPage.items.find((item) => item.id === author.id);
+      if (match) {
+        return match.role === UserRole.USER;
+      }
+      if (page >= accountsPage.totalPages || accountsPage.items.length === 0) {
+        return false;
+      }
+    }
   }
 
   /**
@@ -381,6 +435,105 @@ export class BlogService {
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * BLG-06: likes a visible published post for the authenticated user
+   * (idempotent via the `{ postId: 1, userId: 1 }` unique index).
+   */
+  async likePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    // Handle the unique-index insert outside a transaction because E11000 aborts a MongoDB transaction.
+    let insertedLikeId: Types.ObjectId | undefined;
+    try {
+      const created = await this.likeModel.create({
+        postId: postObjectId,
+        userId: userObjectId,
+      });
+      insertedLikeId = created._id;
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        insertedLikeId = undefined;
+      } else {
+        throw error;
+      }
+    }
+
+    if (insertedLikeId !== undefined) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: 1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) {
+        await this.likeModel.deleteOne({ _id: insertedLikeId }).exec();
+        throw this.notFound();
+      }
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: true,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: true,
+    };
+  }
+
+  /**
+   * BLG-06: removes the authenticated user's like from a visible published
+   * post (idempotent; decrements `likeCount` only when a like was deleted).
+   */
+  async unlikePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    const deleted = await this.likeModel
+      .findOneAndDelete({
+        postId: postObjectId,
+        userId: userObjectId,
+      })
+      .lean()
+      .exec();
+
+    if (deleted) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: -1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: false,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: false,
+    };
   }
 
   /**
@@ -645,10 +798,50 @@ export class BlogService {
     return new Types.ObjectId(value);
   }
 
+  private async paginatePublishedPosts(
+    extraFilter: QueryFilter<StoredPost>,
+    { page, limit }: { page: number; limit: number },
+    knownProfiles?: Map<string, AccountProfile>,
+  ): Promise<Paginated<PublishedPostView>> {
+    const filter: QueryFilter<StoredPost> = {
+      status: PostStatus.PUBLISHED,
+      isHidden: false,
+      authorDeactivated: false,
+      ...extraFilter,
+    };
+    const result = await paginate(
+      this.postModel,
+      filter,
+      { page, limit },
+      { sort: { publishedAt: -1, _id: -1 } },
+    );
+    const profiles =
+      knownProfiles ??
+      (await this.resolveProfiles(
+        result.items.map((post) => post.authorId.toHexString()),
+      ));
+    return {
+      ...result,
+      items: result.items.map((post) =>
+        this.toPublishedView(
+          post as PostRecord,
+          profiles.get(post.authorId.toHexString()),
+        ),
+      ),
+    };
+  }
+
   private notFound(): NotFoundException {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Post not found',
+    });
+  }
+
+  private authorNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Author not found',
     });
   }
 
@@ -674,7 +867,7 @@ export class BlogService {
       ...(post.publishedAt !== undefined
         ? { publishedAt: post.publishedAt }
         : {}),
-      likeCount: post.likeCount,
+      likeCount: Math.max(0, post.likeCount),
       commentCount: post.commentCount,
       isHidden: post.isHidden,
       authorDeactivated: post.authorDeactivated,

@@ -515,3 +515,27 @@ check the new requested changes on those PRs and then fix them
 How the output was used:
 HTL-16 (#148): merged develop, tests fa91ab1, fixes 20ec367 (expiry skips failed holds, logs non-race errors), 0dc9917 (release overdue holds before reserving), 57e8c2f (users only); npm run verify passed
 ================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+make the reply mds clickable links
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+he made new comments that may be optional can you asses them and tell me if they really need to be done
+
+How the output was used:
+Answer only, no files changed (assessed the optional review comments on #147 and #148)
+================================================

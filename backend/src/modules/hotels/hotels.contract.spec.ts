@@ -8,6 +8,7 @@ import { ReferenceDataService } from '../reference-data/reference-data.service.j
 import { StorageService } from '../storage/storage.service.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
+import { Room } from './schemas/room.schema.js';
 
 describe('hotels contracts (stubs)', () => {
   let module: TestingModule;
@@ -17,6 +18,7 @@ describe('hotels contracts (stubs)', () => {
       providers: [
         HotelsService,
         { provide: getModelToken(Hotel.name), useValue: {} },
+        { provide: getModelToken(Room.name), useValue: {} },
         { provide: StorageService, useValue: {} },
         {
           provide: ReferenceDataService,
@@ -30,7 +32,6 @@ describe('hotels contracts (stubs)', () => {
   const checkIn = toDateOnly('2026-11-15');
   const checkOut = toDateOnly('2026-11-17');
   const calls: [string, () => unknown][] = [
-    ['getRooms', () => hotels.getRooms('hotel-1')],
     ['getRoomNights', () => hotels.getRoomNights('hotel-1', checkIn, checkOut)],
     [
       'search',

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -7,16 +8,19 @@ import {
   NotImplementedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { mongo, Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
+import { paginate } from '../../common/pagination/paginate.js';
+import type { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import type { StoredImage } from '../storage/storage.service.js';
 import type { CreateHotelDto } from './dto/create-hotel.dto.js';
+import type { CreateRoomDto } from './dto/create-room.dto.js';
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
   HotelSearchQuery,
@@ -28,6 +32,7 @@ import type {
 } from './hotels.types.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
+import { Room } from './schemas/room.schema.js';
 
 type StoredHotel = Omit<Hotel, 'photos'> & {
   photos: (Hotel['photos'][number] & { _id: Types.ObjectId })[];
@@ -50,6 +55,7 @@ export class HotelsService {
 
   constructor(
     @InjectModel(Hotel.name) private readonly hotelModel: Model<StoredHotel>,
+    @InjectModel(Room.name) private readonly roomModel: Model<Room>,
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
     @Inject(StorageService) private readonly storage: StorageService,
@@ -166,14 +172,66 @@ export class HotelsService {
     return hotel ? this.toView(hotel) : null;
   }
 
-  /** Includes inactive rooms for booking validation and moderator views. */
-  getRooms(
+  /** HTL-03: assignment comes from the authenticated account; new rooms have no bookable dates. */
+  async createRoom(
+    hotelId: string,
+    input: CreateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
+    try {
+      const room = await this.roomModel.create({
+        hotelId: id,
+        name: input.name,
+        type: input.type,
+        beds: input.beds,
+        maxOccupancy: input.maxOccupancy,
+        pricePerNightMinor: input.pricePerNightMinor,
+      });
+      return this.toRoomView(room);
+    } catch (error) {
+      if (error instanceof mongo.MongoServerError && error.code === 11000) {
+        throw new ConflictException({
+          code: ErrorCode.Conflict,
+          message: 'A room with this name already exists in this hotel',
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** HTL-03: paginated moderator list, including inactive rooms, in stable ID order. */
+  async listRooms(
+    hotelId: string,
+    query: PaginationQueryDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<Paginated<RoomView>> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    if (!(await this.hotelModel.exists({ _id: id }))) throw this.notFound();
+    const result = await paginate(this.roomModel, { hotelId: id }, query, {
+      sort: { _id: 1 },
+    });
+    return {
+      ...result,
+      items: result.items.map((room) => this.toRoomView(room)),
+    };
+  }
+
+  /**
+   * HTL-03: includes inactive rooms for booking validation. Missing valid hotel IDs
+   * return []; malformed IDs throw 400 VALIDATION_FAILED. Reads use the caller's session.
+   */
+  async getRooms(
     hotelId: string,
     options?: HotelTransactionOptions,
   ): Promise<RoomView[]> {
-    void hotelId;
-    void options;
-    throw new NotImplementedException('getRooms: implemented in HTL-03');
+    const rooms = await this.roomModel
+      .find({ hotelId: this.parseId(hotelId) }, undefined, options)
+      .sort({ _id: 1 })
+      .lean()
+      .exec();
+    return rooms.map((room) => this.toRoomView(room));
   }
 
   /** Taken nights in the inclusive date range, for HTL-08's room status view. */
@@ -316,6 +374,24 @@ export class HotelsService {
       code: ErrorCode.NotFound,
       message: 'Hotel not found',
     });
+  }
+
+  private toRoomView(room: Room & { _id: Types.ObjectId }): RoomView {
+    return {
+      id: room._id.toHexString(),
+      hotelId: room.hotelId.toHexString(),
+      name: room.name,
+      type: room.type,
+      beds: room.beds,
+      maxOccupancy: room.maxOccupancy,
+      pricePerNightMinor: room.pricePerNightMinor,
+      isActive: room.isActive,
+      availability: room.availability.map(({ fromDate, toDate }) => ({
+        fromDate,
+        toDate,
+      })),
+      hasEverBeenReserved: room.hasEverBeenReserved,
+    };
   }
 
   private toView(hotel: HotelRecord): HotelView {

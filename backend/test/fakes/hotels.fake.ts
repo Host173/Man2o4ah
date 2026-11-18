@@ -1,11 +1,17 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { addDays } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
+import type { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
+import type { CreateRoomDto } from '../../src/modules/hotels/dto/create-room.dto.js';
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
@@ -21,6 +27,10 @@ import {
   HotelSchema,
 } from '../../src/modules/hotels/schemas/hotel.schema.js';
 import type { RatingSummary } from '../../src/modules/hotels/schemas/hotel.schema.js';
+import {
+  Room,
+  RoomSchema,
+} from '../../src/modules/hotels/schemas/room.schema.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import type { StorageService } from '../../src/modules/storage/storage.service.js';
@@ -34,6 +44,7 @@ import { FakeStorageService } from './storage.fake.js';
 
 // Disconnected: share production validators without opening a database connection.
 const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
+const RoomValidationModel = new Mongoose().model(Room.name, RoomSchema);
 
 export interface HotelDataset {
   hotels: HotelView[];
@@ -187,15 +198,72 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     );
   }
 
-  getRooms(
+  async createRoom(
+    hotelId: string,
+    input: CreateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const document = new RoomValidationModel({
+      hotelId: hotel.id,
+      name: input.name,
+      type: input.type,
+      beds: input.beds,
+      maxOccupancy: input.maxOccupancy,
+      pricePerNightMinor: input.pricePerNightMinor,
+    });
+    await document.validate();
+    if (
+      this.data.rooms.some(
+        (room) => room.hotelId === hotel.id && room.name === document.name,
+      )
+    ) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'A room with this name already exists in this hotel',
+      });
+    }
+    const room: RoomView = {
+      id: document._id.toHexString(),
+      hotelId: hotel.id,
+      name: document.name,
+      type: document.type,
+      beds: document.beds,
+      maxOccupancy: document.maxOccupancy,
+      pricePerNightMinor: document.pricePerNightMinor,
+      isActive: document.isActive,
+      availability: [],
+      hasEverBeenReserved: document.hasEverBeenReserved,
+    };
+    this.data.rooms.push(room);
+    return structuredClone(room);
+  }
+
+  async listRooms(
+    hotelId: string,
+    { page, limit }: PaginationQueryDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<Paginated<RoomView>> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const rooms = await this.getRooms(hotel.id);
+    return toPage(
+      rooms.slice((page - 1) * limit, page * limit),
+      rooms.length,
+      page,
+      limit,
+    );
+  }
+
+  async getRooms(
     hotelId: string,
     options?: HotelTransactionOptions,
   ): Promise<RoomView[]> {
     void options;
-    return Promise.resolve(
-      structuredClone(
-        this.data.rooms.filter((room) => room.hotelId === hotelId),
-      ),
+    const id = this.parseId(hotelId);
+    return structuredClone(
+      this.data.rooms
+        .filter((room) => room.hotelId === id)
+        .sort((left, right) => left.id.localeCompare(right.id)),
     );
   }
 

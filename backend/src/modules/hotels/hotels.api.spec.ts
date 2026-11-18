@@ -10,6 +10,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { toDateOnly } from '../../common/dates/date-only.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
@@ -17,6 +18,7 @@ import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
+import { Room } from './schemas/room.schema.js';
 
 const profile = {
   name: 'Nile View Hotel',
@@ -27,10 +29,11 @@ const profile = {
   amenities: ['Wi-Fi', 'Pool'],
 };
 
-describe('Hotel profile API (HTL-01)', () => {
+describe('Hotels API (HTL-01 / HTL-03)', () => {
   let t: TestApp;
   let service: HotelsService;
   let hotels: Model<Hotel>;
+  let rooms: Model<Room>;
   const storage = new FakeStorageService();
 
   beforeAll(async () => {
@@ -45,6 +48,7 @@ describe('Hotel profile API (HTL-01)', () => {
     });
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
+    rooms = t.moduleRef.get<Model<Room>>(getModelToken(Room.name));
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -53,6 +57,304 @@ describe('Hotel profile API (HTL-01)', () => {
     await Promise.all(storage.keys().map((key) => storage.delete(key)));
   });
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('room endpoints (HTL-03)', () => {
+    const input = {
+      name: '101',
+      type: 'Deluxe King',
+      beds: 1,
+      maxOccupancy: 2,
+      pricePerNightMinor: 10000,
+    };
+
+    it('creates a room at the minimum numeric boundaries with trimmed text and documented defaults', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      const response = await t
+        .http()
+        .post(`/api/hotels/${hotel.id}/rooms`)
+        .set('Cookie', moderator.cookie)
+        .send({
+          ...input,
+          name: ' 101 ',
+          type: ' Deluxe King ',
+          maxOccupancy: 1,
+          pricePerNightMinor: 1,
+        })
+        .expect(201);
+      expect(response.body).toEqual({
+        ...input,
+        _id: expect.stringMatching(/^[a-f0-9]{24}$/),
+        hotelId: hotel.id,
+        maxOccupancy: 1,
+        pricePerNightMinor: 1,
+        isActive: true,
+        availability: [],
+        hasEverBeenReserved: false,
+      });
+      const list = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}/rooms`)
+        .set('Cookie', moderator.cookie)
+        .expect(200);
+      expect(list.body).toEqual({
+        items: [response.body],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+    });
+
+    it('returns 409 CONFLICT for a duplicate trimmed name without changing the existing room', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      await t
+        .http()
+        .post(`/api/hotels/${hotel.id}/rooms`)
+        .set('Cookie', moderator.cookie)
+        .send(input)
+        .expect(201);
+      const duplicate = await t
+        .http()
+        .post(`/api/hotels/${hotel.id}/rooms`)
+        .set('Cookie', moderator.cookie)
+        .send({ ...input, name: ' 101 ', beds: 3 })
+        .expect(409);
+      expect(duplicate.body.code).toBe(ErrorCode.Conflict);
+      expect(await rooms.countDocuments()).toBe(1);
+      expect((await service.getRooms(hotel.id))[0]?.beds).toBe(1);
+    });
+
+    it('paginates within the hotel and serializes inactive room dates as calendar dates', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      await service.createRoom(hotel.id, input, hotel.id);
+      const second = await rooms.create({
+        ...input,
+        hotelId: hotel.id,
+        name: '102',
+        isActive: false,
+        availability: [
+          {
+            fromDate: toDateOnly('2026-12-01'),
+            toDate: toDateOnly('2026-12-31'),
+          },
+        ],
+      });
+      const other = await service.create({ ...profile, name: 'Other Hotel' });
+      await service.createRoom(other.id, input, other.id);
+      const response = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}/rooms?page=2&limit=1`)
+        .set('Cookie', moderator.cookie)
+        .expect(200);
+      expect(response.body).toEqual({
+        items: [
+          {
+            ...input,
+            name: '102',
+            _id: second._id.toHexString(),
+            hotelId: hotel.id,
+            isActive: false,
+            hasEverBeenReserved: false,
+            availability: [{ fromDate: '2026-12-01', toDate: '2026-12-31' }],
+          },
+        ],
+        page: 2,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+    });
+
+    it('requires authentication and the hotel-moderator role for creating and listing rooms', async () => {
+      const hotel = await service.create(profile);
+      const path = `/api/hotels/${hotel.id}/rooms`;
+      for (const response of [
+        await t.http().post(path).send(input).expect(401),
+        await t.http().get(path).expect(401),
+      ]) {
+        expect(response.body.code).toBe(ErrorCode.NotAuthenticated);
+      }
+      for (const role of [Role.ADMIN, Role.USER, Role.AIRLINE_MODERATOR]) {
+        const user = await loginAs(t.connection, role);
+        for (const response of [
+          await t
+            .http()
+            .post(path)
+            .set('Cookie', user.cookie)
+            .send(input)
+            .expect(403),
+          await t.http().get(path).set('Cookie', user.cookie).expect(403),
+        ]) {
+          expect(response.body.code).toBe(ErrorCode.ForbiddenRole);
+        }
+      }
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+
+    it('returns 404 for another moderator hotel and a missing assigned hotel without writing', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR);
+      for (const id of [hotel.id, moderator.providerId]) {
+        const path = `/api/hotels/${id}/rooms`;
+        for (const response of [
+          await t
+            .http()
+            .post(path)
+            .set('Cookie', moderator.cookie)
+            .send(input)
+            .expect(404),
+          await t.http().get(path).set('Cookie', moderator.cookie).expect(404),
+        ]) {
+          expect(response.body.code).toBe(ErrorCode.NotFound);
+        }
+      }
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+
+    it('validates required fields, numeric bounds, integer inputs and free-text type length', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      for (const [field, value] of [
+        ['name', undefined],
+        ['name', '   '],
+        ['name', 101],
+        ['type', null],
+        ['type', ' '],
+        ['type', 'x'.repeat(51)],
+        ['beds', 0],
+        ['beds', 1.5],
+        ['beds', '2'],
+        ['maxOccupancy', 0],
+        ['maxOccupancy', 1.5],
+        ['pricePerNightMinor', 0],
+        ['pricePerNightMinor', 1.5],
+        ['pricePerNightMinor', '10000'],
+      ] as const) {
+        const response = await t
+          .http()
+          .post(`/api/hotels/${hotel.id}/rooms`)
+          .set('Cookie', moderator.cookie)
+          .send({ ...input, [field]: value })
+          .expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: expect.arrayContaining([expect.objectContaining({ field })]),
+        });
+      }
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+
+    it('rejects protected fields, malformed hotel IDs and invalid pagination', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      for (const extra of [
+        { hotelId: hotel.id },
+        { providerId: hotel.id },
+        { isActive: false },
+        { availability: [] },
+        { hasEverBeenReserved: true },
+        { inventoryVersion: 5 },
+      ]) {
+        const response = await t
+          .http()
+          .post(`/api/hotels/${hotel.id}/rooms`)
+          .set('Cookie', moderator.cookie)
+          .send({ ...input, ...extra })
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      for (const response of [
+        await t
+          .http()
+          .post('/api/hotels/invalid/rooms')
+          .set('Cookie', moderator.cookie)
+          .send(input)
+          .expect(400),
+        await t
+          .http()
+          .get('/api/hotels/invalid/rooms')
+          .set('Cookie', moderator.cookie)
+          .expect(400),
+      ]) {
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      for (const query of [
+        'page=0',
+        'page=1.5',
+        'limit=0',
+        'limit=51',
+        'limit=invalid',
+      ]) {
+        const response = await t
+          .http()
+          .get(`/api/hotels/${hotel.id}/rooms?${query}`)
+          .set('Cookie', moderator.cookie)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+
+    it('documents the room request, paginated response, authentication and errors in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder()
+          .setTitle('Travel Platform API')
+          .setVersion('0.0.1')
+          .addCookieAuth('access_token')
+          .build(),
+      );
+      const path = document.paths['/api/hotels/{id}/rooms'];
+      for (const operation of [path?.post, path?.get]) {
+        expect(operation?.summary).toContain('HTL-03');
+        expect(operation?.security).toEqual([{ cookie: [] }]);
+        for (const status of ['400', '401', '403', '404']) {
+          expect(operation?.responses[status]).toBeDefined();
+        }
+      }
+      expect(path?.post?.requestBody).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/CreateRoomDto' },
+          },
+        },
+      });
+      expect(path?.post?.responses['201']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/RoomResponseDto' },
+          },
+        },
+      });
+      expect(path?.post?.responses['409']).toBeDefined();
+      expect(path?.get?.responses['200']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PaginatedRoomsResponseDto' },
+          },
+        },
+      });
+      expect(path?.get?.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'page', in: 'query' }),
+          expect.objectContaining({ name: 'limit', in: 'query' }),
+        ]),
+      );
+    });
+  });
 
   describe('hotel photo endpoints', () => {
     const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);

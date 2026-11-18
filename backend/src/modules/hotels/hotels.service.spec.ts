@@ -8,6 +8,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
@@ -15,6 +16,7 @@ import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
 import { Hotel } from './schemas/hotel.schema.js';
+import { Room } from './schemas/room.schema.js';
 
 const profile = {
   name: 'Nile View Hotel',
@@ -25,10 +27,11 @@ const profile = {
   amenities: ['Wi-Fi', 'Pool'],
 };
 
-describe('HotelsService (HTL-01 integration)', () => {
+describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
   let t: TestApp;
   let service: HotelsService;
   let hotels: Model<Hotel>;
+  let rooms: Model<Room>;
   let referenceData: FakeReferenceDataService;
   const storage = new FakeStorageService();
 
@@ -45,6 +48,7 @@ describe('HotelsService (HTL-01 integration)', () => {
     });
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
+    rooms = t.moduleRef.get<Model<Room>>(getModelToken(Room.name));
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -54,6 +58,202 @@ describe('HotelsService (HTL-01 integration)', () => {
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('rooms (HTL-03)', () => {
+    const input = {
+      name: '101',
+      type: 'Deluxe King',
+      beds: 1,
+      maxOccupancy: 2,
+      pricePerNightMinor: 10000,
+    };
+
+    it('creates a detached plain room view and allowlists fields with safe defaults', async () => {
+      const hotel = await service.create(profile);
+      const supplied = {
+        ...input,
+        name: ' 101 ',
+        type: ' Deluxe King ',
+        hotelId: new Types.ObjectId().toHexString(),
+        isActive: false,
+        hasEverBeenReserved: true,
+        inventoryVersion: 99,
+        availability: [{ fromDate: new Date(), toDate: new Date() }],
+      };
+      const room = await service.createRoom(
+        hotel.id.toUpperCase(),
+        supplied,
+        hotel.id,
+      );
+      expect(room).toEqual({
+        ...input,
+        id: expect.stringMatching(/^[a-f0-9]{24}$/),
+        hotelId: hotel.id,
+        isActive: true,
+        availability: [],
+        hasEverBeenReserved: false,
+      });
+      expect(await rooms.findById(room.id).lean()).toMatchObject({
+        hotelId: new Types.ObjectId(hotel.id),
+        inventoryVersion: 0,
+      });
+      room.name = 'Changed response';
+      expect((await service.getRooms(hotel.id))[0]?.name).toBe('101');
+    });
+
+    it('enforces trimmed name uniqueness under concurrency, but allows the same name in another hotel', async () => {
+      const hotel = await service.create(profile);
+      const results = await Promise.allSettled(
+        ['101', ' 101 ', '101 '].map((name) =>
+          service.createRoom(hotel.id, { ...input, name }, hotel.id),
+        ),
+      );
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const rejected = results.filter((result) => result.status === 'rejected');
+      expect(rejected).toHaveLength(2);
+      for (const result of rejected) {
+        expect(result.reason).toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.Conflict },
+        });
+      }
+      expect(await rooms.countDocuments({ hotelId: hotel.id })).toBe(1);
+      const other = await service.create({ ...profile, name: 'Other Hotel' });
+      expect(await service.createRoom(other.id, input, other.id)).toMatchObject(
+        {
+          name: '101',
+          hotelId: other.id,
+        },
+      );
+    });
+
+    it('checks assignment and hotel existence for both moderator operations before writing', async () => {
+      const hotel = await service.create(profile);
+      const missing = new Types.ObjectId().toHexString();
+      for (const assignment of [undefined, 'invalid', missing]) {
+        await expect(
+          service.createRoom(hotel.id, input, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+        await expect(
+          service.listRooms(hotel.id, new PaginationQueryDto(), assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      await expect(
+        service.createRoom(missing, input, missing),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        service.listRooms(missing, new PaginationQueryDto(), missing),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.NotFound },
+      });
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+
+    it('paginates only the assigned hotel rooms and includes inactive rooms in both views', async () => {
+      const hotel = await service.create(profile);
+      const created = [];
+      for (const name of ['101', '102', '103']) {
+        created.push(
+          await service.createRoom(hotel.id, { ...input, name }, hotel.id),
+        );
+      }
+      await rooms.updateOne(
+        { _id: created[1]!.id },
+        { $set: { isActive: false } },
+      );
+      const other = await service.create({ ...profile, name: 'Other Hotel' });
+      await service.createRoom(other.id, input, other.id);
+      const all = await service.getRooms(hotel.id);
+      expect(all.map((room) => [room.name, room.isActive])).toEqual([
+        ['101', true],
+        ['102', false],
+        ['103', true],
+      ]);
+      expect(
+        await service.listRooms(hotel.id, { page: 2, limit: 2 }, hotel.id),
+      ).toEqual({
+        items: [all[2]],
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(
+        await service.listRooms(hotel.id, { page: 3, limit: 2 }, hotel.id),
+      ).toMatchObject({
+        items: [],
+        total: 3,
+        totalPages: 2,
+      });
+      const empty = await service.create({ ...profile, name: 'Empty Hotel' });
+      expect(
+        await service.listRooms(empty.id, new PaginationQueryDto(), empty.id),
+      ).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+      expect(
+        await service.getRooms(new Types.ObjectId().toHexString()),
+      ).toEqual([]);
+    });
+
+    it('uses the caller transaction when reading room views', async () => {
+      const hotel = await service.create(profile);
+      const room = await service.createRoom(hotel.id, input, hotel.id);
+      const session = await t.connection.startSession();
+      try {
+        session.startTransaction();
+        await rooms.updateOne(
+          { _id: room.id },
+          { $set: { pricePerNightMinor: 20000 } },
+          { session },
+        );
+        expect(
+          (await service.getRooms(hotel.id, { session }))[0]
+            ?.pricePerNightMinor,
+        ).toBe(20000);
+        expect((await service.getRooms(hotel.id))[0]?.pricePerNightMinor).toBe(
+          10000,
+        );
+        await session.abortTransaction();
+      } finally {
+        await session.endSession();
+      }
+    });
+
+    it('rejects malformed hotel IDs and propagates unrelated database failures', async () => {
+      for (const call of [
+        () => service.createRoom('invalid', input, 'invalid'),
+        () => service.listRooms('invalid', new PaginationQueryDto(), 'invalid'),
+        () => service.getRooms('invalid'),
+      ]) {
+        await expect(call()).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      const hotel = await service.create(profile);
+      const failure = new Error('Room insert failed');
+      vi.spyOn(rooms.collection, 'insertOne').mockRejectedValueOnce(failure);
+      await expect(service.createRoom(hotel.id, input, hotel.id)).rejects.toBe(
+        failure,
+      );
+      expect(await rooms.countDocuments()).toBe(0);
+    });
+  });
 
   describe('hotel photos', () => {
     const image: UploadedImage = {

@@ -603,3 +603,29 @@ Appended recovered original HTL-01 session prompts and their recorded outcomes t
 ================================================
 
 Follow-up during the same 2026-11-18 recovery request: newer develop changes caused merge conflicts after the log-only push. Preserved the complete incoming INV-02 prompt log and the complete recovered HTL-01 suffix. Combined shared date-rule imports and canonical inventory fixtures while retaining profile validation and both features' regression tests; removed obsolete inventory-stub assertions now covered by the merged real-inventory tests. Backend npm run verify passed 1285 tests across 100 files, 98.36% line coverage, service gates and build. The local production-audit attempt was blocked by the managed mirror with HTTP 429; this is not a successful audit result.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+NO MAKE PROMPT INSTRUCTION I TOLD TO YOU AND START IN IMPLMENTING
+
+How the output was used:
+Implemented HTL-03 on feature/HTL-03-rooms in an isolated worktree from latest develop: added create-room.dto.ts and room.response.dto.ts; updated hotels.service.ts, hotels.controller.ts, hotels.contract.spec.ts, hotels.service.spec.ts, hotels.api.spec.ts, hotels.fake.ts and hotels.fake.spec.ts for moderator-scoped room creation, paginated listing, transaction-aware getRooms, trimmed-name uniqueness and contract parity; appended ai-prompts/pierre.txt. Focused tests passed 146 cases; backend npm run verify passed formatting, lint, typecheck, all 1301 tests across 100 files, per-service coverage gates and build; HotelsService line coverage was 100%. Original worktree files were preserved; no commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+make a pr
+
+How the output was used:
+Reviewed and staged the HTL-03 implementation and tests, appended ai-prompts/pierre.txt, and prepared commit and pull request publication against develop using the repository template; npm run build passed, with the implementation already validated by npm run verify (1301 tests, all service coverage gates, and build).
+================================================

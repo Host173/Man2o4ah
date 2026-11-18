@@ -78,9 +78,141 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  describe('room creation and listing (HTL-03)', () => {
+    const input = {
+      name: ' 101 ',
+      type: ' Deluxe King ',
+      beds: 1,
+      maxOccupancy: 2,
+      pricePerNightMinor: 10000,
+    };
+
+    it('creates detached room views, preserves safe defaults, and lists only assigned rooms', async () => {
+      const supplied = {
+        ...input,
+        hotelId: ids.hotel2,
+        isActive: false,
+        availability: [],
+        hasEverBeenReserved: true,
+      };
+      const created = await hotels.createRoom(
+        ids.hotel1.toUpperCase(),
+        supplied,
+        ids.hotel1,
+      );
+      expect(created).toEqual({
+        ...input,
+        name: '101',
+        type: 'Deluxe King',
+        id: expect.stringMatching(/^[a-f0-9]{24}$/),
+        hotelId: ids.hotel1,
+        isActive: true,
+        availability: [],
+        hasEverBeenReserved: false,
+      });
+      created.name = 'Changed response';
+      const all = await hotels.getRooms(ids.hotel1);
+      expect(all.find((item) => item.id === created.id)?.name).toBe('101');
+      expect(
+        await hotels.listRooms(ids.hotel1, { page: 2, limit: 2 }, ids.hotel1),
+      ).toEqual({
+        items: all.slice(2, 4),
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      expect(
+        await hotels.listRooms(ids.hotel2, { page: 1, limit: 10 }, ids.hotel2),
+      ).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('rejects duplicate trimmed names under concurrency but permits the same name in another hotel', async () => {
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 3 }, () =>
+          hotels.createRoom(ids.hotel1, input, ids.hotel1),
+        ),
+      );
+      expect(
+        outcomes.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      for (const result of outcomes) {
+        if (result.status === 'rejected')
+          expect(result.reason).toMatchObject({
+            status: 409,
+            response: { code: ErrorCode.Conflict },
+          });
+      }
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      expect(
+        await hotels.createRoom(ids.hotel2, input, ids.hotel2),
+      ).toMatchObject({
+        name: '101',
+        hotelId: ids.hotel2,
+      });
+    });
+
+    it('matches assignment, missing-hotel and schema-validation failures without inserting rooms', async () => {
+      for (const assignment of [undefined, 'invalid', ids.hotel2]) {
+        await expect(
+          hotels.createRoom(ids.hotel1, input, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+        await expect(
+          hotels.listRooms(ids.hotel1, { page: 1, limit: 10 }, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      await expect(
+        hotels.createRoom(ids.missing, input, ids.missing),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.NotFound },
+      });
+      for (const invalid of [
+        { name: ' ' },
+        { type: 'x'.repeat(51) },
+        { beds: 0 },
+        { maxOccupancy: 0 },
+        { pricePerNightMinor: 1.5 },
+      ]) {
+        await expect(
+          hotels.createRoom(ids.hotel1, { ...input, ...invalid }, ids.hotel1),
+        ).rejects.toMatchObject({
+          name: 'ValidationError',
+        });
+      }
+      expect(hotels.data.rooms).toHaveLength(2);
+    });
+  });
+
   it('rejects malformed hotel IDs with the same validation errors as the real service', async () => {
     const calls = [
       () => hotels.getHotel('invalid'),
+      () => hotels.getRooms('invalid'),
+      () =>
+        hotels.createRoom(
+          'invalid',
+          {
+            name: '101',
+            type: 'Single',
+            beds: 1,
+            maxOccupancy: 1,
+            pricePerNightMinor: 1,
+          },
+          'invalid',
+        ),
+      () => hotels.listRooms('invalid', { page: 1, limit: 10 }, 'invalid'),
       () => hotels.update('invalid', {}, 'invalid'),
       () => hotels.addPhoto('invalid', undefined, 'invalid'),
       () => hotels.removePhoto('invalid', 'invalid', 'invalid'),
@@ -368,7 +500,7 @@ describe('FakeHotelsService', () => {
       expect.objectContaining({ id: ids.room1, isActive: false }),
       expect.objectContaining({ id: ids.room2, isActive: true }),
     ]);
-    expect(await hotels.getRooms('missing')).toEqual([]);
+    expect(await hotels.getRooms(ids.missing)).toEqual([]);
   });
 
   it('exposes reservations and blocks over inclusive dates without exposing other hotels', async () => {

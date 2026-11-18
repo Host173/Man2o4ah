@@ -255,3 +255,41 @@ Implement all features satisfying requirements **ITN-05** and **ITN-09**:
 How the output was used:
 Implemented ITN-05/ITN-09 in the itineraries module (day helpers, DTOs, service, controller, Swagger models and fake), tests first then code; `npm run verify` passed with 1152 tests and 98.17% lines. The branch is based on the latest develop with the unmerged ITN-01 branch merged in; committed e540ae3 (tests) and b0a5186 (implementation).
 ================================================
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+
+### 1. Fix `notes: null` and Pipeline Spread
+* **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
+* **Fix:** In the pipeline day construction, conditionally include `notes` only when it is provided (e.g., `...(notes !== undefined ? { notes: { $literal: notes } } : {})`) using a red test first[cite: 13].
+
+### 2. Add Missing Tests (Mandatory Red-First TDD)
+Write unit/API tests covering all previously requested items that are still missing[cite: 13]:
+* `POST` and `PATCH` with `"$100 for dinner"` and `"$$ROOT"` stored verbatim[cite: 13].
+* A day added without `notes` verifying the returned object has **no `notes` key**[cite: 13].
+* Fake service tests verifying the **61st day cap**, **unknown city rejection** on both add and edit, and proper error formatting[cite: 13].
+
+### 3. Fix Fake Service Error Shape & Validation Parity
+* **Issue:** The fake service's error structure doesn't match the real service (`copilot-instructions.md: fakes behave like the contract, including its errors`)[cite: 13]. Its `invalidField` throws `{ field, message }` instead of the service's shape (`{ code: "VALIDATION_FAILED", message, details: [{ field, message }] }`), and `PATCH` with a blank `cityId` (`" "`) returns `200` in the fake but `400` in the service[cite: 13].
+* **Fix:** Copy the service's exact error shape into the fake and reject blank `cityId` inputs when present[cite: 13].
+
+### 4. Close Smaller Fake Validation Gaps
+* Match the real service's validation order and behavior:
+  * Check the **day cap before the city validation** so the error matches the service[cite: 13].
+  * Enforce notes length limits (e.g., rejecting 2001-character notes)[cite: 13].
+  * Ensure an **empty PATCH body** does not incorrectly bump `updatedAt` (return early on an empty body)[cite: 13].
+
+### 5. Verification & Push to Update PR #154
+1. Run `npm run format` and the full verification pipeline (`npm run verify`) to ensure Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes with a clear commit message and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Applied conditional spread for notes in the addDay MongoDB pipeline, fixed the fake service invalidField error shape, added fake validation parity tests, added $-prefixed notes and omitted-notes tests, ran `npm run verify` (all green: 1236 tests), and committed to update PR #154.
+

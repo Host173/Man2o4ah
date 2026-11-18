@@ -238,8 +238,9 @@ export class ItinerariesService {
                     {
                       _id: day._id,
                       cityId: { $literal: cityId },
-                      notes:
-                        notes !== undefined ? { $literal: notes } : undefined,
+                      ...(notes !== undefined
+                        ? { notes: { $literal: notes } }
+                        : {}),
                       activities: day.activities,
                       budgetEntries: day.budgetEntries,
                     },

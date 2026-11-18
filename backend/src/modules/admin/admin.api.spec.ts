@@ -1,6 +1,14 @@
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Types } from 'mongoose';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -617,6 +625,220 @@ describe('Admin Bookings API (ACC-17)', () => {
         total: 0,
         totalPages: 0,
       });
+    });
+  });
+
+  describe('Tied CreatedAt Paging & Page Depth Cap (ACC-17)', () => {
+    let tieApp: TestApp | undefined;
+    const fakeFlights = new FakeFlightBookingsService();
+    const fakeHotels = new FakeHotelBookingsService();
+
+    const makeFlight = (
+      bookingId: string,
+      createdAt: Date,
+    ): FlightBookingAdminView => ({
+      bookingType: BookingType.FLIGHT,
+      bookingId,
+      reference: `FB-${bookingId}`,
+      userId: makeId('a'),
+      providerId: makeId('1'),
+      startAt: new Date('2026-12-10T08:00:00.000Z'),
+      endAt: new Date('2026-12-10T11:00:00.000Z'),
+      totalMinor: 25000,
+      currency: 'USD',
+      status: 'confirmed',
+      createdAt,
+    });
+
+    const makeHotel = (
+      bookingId: string,
+      createdAt: Date,
+    ): HotelReservationAdminView => ({
+      bookingType: BookingType.HOTEL,
+      bookingId,
+      reference: `HB-${bookingId}`,
+      userId: makeId('b'),
+      providerId: makeId('2'),
+      startAt: new Date('2026-12-12T15:00:00.000Z'),
+      endAt: new Date('2026-12-15T11:00:00.000Z'),
+      totalMinor: 42000,
+      currency: 'USD',
+      status: 'confirmed',
+      createdAt,
+    });
+
+    beforeAll(async () => {
+      tieApp = await createTestApp({
+        imports: [AdminModule],
+        override: (builder) =>
+          builder
+            .overrideProvider(FlightBookingsService)
+            .useValue(fakeFlights)
+            .overrideProvider(HotelBookingsService)
+            .useValue(fakeHotels),
+      });
+    }, HOOK_TIMEOUT);
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      Object.assign(fakeFlights, new FakeFlightBookingsService([]));
+      Object.assign(fakeHotels, new FakeHotelBookingsService([]));
+    });
+
+    afterAll(async () => {
+      await tieApp?.close();
+    }, HOOK_TIMEOUT);
+
+    it('pages without duplicates or gaps across limits 1, 2, and 5 for same-type ties, cross-type ties, and distinct timestamps', async () => {
+      const admin = await loginAs(tieApp!.connection, UserRole.ADMIN);
+      const tiedTs = new Date('2026-11-11T12:00:00.000Z');
+
+      const datasets: Array<{
+        name: string;
+        flights: FlightBookingAdminView[];
+        hotels: HotelReservationAdminView[];
+        expectedOrder: string[];
+      }> = [
+        {
+          name: '3 flights sharing createdAt plus 2 hotels (exact reproduction)',
+          flights: [
+            makeFlight('f-c', tiedTs),
+            makeFlight('f-b', tiedTs),
+            makeFlight('f-a', tiedTs),
+          ],
+          hotels: [
+            makeHotel('h-2', new Date('2026-11-12T12:00:00.000Z')),
+            makeHotel('h-1', new Date('2026-11-10T12:00:00.000Z')),
+          ],
+          expectedOrder: ['h-2', 'f-c', 'f-b', 'f-a', 'h-1'],
+        },
+        {
+          name: '3 hotels sharing createdAt plus 2 flights',
+          flights: [
+            makeFlight('f-new', new Date('2026-11-12T12:00:00.000Z')),
+            makeFlight('f-old', new Date('2026-11-10T12:00:00.000Z')),
+          ],
+          hotels: [
+            makeHotel('h-c', tiedTs),
+            makeHotel('h-b', tiedTs),
+            makeHotel('h-a', tiedTs),
+          ],
+          expectedOrder: ['f-new', 'h-c', 'h-b', 'h-a', 'f-old'],
+        },
+        {
+          name: 'flights and hotels sharing the same createdAt',
+          flights: [
+            makeFlight('f-c', tiedTs),
+            makeFlight('f-b', tiedTs),
+            makeFlight('f-a', tiedTs),
+          ],
+          hotels: [makeHotel('h-b', tiedTs), makeHotel('h-a', tiedTs)],
+          expectedOrder: ['f-c', 'f-b', 'f-a', 'h-b', 'h-a'],
+        },
+        {
+          name: 'control with all-distinct createdAt',
+          flights: [
+            makeFlight('f-1', new Date('2026-11-14T12:00:00.000Z')),
+            makeFlight('f-2', new Date('2026-11-12T12:00:00.000Z')),
+            makeFlight('f-3', new Date('2026-11-10T12:00:00.000Z')),
+          ],
+          hotels: [
+            makeHotel('h-1', new Date('2026-11-15T12:00:00.000Z')),
+            makeHotel('h-2', new Date('2026-11-13T12:00:00.000Z')),
+          ],
+          expectedOrder: ['h-1', 'f-1', 'h-2', 'f-2', 'f-3'],
+        },
+      ];
+
+      for (const dataset of datasets) {
+        Object.assign(
+          fakeFlights,
+          new FakeFlightBookingsService(dataset.flights),
+        );
+        Object.assign(fakeHotels, new FakeHotelBookingsService(dataset.hotels));
+
+        const singleRes = await tieApp!
+          .http()
+          .get('/api/admin/bookings?limit=50')
+          .set('Cookie', admin.cookie);
+        expect(singleRes.status).toBe(200);
+        const fullIds = (
+          singleRes.body.items as Array<{ bookingId: string }>
+        ).map((item) => item.bookingId);
+
+        for (const limit of [1, 2, 5]) {
+          const totalPages = Math.ceil(dataset.expectedOrder.length / limit);
+          const collected: string[] = [];
+          for (let page = 1; page <= totalPages; page += 1) {
+            const pageRes = await tieApp!
+              .http()
+              .get(`/api/admin/bookings?page=${page}&limit=${limit}`)
+              .set('Cookie', admin.cookie);
+            expect(pageRes.status).toBe(200);
+            expect(pageRes.body.total).toBe(dataset.expectedOrder.length);
+            expect(pageRes.body.totalPages).toBe(totalPages);
+            collected.push(
+              ...(pageRes.body.items as Array<{ bookingId: string }>).map(
+                (item) => item.bookingId,
+              ),
+            );
+          }
+
+          expect(collected).toHaveLength(dataset.expectedOrder.length);
+          expect(new Set(collected).size).toBe(dataset.expectedOrder.length);
+          expect(new Set(collected)).toEqual(new Set(dataset.expectedOrder));
+          expect(collected).toEqual(dataset.expectedOrder);
+          expect(collected).toEqual(fullIds);
+
+          const pastEndRes = await tieApp!
+            .http()
+            .get(`/api/admin/bookings?page=${totalPages + 1}&limit=${limit}`)
+            .set('Cookie', admin.cookie);
+          expect(pastEndRes.status).toBe(200);
+          expect(pastEndRes.body.items).toEqual([]);
+        }
+
+        expect(fullIds).toEqual(dataset.expectedOrder);
+      }
+    });
+
+    it('enforces the 10000 page * limit cap and rejects out-of-bounds page values without calling booking services', async () => {
+      const admin = await loginAs(tieApp!.connection, UserRole.ADMIN);
+
+      for (const queryStr of ['page=200&limit=50', 'page=10000&limit=1']) {
+        const res = await tieApp!
+          .http()
+          .get(`/api/admin/bookings?${queryStr}`)
+          .set('Cookie', admin.cookie);
+        expect(res.status).toBe(200);
+        expect(res.body.items).toEqual([]);
+      }
+
+      const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+      const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+
+      for (const queryStr of [
+        'page=201&limit=50',
+        'page=10001&limit=1',
+        'page=1000000&limit=50',
+        'page=1e300',
+        'page=abc',
+      ]) {
+        flightsSpy.mockClear();
+        hotelsSpy.mockClear();
+
+        const res = await tieApp!
+          .http()
+          .get(`/api/admin/bookings?${queryStr}`)
+          .set('Cookie', admin.cookie);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((detail: { field: string }) => detail.field),
+        ).toContain('page');
+        expect(flightsSpy).not.toHaveBeenCalled();
+        expect(hotelsSpy).not.toHaveBeenCalled();
+      }
     });
   });
 });

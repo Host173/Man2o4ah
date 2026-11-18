@@ -3,7 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
 import { BookingType } from '../../common/database/booking-type.js';
@@ -191,11 +191,107 @@ describe('AdminService', () => {
       { to: '2026-02-29' },
       { limit: 51 },
       { page: 0 },
+      { page: 10001 },
+      { page: 1e300 },
+      { page: 'abc' },
     ];
     for (const raw of invalidCases) {
       const dto = plainToInstance(ListAdminBookingsQueryDto, raw);
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
+    }
+
+    const validBoundary = plainToInstance(ListAdminBookingsQueryDto, {
+      page: 10000,
+      limit: 1,
+    });
+    expect(await validate(validBoundary)).toHaveLength(0);
+  });
+
+  it('keeps service order across limit=1 pages when multiple flights share createdAt', async () => {
+    const tiedAt = new Date('2026-11-11T12:00:00.000Z');
+    const flights = [
+      flightView({ bookingId: 'f-c', createdAt: tiedAt }),
+      flightView({ bookingId: 'f-b', createdAt: tiedAt }),
+      flightView({ bookingId: 'f-a', createdAt: tiedAt }),
+    ];
+    const hotels = [
+      hotelView({
+        bookingId: 'h-2',
+        createdAt: new Date('2026-11-12T12:00:00.000Z'),
+      }),
+      hotelView({
+        bookingId: 'h-1',
+        createdAt: new Date('2026-11-10T12:00:00.000Z'),
+      }),
+    ];
+    const service = new AdminService(
+      new FakeFlightBookingsService(
+        flights,
+      ) as unknown as FlightBookingsService,
+      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    );
+
+    const ids: string[] = [];
+    for (let page = 1; page <= 5; page += 1) {
+      const res = await service.listBookings(
+        plainToInstance(ListAdminBookingsQueryDto, { page, limit: 1 }),
+      );
+      expect(res.items).toHaveLength(1);
+      ids.push(res.items[0].bookingId);
+    }
+    expect(ids).toEqual(['h-2', 'f-c', 'f-b', 'f-a', 'h-1']);
+
+    const page6 = await service.listBookings(
+      plainToInstance(ListAdminBookingsQueryDto, { page: 6, limit: 1 }),
+    );
+    expect(page6.items).toEqual([]);
+  });
+
+  it('caps page * limit at 10000 without calling the booking services when exceeded', async () => {
+    const fakeFlights = new FakeFlightBookingsService([]);
+    const fakeHotels = new FakeHotelBookingsService([]);
+    const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
+    const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
+    const service = new AdminService(
+      fakeFlights as unknown as FlightBookingsService,
+      fakeHotels as unknown as HotelBookingsService,
+    );
+
+    await expect(
+      service.listBookings(
+        plainToInstance(ListAdminBookingsQueryDto, { page: 200, limit: 50 }),
+      ),
+    ).resolves.toMatchObject({ page: 200, limit: 50, items: [] });
+
+    await expect(
+      service.listBookings(
+        plainToInstance(ListAdminBookingsQueryDto, { page: 10000, limit: 1 }),
+      ),
+    ).resolves.toMatchObject({ page: 10000, limit: 1, items: [] });
+
+    flightsSpy.mockClear();
+    hotelsSpy.mockClear();
+
+    for (const [page, limit] of [
+      [201, 50],
+      [10001, 1],
+      [1000000, 50],
+      [1e300, 1],
+    ] as const) {
+      await expect(
+        service.listBookings(
+          plainToInstance(ListAdminBookingsQueryDto, { page, limit }),
+        ),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'page' }],
+        },
+      });
+      expect(flightsSpy).not.toHaveBeenCalled();
+      expect(hotelsSpy).not.toHaveBeenCalled();
     }
   });
 });

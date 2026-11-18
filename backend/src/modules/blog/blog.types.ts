@@ -1,3 +1,5 @@
+import type { Paginated } from '../../common/pagination/paginated.js';
+import type { PublicItinerarySummary } from '../itineraries/itineraries.types.js';
 import type { PostStatus } from './schemas/post.schema.js';
 
 /** Plain view of an image reference on a post (GEN-08). */
@@ -61,4 +63,15 @@ export interface PostLikeView {
   postId: string;
   likeCount: number;
   liked: boolean;
+/**
+ * Public author profile page view (`BLG-12`).
+ * Exposes only public author fields (`id`, `name`, `createdAt`), paginated
+ * published posts, and paginated public itineraries (`CTR-06`).
+ */
+export interface AuthorPageView {
+  id: string;
+  name: string;
+  createdAt: Date;
+  posts: Paginated<PublishedPostView>;
+  itineraries: Paginated<PublicItinerarySummary>;
 }

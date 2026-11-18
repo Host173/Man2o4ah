@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
+import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
@@ -15,7 +16,14 @@ import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { Session } from '../accounts/schemas/session.schema.js';
-import { User, UserStatus } from '../accounts/schemas/user.schema.js';
+import {
+  ProviderType,
+  User,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -45,6 +53,8 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
+      .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
       .compile();
 
     expect(moduleRef.get(BlogService)).toBeInstanceOf(BlogService);
@@ -55,6 +65,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let testApp: TestApp | undefined;
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
+  const fakeItineraries = new FakeItinerariesService();
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -72,7 +83,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     testApp = await createTestApp({
       imports: [BlogModule],
       override: (builder) =>
-        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+        builder
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(ItinerariesService)
+          .useValue(fakeItineraries),
     });
     service = testApp.moduleRef.get(BlogService);
     appEvents = testApp.moduleRef.get(AppEvents);
@@ -95,6 +110,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    Object.assign(fakeItineraries, new FakeItinerariesService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -1704,6 +1720,413 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
           details: [expect.objectContaining({ field: 'tag' })],
         });
       }
+    });
+  });
+
+  describe('getAuthorPage (BLG-12)', () => {
+    it('returns author display name, join date, paginated visible published posts, and public itineraries without private fields', async () => {
+      const joinDate = new Date('2026-10-05T08:30:00.000Z');
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: ownerId,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            createdAt: joinDate,
+          },
+          {
+            id: otherUserId,
+            name: 'Bob Nomad',
+            email: 'bob@example.com',
+          },
+          {
+            id: suspendedUserId,
+            name: 'Suspended Author',
+            email: 'suspended@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+        ]),
+      );
+
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-1',
+            ownerId,
+            title: 'Upper Egypt Loop',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 5,
+            cityIds: ['cairo', 'luxor'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-other',
+            ownerId: otherUserId,
+            title: 'Other User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-15T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['aswan'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      const p1 = await service.create(
+        {
+          title: 'Older Published',
+          body: 'One',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        {
+          title: 'Newer Published',
+          body: 'Two',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.create(
+        { title: 'Owner Draft', body: 'Secret', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Owner Hidden', body: 'Hidden', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await service.create(
+        { title: 'Other Author Post', body: 'O', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+
+      const page = await service.getAuthorPage(ownerId, { page: 1, limit: 1 });
+      expect(page).toMatchObject({
+        id: ownerId,
+        name: 'Aisha Rawahi',
+        createdAt: joinDate,
+        posts: {
+          page: 1,
+          limit: 1,
+          total: 2,
+          totalPages: 2,
+        },
+        itineraries: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        },
+      });
+      expect(page.posts.items.map((p) => p._id)).toEqual([p2._id]);
+      expect(page.posts.items[0].authorName).toBe('Aisha Rawahi');
+      expect(page.itineraries.items.map((i) => i.id)).toEqual(['itin-1']);
+      expect(Object.keys(page).sort()).toEqual([
+        'createdAt',
+        'id',
+        'itineraries',
+        'name',
+        'posts',
+      ]);
+
+      const page2 = await service.getAuthorPage(ownerId, { page: 2, limit: 1 });
+      expect(page2.posts.items.map((p) => p._id)).toEqual([p1._id]);
+
+      // Author with no posts or itineraries returns empty lists cleanly.
+      const emptyAuthorPage = await service.getAuthorPage(suspendedUserId);
+      expect(emptyAuthorPage).toMatchObject({
+        id: suspendedUserId,
+        name: 'Suspended Author',
+        posts: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+        itineraries: {
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        },
+      });
+    });
+
+    it('throws 404 NOT_FOUND for unknown or deactivated author and 400 for invalid id', async () => {
+      for (const blockedId of [
+        deactivatedAuthorId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const err = await service
+          .getAuthorPage(blockedId)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as NotFoundException).getResponse()).toMatchObject({
+          code: ErrorCode.NotFound,
+        });
+      }
+
+      const badErr = await service
+        .getAuthorPage('bad-id')
+        .catch((caught: unknown) => caught);
+      expect(badErr).toBeInstanceOf(BadRequestException);
+      expect((badErr as BadRequestException).getResponse()).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+    });
+
+    it('pages author itineraries independently of posts via itinerariesPage and itinerariesLimit (BLG-12)', async () => {
+      const baseTime = new Date('2026-11-01T00:00:00.000Z').getTime();
+      const seededItineraries = Array.from({ length: 25 }, (_, index) => ({
+        id: `itin-${String(index + 1).padStart(2, '0')}`,
+        ownerId,
+        title: `Trip ${index + 1}`,
+        countryCodes: ['EG'],
+        startDate: new Date('2026-12-01T00:00:00.000Z'),
+        dayCount: 3,
+        cityIds: ['cairo'],
+        // Newest updatedAt is itin-01, oldest is itin-25.
+        updatedAt: new Date(baseTime + (25 - index) * 60_000),
+      }));
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService(seededItineraries),
+      );
+
+      const post1 = await service.create(
+        { title: 'Post 1', body: 'One', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const post2 = await service.create(
+        { title: 'Post 2', body: 'Two', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      // Omitted parameters default both lists to page 1, limit 10.
+      const defaultPage = await service.getAuthorPage(ownerId);
+      expect(defaultPage.posts).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(defaultPage.itineraries).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+      expect(defaultPage.itineraries.items).toHaveLength(10);
+
+      // Page 1, 2, 3 cover all 25 itineraries cleanly without duplicates.
+      const seenIds: string[] = [];
+      for (const [pageNum, expectedCount] of [
+        [1, 10],
+        [2, 10],
+        [3, 5],
+      ] as const) {
+        const res = await service.getAuthorPage(ownerId, {
+          itinerariesPage: pageNum,
+        });
+        expect(res.itineraries).toMatchObject({
+          page: pageNum,
+          limit: 10,
+          total: 25,
+          totalPages: 3,
+        });
+        expect(res.itineraries.items).toHaveLength(expectedCount);
+        seenIds.push(...res.itineraries.items.map((item) => item.id));
+        // Posts remain on page 1 when only itinerariesPage changes.
+        expect(res.posts.page).toBe(1);
+        expect(res.posts.items.map((p) => p._id)).toEqual([
+          post2._id,
+          post1._id,
+        ]);
+      }
+      expect(seenIds).toHaveLength(25);
+      expect(new Set(seenIds).size).toBe(25);
+
+      // Out-of-range itinerariesPage returns empty items cleanly.
+      const pastEnd = await service.getAuthorPage(ownerId, {
+        itinerariesPage: 4,
+      });
+      expect(pastEnd.itineraries).toEqual({
+        items: [],
+        page: 4,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+
+      // itinerariesLimit=50 returns all 25 items in one page.
+      const limit50 = await service.getAuthorPage(ownerId, {
+        itinerariesLimit: 50,
+      });
+      expect(limit50.itineraries.limit).toBe(50);
+      expect(limit50.itineraries.items).toHaveLength(25);
+
+      // Moving posts page=2&limit=1 leaves itineraries on page 1 limit 10.
+      const postsPage2 = await service.getAuthorPage(ownerId, {
+        page: 2,
+        limit: 1,
+      });
+      expect(postsPage2.posts.page).toBe(2);
+      expect(postsPage2.posts.items.map((p) => p._id)).toEqual([post1._id]);
+      expect(postsPage2.itineraries.page).toBe(1);
+      expect(postsPage2.itineraries.limit).toBe(10);
+      expect(postsPage2.itineraries.items).toHaveLength(10);
+    });
+
+    it('throws 404 NOT_FOUND for admin, airline_moderator, and hotel_moderator accounts even with content present (BLG-12)', async () => {
+      const adminId = new Types.ObjectId().toHexString();
+      const airlineModId = new Types.ObjectId().toHexString();
+      const hotelModId = new Types.ObjectId().toHexString();
+
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: ownerId,
+            name: 'Normal User',
+            email: 'user@example.com',
+            role: UserRole.USER,
+          },
+          {
+            id: adminId,
+            name: 'Platform Admin',
+            email: 'admin@example.com',
+            role: UserRole.ADMIN,
+          },
+          {
+            id: airlineModId,
+            name: 'Airline Moderator',
+            email: 'airline-mod@example.com',
+            role: UserRole.AIRLINE_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.AIRLINE,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+          {
+            id: hotelModId,
+            name: 'Hotel Moderator',
+            email: 'hotel-mod@example.com',
+            role: UserRole.HOTEL_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.HOTEL,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+        ]),
+      );
+
+      for (const accountId of [ownerId, adminId, airlineModId, hotelModId]) {
+        await postModel.create({
+          authorId: new Types.ObjectId(accountId),
+          title: `Post by ${accountId}`,
+          body: 'Sample post',
+          status: PostStatus.PUBLISHED,
+          publishedAt: new Date(),
+        });
+      }
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-user',
+            ownerId,
+            title: 'User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-admin',
+            ownerId: adminId,
+            title: 'Admin Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-airline',
+            ownerId: airlineModId,
+            title: 'Airline Mod Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-hotel',
+            ownerId: hotelModId,
+            title: 'Hotel Mod Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      for (const nonUserId of [adminId, airlineModId, hotelModId]) {
+        const err = await service
+          .getAuthorPage(nonUserId)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as NotFoundException).getResponse()).toMatchObject({
+          code: ErrorCode.NotFound,
+        });
+      }
+
+      const userPage = await service.getAuthorPage(ownerId);
+      expect(userPage.id).toBe(ownerId);
+      expect(userPage.posts.items).toHaveLength(1);
+      expect(userPage.itineraries.items).toHaveLength(1);
+    });
+
+    it('resolves role across multiple listAccounts pages when more than 50 accounts share a name prefix (BLG-12)', async () => {
+      const targetAdminId = new Types.ObjectId().toHexString();
+      const decoys = Array.from({ length: 55 }, (_, index) => ({
+        id: new Types.ObjectId().toHexString(),
+        name: `Traveler ${index + 1}`,
+        email: `traveler-${index + 1}@example.com`,
+        role: UserRole.USER,
+        createdAt: new Date(Date.UTC(2026, 10, 2, 0, index + 1)),
+      }));
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: targetAdminId,
+            name: 'Traveler',
+            email: 'admin-traveler@example.com',
+            role: UserRole.ADMIN,
+            createdAt: new Date('2026-11-01T00:00:00.000Z'),
+          },
+          ...decoys,
+        ]),
+      );
+
+      const err = await service
+        .getAuthorPage(targetAdminId)
+        .catch((caught: unknown) => caught);
+      expect(err).toBeInstanceOf(NotFoundException);
+      expect((err as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
     });
   });
 });

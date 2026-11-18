@@ -614,6 +614,18 @@ describe('FakeRoomNightInventory', () => {
     ]);
   });
 
+  it('rejects overlapping availability before checking whether the room exists', async () => {
+    await expect(
+      inventory.setAvailability(ids.missing, [
+        { fromDate: checkIn, toDate: checkOut },
+        { fromDate: checkOut, toDate: checkOut },
+      ]),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: ErrorCode.ValidationFailed },
+    });
+  });
+
   it('protects reserved nights when editing, deactivating, or deleting a room', async () => {
     await inventory.reserve(
       ids.hotel1,

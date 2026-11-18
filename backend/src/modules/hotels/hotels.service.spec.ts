@@ -502,4 +502,55 @@ describe('HotelsService (HTL-01 integration)', () => {
     ).rejects.toThrow();
     expect(await service.getHotel(created.id)).toEqual(created);
   });
+
+  it.each([
+    { field: 'count', summary: { average: 4, count: -1 } },
+    { field: 'count', summary: { average: 4, count: 1.5 } },
+  ])(
+    'rejects invalid rating $field without replacing the stored summary',
+    async ({ field, summary }) => {
+      const created = await service.create(profile);
+      await expect(
+        service.setRatingSummary(created.id, summary),
+      ).rejects.toMatchObject({
+        name: 'ValidationError',
+        errors: { [`ratingSummary.${field}`]: expect.anything() },
+      });
+      expect((await service.getHotel(created.id))?.ratingSummary).toEqual(
+        created.ratingSummary,
+      );
+    },
+  );
+
+  it.each([
+    { field: 'count', summary: { average: 4, count: NaN } },
+    { field: 'average', summary: { average: NaN, count: 1 } },
+  ])(
+    'reports an invalid rating $field as a cast error without writing it',
+    async ({ field, summary }) => {
+      const created = await service.create(profile);
+      await expect(
+        service.setRatingSummary(created.id, summary),
+      ).rejects.toMatchObject({ name: 'CastError', path: field });
+      expect((await service.getHotel(created.id))?.ratingSummary).toEqual(
+        created.ratingSummary,
+      );
+    },
+  );
+
+  it.each([
+    { field: 'name', input: { name: '   ' } },
+    { field: 'starRating', input: { starRating: 9 } },
+  ])(
+    'rejects invalid profile $field before creating a hotel',
+    async ({ field, input }) => {
+      await expect(
+        service.create({ ...profile, ...input }),
+      ).rejects.toMatchObject({
+        name: 'ValidationError',
+        errors: { [field]: expect.anything() },
+      });
+      expect(await hotels.countDocuments()).toBe(0);
+    },
+  );
 });

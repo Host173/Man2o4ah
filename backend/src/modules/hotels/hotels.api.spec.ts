@@ -325,6 +325,30 @@ describe('Hotel profile API (HTL-01)', () => {
     });
   });
 
+  it('allows the assigned moderator to edit a deactivated hotel without reactivating it', async () => {
+    const created = await service.create(profile);
+    await service.setActive(created.id, false);
+    const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+      providerId: created.id,
+    });
+    const response = await t
+      .http()
+      .patch(`/api/hotels/${created.id}`)
+      .set('Cookie', moderator.cookie)
+      .send({ name: 'Edited while hidden' })
+      .expect(200);
+    expect(response.body).toMatchObject({
+      _id: created.id,
+      name: 'Edited while hidden',
+      isActive: false,
+    });
+    expect(await service.getHotel(created.id)).toEqual({
+      ...created,
+      name: 'Edited while hidden',
+      isActive: false,
+    });
+  });
+
   it('computes photo URLs in HTTP responses without changing the stored or internal view', async () => {
     const created = await service.create(profile);
     const photoId = new Types.ObjectId();

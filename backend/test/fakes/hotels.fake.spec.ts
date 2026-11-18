@@ -239,6 +239,76 @@ describe('FakeHotelsService', () => {
     expect((await hotels.getHotel(HOTEL_ID))?.amenities).toEqual([]);
   });
 
+  it.each([
+    { field: 'name', input: { name: '   ' } },
+    { field: 'name', input: { name: 'x'.repeat(151) } },
+    { field: 'address', input: { address: '   ' } },
+    { field: 'address', input: { address: 'x'.repeat(301) } },
+    { field: 'description', input: { description: 'x'.repeat(5001) } },
+    { field: 'starRating', input: { starRating: 9 } },
+    { field: 'starRating', input: { starRating: 0 } },
+    { field: 'starRating', input: { starRating: 2.5 } },
+    { field: 'amenities.0', input: { amenities: ['   '] } },
+    { field: 'amenities.0', input: { amenities: ['x'.repeat(51)] } },
+    { field: 'amenities', input: { amenities: [' Pool ', 'Pool'] } },
+  ])(
+    'rejects invalid profile $field on creation and editing without partial writes',
+    async ({ field, input }) => {
+      const previous = await hotels.getHotel(HOTEL_ID);
+      const failure = {
+        name: 'ValidationError',
+        errors: { [field]: expect.anything() },
+      };
+      await expect(
+        hotels.create({
+          name: 'Valid hotel',
+          address: '1 Test Street',
+          cityId: 'cairo',
+          ...input,
+        }),
+      ).rejects.toMatchObject(failure);
+      await expect(
+        hotels.update(HOTEL_ID, { cityId: 'dubai', ...input }, HOTEL_ID),
+      ).rejects.toMatchObject(failure);
+      expect(hotels.data.hotels).toHaveLength(1);
+      expect(await hotels.getHotel(HOTEL_ID)).toEqual(previous);
+    },
+  );
+
+  it.each([
+    { field: 'count', summary: { average: 4, count: -1 } },
+    { field: 'count', summary: { average: 4, count: 1.5 } },
+  ])(
+    'rejects invalid rating $field without replacing the previous summary',
+    async ({ field, summary }) => {
+      await hotels.setRatingSummary(HOTEL_ID, { average: 4.5, count: 2 });
+      await expect(
+        hotels.setRatingSummary(HOTEL_ID, summary),
+      ).rejects.toMatchObject({
+        name: 'ValidationError',
+        errors: { [`ratingSummary.${field}`]: expect.anything() },
+      });
+      expect((await hotels.getHotel(HOTEL_ID))?.ratingSummary).toEqual({
+        average: 4.5,
+        count: 2,
+      });
+    },
+  );
+
+  it.each([
+    { field: 'count', summary: { average: 4, count: NaN } },
+    { field: 'average', summary: { average: NaN, count: 1 } },
+  ])(
+    'preserves the real rating $field cast error without changing the summary',
+    async ({ field, summary }) => {
+      const previous = await hotels.getHotel(HOTEL_ID);
+      await expect(
+        hotels.setRatingSummary(HOTEL_ID, summary),
+      ).rejects.toMatchObject({ name: 'CastError', path: field });
+      expect(await hotels.getHotel(HOTEL_ID)).toEqual(previous);
+    },
+  );
+
   it('rejects unassigned hotel edits and unknown cities without partial changes', async () => {
     const previous = await hotels.getHotel(HOTEL_ID);
     await expect(

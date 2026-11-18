@@ -34,10 +34,7 @@ import type {
 } from './blog.types.js';
 import type { CreateCommentDto } from './dto/create-comment.dto.js';
 import type { CreatePostDto } from './dto/create-post.dto.js';
-import {
-  ListPostsQueryDto,
-  MAX_SEARCH_QUERY_LENGTH,
-} from './dto/list-posts-query.dto.js';
+import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import type { UpdateCommentDto } from './dto/update-comment.dto.js';
 import type { UpdatePostDto } from './dto/update-post.dto.js';
 import { Comment } from './schemas/comment.schema.js';
@@ -102,19 +99,6 @@ export class BlogService {
     const limit = query.limit ?? 10;
     const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
     const q = query.q !== undefined ? query.q.trim() : undefined;
-
-    if (q !== undefined && q.length > MAX_SEARCH_QUERY_LENGTH) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Validation failed',
-        details: [
-          {
-            field: 'q',
-            message: `q must be shorter than or equal to ${MAX_SEARCH_QUERY_LENGTH} characters`,
-          },
-        ],
-      });
-    }
 
     if (q && q.length > 0) {
       const matchedUserIds = await this.accountsService.findUserIdsByName(q);

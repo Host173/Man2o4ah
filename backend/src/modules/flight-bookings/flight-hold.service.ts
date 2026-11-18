@@ -1,19 +1,15 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
-import { ErrorCode } from '../../common/errors/error-codes.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
 import type { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import type { FlightHold, FlightQuote } from './flight-bookings.types.js';
-import { FlightQuoteService } from './flight-quote.service.js';
+import { FlightQuoteService, HOLD_MINUTES } from './flight-quote.service.js';
 import {
   FlightBooking,
   FlightBookingStatus,
 } from './schemas/flight-booking.schema.js';
-
-/** How long held seats wait for payment (FLT-22). */
-const HOLD_MINUTES = 10;
 
 /**
  * The flight seat hold (FLT-22). Validates and prices exactly like the quote,
@@ -35,27 +31,14 @@ export class FlightHoldService {
     request: FlightQuoteRequestDto,
     userId: string,
   ): Promise<FlightHold> {
-    // The same checks and prices as the quote (FLT-19): one set of rules.
+    // The same checks and prices as the quote (FLT-19): one set of rules,
+    // including "the flight must leave at least HOLD_MINUTES from now".
     const quote = await this.quotes.quote(request);
 
     const createdAt = new Date();
     const holdExpiresAt = new Date(
       createdAt.getTime() + HOLD_MINUTES * 60 * 1000,
     );
-    // A hold must not outlive the flight: the whole 10 minutes must fit
-    // before the outbound departure (decided on review #147).
-    if (quote.segments[0].departureAt < holdExpiresAt) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'The booking request is not valid',
-        details: [
-          {
-            field: 'segments[0]',
-            message: `This flight leaves in less than ${HOLD_MINUTES} minutes and can no longer be held`,
-          },
-        ],
-      });
-    }
 
     let bookingId = '';
     const session = await this.connection.startSession();

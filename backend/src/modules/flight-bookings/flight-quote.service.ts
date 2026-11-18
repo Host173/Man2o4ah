@@ -39,6 +39,13 @@ const NOT_BOOKABLE: Record<
   departure_passed: 'This flight has already departed',
 };
 
+/**
+ * How long a hold keeps seats for payment (FLT-22). A flight that leaves
+ * sooner can't be quoted or held: a hold must not outlive the flight
+ * (decided on review #147).
+ */
+export const HOLD_MINUTES = 10;
+
 function invalid(details: ErrorDetail[]): BadRequestException {
   return new BadRequestException({
     code: ErrorCode.ValidationFailed,
@@ -66,6 +73,7 @@ export class FlightQuoteService {
   async quote(request: FlightQuoteRequestDto): Promise<FlightQuote> {
     const legs = await this.loadLegs(request);
     const errors = [
+      ...this.checkDepartureTime(legs),
       ...this.checkRoute(legs),
       ...this.checkPassengerDetails(request, legs),
     ];
@@ -167,6 +175,18 @@ export class FlightQuoteService {
     // Nothing else can be checked without the flights.
     if (errors.length > 0) throw invalid(errors);
     return legs;
+  }
+
+  /** The outbound must leave at least HOLD_MINUTES from now, so a hold fits before it. */
+  private checkDepartureTime(legs: Leg[]): ErrorDetail[] {
+    const latestHoldEnd = Date.now() + HOLD_MINUTES * 60 * 1000;
+    if (legs[0].flight.departureAt.getTime() >= latestHoldEnd) return [];
+    return [
+      {
+        field: 'segments[0]',
+        message: `This flight leaves in less than ${HOLD_MINUTES} minutes and can no longer be booked`,
+      },
+    ];
   }
 
   /** A return flies back from the outbound's arrival to its origin, after it lands. */

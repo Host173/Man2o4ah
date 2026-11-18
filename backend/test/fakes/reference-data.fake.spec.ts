@@ -28,7 +28,7 @@ describe('FakeReferenceDataService', () => {
 
   it('finds city IDs by keyword, case-insensitive', async () => {
     expect(await data.findCityIds('CAI')).toEqual(['cairo']);
-    expect(await data.findCityIds('york')).toEqual(['new-york']);
+    expect(await data.findCityIds('york')).toEqual(['new_york']);
   });
 
   it('finds country codes by keyword', async () => {

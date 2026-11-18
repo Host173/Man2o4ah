@@ -220,3 +220,262 @@ i did them i think now i want to write the pr
 How the output was used:
 Ran npm run verify (passed); drafted the PR title and description for CTR-04; no files in the repo changed except this log
 ================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+yes start the plan
+
+How the output was used:
+Answer only, no files changed (FLT-19 plan)
+i want to start implementing endpoints in sprint 2 what do i need to know to start (i am user hestiasspace)
+
+How the output was used:
+Planned Sprint 2 (GEN-11 first); created branch feature/GEN-11-booking-lifecycle-refund-rules from develop and ran npm ci; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+where are you getting the information for the endpoints from
+Related Requirement: GEN-11
+
+Prompt:
+they are assigned to me
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+it shouldnt pass i think, commit
+
+How the output was used:
+Committed passenger-rules.spec.ts (failing TDD tests for FLT-19)
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+let me try to write it but give me a reference or something
+
+How the output was used:
+Answer only, no files changed (DTO references and a skeleton for Aya to fill in)
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+i am done check it
+
+How the output was used:
+Answer only, no files changed (review of dto/flight-quote.dto.ts)
+Related Requirement: GEN-11
+
+Prompt:
+go
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.spec.ts (TDD, failing until Step 2); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+can you fix my issues
+
+How the output was used:
+Fixed dto/flight-quote.dto.ts (validators, ValidateNested, definite assignment, optional weight, examples, enums); no commit
+Related Requirement: GEN-11
+
+Prompt:
+commit
+
+How the output was used:
+Committed refund-tiers.spec.ts (failing TDD test for GEN-11)
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do their tests
+
+How the output was used:
+Committed df4e82f (quote DTO); added dto/flight-quote.dto.spec.ts (30 tests passing); no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+u write it
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.ts (tests now pass); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do the service code
+
+How the output was used:
+Committed bae2de5 (quote service tests); added flight-quote.service.ts and the quote types in flight-bookings.types.ts (all tests pass); no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+commit  and step adding rlly short prompts to prompt txt
+
+How the output was used:
+Committed f54c55b (refund tier calculator); added a "skip really short prompts" rule to my local CLAUDE.md preferences
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+yes gp
+
+How the output was used:
+Committed b5894b5 (quote service); added flight-bookings.controller.ts, dto/flight-quote.response.dto.ts, flight-bookings.api.spec.ts and wired FlightsModule in flight-bookings.module.ts; no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+i want to copy env
+
+How the output was used:
+Created backend/.env and frontend/.env.local from .env.example (gitignored, not committed); generated a local JWT secret <removed>
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+what is error
+[Attached: screenshot of npm run start:dev failing with "querySrv ECONNREFUSED _mongodb._tcp.<removed>.mongodb.net"]
+
+How the output was used:
+Answer only, no files changed (diagnosed the MongoDB Atlas DNS error)
+Related Requirement: GEN-11
+
+Prompt:
+he didnt say anything make an assumption and i might change it later
+
+How the output was used:
+Kept the GEN-11 rules in flight-bookings (assumption, pending Kareem) and recorded it in file comments; skipped the README section because the backend README now forbids contract copies; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+[Attached: screenshot of Swagger UI, POST /api/flight-bookings answering 501 "getFlightsForBooking: implemented in FLT-17"]
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do step 6
+
+How the output was used:
+Committed 9cc2ed0 (quote endpoint); ran npm run verify twice (flaky accounts timeouts, flight-bookings green); fixed two lint warnings in flight-quote.service.spec.ts; drafted the FLT-19 PR text; no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+commit and let me run npm run verify
+
+How the output was used:
+Committed the shared-location comments in refund-tiers.ts and booking-lifecycle.ts; Aya runs npm run verify herself
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+done now i want to move on to the nexft issue
+
+How the output was used:
+Answer only, no files changed (checked which tickets are unblocked)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+some changes were requested on the prs i made, can u briefly explain what is wrong and each and start a plan to fix them
+
+How the output was used:
+Answer only, no files changed (read Kareem's develop changes; plan for the GEN-11 fix; asked for the review comments)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+how do i install gh
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+i mean the second comment not the decisions md
+
+How the output was used:
+Answer only, no files changed
+Related Requirement: GEN-11
+
+Prompt:
+[Attached: screenshot of npm run verify passing (86 test files, 943 tests, 97.07% statements), with the draft message "it passed, do 1 and 2"]
+
+How the output was used:
+Committed the GEN-11 prompt log; drafted the GEN-11 PR title and description
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+Related Requirement: GEN-11
+
+Prompt:
+do all the stated fixes i approve
+
+How the output was used:
+FLT-19: merged develop (f64503a), tests d625347, fixes 650031c, npm run verify passed (1001 tests). GEN-11 fixes are on the GEN-11 branch
+GEN-11: merged develop (17a70eb), tests 5ca7aeb, fixes f969653, comments 8fd9a51, npm run verify passed. FLT-19: merged develop, review fixes with tests (see the FLT-19 commits)
+================================================

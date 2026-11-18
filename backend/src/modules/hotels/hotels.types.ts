@@ -2,7 +2,7 @@ import type { ClientSession } from 'mongoose';
 import type { CancellationPolicy } from '../../common/database/cancellation-policy.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 
-/** Pass the caller's transaction to every read and inventory write in a hold. */
+/** Pass the caller's transaction to every read and inventory write in a hold. Required by all production inventory mutations. */
 export interface HotelTransactionOptions {
   session: ClientSession;
 }
@@ -32,6 +32,7 @@ export interface HotelView {
 export interface RoomView {
   id: string;
   hotelId: string;
+  /** New rooms use trimmed lowercase names; legacy reads retain their stored names. */
   name: string;
   type: string;
   beds: number;

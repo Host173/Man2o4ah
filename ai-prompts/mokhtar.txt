@@ -101,3 +101,112 @@ Before making any edits, thoroughly read and inspect:
 How the output was used:
 Added the CTR-06 prompt-log entry and corrected the PR #118 description after review; no source changes.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+You are tasked with implementing GitHub Issue #65: "ITN-01: Create and list itineraries". 
+
+Please follow all project conventions, architecture guidelines, and standards.
+
+### 1. Initial Research & Review (Do this first)
+* Read the project skill guidelines located at `docs/ai/skills/travel-platform/` to understand the architecture, patterns, error handling, and coding standards.
+* Inspect the repository structure, existing modules, database models, and API routing conventions (especially around user ownership, validation, and authentication since tests require API owner-only checks).
+* Review existing code in related modules to maintain consistency.
+
+### 2. Branch Setup
+* Create and check out the correct feature branch:
+  `git checkout -b feature/ITN-01-create-list-itineraries`
+
+### 3. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement the following features satisfying requirements **ITN-01** and **ITN-03**:
+* **Create Itinerary:** Allow an authenticated owner to create an itinerary with fields: `title`, `countries`, and `start date`.
+* **Edit Itinerary:** Allow the owner to update/edit an existing itinerary.
+* **Delete Itinerary:** Allow the owner to delete an itinerary.
+* **List Itineraries:** List the current user's itineraries, ordered by **most recently updated first**.
+* **Open/View Itinerary:** Allow the owner to retrieve/open a single itinerary by ID.
+* **Access Control:** Ensure API endpoints are restricted to the owner only (owner-only API access).
+
+### 4. Testing & Verification
+* Write required integration and API tests for the `itineraries` module.
+* Run the test suite and linter to verify that all tests pass cleanly and no regressions are introduced.
+
+### 5. Pull Request Creation
+* Once everything is implemented, verified, and passing tests, commit your changes with clear commit messages.
+* Push the branch and create a Pull Request with the exact title:
+  `ITN-01: Create and list itineraries`
+* Ensure the PR description references issue `#65`.
+
+How the output was used:
+Implemented owner-only create/list/open/edit/delete for itineraries in `itineraries.service.ts`, `itineraries.controller.ts`, the DTOs and types, added service and API tests plus the expanded fake, and committed 4c00728.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+Please start the local development server so I can manually test the new itinerary endpoints in Swagger:
+1. Run the application (e.g., `npm run start:dev`).
+2. Provide the exact local Swagger UI URL.
+3. Confirm that session/cookie authentication is configured so I can test the POST, GET, PATCH, and DELETE `/api/itineraries` endpoints.
+
+Also, please check and confirm whether you have added the prompts I gave you into the project's prompts file. If they haven't been added yet, please add them now and confirm where they were saved.
+
+How the output was used:
+Started a local MongoDB and the Nest dev server on port 4000, confirmed Swagger and cookie auth, and verified the itinerary endpoints end to end; only `ai-prompts/mokhtar.txt` changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+MONGODB_URI=<removed>
+PORT=4000
+FRONTEND_URL=http://localhost:3000
+PLATFORM_CURRENCY=USD add this to the .env
+
+How the output was used:
+Pointed `backend/.env` at the team Atlas cluster and restarted the dev server on it; no source files changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+this api takes loading so long and it doesnt execcute
+
+How the output was used:
+Fixed the shared pagination query DTO so Swagger exposes `page` and `limit` as numbers instead of objects, confirmed GET /api/itineraries returns 200, and committed b26f24c.
+================================================
+
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+did you make tests in a test file for api as project rules or not ?
+
+How the output was used:
+Confirmed the co-located itineraries.api.spec.ts and itineraries.service.spec.ts files. Acting on the PR review afterwards, replaced the NotImplementedExceptions in FakeItinerariesService with in-memory owner-scoped create/list/open/edit/delete, added 	est/fakes/itineraries.fake.spec.ts, attached the Swagger screenshot, and committed f4538ae.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+[Screenshot of an email from kareem sayed]
+every thing is good ready tobe merged just small fixes so we avoid future problems (not now )
+1. The fake (no change needed) ... One tiny difference: an empty update({}) changes updatedAt in the fake but not in the real service. Fix it only if you want.
+2. The emoji title limit (small bug). The DTO's @maxlength(100) counts characters, but normalizeTitle uses .length, which counts an emoji as 2. So a title of 51-100 emoji passes the DTO and then gets a 400 from the service. Suggested fix: count the same way in the service, [...trimmed].length instead of trimmed.length, and add a test with a 100-emoji title.
+and about the screenshot, we don't need it in the repo
+
+How the output was used:
+Counted title characters as code points in the service and the schema (Array.from(value).length), added 100-emoji and 101-emoji tests to the service, API and schema specs, stopped an empty update from bumping updatedAt in the fake, deleted docs/screenshots/itn-01-swagger.jpg and dropped it from the PR description; committed ce48c4e.
+================================================

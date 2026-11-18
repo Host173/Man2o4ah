@@ -720,3 +720,5 @@ why it si changes the frozen database index and conflicts ?
 How the output was used:
 Appended ai-prompts/pierre.txt; explained that the existing case-sensitive unique index cannot enforce case-insensitive uniqueness under concurrency, clarified that HTL-03 itself does not prohibit case-insensitive names, and continued the safe-integer fix without altering the frozen schema or index.
 ================================================
+
+Follow-up for the same 2026-11-18 numeric-fix request: committed the failing regression tests first as 75197a1, then added Number.MAX_SAFE_INTEGER bounds and matching Swagger maxima to all three numeric inputs in create-room.dto.ts. The hotel API suite passed all 35 tests; after correcting DTO formatting, backend npm run verify passed all gates, 1305 tests across 100 files, service coverage thresholds and build. No name-uniqueness, schema or index changes; no push.

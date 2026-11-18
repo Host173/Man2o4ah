@@ -1261,4 +1261,37 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       });
     });
   });
+
+  describe('concurrent day writes (ITN-05 review)', () => {
+    it('does not lose a day edit when adds overlap', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const first = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const results = await Promise.allSettled([
+        itineraries.addDay(created._id, dayDto({ cityId: 'dubai' }), owner.id),
+        itineraries.updateDay(
+          created._id,
+          first._id,
+          { notes: 'edited' },
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(2);
+      expect(detail.days[0].notes).toBe('edited');
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(2);
+      expect(stored?.dayCount).toBe(2);
+      expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
+    });
+  });
 });

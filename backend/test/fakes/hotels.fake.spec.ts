@@ -78,10 +78,71 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  const policies = {
+    checkInTime: '15:30',
+    checkOutTime: '11:00',
+    cancellationPolicy: { tiers: [{ daysBefore: 2, refundPercent: 50 }] },
+  };
+
+  it('replaces policies with detached input and output and permits clearing tiers', async () => {
+    const before = (await hotels.getHotel(ids.hotel1))!;
+    const input = structuredClone(policies);
+    const updated = await hotels.updatePolicies(ids.hotel1, input, ids.hotel1);
+    expect(updated).toEqual({ ...before, ...policies });
+    input.cancellationPolicy.tiers.length = 0;
+    updated.cancellationPolicy.tiers.length = 0;
+    expect(await hotels.getHotel(ids.hotel1)).toEqual({
+      ...before,
+      ...policies,
+    });
+    const cleared = { ...policies, cancellationPolicy: { tiers: [] } };
+    expect(
+      await hotels.updatePolicies(ids.hotel1, cleared, ids.hotel1),
+    ).toEqual({ ...before, ...cleared });
+  });
+
+  it('enforces policy scope and validation without partially updating stored fields', async () => {
+    const before = await hotels.getHotel(ids.hotel1);
+    for (const assignment of [undefined, ids.hotel2, 'invalid']) {
+      await expect(
+        hotels.updatePolicies(ids.hotel1, policies, assignment),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+    for (const input of [policies, { ...policies, checkInTime: '24:00' }]) {
+      await expect(
+        hotels.updatePolicies(ids.missing, input, ids.missing),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+    for (const input of [
+      { ...policies, checkInTime: '24:00' },
+      {
+        ...policies,
+        cancellationPolicy: {
+          tiers: [
+            { daysBefore: 2, refundPercent: 50 },
+            { daysBefore: 2, refundPercent: 100 },
+          ],
+        },
+      },
+    ]) {
+      await expect(
+        hotels.updatePolicies(ids.hotel1, input, ids.hotel1),
+      ).rejects.toMatchObject({ name: 'ValidationError' });
+      expect(await hotels.getHotel(ids.hotel1)).toEqual(before);
+    }
+  });
+
   it('rejects malformed hotel IDs with the same validation errors as the real service', async () => {
     const calls = [
       () => hotels.getHotel('invalid'),
       () => hotels.update('invalid', {}, 'invalid'),
+      () => hotels.updatePolicies('invalid', policies, 'invalid'),
       () => hotels.addPhoto('invalid', undefined, 'invalid'),
       () => hotels.removePhoto('invalid', 'invalid', 'invalid'),
       () => hotels.setActive('invalid', false),

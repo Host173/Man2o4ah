@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Model, PipelineStage } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
@@ -14,7 +14,7 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
-import { cityGroups, cityIdsOf, dayDate, dayNumber } from './days.js';
+import { cityGroups, dayDate, dayNumber } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
@@ -204,7 +204,7 @@ export class ItinerariesService {
     const cityId = await this.resolveCityId(dto.cityId);
     const notes = this.normalizeNotes(dto.notes);
 
-    const days = [...itinerary.days];
+    const days = itinerary.days ?? [];
     if (days.length >= MAX_DAYS) {
       throw this.invalidField(
         'days',
@@ -219,20 +219,35 @@ export class ItinerariesService {
       activities: [],
       budgetEntries: [],
     };
-    days.push(day);
 
+    // Append inside the database: both the 60-day guard and `$concatArrays`
+    // re-read `days` at write time, so overlapping adds cannot overwrite each
+    // other (review of ITN-05).
     const updated = await this.itineraryModel
       .findOneAndUpdate(
-        { _id: id, ownerId },
-        { $set: { days, dayCount: days.length, cityIds: cityIdsOf(days) } },
-        { returnDocument: 'after', runValidators: true },
+        { _id: id, ownerId, [`days.${MAX_DAYS - 1}`]: { $exists: false } },
+        [
+          { $set: { days: { $concatArrays: ['$days', [day]] } } },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', runValidators: true, updatePipeline: true },
       )
       .lean()
       .exec();
-    if (!updated) throw this.notFound();
+    if (!updated) {
+      // Either the itinerary was deleted or another request filled the last
+      // slot between our read and write; report the same error for a full trip.
+      if (!(await this.itineraryModel.exists({ _id: id, ownerId }))) {
+        throw this.notFound();
+      }
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
 
     const record = updated as ItineraryRecord;
-    const index = days.length - 1;
+    const index = record.days.length - 1;
     return this.toDayView(record.days[index], index, record.startDate);
   }
 
@@ -273,33 +288,66 @@ export class ItinerariesService {
         : undefined;
     const notes = this.normalizeNotes(dto.notes);
 
-    const edited: StoredDay = {
-      ...days[index],
-      ...(cityId !== undefined ? { cityId } : {}),
-      ...(notes !== undefined ? { notes } : {}),
-    };
-    const nextDays = days.map((day, position) =>
-      position === index ? edited : day,
-    );
+    const changes: Record<string, unknown> = {};
+    if (cityId !== undefined) changes.cityId = cityId;
+    if (notes !== undefined) changes.notes = notes;
 
+    // Edit only the target day, using the array as it exists at write time.
+    // Rewriting a read copy of the whole array lost overlapping adds (review
+    // of ITN-05); `$map` merges the changes into the current document instead.
+    const target = targetDayId.toHexString();
     const updated = await this.itineraryModel
       .findOneAndUpdate(
-        { _id: id, ownerId },
-        {
-          $set: {
-            days: nextDays,
-            dayCount: nextDays.length,
-            cityIds: cityIdsOf(nextDays),
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      { $mergeObjects: ['$$day', changes] },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
           },
-        },
-        { returnDocument: 'after', runValidators: true },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', runValidators: true, updatePipeline: true },
       )
       .lean()
       .exec();
     if (!updated) throw this.notFound();
 
     const record = updated as ItineraryRecord;
-    return this.toDayView(record.days[index], index, record.startDate);
+    const updatedIndex = record.days.findIndex(
+      (day) => day._id.toHexString() === target,
+    );
+    return this.toDayView(
+      record.days[updatedIndex],
+      updatedIndex,
+      record.startDate,
+    );
+  }
+
+  /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */
+  private recomputeDayFields(): PipelineStage[] {
+    return [
+      { $set: { dayCount: { $size: '$days' } } },
+      {
+        $set: {
+          cityIds: {
+            $sortArray: { input: { $setUnion: ['$days.cityId'] }, sortBy: 1 },
+          },
+        },
+      },
+    ];
   }
 
   /**

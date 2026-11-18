@@ -13,6 +13,7 @@ import {
   PaginatedPublicItinerariesResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PostLikeResponseDto,
   PublicItinerarySummaryResponseDto,
   PublishedPostResponseDto,
 } from './post.response.dto.js';
@@ -360,6 +361,7 @@ describe('CreatePostDto & UpdatePostDto', () => {
       const comment = new CommentResponseDto();
       const commentsPage = new PaginatedCommentsResponseDto();
       const detail = new PostDetailResponseDto();
+      const like = new PostLikeResponseDto();
       const itinerarySummary = new PublicItinerarySummaryResponseDto();
       const itineraryPage = new PaginatedPublicItinerariesResponseDto();
       const authorPage = new AuthorPageResponseDto();
@@ -369,6 +371,7 @@ describe('CreatePostDto & UpdatePostDto', () => {
       expect(comment).toBeInstanceOf(CommentResponseDto);
       expect(commentsPage).toBeInstanceOf(PaginatedCommentsResponseDto);
       expect(detail).toBeInstanceOf(PublishedPostResponseDto);
+      expect(like).toBeInstanceOf(PostLikeResponseDto);
       expect(itinerarySummary).toBeInstanceOf(
         PublicItinerarySummaryResponseDto,
       );

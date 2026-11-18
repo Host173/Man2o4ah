@@ -28,6 +28,7 @@ import type {
   AuthorPageView,
   CommentView,
   PostDetailView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
@@ -369,6 +370,105 @@ export class BlogService {
   }
 
   /**
+   * BLG-06: likes a visible published post for the authenticated user
+   * (idempotent via the `{ postId: 1, userId: 1 }` unique index).
+   */
+  async likePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    // Handle the unique-index insert outside a transaction because E11000 aborts a MongoDB transaction.
+    let insertedLikeId: Types.ObjectId | undefined;
+    try {
+      const created = await this.likeModel.create({
+        postId: postObjectId,
+        userId: userObjectId,
+      });
+      insertedLikeId = created._id;
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        insertedLikeId = undefined;
+      } else {
+        throw error;
+      }
+    }
+
+    if (insertedLikeId !== undefined) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: 1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) {
+        await this.likeModel.deleteOne({ _id: insertedLikeId }).exec();
+        throw this.notFound();
+      }
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: true,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: true,
+    };
+  }
+
+  /**
+   * BLG-06: removes the authenticated user's like from a visible published
+   * post (idempotent; decrements `likeCount` only when a like was deleted).
+   */
+  async unlikePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    const deleted = await this.likeModel
+      .findOneAndDelete({
+        postId: postObjectId,
+        userId: userObjectId,
+      })
+      .lean()
+      .exec();
+
+    if (deleted) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: -1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: false,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: false,
+    };
+  }
+
+  /**
    * BLG-04 / BLG-08: updates the authenticated owner's post. Sets
    * `publishedAt` the first time the post is published; throws 404 if missing
    * or owned by someone else.
@@ -699,7 +799,7 @@ export class BlogService {
       ...(post.publishedAt !== undefined
         ? { publishedAt: post.publishedAt }
         : {}),
-      likeCount: post.likeCount,
+      likeCount: Math.max(0, post.likeCount),
       commentCount: post.commentCount,
       isHidden: post.isHidden,
       authorDeactivated: post.authorDeactivated,

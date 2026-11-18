@@ -89,6 +89,8 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     expect(document.paths['/api/posts/{id}/comments']?.post).toBeDefined();
     expect(document.paths['/api/comments/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/comments/{id}']?.delete).toBeDefined();
+    expect(document.paths['/api/posts/{id}/like']?.post).toBeDefined();
+    expect(document.paths['/api/posts/{id}/like']?.delete).toBeDefined();
     expect(document.paths['/api/tags/{tag}/posts']?.get).toBeDefined();
     expect(
       document.paths['/api/tags/{tag}/posts']?.get?.security,
@@ -150,6 +152,18 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .delete(`/api/comments/${someId}`);
       expect(deleteCommentRes.status).toBe(401);
       expect(deleteCommentRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const likePostRes = await testApp!
+        .http()
+        .post(`/api/posts/${someId}/like`);
+      expect(likePostRes.status).toBe(401);
+      expect(likePostRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const unlikePostRes = await testApp!
+        .http()
+        .delete(`/api/posts/${someId}/like`);
+      expect(unlikePostRes.status).toBe(401);
+      expect(unlikePostRes.body.code).toBe(ErrorCode.NotAuthenticated);
     });
 
     it('rejects expired sessions with 401 and mustChangePassword users with 403 PASSWORD_CHANGE_REQUIRED', async () => {
@@ -1535,6 +1549,226 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .get(`/api/posts/${postId}/comments?limit=51`);
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
+  describe('POST & DELETE /api/posts/:id/like (BLG-06)', () => {
+    it('likes, idempotently re-likes, unlikes, and idempotently re-unlikes a published post', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      const fanA = await loginAs(testApp!.connection, UserRole.USER);
+      const fanB = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: author.id, name: 'Author', email: 'author@example.com' },
+          { id: fanA.id, name: 'Fan A', email: 'fana@example.com' },
+          { id: fanB.id, name: 'Fan B', email: 'fanb@example.com' },
+        ]),
+      );
+
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Aswan Sunset',
+          body: 'Felucca ride on the Nile.',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = created.body._id as string;
+
+      // Unlike before liking is idempotent (200 OK, likeCount stays 0).
+      const preUnlike = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/like`)
+        .set('Cookie', fanA.cookie);
+      expect(preUnlike.status).toBe(200);
+      expect(preUnlike.body).toEqual({
+        postId,
+        likeCount: 0,
+        liked: false,
+      });
+
+      // First like increments likeCount to 1.
+      const firstLike = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/like`)
+        .set('Cookie', fanA.cookie);
+      expect(firstLike.status).toBe(200);
+      expect(firstLike.body).toEqual({
+        postId,
+        likeCount: 1,
+        liked: true,
+      });
+
+      // Repeated like by same user is idempotent (stays at 1).
+      const secondLike = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/like`)
+        .set('Cookie', fanA.cookie);
+      expect(secondLike.status).toBe(200);
+      expect(secondLike.body).toEqual({
+        postId,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: new Types.ObjectId(postId) }),
+      ).toBe(1);
+
+      // Second user likes -> likeCount becomes 2 and is reflected on GET /api/posts/:id.
+      const otherUserLike = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/like`)
+        .set('Cookie', fanB.cookie);
+      expect(otherUserLike.status).toBe(200);
+      expect(otherUserLike.body).toEqual({
+        postId,
+        likeCount: 2,
+        liked: true,
+      });
+
+      const detailAfterLikes = await testApp!
+        .http()
+        .get(`/api/posts/${postId}`);
+      expect(detailAfterLikes.status).toBe(200);
+      expect(detailAfterLikes.body.likeCount).toBe(2);
+
+      // Fan A unlikes -> likeCount decrements to 1; repeated unlike stays at 1.
+      const unlikeRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/like`)
+        .set('Cookie', fanA.cookie);
+      expect(unlikeRes.status).toBe(200);
+      expect(unlikeRes.body).toEqual({
+        postId,
+        likeCount: 1,
+        liked: false,
+      });
+
+      const repeatUnlikeRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/like`)
+        .set('Cookie', fanA.cookie);
+      expect(repeatUnlikeRes.status).toBe(200);
+      expect(repeatUnlikeRes.body).toEqual({
+        postId,
+        likeCount: 1,
+        liked: false,
+      });
+
+      // Fan B unlikes -> likeCount reaches 0.
+      const finalUnlike = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/like`)
+        .set('Cookie', fanB.cookie);
+      expect(finalUnlike.status).toBe(200);
+      expect(finalUnlike.body).toEqual({
+        postId,
+        likeCount: 0,
+        liked: false,
+      });
+    });
+
+    it('rejects unauthenticated requests, malformed IDs, and draft/hidden/deactivated/missing posts', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      const deactivatedAuthor = await loginAs(
+        testApp!.connection,
+        UserRole.USER,
+      );
+      const viewer = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: author.id, name: 'Author', email: 'author@example.com' },
+          {
+            id: deactivatedAuthor.id,
+            name: 'Former User',
+            email: 'former@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
+      );
+
+      const draft = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Draft',
+          body: 'Private draft',
+          status: PostStatus.DRAFT,
+        });
+      const hidden = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Hidden',
+          body: 'Moderated post',
+          status: PostStatus.PUBLISHED,
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+      const deactivatedPost = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', deactivatedAuthor.cookie)
+        .send({
+          title: 'Deactivated Author Post',
+          body: 'Author deactivated',
+          status: PostStatus.PUBLISHED,
+        });
+
+      const missingId = new Types.ObjectId().toHexString();
+      for (const blockedId of [
+        draft.body._id as string,
+        hidden.body._id as string,
+        deactivatedPost.body._id as string,
+        missingId,
+      ]) {
+        const likeBlocked = await testApp!
+          .http()
+          .post(`/api/posts/${blockedId}/like`)
+          .set('Cookie', viewer.cookie);
+        expect(likeBlocked.status).toBe(404);
+        expect(likeBlocked.body.code).toBe(ErrorCode.NotFound);
+
+        const unlikeBlocked = await testApp!
+          .http()
+          .delete(`/api/posts/${blockedId}/like`)
+          .set('Cookie', viewer.cookie);
+        expect(unlikeBlocked.status).toBe(404);
+        expect(unlikeBlocked.body.code).toBe(ErrorCode.NotFound);
+      }
+
+      const badIdLike = await testApp!
+        .http()
+        .post('/api/posts/invalid-id/like')
+        .set('Cookie', viewer.cookie);
+      expect(badIdLike.status).toBe(400);
+      expect(badIdLike.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badIdUnlike = await testApp!
+        .http()
+        .delete('/api/posts/invalid-id/like')
+        .set('Cookie', viewer.cookie);
+      expect(badIdUnlike.status).toBe(400);
+      expect(badIdUnlike.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const unauthLike = await testApp!
+        .http()
+        .post(`/api/posts/${missingId}/like`);
+      expect(unauthLike.status).toBe(401);
+      expect(unauthLike.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const unauthUnlike = await testApp!
+        .http()
+        .delete(`/api/posts/${missingId}/like`);
+      expect(unauthUnlike.status).toBe(401);
+      expect(unauthUnlike.body.code).toBe(ErrorCode.NotAuthenticated);
     });
   });
 

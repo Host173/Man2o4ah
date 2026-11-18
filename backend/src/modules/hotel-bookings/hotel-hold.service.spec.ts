@@ -7,6 +7,8 @@ import { FakeRoomNightInventory } from '../../../test/fakes/room-night-inventory
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import type { HotelView, RoomView } from '../hotels/hotels.types.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
@@ -129,6 +131,7 @@ describe('HotelHoldService.hold (HTL-16, HTL-18)', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -341,6 +344,62 @@ describe('HotelHoldService.hold (HTL-16, HTL-18)', () => {
       await expect(holds.hold(sameRoom, USER)).rejects.toMatchObject({
         status: 409,
         response: { code: 'ROOMS_UNAVAILABLE' },
+      });
+    });
+
+    // Boundaries of "overlapping nights": check-out is never a night.
+    it.each([
+      ['checking out on our check-in day', '2027-03-07', '2027-03-10'],
+      ['checking in on our check-out day', '2027-03-13', '2027-03-15'],
+    ])(
+      'leaves an overdue hold of the same room %s alone',
+      async (_label, checkInDate, checkOutDate) => {
+        const adjacent = await holds.hold(
+          request({
+            checkInDate,
+            checkOutDate,
+            rooms: [{ roomId: ROOM_101, adults: 1, childAges: [] }],
+          }),
+          USER,
+        );
+        vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+        await holds.hold(sameRoom, USER);
+
+        expect(
+          (await reservations.findById(adjacent.reservationId).lean())?.status,
+        ).toBe('pending_payment');
+      },
+    );
+
+    it('frees an overdue hold that shares just one night', async () => {
+      const lastNight = await holds.hold(
+        request({
+          checkInDate: '2027-03-12',
+          checkOutDate: '2027-03-14',
+          rooms: [{ roomId: ROOM_101, adults: 1, childAges: [] }],
+        }),
+        USER,
+      );
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+      await holds.hold(sameRoom, USER);
+
+      expect(
+        (await reservations.findById(lastNight.reservationId).lean())?.status,
+      ).toBe('expired');
+    });
+
+    it('tells payments the freed hold expired (HotelReservationExpired)', async () => {
+      const old = await holds.hold(sameRoom, USER);
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+      const emit = vi.spyOn(t.moduleRef.get(AppEvents), 'emit');
+
+      await holds.hold(sameRoom, USER);
+
+      expect(emit).toHaveBeenCalledWith(Events.HotelReservationExpired, {
+        bookingId: old.reservationId,
+        userId: USER,
       });
     });
 

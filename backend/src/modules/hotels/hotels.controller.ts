@@ -73,7 +73,8 @@ export class HotelsController {
   @ApiParam({ name: 'roomId', type: String })
   @ApiOkResponse({ type: RoomBlockResponseDto })
   @ApiBadRequestResponse({
-    description: 'Invalid IDs, dates, or operation fields',
+    description:
+      'VALIDATION_FAILED: invalid IDs, dates, operation fields, or a block longer than 365 inclusive nights',
   })
   @ApiNotFoundResponse({
     description:

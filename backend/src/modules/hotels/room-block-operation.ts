@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { toDateOnly } from '../../common/dates/date-only.js';
+import { daysBetween, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { RoomBlockOperationDto } from './dto/room-block-operation.dto.js';
 import { normalizeInventoryId } from './inventory-ids.js';
@@ -9,7 +9,7 @@ type RoomBlockOperation =
   | { op: 'BLOCK'; fromDate: Date; toDate: Date }
   | { op: 'UNBLOCK'; blockId: string };
 
-/** HTL-06: validate mutually exclusive operation fields before any write. */
+/** HTL-06: validate operation fields and the 365-inclusive-night block limit before any write. */
 export function parseRoomBlockOperation(
   input: RoomBlockOperationDto,
 ): RoomBlockOperation {
@@ -22,6 +22,18 @@ export function parseRoomBlockOperation(
     const fromDate = parseDate(input.fromDate, 'fromDate');
     const toDate = parseDate(input.toDate, 'toDate');
     assertDateRange(fromDate, toDate);
+    if (daysBetween(fromDate, toDate) + 1 > 365) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'A block cannot exceed 365 inclusive nights',
+        details: [
+          {
+            field: 'toDate',
+            message: 'must be within 365 inclusive nights of fromDate',
+          },
+        ],
+      });
+    }
     return { op: 'BLOCK', fromDate, toDate };
   }
   if (

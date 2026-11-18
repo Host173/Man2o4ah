@@ -143,12 +143,15 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
       const block = vi
         .spyOn(inventory, 'block')
         .mockResolvedValue(new Types.ObjectId().toHexString());
-      for (const toDate of ['2028-12-31', '2999-12-31']) {
+      for (const dates of [
+        { fromDate: '2028-01-01', toDate: '2028-12-31' },
+        { fromDate: '2030-01-01', toDate: '2999-12-31' },
+      ]) {
         const response = await t
           .http()
           .patch(`${path}/availability`)
           .set('Cookie', user.cookie)
-          .send({ op: 'BLOCK', fromDate: '2028-01-01', toDate })
+          .send({ op: 'BLOCK', ...dates })
           .expect(400);
         expect(response.body).toMatchObject({
           code: ErrorCode.ValidationFailed,
@@ -165,6 +168,31 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
       expect(await rooms.findById(roomId).lean()).toMatchObject({
         inventoryVersion: 0,
       });
+    });
+
+    it('persists exactly 365 nights at the inclusive block limit across a leap day', async () => {
+      const user = await moderator();
+      const response = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', user.cookie)
+        .send({
+          op: 'BLOCK',
+          fromDate: '2028-01-01',
+          toDate: '2028-12-30',
+        })
+        .expect(200);
+      expect(response.body).toEqual({
+        blockId: expect.stringMatching(/^[a-f0-9]{24}$/),
+      });
+      const blocked = await nights
+        .find({ roomId, blockId: response.body.blockId })
+        .sort({ date: 1 })
+        .lean();
+      expect(blocked).toHaveLength(365);
+      expect(blocked[0].date).toEqual(toDateOnly('2028-01-01'));
+      expect(blocked[364].date).toEqual(toDateOnly('2028-12-30'));
+      expect(await nights.countDocuments()).toBe(365);
     });
 
     it('returns a plain inactive room with calendar dates, and deletes a never-reserved room with its blocks', async () => {

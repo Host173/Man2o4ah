@@ -28,7 +28,8 @@ export class RoomBlockOperationDto {
   @ApiPropertyOptional({
     format: 'date',
     example: '2026-12-12',
-    description: 'Required only for BLOCK; last blocked night, inclusive',
+    description:
+      'Required only for BLOCK; last blocked night, inclusive. Maximum 365 nights including both endpoints.',
   })
   @ValidateIf(
     (input: RoomBlockOperationDto) =>

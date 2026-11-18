@@ -1,4 +1,6 @@
+import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
+import type { Model } from 'mongoose';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { loginAs } from '../../../test/support/auth.js';
@@ -8,6 +10,7 @@ import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FlightsModule } from './flights.module.js';
+import { Airline } from './schemas/airline.schema.js';
 
 describe('Flights HTTP API (FLT-03)', () => {
   let t: TestApp;
@@ -21,7 +24,12 @@ describe('Flights HTTP API (FLT-03)', () => {
           .useValue(new FakeReferenceDataService()),
     });
   }, HOOK_TIMEOUT);
-  beforeEach(() => clearCollections(t.connection));
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+    await clearCollections(t.connection);
+  });
+  afterEach(() => vi.useRealTimers());
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
   const flight = {
@@ -33,7 +41,18 @@ describe('Flights HTTP API (FLT-03)', () => {
   };
 
   async function moderator(providerId = new Types.ObjectId().toString()) {
-    return loginAs(t.connection, UserRole.AIRLINE_MODERATOR, { providerId });
+    const user = await loginAs(t.connection, UserRole.AIRLINE_MODERATOR, {
+      providerId,
+    });
+    const airlines = t.moduleRef.get<Model<Airline>>(
+      getModelToken(Airline.name),
+    );
+    await airlines.create({
+      _id: new Types.ObjectId(providerId),
+      name: 'Test Airline',
+      code: 'TA',
+    });
+    return user;
   }
 
   it('creates a flight with normalized number, UTC instants, and airport zones', async () => {
@@ -107,6 +126,17 @@ describe('Flights HTTP API (FLT-03)', () => {
       .send({ ...flight, flightNumber: 'MS 123' })
       .expect(409);
     expect(duplicate.body.code).toBe(ErrorCode.Conflict);
+
+    await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send({
+        ...flight,
+        departureLocal: '2027-03-15T03:30',
+        arrivalLocal: '2027-03-15T10:00',
+      })
+      .expect(201);
   });
 
   it('lists only the moderator airline flights with the standard page shape', async () => {
@@ -139,7 +169,7 @@ describe('Flights HTTP API (FLT-03)', () => {
 
     await t
       .http()
-      .get(`/api/airlines/${new Types.ObjectId()}/flights`)
+      .get(`/api/airlines/${new Types.ObjectId().toString()}/flights`)
       .set('Cookie', user.cookie)
       .expect(404);
   });
@@ -153,5 +183,17 @@ describe('Flights HTTP API (FLT-03)', () => {
       .send(flight)
       .expect(403);
     await t.http().post('/api/flights').send(flight).expect(401);
+  });
+
+  it('does not accept an airline ID from the moderator request body', async () => {
+    const user = await moderator();
+    const response = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send({ ...flight, airlineId: new Types.ObjectId().toString() })
+      .expect(400);
+
+    expect(response.body.code).toBe(ErrorCode.ValidationFailed);
   });
 });

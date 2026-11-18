@@ -1,12 +1,22 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
+import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
 import type { FlightsService } from '../../src/modules/flights/flights.service.js';
+import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
   AirlineView,
   BookabilityResult,
   CabinView,
+  CreateFlightInput,
+  FlightListQuery,
+  FlightManagementView,
   FlightSearchItem,
   FlightView,
   FlightWithAirline,
@@ -17,6 +27,7 @@ import type {
   SearchFlightsQuery,
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import type { PublicApi } from './public-api.js';
 
 /**
@@ -25,7 +36,138 @@ import type { PublicApi } from './public-api.js';
  * and `checkBookable` see. Everything it returns is a copy.
  */
 export class FakeFlightsService implements PublicApi<FlightsService> {
-  constructor(readonly data: FakeFlightsData = new FakeFlightsData()) {}
+  private nextFlightId = 1;
+
+  constructor(
+    readonly data: FakeFlightsData = new FakeFlightsData(),
+    private readonly referenceData: Pick<
+      ReferenceDataService,
+      'getAirports'
+    > = new FakeReferenceDataService(),
+  ) {}
+
+  async createFlight(
+    input: CreateFlightInput,
+    airlineId: string,
+  ): Promise<FlightManagementView> {
+    if (!this.data.airline(airlineId)) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
+
+    const flightNumber = input.flightNumber.trim().toUpperCase();
+    if (!flightNumber) {
+      throw invalid('flightNumber', 'must not be blank');
+    }
+    const departureAirportId = input.departureAirportId.trim().toUpperCase();
+    const arrivalAirportId = input.arrivalAirportId.trim().toUpperCase();
+    if (departureAirportId === arrivalAirportId) {
+      throw invalid('arrivalAirportId', 'must differ from departureAirportId');
+    }
+
+    const airports = await this.referenceData.getAirports([
+      departureAirportId,
+      arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(departureAirportId);
+    if (!departureAirport) {
+      throw invalid('departureAirportId', 'is not a known airport');
+    }
+    const arrivalAirport = airports.get(arrivalAirportId);
+    if (!arrivalAirport) {
+      throw invalid('arrivalAirportId', 'is not a known airport');
+    }
+    const times = convertFlightTimes(
+      input.departureLocal,
+      departureAirport.timeZone,
+      input.arrivalLocal,
+      arrivalAirport.timeZone,
+    );
+
+    if (
+      this.data
+        .flights()
+        .some(
+          (flight) =>
+            flight.airlineId === airlineId &&
+            flight.flightNumber.trim().toUpperCase() === flightNumber &&
+            flight.departureLocalDate === times.departureLocalDate,
+        )
+    ) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'A flight with this number already exists on this local date',
+      });
+    }
+
+    const flight = this.data.addFlight({
+      id: this.newFlightId(),
+      airlineId,
+      flightNumber,
+      departureAirportId,
+      arrivalAirportId,
+      departureAt: times.departureAt,
+      arrivalAt: times.arrivalAt,
+      departureLocalDate: times.departureLocalDate,
+      cabins: [],
+    });
+    return {
+      ...flight,
+      departureTimeZone: departureAirport.timeZone,
+      arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
+  async listAirlineFlights(
+    airlineId: string,
+    query: FlightListQuery,
+  ): Promise<Paginated<FlightManagementView>> {
+    if (!this.data.airline(airlineId)) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
+
+    const flights = this.data
+      .flights()
+      .filter((flight) => flight.airlineId === airlineId)
+      .sort(
+        (a, b) =>
+          a.departureAt.getTime() - b.departureAt.getTime() ||
+          a.id.localeCompare(b.id),
+      );
+    const airportCodes = [
+      ...new Set(
+        flights.flatMap((flight) => [
+          flight.departureAirportId,
+          flight.arrivalAirportId,
+        ]),
+      ),
+    ];
+    const airports = await this.referenceData.getAirports(airportCodes);
+    const start = (query.page - 1) * query.limit;
+    const items = flights
+      .slice(start, start + query.limit)
+      .map((flight): FlightManagementView => {
+        const departureAirport = airports.get(flight.departureAirportId);
+        const arrivalAirport = airports.get(flight.arrivalAirportId);
+        if (!departureAirport || !arrivalAirport) {
+          throw new InternalServerErrorException({
+            code: ErrorCode.InternalError,
+            message: 'A flight references an unknown airport',
+          });
+        }
+        return {
+          ...structuredClone(flight),
+          departureTimeZone: departureAirport.timeZone,
+          arrivalTimeZone: arrivalAirport.timeZone,
+        };
+      });
+    return toPage(items, flights.length, query.page, query.limit);
+  }
 
   getFlightsForBooking(
     flightIds: string[],
@@ -115,8 +257,15 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
         }),
       );
     }
+
     airline.isActive = isActive;
     return Promise.resolve(structuredClone(airline));
+  }
+
+  private newFlightId(): string {
+    let id = `created-flight-${this.nextFlightId++}`;
+    while (this.data.flight(id)) id = `created-flight-${this.nextFlightId++}`;
+    return id;
   }
 
   /** One direction of a search: filter, sort, paginate. */
@@ -155,6 +304,14 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       query.limit,
     );
   }
+}
+
+function invalid(field: string, message: string): BadRequestException {
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message: 'Invalid flight',
+    details: [{ field, message }],
+  });
 }
 
 function no(reason: Extract<BookabilityResult, { bookable: false }>['reason']) {

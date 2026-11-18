@@ -1,3 +1,44 @@
 AI prompt log — Jana Elmenshawi
 One entry per prompt, appended by the member's agent (format: docs/ai/skills/travel-platform/references/workflow.md §5).
 
+================================================
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-03
+
+Prompt:
+implement this ticket: # FLT-03: Create flights in local time #35
+
+Open
+
+Blocked by:[FLT-01: Airline profile](https://github.com/Host173/Man2o4ah/issues/33)Blocked by 1 issue
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/35#issue-6313313781)
+
+**Expected output**
+Moderator creates a flight with airports from the dataset and local times converted with each airport's time zone; duplicate number on the same local date rejected; own-airline list.
+
+**Requirements:** FLT-03, FLT-02, GEN-06
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit (time-zone conversion, DST, arrival after departure); API
+**TDD required:** Yes
+
+**Branch:** `feature/FLT-03-create-flights-local-time`
+**PR title:** `FLT-03: Create flights in local time`
+
+**Depends on:** [#33](https://github.com/Host173/Man2o4ah/issues/33) (FLT-01), [#9](https://github.com/Host173/Man2o4ah/issues/9) (CTR-05)
+**Blocks:** [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04), [#39](https://github.com/Host173/Man2o4ah/issues/39) (FLT-06), [#40](https://github.com/Host173/Man2o4ah/issues/40) (FLT-30)
+**Works end to end once these merge:** [#16](https://github.com/Host173/Man2o4ah/issues/16) (GEN-12)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* make sure the implementation matches the fakes and contract and read the agent.example and readme first my name is jana since TDD is required once you create the test files commit them first then the rest of the code
+
+How the output was used:
+Changed backend/src/modules/flights, backend/test/fakes/flights.fake.ts and its tests, backend/package.json and package-lock.json; tests-first commit bbfcc00.
+================================================
+

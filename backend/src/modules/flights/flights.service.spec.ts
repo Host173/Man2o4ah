@@ -1,8 +1,29 @@
 import { NotImplementedException } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Test } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { FlightsService } from './flights.service.js';
+import { Airline } from './schemas/airline.schema.js';
+import { Flight } from './schemas/flight.schema.js';
 
 describe('FlightsService (contract stub)', () => {
-  const service = new FlightsService();
+  let moduleRef: TestingModule;
+  let service: FlightsService;
+
+  beforeAll(async () => {
+    moduleRef = await Test.createTestingModule({
+      providers: [
+        FlightsService,
+        { provide: getModelToken(Flight.name), useValue: {} },
+        { provide: getModelToken(Airline.name), useValue: {} },
+        { provide: ReferenceDataService, useValue: {} },
+      ],
+    }).compile();
+    service = moduleRef.get(FlightsService);
+  });
+  afterAll(() => moduleRef.close());
+
   const search = {
     from: 'CAI',
     to: 'DXB',

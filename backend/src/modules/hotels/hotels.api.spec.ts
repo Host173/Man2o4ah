@@ -108,6 +108,53 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
       });
     });
 
+    it.each(['beds', 'maxOccupancy', 'pricePerNightMinor'] as const)(
+      'rejects unsafe integers in %s without creating a room',
+      async (field) => {
+        const hotel = await service.create(profile);
+        const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+          providerId: hotel.id,
+        });
+        for (const value of [Number.MAX_SAFE_INTEGER + 1, 1e21, 1e308]) {
+          const response = await t
+            .http()
+            .post(`/api/hotels/${hotel.id}/rooms`)
+            .set('Cookie', moderator.cookie)
+            .send({ ...input, [field]: value })
+            .expect(400);
+          expect(response.body).toMatchObject({
+            code: ErrorCode.ValidationFailed,
+            details: expect.arrayContaining([
+              expect.objectContaining({ field }),
+            ]),
+          });
+        }
+        expect(await rooms.countDocuments()).toBe(0);
+      },
+    );
+
+    it('accepts and preserves the safe-integer boundary for all numeric room inputs', async () => {
+      const hotel = await service.create(profile);
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      const fields = {
+        beds: Number.MAX_SAFE_INTEGER,
+        maxOccupancy: Number.MAX_SAFE_INTEGER,
+        pricePerNightMinor: Number.MAX_SAFE_INTEGER,
+      };
+      const response = await t
+        .http()
+        .post(`/api/hotels/${hotel.id}/rooms`)
+        .set('Cookie', moderator.cookie)
+        .send({ ...input, ...fields })
+        .expect(201);
+      expect(response.body).toMatchObject(fields);
+      expect(await service.getRooms(hotel.id)).toEqual([
+        expect.objectContaining(fields),
+      ]);
+    });
+
     it('returns 409 CONFLICT for a duplicate trimmed name without changing the existing room', async () => {
       const hotel = await service.create(profile);
       const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {

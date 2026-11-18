@@ -629,3 +629,94 @@ make a pr
 How the output was used:
 Reviewed and staged the HTL-03 implementation and tests, appended ai-prompts/pierre.txt, and prepared commit and pull request publication against develop using the repository template; npm run build passed, with the implementation already validated by npm run verify (1301 tests, all service coverage gates, and build).
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+does the pr lacks somthing?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; checked PR #159 against HTL-03 and the completion rules, confirmed all applicable CI checks passed with no merge conflicts, and identified the remaining manual Swagger validation, required approval, and failed Copilot review configuration; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+is Test: Manually exercise the endpoints in Swagger—success, invalid input, wrong role and another hotel’s resource—as required by the completion checklist. This has not been done.  needed in every ticket ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that the current completion checklist requires Swagger checks for affected backend endpoints, including HTL-03, rather than manually retesting the whole API for every ticket; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+should i add screenshots ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended representative Swagger screenshots for HTL-03, distinguished screenshot evidence from the required manual checks, and warned against exposing credentials; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+cna you review the last comment on the pr  and give your opinion
+
+How the output was used:
+Appended ai-prompts/pierre.txt; read Kareem's latest review and approval on PR #159, checked the DTO, numeric validators, data-model money rules and existing tests, and confirmed with class-validator that unsafe integers are accepted; recommended safe-integer input bounds plus booking-total overflow checks, retaining case-sensitive room names, and treating the extra API boundary cases as optional; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what u reccomend we fix then ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended a focused safe-integer validation fix with test-first regression coverage and Swagger limits, leaving case sensitivity unchanged and booking-total overflow protection to the booking owner; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+fix that + fix the case-sesitive names make it non-sensitve
+
+How the output was used:
+Added safe-integer regression cases to hotels.api.spec.ts and appended ai-prompts/pierre.txt; three new tests reproduced unsafe values receiving 201 instead of 400, while the maximum-safe boundary passed. Case-insensitive uniqueness remains pending Kareem's approval and the required separate data-model/index change process.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+why it si changes the frozen database index and conflicts ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained that the existing case-sensitive unique index cannot enforce case-insensitive uniqueness under concurrency, clarified that HTL-03 itself does not prohibit case-insensitive names, and continued the safe-integer fix without altering the frozen schema or index.
+================================================

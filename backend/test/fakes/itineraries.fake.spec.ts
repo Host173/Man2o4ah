@@ -414,6 +414,42 @@ describe('FakeItinerariesService owner-only methods', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('rejects a reorder that is not a permutation of the current days', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto() as never, 'user-1');
+    const first = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    await itineraries.addDay(created._id, { cityId: 'dubai' }, 'user-1');
+    const unknown = 'ffffffffffffffffffffffff';
+
+    for (const dayIds of [
+      undefined,
+      [first._id],
+      [first._id, first._id],
+      [first._id, unknown],
+      [first._id, null as unknown as string],
+    ]) {
+      const error = await itineraries
+        .reorderDays(created._id, { dayIds } as never, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        details: { field: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('dayIds');
+    }
+
+    // No rejected input may reorder, drop or duplicate days.
+    const detail = await itineraries.getById(created._id, 'user-1');
+    expect(detail.days.map((day) => day._id)).toHaveLength(2);
+    expect(new Set(detail.days.map((day) => day._id)).size).toBe(2);
+  });
+
   describe('day validation parity (ITN-05)', () => {
     it('rejects the 61st day with the same validation error as the real service', async () => {
       const itineraries = new FakeItinerariesService();

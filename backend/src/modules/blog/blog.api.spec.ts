@@ -4,6 +4,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -17,6 +18,7 @@ import {
   UserStatus,
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
@@ -26,6 +28,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   let testApp: TestApp | undefined;
   const fakeAccounts = new FakeAccountsService();
   const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
@@ -39,7 +42,9 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
           .overrideProvider(AccountsService)
           .useValue(fakeAccounts)
           .overrideProvider(ItinerariesService)
-          .useValue(fakeItineraries),
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage),
     });
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -56,6 +61,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   beforeEach(async () => {
     Object.assign(fakeAccounts, new FakeAccountsService());
     Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -957,8 +963,10 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(suspendedRes.body.comments).toBeUndefined();
     });
 
-    it('returns 404 NOT_FOUND for missing, draft (even by owner), hidden, or deactivated-author posts and 400 for malformed id', async () => {
+    it('returns 404 NOT_FOUND for missing, draft (even by owner), non-visible hidden, or deactivated-author posts and allows author/admin to read hidden posts', async () => {
       const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const otherUser = await loginAs(testApp!.connection, UserRole.USER);
+      const admin = await loginAs(testApp!.connection, UserRole.ADMIN);
 
       const draft = await testApp!
         .http()
@@ -999,12 +1007,38 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(draftOwnerRes.status).toBe(404);
       expect(draftOwnerRes.body.code).toBe(ErrorCode.NotFound);
 
-      const hiddenRes = await testApp!
+      const hiddenGuestRes = await testApp!
+        .http()
+        .get(`/api/posts/${hidden.body._id}`);
+      expect(hiddenGuestRes.status).toBe(404);
+      expect(hiddenGuestRes.body.code).toBe(ErrorCode.NotFound);
+
+      const hiddenOtherRes = await testApp!
+        .http()
+        .get(`/api/posts/${hidden.body._id}`)
+        .set('Cookie', otherUser.cookie);
+      expect(hiddenOtherRes.status).toBe(404);
+      expect(hiddenOtherRes.body.code).toBe(ErrorCode.NotFound);
+
+      const hiddenOwnerRes = await testApp!
         .http()
         .get(`/api/posts/${hidden.body._id}`)
         .set('Cookie', owner.cookie);
-      expect(hiddenRes.status).toBe(404);
-      expect(hiddenRes.body.code).toBe(ErrorCode.NotFound);
+      expect(hiddenOwnerRes.status).toBe(200);
+      expect(hiddenOwnerRes.body).toMatchObject({
+        _id: hidden.body._id,
+        isHidden: true,
+      });
+
+      const hiddenAdminRes = await testApp!
+        .http()
+        .get(`/api/posts/${hidden.body._id}`)
+        .set('Cookie', admin.cookie);
+      expect(hiddenAdminRes.status).toBe(200);
+      expect(hiddenAdminRes.body).toMatchObject({
+        _id: hidden.body._id,
+        isHidden: true,
+      });
 
       const activePub = await testApp!
         .http()
@@ -1422,6 +1456,101 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .get(`/api/posts/${post.body._id}/comments`);
       expect(commentsRes.status).toBe(200);
       expect(commentsRes.body.items[0].body).toBe('Original comment');
+    });
+
+    it('restricts hidden comments to comment author/admin and hidden post comments to post owner/admin (GEN-10)', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const commenter = await loginAs(testApp!.connection, UserRole.USER);
+      const otherUser = await loginAs(testApp!.connection, UserRole.USER);
+      const admin = await loginAs(testApp!.connection, UserRole.ADMIN);
+
+      const post = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Post for comment visibility',
+          body: 'Body text',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = post.body._id as string;
+
+      const visibleComment = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/comments`)
+        .set('Cookie', owner.cookie)
+        .send({ body: 'Public comment' });
+      const hiddenComment = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/comments`)
+        .set('Cookie', commenter.cookie)
+        .send({ body: 'Hidden comment' });
+
+      await commentModel.updateOne(
+        { _id: new Types.ObjectId(hiddenComment.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+
+      // Guest, unrelated user, and post owner do not see commenter's hidden comment.
+      for (const cookie of [undefined, otherUser.cookie, owner.cookie]) {
+        const req = testApp!.http().get(`/api/posts/${postId}/comments`);
+        const res = cookie ? await req.set('Cookie', cookie) : await req;
+        expect(res.status).toBe(200);
+        expect(res.body.items.map((c: { _id: string }) => c._id)).toEqual([
+          visibleComment.body._id,
+        ]);
+      }
+
+      // Comment author and admin see the hidden comment.
+      for (const cookie of [commenter.cookie, admin.cookie]) {
+        const res = await testApp!
+          .http()
+          .get(`/api/posts/${postId}/comments`)
+          .set('Cookie', cookie);
+        expect(res.status).toBe(200);
+        expect(res.body.items.map((c: { _id: string }) => c._id)).toEqual([
+          visibleComment.body._id,
+          hiddenComment.body._id,
+        ]);
+        expect(res.body.items[1].isHidden).toBe(true);
+      }
+
+      // Hide the post itself: guest and unrelated user receive 404, owner and admin receive 200.
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(postId) },
+        { $set: { isHidden: true } },
+      );
+
+      const guestOnHiddenPost = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments`);
+      expect(guestOnHiddenPost.status).toBe(404);
+      expect(guestOnHiddenPost.body.code).toBe(ErrorCode.NotFound);
+
+      const otherOnHiddenPost = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments`)
+        .set('Cookie', otherUser.cookie);
+      expect(otherOnHiddenPost.status).toBe(404);
+      expect(otherOnHiddenPost.body.code).toBe(ErrorCode.NotFound);
+
+      const ownerOnHiddenPost = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments`)
+        .set('Cookie', owner.cookie);
+      expect(ownerOnHiddenPost.status).toBe(200);
+      expect(
+        ownerOnHiddenPost.body.items.map((c: { _id: string }) => c._id),
+      ).toEqual([visibleComment.body._id]);
+
+      const adminOnHiddenPost = await testApp!
+        .http()
+        .get(`/api/posts/${postId}/comments`)
+        .set('Cookie', admin.cookie);
+      expect(adminOnHiddenPost.status).toBe(200);
+      expect(
+        adminOnHiddenPost.body.items.map((c: { _id: string }) => c._id),
+      ).toEqual([visibleComment.body._id, hiddenComment.body._id]);
     });
 
     it('paginates comments (default page size 10), supports page 2, orders oldest first with _id tie-break across pages, and validates pagination params', async () => {

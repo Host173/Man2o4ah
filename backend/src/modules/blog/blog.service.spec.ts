@@ -1,20 +1,23 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
+import { EventsModule } from '../../common/events/events.module.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AccountsService } from '../accounts/accounts.service.js';
+import { Role, type AuthUser } from '../accounts/auth/auth.types.js';
 import { Session } from '../accounts/schemas/session.schema.js';
 import {
   ProviderType,
@@ -24,11 +27,17 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
+import {
+  Report,
+  ReportTargetType,
+} from '../moderation/schemas/report.schema.js';
 import { Airport } from '../reference-data/schemas/airport.schema.js';
 import { Attraction } from '../reference-data/schemas/attraction.schema.js';
 import { City } from '../reference-data/schemas/city.schema.js';
 import { Country } from '../reference-data/schemas/country.schema.js';
 import { Currency } from '../reference-data/schemas/currency.schema.js';
+import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -39,7 +48,7 @@ import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
 describe('BlogService (skeleton)', () => {
   it('Provides and exports BlogService from BlogModule', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [BlogModule],
+      imports: [EventEmitterModule.forRoot(), EventsModule, BlogModule],
     })
       .useMocker((token) => {
         if (token === getConnectionToken()) return {};
@@ -60,6 +69,10 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
       .useValue({})
+      .overrideProvider(getModelToken(Report.name))
+      .useValue({})
+      .overrideProvider(AppEvents)
+      .useValue({ emit: vi.fn() })
       // ItinerariesModule imports ReferenceDataModule (ITN-01).
       .overrideProvider(getModelToken(Country.name))
       .useValue({})
@@ -82,6 +95,8 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
   const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
+  let registry: ReportableContentRegistry;
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -90,6 +105,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
   const ownerId = new Types.ObjectId().toHexString();
   const otherUserId = new Types.ObjectId().toHexString();
+  const adminUserId = new Types.ObjectId().toHexString();
   const suspendedUserId = new Types.ObjectId().toHexString();
   const activeCommenterId = new Types.ObjectId().toHexString();
   const deactivatedCommenterId = new Types.ObjectId().toHexString();
@@ -103,9 +119,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
           .overrideProvider(AccountsService)
           .useValue(fakeAccounts)
           .overrideProvider(ItinerariesService)
-          .useValue(fakeItineraries),
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage),
     });
     service = testApp.moduleRef.get(BlogService);
+    registry = testApp.moduleRef.get(ReportableContentRegistry);
     appEvents = testApp.moduleRef.get(AppEvents);
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -127,6 +146,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   beforeEach(async () => {
     vi.restoreAllMocks();
     Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -2551,6 +2571,234 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         total: 0,
         totalPages: 0,
       });
+    });
+  });
+
+  describe('GEN-10 ReportableContent & hidden-content visibility', () => {
+    function authViewer(id: string, role: Role): AuthUser {
+      return { id, role, sid: new Types.ObjectId().toHexString() };
+    }
+
+    it('registers PostReportableContent with ReportableContentRegistry and supports exists, hide, and cascading delete with storage cleanup', async () => {
+      const postProvider = registry.get(ReportTargetType.POST);
+      const post = await service.create(
+        {
+          title: 'Moderated Post',
+          body: 'Post body with image.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const savedImage = await fakeStorage.save({
+        originalname: 'photo.jpg',
+        mimetype: 'image/jpeg',
+        size: 16,
+        buffer: Buffer.from('fake-jpeg-bytes!'),
+      });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(post._id) },
+        { $set: { images: [savedImage] } },
+      );
+
+      await service.createComment(
+        post._id,
+        { body: 'Comment to cascade delete' },
+        activeCommenterId,
+      );
+      await service.likePost(post._id, otherUserId);
+
+      expect(await postProvider.exists(post._id)).toBe(true);
+      expect(
+        await postProvider.exists(new Types.ObjectId().toHexString()),
+      ).toBe(false);
+      expect(fakeStorage.has(savedImage.key)).toBe(true);
+
+      await postProvider.hide(post._id);
+      const hiddenDoc = await postModel.findById(post._id).lean().exec();
+      expect(hiddenDoc?.isHidden).toBe(true);
+      expect(await postProvider.exists(post._id)).toBe(true);
+
+      await postProvider.delete(post._id);
+      expect(await postProvider.exists(post._id)).toBe(false);
+      expect(
+        await commentModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect(fakeStorage.has(savedImage.key)).toBe(false);
+
+      await expect(postProvider.hide(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(postProvider.delete(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('registers CommentReportableContent, hides idempotently with one commentCount decrement, and deletes cleanly', async () => {
+      const commentProvider = registry.get(ReportTargetType.COMMENT);
+      const post = await service.create(
+        {
+          title: 'Post with moderated comments',
+          body: 'Parent body.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const comment1 = await service.createComment(
+        post._id,
+        { body: 'Comment to hide then delete' },
+        activeCommenterId,
+      );
+      const comment2 = await service.createComment(
+        post._id,
+        { body: 'Comment to delete directly' },
+        otherUserId,
+      );
+
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(2);
+      expect(await commentProvider.exists(comment1._id)).toBe(true);
+
+      // Hide decrements commentCount once; second hide is idempotent without double decrement.
+      await commentProvider.hide(comment1._id);
+      await commentProvider.hide(comment1._id);
+      expect((await commentModel.findById(comment1._id).lean())?.isHidden).toBe(
+        true,
+      );
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(1);
+
+      // Deleting an already-hidden comment keeps commentCount at 1.
+      await commentProvider.delete(comment1._id);
+      expect(await commentProvider.exists(comment1._id)).toBe(false);
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(1);
+
+      // Deleting a visible comment decrements commentCount to 0.
+      await commentProvider.delete(comment2._id);
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(0);
+
+      await expect(commentProvider.hide(comment1._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(commentProvider.delete(comment2._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restricts hidden posts and hidden comments to their author and admins while preserving draft/deactivated 404 guards', async () => {
+      const postProvider = registry.get(ReportTargetType.POST);
+      const commentProvider = registry.get(ReportTargetType.COMMENT);
+
+      const post = await service.create(
+        {
+          title: 'Moderated Visibility Post',
+          body: 'Post body.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const draft = await service.create(
+        {
+          title: 'Secret Draft',
+          body: 'Draft body.',
+          status: PostStatus.DRAFT,
+        },
+        ownerId,
+      );
+      const visibleComment = await service.createComment(
+        post._id,
+        { body: 'Visible comment' },
+        otherUserId,
+      );
+      const hiddenComment = await service.createComment(
+        post._id,
+        { body: 'Moderated comment' },
+        activeCommenterId,
+      );
+
+      await commentProvider.hide(hiddenComment._id);
+
+      const ownerViewer = authViewer(ownerId, Role.USER);
+      const otherViewer = authViewer(otherUserId, Role.USER);
+      const commenterViewer = authViewer(activeCommenterId, Role.USER);
+      const adminViewer = authViewer(adminUserId, Role.ADMIN);
+
+      // Visible post with hidden comment: guest, post owner, and other users do not see hidden comment; commenter and admin do.
+      expect(
+        (
+          await service.listComments(post._id, { page: 1, limit: 10 })
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            ownerViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            commenterViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id, hiddenComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            adminViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id, hiddenComment._id]);
+
+      // Hide parent post: only post owner and admin can read it or its comments.
+      await postProvider.hide(post._id);
+      await expect(service.getById(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.getById(post._id, otherViewer)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(
+        service.listComments(post._id, { page: 1, limit: 10 }, otherViewer),
+      ).rejects.toThrow(NotFoundException);
+
+      const asOwner = await service.getById(post._id, ownerViewer);
+      expect(asOwner.isHidden).toBe(true);
+      const asAdmin = await service.getById(post._id, adminViewer);
+      expect(asAdmin.isHidden).toBe(true);
+
+      const hiddenPostCommentsForAdmin = await service.listComments(
+        post._id,
+        { page: 1, limit: 10 },
+        adminViewer,
+      );
+      expect(hiddenPostCommentsForAdmin.items.map((c) => c._id)).toEqual([
+        visibleComment._id,
+        hiddenComment._id,
+      ]);
+
+      // Drafts and deactivated-author posts still return 404 even for admins.
+      await expect(service.getById(draft._id, adminViewer)).rejects.toThrow(
+        NotFoundException,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(post._id) },
+        { $set: { authorDeactivated: true } },
+      );
+      await expect(service.getById(post._id, adminViewer)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

@@ -33,6 +33,7 @@ describe('FlightsService (contract stub)', () => {
   afterAll(() => moduleRef.close());
 
 
+
   const search = {
     from: 'CAI',
     to: 'DXB',

@@ -40,6 +40,202 @@ Moderator creates a flight with airports from the dataset and local times conver
 
 How the output was used:
 Changed backend/src/modules/flights, backend/test/fakes/flights.fake.ts and its tests, backend/package.json and package-lock.json; tests-first commit bbfcc00.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-01
+
+Prompt:
+**Expected output**
+Admin creates an airline; its moderator edits name, code and logo; activate/deactivate used by admin; inactive airlines hidden from search and booking.
+
+**Requirements:** FLT-01, ACC-15 (airline active flag)
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Integration; API (moderator scope)
+**TDD required:** No
+
+**Branch:** `feature/FLT-01-airline-profile`
+**PR title:** `FLT-01: Airline profile`
+
+**Depends on:** [#11](https://github.com/Host173/Man2o4ah/issues/11) (CTR-02), [#9](https://github.com/Host173/Man2o4ah/issues/9) (CTR-05), [#10](https://github.com/Host173/Man2o4ah/issues/10) (CTR-01)
+**Blocks:** [#34](https://github.com/Host173/Man2o4ah/issues/34) (FLT-08), [#35](https://github.com/Host173/Man2o4ah/issues/35) (FLT-03)
+**Works end to end once these merge:** [#17](https://github.com/Host173/Man2o4ah/issues/17) (GEN-08)
+**Needed end to end by:** [#86](https://github.com/Host173/Man2o4ah/issues/86) (ACC-13), [#87](https://github.com/Host173/Man2o4ah/issues/87) (ACC-15)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure to read the readme, skills.md and agentexample first
+
+How the output was used:
+Implemented the airline profile API and service, added integration/API tests, and made no commit.
+
+Date: 2026-11-17
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-01
+
+Prompt:
+<ide_selection>
+The user has the following text selected in their IDE. This may or may not be related to their request.
+File: ai-prompts/aisha.txt (line 26)
+```
+airline_moderator
+```
+</ide_selection>
+
+PATCH[/api/airlines/{id}](http://localhost:4000/api/docs#/flights/AirlinesController_update)FLT-01 Airline moderator edits their profile
+
+#### Parameters
+
+Cancel
+
+NameDescriptionid *
+object
+
+(path)
+
+- Edit Value
+- Schema
+
+#### Request body
+application/json
+
+- Edit Value
+- Schema
+
+ExecuteClear
+
+#### Responses
+
+#### Curl
+
+```
+curl -X 'PATCH' \
+  'http://localhost:4000/api/airlines/id,6afc812860b0836cc26d6cc4' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: access_token=[object%20Object]' \
+  -d '{
+  "name": "Cairo Air",
+  "code": "CA"
+}'
+```
+
+#### Request URL
+
+```
+http://localhost:4000/api/airlines/id,6afc812860b0836cc26d6cc4
+```
+
+#### Server response
+CodeDetails400Error: Bad Request
+
+##### Response body
+
+Download
+```
+{
+  "statusCode": 400,
+  "code": "VALIDATION_FAILED",
+  "message": "Invalid ObjectId: 'id,6afc812860b0836cc26d6cc4' is not a valid MongoDB ObjectId",
+  "path": "/api/airlines/id,6afc812860b0836cc26d6cc4",
+  "timestamp": "2026-11-17T16:59:26.057Z"
+}
+```
+
+##### Response headers
+
+```
+ access-control-allow-credentials: true  access-control-allow-origin: http://localhost:3000  connection: keep-alive  content-length: 227  content-type: application/json; charset=utf-8  date: Tue,17 Nov 2026 16:59:26 GMT  etag: W/"e3-WKPL9nXgYvstu0iYTyaDweo19bs"  keep-alive: timeout=5  vary: Origin  x-powered-by: Express
+```
+
+#### Responses
+
+CodeDescriptionLinks200
+Media typeapplication/json
+Controls `Accept` header.
+
+- Example Value
+- Schema
+
+```
+{
+  "id": "6736f0b2c5a1b2c3d4e5f602",
+  "name": "Cairo Air",
+  "code": "CA",
+  "isActive": true,
+  "logo": {
+    "id": "6736f0b2c5a1b2c3d4e5f601",
+    "url": "/uploads/airline-logo.png"
+  },
+  "baggagePolicy": {
+    "extraBagPriceMinor": null,
+    "maxExtraBagsPerPassenger": 0
+  },
+  "cancellationTiers": [
+    {}
+  ]
+}
+```
+
+*No links*400Invalid airline ID or profile
+
+*No links*401Authentication required
+
+*No links*403Airline moderator role required
+
+*No links*404Airline not found i get this when i try to test the end point for patch if this is an error in my module the one you worked on fix it if not dont
+
+How the output was used:
+Explicitly documented airline path parameters as strings in Swagger and added an API regression assertion; no commit.
+
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-01
+
+Prompt:
+1. Bad IDs: `getAirline('nope')` throws a CastError (500) instead of returning `null`, and `setAirlineActive('nope', false)` gives 400 instead of 404. Check `Types.ObjectId.isValid(id)` first, like the contract and the fake.
+2. Parallel logo uploads leave orphan files (5 at once → 2 files stored, the airline points to 1). Use `findOneAndUpdate` returning the old document and delete the key it returns.
+3. Add the missing API tests: GET unknown ID → 404; logo by another airline's moderator → 404; logo with no login → 401 and wrong role → 403; PATCH with no login → 401; PATCH duplicate code → 409; a parallel logo replace. fix those in FLT-01
+
+<tagged_files>
+* c:\Users\hema_\Man2o4ah\backend\src\main.ts (27 lines)
+</tagged_files>
+
+[Attached: main.ts]
+import { readFileSync } from 'node:fs';
+import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  const config = app.get(ConfigService);
+
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
+  });
+
+  const { version } = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ) as { version: string };
+  setupSwagger(app, version);
+
+  await app.listen(config.get<number>('PORT', 4000));
+}
+await bootstrap();
+
+How the output was used:
+Fixed bad airline IDs and atomic logo replacement in backend/src/modules/flights/airlines.service.ts; added FLT-01 API and integration regression tests. The tagged backend/src/main.ts was not changed.
 Date: 2026-11-18
 ================================================
 

@@ -262,3 +262,4 @@ export class AdminService {
     return { ...base, bookingType: BookingType.HOTEL, status: row.status };
   }
 }
+

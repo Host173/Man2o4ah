@@ -46,8 +46,15 @@ export interface AirlineView {
   name: string;
   code: string;
   isActive: boolean;
+  logo?: AirlineLogoView;
   baggagePolicy: BaggagePolicyView;
   cancellationTiers: CancellationTierView[];
+}
+
+/** Public logo information; storage keys are not exposed in service views. */
+export interface AirlineLogoView {
+  id: string;
+  url: string;
 }
 
 /** A flight with all its cabins. Times are UTC instants. */

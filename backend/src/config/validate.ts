@@ -21,5 +21,16 @@ export function validate(config: Record<string, unknown>) {
       'PLATFORM_CURRENCY must be a 3-letter uppercase currency code such as USD.',
     );
   }
+  // FXRATES_API_KEY is optional and can be any string (ITN-18).
+  const autoRefresh = config.FX_AUTO_REFRESH;
+  if (
+    autoRefresh !== undefined &&
+    autoRefresh !== 'true' &&
+    autoRefresh !== 'false'
+  ) {
+    throw new Error(
+      'FX_AUTO_REFRESH must be "true" or "false" when it is set.',
+    );
+  }
   return config;
 }

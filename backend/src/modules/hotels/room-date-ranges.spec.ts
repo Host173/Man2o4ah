@@ -4,6 +4,7 @@ import {
   assertDateRange,
   assertStayDates,
   normalizeAvailability,
+  parseAvailabilityRange,
 } from './room-date-ranges.js';
 
 const today = toDateOnly('2026-11-18');
@@ -61,4 +62,37 @@ describe('room calendar-date rules (INV-02)', () => {
       }),
     );
   });
+
+  it('parses inclusive calendar-date ranges, including a single night', () => {
+    expect(
+      parseAvailabilityRange({
+        fromDate: '2026-12-01',
+        toDate: '2026-12-01',
+      }),
+    ).toEqual({
+      fromDate: toDateOnly('2026-12-01'),
+      toDate: toDateOnly('2026-12-01'),
+    });
+  });
+
+  it.each([
+    ['2026-02-30', '2026-03-01', 'fromDate'],
+    ['2026-12-01T00:00:00Z', '2026-12-02', 'fromDate'],
+    ['2026-12-01', '2026-12-32', 'toDate'],
+    ['2026-12-02', '2026-12-01', 'toDate'],
+  ])(
+    'rejects invalid availability dates %s to %s',
+    (fromDate, toDate, field) => {
+      expect(() => parseAvailabilityRange({ fromDate, toDate })).toThrow(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            code: ErrorCode.ValidationFailed,
+            details: expect.arrayContaining([
+              expect.objectContaining({ field }),
+            ]),
+          }),
+        }),
+      );
+    },
+  );
 });

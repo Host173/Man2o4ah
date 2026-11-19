@@ -1859,3 +1859,14 @@ every thing is fine open a pr
 How the output was used:
 Pushed feature/ITN-18-exchange-rates and opened the ITN-18 PR into develop; one prompt-log commit added.
 ================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-18
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review points 1-2 on PR #171 (exact half-up rounding and result overflow check in fx-conversion.ts, shared with test/fakes/fx.fake.ts) with tests committed first, pushed to feature/ITN-18-exchange-rates.
+================================================

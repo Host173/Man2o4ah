@@ -7,6 +7,7 @@ import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
@@ -29,6 +30,8 @@ import { Attraction } from '../reference-data/schemas/attraction.schema.js';
 import { City } from '../reference-data/schemas/city.schema.js';
 import { Country } from '../reference-data/schemas/country.schema.js';
 import { Currency } from '../reference-data/schemas/currency.schema.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -82,6 +85,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
   const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -103,7 +107,9 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
           .overrideProvider(AccountsService)
           .useValue(fakeAccounts)
           .overrideProvider(ItinerariesService)
-          .useValue(fakeItineraries),
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage),
     });
     service = testApp.moduleRef.get(BlogService);
     appEvents = testApp.moduleRef.get(AppEvents);
@@ -127,6 +133,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   beforeEach(async () => {
     vi.restoreAllMocks();
     Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -293,7 +300,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(result.items[0].isHidden).toBe(true);
       expect(result.items[0].tags).toEqual(['egypt']);
       expect(result.items[0].images).toEqual([
-        { _id: imageId.toHexString(), key: 'blog/post-1.webp' },
+        {
+          _id: imageId.toHexString(),
+          key: 'blog/post-1.webp',
+          url: '/uploads/blog/post-1.webp',
+        },
       ]);
       expect(result.items[1].status).toBe(PostStatus.PUBLISHED);
     });
@@ -617,7 +628,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(result.items[1].authorName).toBe('Aisha Rawahi');
       expect(result.items[1].tags).toEqual(['cairo', 'nile']);
       expect(result.items[1].images).toEqual([
-        { _id: olderImageId.toHexString(), key: 'blog/cairo.jpg' },
+        {
+          _id: olderImageId.toHexString(),
+          key: 'blog/cairo.jpg',
+          url: '/uploads/blog/cairo.jpg',
+        },
       ]);
     });
 
@@ -720,7 +735,13 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         title: 'Dahab Diving',
         body: 'Blue Hole tips and reef safety.',
         tags: ['red-sea'],
-        images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
+        images: [
+          {
+            _id: imageId.toHexString(),
+            key: 'blog/reef.png',
+            url: '/uploads/blog/reef.png',
+          },
+        ],
         status: PostStatus.PUBLISHED,
         likeCount: 4,
         commentCount: 2,
@@ -2551,6 +2572,400 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         total: 0,
         totalPages: 0,
       });
+    });
+  });
+
+  describe('post images (BLG-10)', () => {
+    const sampleImage = (
+      name = 'photo.png',
+      mimetype = 'image/png',
+    ): UploadedImage => {
+      const buffer = Buffer.from(`bytes-for-${name}`);
+      return {
+        buffer,
+        originalname: name,
+        mimetype,
+        size: buffer.length,
+      };
+    };
+
+    it('attaches up to 5 images, stores ImageRef only in DB, computes url, and rejects a 6th with LIMIT_EXCEEDED', async () => {
+      const post = await service.create(
+        {
+          title: 'Siwa Sunset',
+          body: 'Dunes in golden hour.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      const first = await service.addImage(
+        post._id,
+        sampleImage('one.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      expect(first.images).toHaveLength(1);
+      expect(first.images[0]).toEqual({
+        _id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        key: expect.stringMatching(/^[0-9a-f]{24}\.jpg$/),
+        url: `/uploads/${first.images[0]!.key}`,
+      });
+      expect(fakeStorage.has(first.images[0]!.key)).toBe(true);
+
+      const stored = await postModel.findById(post._id).lean().exec();
+      expect(stored?.images).toHaveLength(1);
+      expect(stored?.images[0]).toMatchObject({ key: first.images[0]!.key });
+      expect('url' in (stored?.images[0] ?? {})).toBe(false);
+
+      let latest = first;
+      for (let i = 2; i <= 5; i += 1) {
+        latest = await service.addImage(
+          post._id,
+          sampleImage(`img-${i}.png`),
+          ownerId,
+        );
+      }
+      expect(latest.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+
+      await expect(
+        service.addImage(post._id, sampleImage('sixth.png'), ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: { code: ErrorCode.LimitExceeded },
+      });
+
+      const afterRejected = await postModel.findById(post._id).lean().exec();
+      expect(afterRejected?.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+    });
+
+    it('removes an image, leaves empty array after last removal, and allows attaching again', async () => {
+      const post = await service.create(
+        { title: 'Gallery', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      let latest = post;
+      for (let i = 1; i <= 5; i += 1) {
+        latest = await service.addImage(
+          post._id,
+          sampleImage(`pic-${i}.png`),
+          ownerId,
+        );
+      }
+      const removedImg = latest.images[2]!;
+
+      await service.removeImage(post._id, removedImg._id, ownerId);
+      expect(fakeStorage.has(removedImg.key)).toBe(false);
+      expect(fakeStorage.keys()).toHaveLength(4);
+
+      const afterRemove = await service.getById(post._id);
+      expect(afterRemove.images).toHaveLength(4);
+      expect(afterRemove.images.map((img) => img._id)).not.toContain(
+        removedImg._id,
+      );
+
+      const replaced = await service.addImage(
+        post._id,
+        sampleImage('replacement.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      expect(replaced.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+
+      for (const img of replaced.images) {
+        await service.removeImage(post._id, img._id, ownerId);
+      }
+      const emptied = await postModel.findById(post._id).lean().exec();
+      expect(emptied?.images).toEqual([]);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('supports attaching and removing images on own draft and hidden posts', async () => {
+      const draft = await service.create(
+        { title: 'Draft Post', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden Post', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+
+      const draftUpdated = await service.addImage(
+        draft._id,
+        sampleImage('draft.png'),
+        ownerId,
+      );
+      expect(draftUpdated.images).toHaveLength(1);
+      await service.removeImage(
+        draft._id,
+        draftUpdated.images[0]!._id,
+        ownerId,
+      );
+      expect(fakeStorage.has(draftUpdated.images[0]!.key)).toBe(false);
+
+      const hiddenUpdated = await service.addImage(
+        hidden._id,
+        sampleImage('hidden.png'),
+        ownerId,
+      );
+      expect(hiddenUpdated.images).toHaveLength(1);
+      await service.removeImage(
+        hidden._id,
+        hiddenUpdated.images[0]!._id,
+        ownerId,
+      );
+      expect(fakeStorage.has(hiddenUpdated.images[0]!.key)).toBe(false);
+    });
+
+    it('rejects unknown imageId, another post imageId, repeated delete, missing post, non-owner, and malformed ids', async () => {
+      const postA = await service.create(
+        { title: 'Post A', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const postB = await service.create(
+        { title: 'Post B', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const withImgB = await service.addImage(
+        postB._id,
+        sampleImage('b.png'),
+        ownerId,
+      );
+      const imgB = withImgB.images[0]!;
+
+      await expect(
+        service.removeImage(
+          postA._id,
+          new Types.ObjectId().toHexString(),
+          ownerId,
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.removeImage(postA._id, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.addImage(postA._id, sampleImage('intruder.png'), otherUserId),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.removeImage(postB._id, imgB._id, otherUserId),
+      ).rejects.toThrow(NotFoundException);
+
+      const missingPostId = new Types.ObjectId().toHexString();
+      await expect(
+        service.addImage(missingPostId, sampleImage('missing.png'), ownerId),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.removeImage(missingPostId, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+
+      // Malformed IDs and missing file return 400 VALIDATION_FAILED.
+      await expect(
+        service.addImage('bad-id', sampleImage('m.png'), ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'postId' }],
+        },
+      });
+      await expect(
+        service.removeImage('bad-id', imgB._id, ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'postId' }],
+        },
+      });
+      await expect(
+        service.removeImage(postB._id, 'bad-image-id', ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'imageId' }],
+        },
+      });
+      await expect(
+        service.addImage(postA._id, undefined, ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'file' }],
+        },
+      });
+
+      // Repeated delete fails with NOT_FOUND and does not touch other posts' files.
+      await service.removeImage(postB._id, imgB._id, ownerId);
+      await expect(
+        service.removeImage(postB._id, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('enforces the 5-image limit atomically across parallel uploads without leaving orphan files', async () => {
+      const post = await service.create(
+        { title: 'Concurrent', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      for (let i = 1; i <= 3; i += 1) {
+        await service.addImage(post._id, sampleImage(`seed-${i}.png`), ownerId);
+      }
+
+      const settled = await Promise.allSettled(
+        Array.from({ length: 5 }, (_, i) =>
+          service.addImage(post._id, sampleImage(`parallel-${i}.png`), ownerId),
+        ),
+      );
+
+      const fulfilled = settled.filter(
+        (
+          result,
+        ): result is PromiseFulfilledResult<
+          Awaited<ReturnType<typeof service.addImage>>
+        > => result.status === 'fulfilled',
+      );
+      const rejected = settled.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      );
+
+      expect(fulfilled).toHaveLength(2);
+      expect(rejected).toHaveLength(3);
+      for (const rej of rejected) {
+        expect(rej.reason).toBeInstanceOf(BadRequestException);
+        expect((rej.reason as BadRequestException).getResponse()).toMatchObject(
+          { code: ErrorCode.LimitExceeded },
+        );
+      }
+
+      const finalDoc = await postModel.findById(post._id).lean().exec();
+      expect(finalDoc?.images).toHaveLength(5);
+      const storedKeys = (finalDoc?.images ?? []).map((img) => img.key);
+      expect(new Set(fakeStorage.keys())).toEqual(new Set(storedKeys));
+      expect(fakeStorage.keys()).toHaveLength(5);
+    });
+
+    it('propagates StorageService failures cleanly and cleans up newly saved files on post-save DB errors or deletion races', async () => {
+      const post = await service.create(
+        {
+          title: 'Failure Cleanup',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const initial = await service.addImage(
+        post._id,
+        sampleImage('initial.png'),
+        ownerId,
+      );
+
+      vi.spyOn(fakeStorage, 'save').mockRejectedValueOnce(
+        new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Invalid image',
+          details: [
+            { field: 'file', message: 'only JPG or PNG images are allowed' },
+          ],
+        }),
+      );
+
+      await expect(
+        service.addImage(
+          post._id,
+          sampleImage('bad.gif', 'image/gif'),
+          ownerId,
+        ),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+
+      // DB write fails after storage.save: newly saved file is deleted.
+      vi.spyOn(postModel, 'findOneAndUpdate').mockReturnValueOnce({
+        lean: () => ({
+          exec: () => Promise.reject(new Error('db write failure')),
+        }),
+      } as never);
+      await expect(
+        service.addImage(post._id, sampleImage('db-fail.png'), ownerId),
+      ).rejects.toThrow('db write failure');
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+
+      // Post is deleted while file is being saved: newly saved file is deleted and 404 is thrown.
+      const realSave = fakeStorage.save.bind(fakeStorage);
+      vi.spyOn(fakeStorage, 'save').mockImplementationOnce(async (file) => {
+        await postModel.deleteOne({ _id: new Types.ObjectId(post._id) }).exec();
+        return realSave(file);
+      });
+      await expect(
+        service.addImage(post._id, sampleImage('race-del.png'), ownerId),
+      ).rejects.toThrow(NotFoundException);
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+    });
+
+    it('deletes all post image files when the post is deleted, and preserves them if the delete transaction rolls back', async () => {
+      const target = await service.create(
+        {
+          title: 'Delete With Images',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const bystander = await service.create(
+        { title: 'Keep Images', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      await service.addImage(target._id, sampleImage('t1.png'), ownerId);
+      const targetWithImgs = await service.addImage(
+        target._id,
+        sampleImage('t2.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      const bystanderWithImg = await service.addImage(
+        bystander._id,
+        sampleImage('keep.png'),
+        ownerId,
+      );
+
+      // Rollback preserves files.
+      const deleteLikesSpy = vi
+        .spyOn(likeModel, 'deleteMany')
+        .mockImplementationOnce(
+          () =>
+            ({
+              exec: () => Promise.reject(new Error('rollback delete')),
+            }) as never,
+        );
+      await expect(service.delete(target._id, ownerId)).rejects.toThrow(
+        'rollback delete',
+      );
+      deleteLikesSpy.mockRestore();
+      for (const img of targetWithImgs.images) {
+        expect(fakeStorage.has(img.key)).toBe(true);
+      }
+
+      // Successful post deletion removes all target files and keeps bystander's file.
+      await service.delete(target._id, ownerId);
+      for (const img of targetWithImgs.images) {
+        expect(fakeStorage.has(img.key)).toBe(false);
+      }
+      expect(fakeStorage.has(bystanderWithImg.images[0]!.key)).toBe(true);
+      expect(fakeStorage.keys()).toEqual([bystanderWithImg.images[0]!.key]);
     });
   });
 });

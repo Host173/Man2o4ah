@@ -18,6 +18,11 @@ import type {
   RoomBlockResponseDto,
 } from '../../src/modules/hotels/dto/room-block-operation.dto.js';
 import { parseRoomBlockOperation } from '../../src/modules/hotels/room-block-operation.js';
+import type {
+  RoomAvailabilityDto,
+  SetRoomAvailabilityDto,
+} from '../../src/modules/hotels/dto/room-availability.dto.js';
+import type { UpdateRoomDto } from '../../src/modules/hotels/dto/update-room.dto.js';
 import type { UpdateHotelPoliciesDto } from '../../src/modules/hotels/dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
@@ -45,10 +50,11 @@ import type { PublicApi } from './public-api.js';
 import {
   assertDateRange,
   assertStayDates,
+  parseAvailabilityRange,
 } from '../../src/modules/hotels/room-date-ranges.js';
+import { FakeRoomNightInventory } from './room-night-inventory.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
-import { FakeRoomNightInventory } from './room-night-inventory.fake.js';
 
 // Disconnected: share production validators without opening a database connection.
 const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
@@ -262,6 +268,72 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     };
     this.data.rooms.push(room);
     return structuredClone(room);
+  }
+
+  async updateRoom(
+    hotelId: string,
+    roomId: string,
+    input: UpdateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    const fields: UpdateRoomDto = {};
+    if (input.beds !== undefined) fields.beds = input.beds;
+    if (input.maxOccupancy !== undefined)
+      fields.maxOccupancy = input.maxOccupancy;
+    if (input.pricePerNightMinor !== undefined)
+      fields.pricePerNightMinor = input.pricePerNightMinor;
+    const document = new RoomValidationModel(room);
+    document.set(fields);
+    await document.validate(Object.keys(fields));
+    Object.assign(room, fields);
+    return structuredClone(room);
+  }
+
+  async addRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: RoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const range = parseAvailabilityRange(input);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).setAvailability(room.id, [
+      ...room.availability,
+      range,
+    ]);
+    return structuredClone(room);
+  }
+
+  async setRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: SetRoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const ranges = input.ranges.map(parseAvailabilityRange);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).setAvailability(room.id, ranges);
+    return structuredClone(room);
+  }
+
+  private assignedRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): RoomView {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const id = this.parseId(roomId, 'roomId');
+    const room = this.data.rooms.find(
+      (item) => item.id === id && item.hotelId === hotel.id,
+    );
+    if (!room) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Room not found',
+      });
+    }
+    return room;
   }
 
   async listRooms(
@@ -528,25 +600,6 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
       });
     }
     return hotel;
-  }
-
-  private assignedRoom(
-    hotelId: string,
-    roomId: string,
-    moderatorHotelId: string | undefined,
-  ): RoomView {
-    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
-    const id = this.parseId(roomId, 'roomId');
-    const room = this.data.rooms.find(
-      (item) => item.id === id && item.hotelId === hotel.id,
-    );
-    if (!room) {
-      throw new NotFoundException({
-        code: ErrorCode.NotFound,
-        message: 'Room not found',
-      });
-    }
-    return room;
   }
 
   private parseId(value: string, field = 'hotelId'): string {

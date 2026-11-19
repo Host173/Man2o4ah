@@ -1,7 +1,39 @@
 import { BadRequestException } from '@nestjs/common';
-import { addDays, isDateOnly } from '../../common/dates/date-only.js';
+import {
+  addDays,
+  isDateOnly,
+  toDateOnly,
+} from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { RoomDateRange } from './hotels.types.js';
+
+export function parseAvailabilityRange(input: {
+  fromDate: string;
+  toDate: string;
+}): RoomDateRange {
+  const fromDate = parseAvailabilityDate(input.fromDate, 'fromDate');
+  const toDate = parseAvailabilityDate(input.toDate, 'toDate');
+  if (toDate < fromDate) {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'The last bookable night must not precede the first',
+      details: [{ field: 'toDate', message: 'must be on or after fromDate' }],
+    });
+  }
+  return { fromDate, toDate };
+}
+
+function parseAvailabilityDate(value: string, field: string): Date {
+  try {
+    return toDateOnly(value);
+  } catch {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Invalid availability date',
+      details: [{ field, message: 'must be a valid YYYY-MM-DD calendar date' }],
+    });
+  }
+}
 
 export function assertDateRange(fromDate: Date, toDate: Date): void {
   if (!isDateOnly(fromDate) || !isDateOnly(toDate) || toDate < fromDate) {

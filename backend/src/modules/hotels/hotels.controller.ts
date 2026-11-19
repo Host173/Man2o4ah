@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,6 +18,7 @@ import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiExtraModels,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -28,9 +30,11 @@ import {
   ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
@@ -38,11 +42,12 @@ import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
-import { DeactivateRoomDto } from './dto/deactivate-room.dto.js';
+import { RoomAvailabilityDto } from './dto/room-availability.dto.js';
+import { RoomBlockResponseDto } from './dto/room-block-operation.dto.js';
 import {
-  RoomBlockOperationDto,
-  RoomBlockResponseDto,
-} from './dto/room-block-operation.dto.js';
+  PatchRoomDto,
+  RoomAvailabilityOperationDto,
+} from './dto/room-patch.dto.js';
 import { HotelProfileResponseDto } from './dto/hotel-profile.response.dto.js';
 import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import { UpdateHotelDto } from './dto/update-hotel.dto.js';
@@ -51,6 +56,15 @@ import {
   RoomResponseDto,
 } from './dto/room.response.dto.js';
 import { HotelsService } from './hotels.service.js';
+
+/** 400 VALIDATION_FAILED for a body that mixes fields of two operations. */
+function wrongFields(field: string, message: string): BadRequestException {
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message: 'Validation failed',
+    details: [{ field, message }],
+  });
+}
 
 @ApiTags('hotels')
 @ApiCookieAuth()
@@ -64,66 +78,148 @@ import { HotelsService } from './hotels.service.js';
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
 
-  @Patch(':id/rooms/:roomId/availability')
-  @Roles(Role.HOTEL_MODERATOR)
-  @ApiOperation({
-    summary: 'HTL-06 Block inclusive room dates or remove a whole block',
-  })
-  @ApiParam({ name: 'id', type: String })
-  @ApiParam({ name: 'roomId', type: String })
-  @ApiOkResponse({ type: RoomBlockResponseDto })
-  @ApiBadRequestResponse({
-    description:
-      'VALIDATION_FAILED: invalid IDs, dates, operation fields, or a block longer than 365 inclusive nights',
-  })
-  @ApiNotFoundResponse({
-    description:
-      'Hotel, room, or block not found within this moderator assignment',
-  })
-  @ApiConflictResponse({
-    description: 'OVERLAPS_RESERVATION_OR_BLOCK: no part of the block is saved',
-  })
-  manageRoomBlock(
-    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
-    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
-    @Body() input: RoomBlockOperationDto,
-    @CurrentUser() user: AuthUser,
-  ): Promise<RoomBlockResponseDto> {
-    return this.hotels.manageRoomBlock(
-      id.toHexString(),
-      roomId.toHexString(),
-      input,
-      user.providerId,
-    );
-  }
-
   @Patch(':id/rooms/:roomId')
   @Roles(Role.HOTEL_MODERATOR)
-  @ApiOperation({ summary: 'HTL-06 Deactivate an assigned room' })
+  @ApiOperation({
+    summary:
+      'HTL-05 Edit room beds, occupancy and nightly price · HTL-06 Deactivate the room (isActive: false)',
+    description:
+      'Send numeric edits (HTL-05) or only `isActive: false` (HTL-06), not both. Beds and maximum occupancy may be reduced even when a future reservation has more guests. Existing reservations are not modified or invalidated; occupancy limits are checked when booking. Price changes do not affect existing reservation snapshots.',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'roomId', type: String })
   @ApiOkResponse({ type: RoomResponseDto })
   @ApiBadRequestResponse({
-    description: 'Invalid IDs or isActive is not false',
+    description:
+      'Invalid ID or numeric room fields, an empty body, isActive other than false, or isActive combined with edits',
   })
   @ApiNotFoundResponse({
-    description: 'Hotel or room not found within this moderator assignment',
+    description: 'Hotel or room not found, or not assigned to this moderator',
   })
   @ApiConflictResponse({
-    description: 'ROOM_HAS_RESERVATIONS: reserved nights exist today or later',
+    description:
+      'ROOM_HAS_RESERVATIONS (deactivation only): reserved nights exist today or later',
   })
-  async deactivateRoom(
+  async patchRoom(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
-    @Body() _input: DeactivateRoomDto,
+    @Body() input: PatchRoomDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    const { isActive, ...edits } = input;
+    const hasEdits = Object.values(edits).some((value) => value !== undefined);
+    if (isActive === false) {
+      if (hasEdits)
+        throw wrongFields('isActive', 'cannot be combined with room edits');
+      return RoomResponseDto.fromView(
+        await this.hotels.deactivateRoom(
+          id.toHexString(),
+          roomId.toHexString(),
+          user.providerId,
+        ),
+      );
+    }
+    if (!hasEdits)
+      throw wrongFields('isActive', 'send room edits or isActive: false');
+    return RoomResponseDto.fromView(
+      await this.hotels.updateRoom(
+        id.toHexString(),
+        roomId.toHexString(),
+        edits,
+        user.providerId,
+      ),
+    );
+  }
+
+  @Post(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({ summary: 'HTL-04 Add an inclusive bookable date range' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiCreatedResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid ID, calendar dates or overlapping bookable ranges',
+  })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found, or not assigned to this moderator',
+  })
+  async addRoomAvailability(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: RoomAvailabilityDto,
     @CurrentUser() user: AuthUser,
   ): Promise<RoomResponseDto> {
     return RoomResponseDto.fromView(
-      await this.hotels.deactivateRoom(
+      await this.hotels.addRoomAvailability(
         id.toHexString(),
         roomId.toHexString(),
+        input,
         user.providerId,
       ),
+    );
+  }
+
+  @Patch(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'HTL-05 Replace all bookable date ranges (SET_RANGES) · HTL-06 Block inclusive room dates (BLOCK) or remove a whole block (UNBLOCK)',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiExtraModels(RoomResponseDto, RoomBlockResponseDto)
+  @ApiOkResponse({
+    description:
+      'SET_RANGES returns the room; BLOCK and UNBLOCK return the block ID',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(RoomResponseDto) },
+        { $ref: getSchemaPath(RoomBlockResponseDto) },
+      ],
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: invalid IDs, dates, operation fields, overlapping ranges, or a block longer than 365 inclusive nights',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Hotel, room, or block not found, or not assigned to this moderator',
+  })
+  @ApiConflictResponse({
+    description:
+      'AVAILABILITY_HAS_RESERVATIONS (SET_RANGES): a reservation night from today onward would be excluded · OVERLAPS_RESERVATION_OR_BLOCK (BLOCK): no part of the block is saved',
+  })
+  async patchRoomAvailability(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: RoomAvailabilityOperationDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto | RoomBlockResponseDto> {
+    const { op, ranges, fromDate, toDate, blockId } = input;
+    if (op === 'SET_RANGES') {
+      if (
+        fromDate !== undefined ||
+        toDate !== undefined ||
+        blockId !== undefined
+      )
+        throw wrongFields('op', 'SET_RANGES requires only ranges');
+      return RoomResponseDto.fromView(
+        await this.hotels.setRoomAvailability(
+          id.toHexString(),
+          roomId.toHexString(),
+          { op, ranges: ranges ?? [] },
+          user.providerId,
+        ),
+      );
+    }
+    if (ranges !== undefined)
+      throw wrongFields('ranges', 'only SET_RANGES takes ranges');
+    return this.hotels.manageRoomBlock(
+      id.toHexString(),
+      roomId.toHexString(),
+      { op, fromDate, toDate, blockId },
+      user.providerId,
     );
   }
 

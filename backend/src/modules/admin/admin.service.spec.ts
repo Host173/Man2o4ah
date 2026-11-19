@@ -1,20 +1,63 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { describe, expect, it, vi } from 'vitest';
+import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
+import { FakeFlightsData } from '../../../test/fakes/flights-data.fake.js';
+import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
+import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import type { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import {
+  ProviderType,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
+import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
+import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import { AdminModule } from './admin.module.js';
 import { AdminService } from './admin.service.js';
+import { CreateModeratorDto } from './dto/create-moderator.dto.js';
+import { ListAdminAccountsQueryDto } from './dto/list-admin-accounts-query.dto.js';
 import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
+import { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
+
+function createAdminService(
+  flightBookings: FakeFlightBookingsService = new FakeFlightBookingsService([]),
+  hotelBookings: FakeHotelBookingsService = new FakeHotelBookingsService([]),
+  deps: {
+    accounts?: FakeAccountsService;
+    flights?: FakeFlightsService;
+    hotels?: FakeHotelsService;
+    events?: FakeEvents;
+  } = {},
+): AdminService {
+  return new AdminService(
+    flightBookings as unknown as FlightBookingsService,
+    hotelBookings as unknown as HotelBookingsService,
+    (deps.accounts ?? new FakeAccountsService()) as unknown as AccountsService,
+    (deps.flights ?? new FakeFlightsService()) as unknown as FlightsService,
+    (deps.hotels ?? new FakeHotelsService()) as unknown as HotelsService,
+    (deps.events ?? new FakeEvents()) as unknown as AppEvents,
+  );
+}
 
 function flightView(
   overrides: Partial<FlightBookingAdminView> = {},
@@ -72,9 +115,9 @@ describe('AdminService', () => {
   );
 
   it('returns empty page when no bookings exist', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(new ListAdminBookingsQueryDto());
@@ -103,11 +146,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-13T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const page1 = await service.listBookings(
@@ -124,9 +165,9 @@ describe('AdminService', () => {
   });
 
   it('rejects from > to with VALIDATION_FAILED details', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     await expect(
@@ -151,11 +192,9 @@ describe('AdminService', () => {
       passengerEmail: 'secret@example.com',
       paymentIntentId: 'pi_secret',
     } as FlightBookingAdminView;
-    const service = new AdminService(
-      new FakeFlightBookingsService([
-        leakyFlight,
-      ]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([leakyFlight]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(
@@ -217,11 +256,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-10T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const ids: string[] = [];
@@ -245,10 +282,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService([]);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     await expect(
       service.listBookings(
@@ -305,10 +339,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels10k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     for (const [limit, expectedTotalPages] of [
       [50, 200],
@@ -345,13 +376,9 @@ describe('AdminService', () => {
       expect(hotelsSpy).not.toHaveBeenCalled();
     }
 
-    const smallService = new AdminService(
-      new FakeFlightBookingsService(
-        flights10k.slice(0, 60),
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(
-        hotels10k.slice(0, 60),
-      ) as unknown as HotelBookingsService,
+    const smallService = createAdminService(
+      new FakeFlightBookingsService(flights10k.slice(0, 60)),
+      new FakeHotelBookingsService(hotels10k.slice(0, 60)),
     );
     const smallLast = await smallService.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, { page: 3, limit: 50 }),
@@ -386,10 +413,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels20k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     const flightRes = await service.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, {
@@ -436,5 +460,218 @@ describe('AdminService', () => {
         expect(errors.map((err) => err.property)).toContain('page');
       }
     }
+  });
+
+  it('delegates listAccounts cleanly, strips unexpected fields, and validates role/status on direct calls (ACC-14)', async () => {
+    const accounts = new FakeAccountsService([
+      {
+        id: '6736f0b2c5a1b2c3d4e50001',
+        name: 'Aisha Al Rawahi',
+        email: 'aisha@example.com',
+        role: UserRole.USER,
+        status: UserStatus.ACTIVE,
+        mustChangePassword: true,
+        temporaryPassword: 'Secret123',
+        sessionsRevoked: 2,
+      },
+    ]);
+    const service = createAdminService(undefined, undefined, { accounts });
+
+    const page = await service.listAccounts(
+      plainToInstance(ListAdminAccountsQueryDto, { q: '  aisha  ' }),
+    );
+    expect(page.total).toBe(1);
+    expect(page.items[0]).not.toHaveProperty('mustChangePassword');
+    expect(page.items[0]).not.toHaveProperty('temporaryPassword');
+    expect(page.items[0]).not.toHaveProperty('sessionsRevoked');
+
+    await expect(
+      service.listAccounts(
+        Object.assign(new ListAdminAccountsQueryDto(), {
+          role: 'superadmin' as unknown as UserRole,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'role' }],
+      },
+    });
+
+    await expect(
+      service.listAccounts(
+        Object.assign(new ListAdminAccountsQueryDto(), {
+          status: 'deleted' as unknown as UserStatus,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'status' }],
+      },
+    });
+  });
+
+  it('verifies providers and validates inputs in createModerator, resetUserPassword, suspendAccount, and reactivateAccount', async () => {
+    const adminId = '6736f0b2c5a1b2c3d4e59999';
+    const airlineId = '6736f0b2c5a1b2c3d4e51001';
+    const hotelId = '6736f0b2c5a1b2c3d4e52001';
+    const userId = '6736f0b2c5a1b2c3d4e53001';
+
+    const flightsData = new FakeFlightsData();
+    flightsData.addAirline({ id: airlineId, code: 'MS', name: 'EgyptAir' });
+    const flights = new FakeFlightsService(flightsData);
+    const hotels = new FakeHotelsService({
+      hotels: [
+        {
+          id: hotelId,
+          name: 'Nile Hotel',
+          address: '1 Nile Corniche',
+          cityId: 'cairo',
+          countryCode: 'EG',
+          photos: [],
+          amenities: [],
+          checkInTime: '14:00',
+          checkOutTime: '12:00',
+          cancellationPolicy: { tiers: [] },
+          isActive: false,
+          ratingSummary: { average: null, count: 0 },
+        },
+      ],
+    });
+    const accounts = new FakeAccountsService([
+      {
+        id: userId,
+        name: 'Traveler',
+        email: 'traveler@example.com',
+        role: UserRole.USER,
+        status: UserStatus.ACTIVE,
+      },
+    ]);
+    const events = new FakeEvents();
+    const service = createAdminService(undefined, undefined, {
+      accounts,
+      flights,
+      hotels,
+      events,
+    });
+
+    const createdAirlineMod = await service.createModerator(
+      plainToInstance(CreateModeratorDto, {
+        name: 'Sky Mod',
+        email: 'sky@airline.example',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airlineId,
+        temporaryPassword: 'Password1',
+      }),
+      adminId,
+    );
+    expect(createdAirlineMod.moderatorOf).toEqual({
+      providerType: ProviderType.AIRLINE,
+      providerId: airlineId,
+    });
+
+    const createdHotelMod = await service.createModerator(
+      plainToInstance(CreateModeratorDto, {
+        name: 'Hotel Mod',
+        email: 'mod@hotel.example',
+        role: UserRole.HOTEL_MODERATOR,
+        providerId: hotelId,
+        temporaryPassword: 'Password1',
+      }),
+      adminId,
+    );
+    expect(createdHotelMod.moderatorOf).toEqual({
+      providerType: ProviderType.HOTEL,
+      providerId: hotelId,
+    });
+
+    // Rejects wrong-type provider or unsupported role without creating or emitting events.
+    events.clear();
+    await expect(
+      service.createModerator(
+        plainToInstance(CreateModeratorDto, {
+          name: 'Wrong',
+          email: 'wrong@airline.example',
+          role: UserRole.AIRLINE_MODERATOR,
+          providerId: hotelId,
+          temporaryPassword: 'Password1',
+        }),
+        adminId,
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    await expect(
+      service.createModerator(
+        Object.assign(new CreateModeratorDto(), {
+          name: 'Bad Role',
+          email: 'badrole@example.com',
+          role: UserRole.USER as unknown as CreateModeratorDto['role'],
+          providerId: hotelId,
+          temporaryPassword: 'Password1',
+        }),
+        adminId,
+      ),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'role' }],
+      },
+    });
+    expect(events.payloadsOf(Events.AdminAction)).toHaveLength(0);
+
+    // Direct validation on resetUserPassword, suspendAccount, and reactivateAccount.
+    await expect(
+      service.resetUserPassword(
+        'not-an-id',
+        plainToInstance(ResetUserPasswordDto, {
+          temporaryPassword: 'Password1',
+        }),
+        adminId,
+      ),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'id' }],
+      },
+    });
+    await expect(
+      service.resetUserPassword(
+        userId,
+        Object.assign(new ResetUserPasswordDto(), {
+          temporaryPassword: 'weak',
+        }),
+        adminId,
+      ),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'temporaryPassword' }],
+      },
+    });
+
+    await service.resetUserPassword(
+      userId,
+      plainToInstance(ResetUserPasswordDto, { temporaryPassword: 'Password2' }),
+      adminId,
+    );
+    await service.suspendAccount(userId, adminId);
+    await service.reactivateAccount(userId, adminId);
+    await expect(service.reactivateAccount(userId, adminId)).rejects.toThrow(
+      ConflictException,
+    );
+
+    expect(
+      events.payloadsOf(Events.AdminAction).map((event) => event.action),
+    ).toEqual([
+      AuditAction.PASSWORD_RESET,
+      AuditAction.ACCOUNT_SUSPENDED,
+      AuditAction.ACCOUNT_REACTIVATED,
+    ]);
   });
 });

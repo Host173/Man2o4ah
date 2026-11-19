@@ -6,15 +6,19 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
-import { addDays, toDateOnly } from '../../common/dates/date-only.js';
+import type { Model, PipelineStage } from 'mongoose';
+import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
+import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
+import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import type {
   ActivityView,
@@ -28,6 +32,8 @@ import type {
 } from './itineraries.types.js';
 import {
   Itinerary,
+  MAX_DAYS,
+  MAX_NOTES_LENGTH,
   type Activity,
   type BudgetEntry,
   type Day,
@@ -178,6 +184,370 @@ export class ItinerariesService {
   }
 
   /**
+   * ITN-05: appends a day to the owner's itinerary. Its number and date come
+   * from its position, so nothing extra is stored; `dayCount` and `cityIds`
+   * are recomputed in the same update (data-model.md §3.8).
+   */
+  async addDay(
+    itineraryId: string,
+    dto: CreateDayDto,
+    userId: string,
+  ): Promise<ItineraryDayView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const cityId = await this.resolveCityId(dto.cityId);
+    const notes = this.normalizeNotes(dto.notes);
+
+    const days = itinerary.days ?? [];
+    if (days.length >= MAX_DAYS) {
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
+
+    const day: StoredDay = {
+      _id: new Types.ObjectId(),
+      cityId,
+      ...(notes !== undefined ? { notes } : {}),
+      activities: [],
+      budgetEntries: [],
+    };
+
+    // Append inside the database: both the 60-day guard and `$concatArrays`
+    // re-read `days` at write time, so overlapping adds cannot overwrite each
+    // other (review of ITN-05). Wrap user-supplied values in `$literal` so
+    // strings starting with `$` are stored verbatim and not evaluated as
+    // MongoDB expressions (e.g. `"$100 for dinner"`, `"$$ROOT"`).
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, [`days.${MAX_DAYS - 1}`]: { $exists: false } },
+        [
+          {
+            $set: {
+              days: {
+                $concatArrays: [
+                  '$days',
+                  [
+                    {
+                      _id: day._id,
+                      cityId: { $literal: cityId },
+                      ...(notes !== undefined
+                        ? { notes: { $literal: notes } }
+                        : {}),
+                      activities: day.activities,
+                      budgetEntries: day.budgetEntries,
+                    },
+                  ],
+                ],
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', runValidators: true, updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) {
+      // Either the itinerary was deleted or another request filled the last
+      // slot between our read and write; report the same error for a full trip.
+      if (!(await this.itineraryModel.exists({ _id: id, ownerId }))) {
+        throw this.notFound();
+      }
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
+
+    const record = updated as ItineraryRecord;
+    const index = record.days.length - 1;
+    return this.toDayView(record.days[index], index, record.startDate);
+  }
+
+  /**
+   * ITN-05: edits a day's city and notes. Omitted fields stay unchanged, and
+   * an empty body returns the day untouched. A day that belongs to another
+   * itinerary (or another user's) is a 404, never a 403.
+   */
+  async updateDay(
+    itineraryId: string,
+    dayId: string,
+    dto: UpdateDayDto,
+    userId: string,
+  ): Promise<ItineraryDayView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const targetDayId = this.parseId(dayId, 'dayId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const days = itinerary.days ?? [];
+    const index = days.findIndex(
+      (day) => day._id.toHexString() === targetDayId.toHexString(),
+    );
+    if (index === -1) throw this.notFound();
+
+    if (dto.cityId === undefined && dto.notes === undefined) {
+      return this.toDayView(days[index], index, itinerary.startDate);
+    }
+
+    const cityId =
+      dto.cityId !== undefined
+        ? await this.resolveCityId(dto.cityId)
+        : undefined;
+    const notes = this.normalizeNotes(dto.notes);
+
+    const changes: Record<string, unknown> = {};
+    if (cityId !== undefined) changes.cityId = { $literal: cityId };
+    if (notes !== undefined) changes.notes = { $literal: notes };
+
+    // Edit only the target day, using the array as it exists at write time.
+    // Rewriting a read copy of the whole array lost overlapping adds (review
+    // of ITN-05); `$map` merges the changes into the current document instead.
+    const target = targetDayId.toHexString();
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      { $mergeObjects: ['$$day', changes] },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', runValidators: true, updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+
+    const record = updated as ItineraryRecord;
+    const updatedIndex = record.days.findIndex(
+      (day) => day._id.toHexString() === target,
+    );
+    return this.toDayView(
+      record.days[updatedIndex],
+      updatedIndex,
+      record.startDate,
+    );
+  }
+
+  /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */
+  private recomputeDayFields(): PipelineStage[] {
+    return [
+      { $set: { dayCount: { $size: '$days' } } },
+      {
+        $set: {
+          cityIds: {
+            $sortArray: { input: { $setUnion: ['$days.cityId'] }, sortBy: 1 },
+          },
+        },
+      },
+    ];
+  }
+
+  /**
+   * ITN-07: deletes a day of the owner's itinerary. The day's activities and
+   * budget entries are embedded, so they go with it; transport costs are in a
+   * separate array and are filtered by `dayId` in the same update, which keeps
+   * the schema's day-link validation happy. Numbers and dates are derived on
+   * read, so the remaining days renumber and re-date themselves.
+   *
+   * Deferred: the deleted activities' image files need `StorageService.delete`
+   * (ITN-12/GEN-08), and budget summaries are owned by ITN-14/18.
+   */
+  async deleteDay(
+    itineraryId: string,
+    dayId: string,
+    userId: string,
+  ): Promise<void> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const targetDayId = this.parseId(dayId, 'dayId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const days = itinerary.days ?? [];
+    const target = targetDayId.toHexString();
+    if (!days.some((day) => day._id.toHexString() === target)) {
+      throw this.notFound();
+    }
+    // The schema checks that every transportCosts.dayId is one of `days`, so
+    // both arrays must be rewritten in the same update. The pipeline re-reads
+    // them at write time: an add/edit landing at the same time is preserved.
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $filter: {
+                  input: '$days',
+                  as: 'day',
+                  cond: { $ne: ['$$day._id', targetDayId] },
+                },
+              },
+            },
+          },
+          {
+            $set: {
+              transportCosts: {
+                $filter: {
+                  input: '$transportCosts',
+                  as: 'cost',
+                  cond: { $ne: ['$$cost.dayId', targetDayId] },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+  }
+
+  /**
+   * ITN-08: moves a day by replacing the `days` array with the requested
+   * permutation in one update. Only the order changes: the embedded details
+   * travel with each day, while numbers, dates and city groups are derived on
+   * read. The current order is a no-op and does not bump `updatedAt`.
+   */
+  async reorderDays(
+    itineraryId: string,
+    dto: ReorderDaysDto,
+    userId: string,
+  ): Promise<ItineraryDetailView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const days = itinerary.days ?? [];
+    const order = this.parseDayOrder(dto?.dayIds, days);
+    const ordered = orderDaysById(days, order, (day) => day._id.toHexString());
+    const unchanged = days.every(
+      (day, index) =>
+        day._id.toHexString() === ordered[index]._id.toHexString(),
+    );
+    if (unchanged) return this.toDetailView(itinerary as ItineraryRecord);
+
+    // Rebuild the order from the array as it exists at write time: the
+    // requested days first, then any day added by an overlapping request. The
+    // filter requires all requested days to still exist, so a concurrent
+    // delete cannot silently reorder a stale list (review of ITN-08).
+    const wanted = order.map((id) => new Types.ObjectId(id));
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        {
+          _id: id,
+          ownerId,
+          $and: wanted.map((dayId) => ({ 'days._id': dayId })),
+        },
+        [
+          {
+            $set: {
+              days: {
+                $concatArrays: [
+                  {
+                    $map: {
+                      input: wanted,
+                      as: 'wantedId',
+                      in: {
+                        $arrayElemAt: [
+                          '$days',
+                          { $indexOfArray: ['$days._id', '$$wantedId'] },
+                        ],
+                      },
+                    },
+                  },
+                  {
+                    $filter: {
+                      input: '$days',
+                      as: 'day',
+                      cond: { $not: { $in: ['$$day._id', wanted] } },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+    return this.toDetailView(updated as ItineraryRecord);
+  }
+
+  /**
+   * ITN-08: `dayIds` must be a permutation of the itinerary's current day IDs.
+   * Checked here as well as in the DTO because the service is used directly by
+   * other modules and by tests, and only it knows the current IDs.
+   */
+  private parseDayOrder(value: unknown, days: readonly StoredDay[]): string[] {
+    if (!Array.isArray(value)) {
+      throw this.invalidField('dayIds', 'dayIds must be an array');
+    }
+    if (value.some((id) => typeof id !== 'string')) {
+      throw this.invalidField('dayIds', 'dayIds must contain day IDs');
+    }
+    const ids = (value as string[]).map((id) => id.toLowerCase());
+    if (ids.length !== days.length) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
+    }
+    const known = new Set(days.map((day) => day._id.toHexString()));
+    if (ids.some((id) => !OBJECT_ID_HEX_RE.test(id) || !known.has(id))) {
+      throw this.invalidField('dayIds', 'dayIds must be current day IDs');
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
+    }
+    return ids;
+  }
+
+  /**
    * BLG-12: an author's public itineraries for the author page, newest
    * `updatedAt` first. Only `visibility: public` itineraries are included, and
    * hidden ones or those of a deactivated author are left out (ITN-20).
@@ -224,6 +594,37 @@ export class ItinerariesService {
       );
     }
     return codes;
+  }
+
+  /** ITN-05: the city must exist in the reference dataset, and is trimmed. */
+  private async resolveCityId(value: string): Promise<string> {
+    if (typeof value !== 'string') {
+      throw this.invalidField('cityId', 'cityId must be a string');
+    }
+    const cityId = value.trim();
+    if (cityId.length === 0) {
+      throw this.invalidField('cityId', 'cityId must not be blank');
+    }
+    const cities = await this.referenceData.getCities([cityId]);
+    if (!cities.has(cityId)) {
+      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    }
+    return cityId;
+  }
+
+  /** ITN-05: notes are kept untrimmed; the limit counts code points. */
+  private normalizeNotes(notes: string | undefined): string | undefined {
+    if (notes === undefined) return undefined;
+    if (typeof notes !== 'string') {
+      throw this.invalidField('notes', 'notes must be a string');
+    }
+    if (Array.from(notes).length > MAX_NOTES_LENGTH) {
+      throw this.invalidField(
+        'notes',
+        `notes must have at most ${MAX_NOTES_LENGTH} characters`,
+      );
+    }
+    return notes;
   }
 
   private normalizeTitle(title: string): string {
@@ -306,11 +707,13 @@ export class ItinerariesService {
   }
 
   private toDetailView(itinerary: ItineraryRecord): ItineraryDetailView {
+    const days = itinerary.days ?? [];
     return {
       ...this.toSummary(itinerary),
-      days: (itinerary.days ?? []).map((day, index) =>
+      days: days.map((day, index) =>
         this.toDayView(day, index, itinerary.startDate),
       ),
+      cityGroups: cityGroups(days, itinerary.startDate),
       transportCosts: (itinerary.transportCosts ?? []).map((cost) =>
         this.toTransportCostView(cost),
       ),
@@ -334,8 +737,8 @@ export class ItinerariesService {
   ): ItineraryDayView {
     return {
       _id: day._id.toHexString(),
-      dayNumber: index + 1,
-      date: this.toIsoDate(addDays(startDate, index)),
+      dayNumber: dayNumber(index),
+      date: dayDate(startDate, index),
       cityId: day.cityId,
       ...(day.notes !== undefined ? { notes: day.notes } : {}),
       activities: (day.activities ?? []).map((activity) =>

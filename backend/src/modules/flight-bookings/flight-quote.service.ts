@@ -39,6 +39,13 @@ const NOT_BOOKABLE: Record<
   departure_passed: 'This flight has already departed',
 };
 
+/**
+ * How long a hold keeps seats for payment (FLT-22). A flight that leaves
+ * sooner can't be quoted or held: a hold must not outlive the flight
+ * (decided on review #147).
+ */
+export const HOLD_MINUTES = 10;
+
 function invalid(details: ErrorDetail[]): BadRequestException {
   return new BadRequestException({
     code: ErrorCode.ValidationFailed,
@@ -63,9 +70,18 @@ function maxExtraBags(airline: AirlineView): number {
 export class FlightQuoteService {
   constructor(private readonly flights: FlightsService) {}
 
-  async quote(request: FlightQuoteRequestDto): Promise<FlightQuote> {
+  /**
+   * `now` is the moment the 10-minute rule is checked against. The hold passes
+   * its own `now` and uses the same one for `holdExpiresAt`, so the database
+   * time spent here can't push a hold past departure (review #147).
+   */
+  async quote(
+    request: FlightQuoteRequestDto,
+    now: Date = new Date(),
+  ): Promise<FlightQuote> {
     const legs = await this.loadLegs(request);
     const errors = [
+      ...this.checkDepartureTime(legs, now),
       ...this.checkRoute(legs),
       ...this.checkPassengerDetails(request, legs),
     ];
@@ -101,6 +117,7 @@ export class FlightQuoteService {
 
     const price = priceFlightBooking(
       legs.map(({ airline, cabin }) => ({
+        airlineId: airline.id,
         fareMinor: cabin.priceMinor,
         extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor ?? 0,
       })),
@@ -167,6 +184,21 @@ export class FlightQuoteService {
     // Nothing else can be checked without the flights.
     if (errors.length > 0) throw invalid(errors);
     return legs;
+  }
+
+  /** The outbound must leave at least HOLD_MINUTES after `now`, so a hold fits before it. */
+  private checkDepartureTime(legs: Leg[], now: Date): ErrorDetail[] {
+    const departure = legs[0].flight.departureAt.getTime();
+    // Already gone: checkBookable reports "already departed"; one message is enough.
+    if (departure <= now.getTime()) return [];
+    const latestHoldEnd = now.getTime() + HOLD_MINUTES * 60 * 1000;
+    if (departure >= latestHoldEnd) return [];
+    return [
+      {
+        field: 'segments[0]',
+        message: `This flight leaves in less than ${HOLD_MINUTES} minutes and can no longer be booked`,
+      },
+    ];
   }
 
   /** A return flies back from the outbound's arrival to its origin, after it lands. */

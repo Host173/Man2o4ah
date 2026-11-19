@@ -3,6 +3,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { assertMinor } from '../../src/common/money/money.js';
+import { convertMinor } from '../../src/modules/fx/fx-conversion.js';
 import type { Converter } from '../../src/modules/fx/fx.types.js';
 import type { FxService } from '../../src/modules/fx/fx.service.js';
 import type { PublicApi } from './public-api.js';
@@ -80,10 +82,16 @@ export class FakeFxService implements PublicApi<FxService> {
         message: `Unsupported currency: ${rateFrom === undefined ? from : to}`,
       });
     }
-    const unitsFrom = 10 ** (this.minorUnits[from] ?? 2);
-    const unitsTo = 10 ** (this.minorUnits[to] ?? 2);
-    return Math.round(
-      (amountMinor * rateTo * unitsTo) / (rateFrom * unitsFrom),
+    if (from === to) {
+      assertMinor(amountMinor);
+      return amountMinor;
+    }
+    return convertMinor(
+      amountMinor,
+      rateFrom,
+      rateTo,
+      this.minorUnits[from] ?? 2,
+      this.minorUnits[to] ?? 2,
     );
   }
 }

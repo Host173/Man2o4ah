@@ -361,6 +361,188 @@ Restricted page * limit depth cap to unfiltered merged lists and clamped merged 
 Date: 2026-11-19
 Student: Mostafa
 Tool: Antigravity
+Related Requirement: ACC-13
+
+Prompt:
+Implement ticket ACC-13 ("Admin account endpoints", issue #86).
+
+Context:
+- Package 7: Community & Admin
+- Owner: Mostafa
+- Tool: Antigravity
+- Module: admin
+- Branch: feature/ACC-13-admin-account-endpoints
+- PR title, for reference only: ACC-13: Admin account endpoints
+- Requirements: ACC-07a, ACC-13, ACC-14, ACC-16
+- Prompt log: ai-prompts/mostafa.txt
+- Ticket tests: API (admin only, accounts fake)
+- TDD: No
+
+1. Inspect before editing
+
+Read README.md "Team rules", docs/ai/skills/travel-platform/SKILL.md and its relevant references, docs/DECISIONS.md, and docs/database/data-model.md. Read issue #86 and confirm its dependencies and boundaries.
+
+Follow the source-of-truth order: official requirements > locked decisions > data model > project skill. Inspect merged code to reuse current contracts and conventions, but do not let existing implementation override authoritative requirements or frozen contracts. Report conflicts instead of silently choosing.
+
+Fetch origin and create the feature branch directly from the latest origin/develop without modifying develop or main. Preserve unrelated local changes. If the branch already exists or local changes prevent safe branching, stop and ask rather than resetting or overwriting work.
+
+Inspect:
+- Existing AdminModule, AdminController, AdminService and admin tests, especially ACC-17.
+- AccountsService, its public types and FakeAccountsService (CTR-01).
+- FlightsService.getAirline and HotelsService.getHotel, including their existing fakes (CTR-02, CTR-03).
+- Existing authentication, role decorators, shared password validation, pagination, error handling, Swagger and typed events (PLT-05, PLT-06).
+
+If a genuine ambiguity affects behavior, authorization, data or shared contracts, stop before editing the affected code and present concise numbered questions for Kareem. Distinguish documented rules from recommendations.
+
+2. Implement account listing and moderator creation
+
+Implement GET /api/admin/accounts for ACC-14:
+- Paginated account list with name, email, role, status and registration date, preserving the existing AccountListItem contract.
+- Search by name or email using q.
+- Filter by valid role and status, including combined filters.
+- Reuse PaginationQueryDto: default page 1, default limit 10, maximum limit 50.
+- Return the standard { items, page, limit, total, totalPages } shape.
+- Delegate filtering, literal search and ordering to AccountsService.listAccounts; do not query users or recreate account-list business logic in admin.
+
+Implement POST /api/admin/moderators for ACC-13:
+- Accept validated name, email, role, providerId and temporaryPassword.
+- Allow only airline_moderator and hotel_moderator roles.
+- Require exactly one providerId, matching the existing CreateModeratorInput contract.
+- For airline_moderator, verify the airline exists through FlightsService.getAirline.
+- For hotel_moderator, verify the hotel exists through HotelsService.getHotel.
+- Return the standard 404 NOT_FOUND when the required provider does not exist. Do not call AccountsService.createModerator or emit a success event after failed validation or provider lookup.
+- Delegate creation to AccountsService.createModerator.
+- Preserve the existing 409 EMAIL_TAKEN behavior.
+- Reuse the current shared password rule; do not invent a new password policy.
+- Do not impose undocumented provider-activity restrictions or one-moderator-per-provider uniqueness.
+
+Accounts owns password hashing, persistence, moderatorOf and mustChangePassword. Admin must not duplicate that implementation or modify the accounts package.
+
+3. Implement password reset and account status endpoints
+
+Implement POST /api/admin/users/:id/reset-password for ACC-07a:
+- Accept a validated temporaryPassword using the existing shared password rule.
+- Delegate to AccountsService.resetPassword.
+- Preserve the contract requiring a password change at next login and session revocation.
+- Never return or log the temporary password or password hash.
+
+Implement:
+- PATCH /api/admin/accounts/:id/suspend
+- PATCH /api/admin/accounts/:id/reactivate
+
+Delegate to AccountsService.suspend and AccountsService.reactivate for user and moderator account administration as described by issue #86 and the existing contract:
+- Suspension: active -> suspended.
+- Reactivation: suspended -> active.
+- Preserve 404 NOT_FOUND and 409 INVALID_STATUS_TRANSITION.
+- Do not turn self-deactivated accounts into active accounts through reactivation.
+- Leave session revocation, conditional database updates, account-status events and notification triggers to accounts.
+- Do not alter bookings, blog content or provider activity.
+
+Do not invent policies for targeting admin accounts or self-administration if existing authoritative sources do not settle them; ask Kareem if needed.
+
+Provider deactivation/reactivation endpoints belong to ACC-15, issue #87. Do not implement them here.
+
+4. Authorization, delegation and audit
+
+All five new endpoints must be admin-only using existing global authentication and role conventions:
+- No login: 401.
+- Authenticated non-admin: 403.
+- Validate IDs, bodies and query parameters using existing DTO and pipe conventions.
+- Keep controllers thin; orchestration belongs in AdminService.
+- Access other modules only through exported service contracts. Never query their collections or import their models.
+- Preserve existing admin routes and behavior.
+
+Emit typed audit events through AppEvents.emit(Events.AdminAction, ...) after successful mutations:
+- MODERATOR_CREATED
+- PASSWORD_RESET
+- ACCOUNT_SUSPENDED
+- ACCOUNT_REACTIVATED
+
+Use existing audit action values and payload contracts. Derive actorId from the authenticated admin, not request input. Target the affected account. Emit only after the delegated operation succeeds and any owner-managed transaction has committed.
+
+Do not emit audit events for listing, rejected requests, missing providers, duplicate emails, invalid transitions or failed service calls. Do not duplicate account.suspended/account.reactivated events owned by accounts.
+
+Never include passwords, hashes, cookies, tokens or other secrets in audit details, responses, logs or commit messages.
+
+Document all endpoints and DTOs in Swagger using existing response and error conventions.
+
+5. Tests
+
+Add focused Supertest API tests through the real AdminModule and production app configuration, using existing createTestApp, clearCollections, loginAs and FakeEvents helpers.
+
+Use FakeAccountsService and existing provider fakes to isolate cross-module business logic. Keep real authentication/session support through the test helpers; do not bypass authorization.
+
+Cover:
+- Every endpoint's success response and exact public response shape.
+- 401 without authentication.
+- 403 for user, airline moderator and hotel moderator roles.
+- Account-list pagination defaults, boundaries, empty results and subsequent pages.
+- Search by name/email, role/status filters and combined filters.
+- Literal handling of regex-special characters in search through the delegated contract.
+- Both moderator roles, correct provider-service selection and single-provider assignment.
+- Missing or wrong-type providers and no account creation after failed provider checks.
+- Duplicate email: 409 EMAIL_TAKEN.
+- Invalid IDs, missing fields, invalid roles/statuses, unexpected fields and invalid temporary passwords.
+- Password reset delegation and the existing fake's mustChangePassword/session-revocation effects.
+- Valid and invalid suspend/reactivate transitions, including missing accounts and deactivated accounts.
+- Correct actor, target and audit action; exactly one audit event per successful mutation.
+- No success audit event when the delegated operation fails.
+- No sensitive fields in any response or audit payload.
+- Existing admin endpoint regressions and Swagger registration.
+
+Use fake-state assertions to verify the admin contract, not to claim real hashing, session invalidation or first-login enforcement is implemented by this ticket. Those behaviors belong to accounts and its integration tests.
+
+Modify existing tests only when this ticket intentionally changes specified behavior or directly dependent test wiring. Report exactly which tests changed and why. Never weaken, skip or delete tests to obtain a pass.
+
+6. Dependencies, boundaries and verification
+
+At the time this prompt was prepared, AccountsService administration methods were still stubs and ACC-16 (#31) was open. Recheck current develop.
+
+If those methods remain unfinished:
+- Implement admin delegation against the published contracts.
+- Test using FakeAccountsService.
+- Do not implement accounts logic, replace production services with fakes, swallow NotImplementedException or claim production account administration works end to end.
+- Report ACC-16 as the remaining runtime dependency.
+
+Change only the admin module, its directly related tests and Mostafa's prompt log. Reuse existing fakes and shared helpers without changing another owner's package. Stop for owner/team-leader approval if a shared contract or another package needs changes.
+
+Preserve frozen schemas. Follow existing backend conventions. Avoid any, TypeScript suppression and lint-disable comments. Do not add feature or contract documentation to README files.
+
+Run npm run verify inside backend. Preserve the existing requirement that every src/modules/**/*.service.ts file has at least 80% line coverage individually.
+
+Fix failures introduced by or directly coupled to this ticket, then rerun verification. Do not expand scope to repair unrelated baseline failures or another owner's modules. Report those blockers with exact commands and evidence. Never claim verification passed when it did not.
+
+7. Logging, commits and final report
+
+Commit only intended ticket changes on the feature branch using Conventional Commits with module scope and (ACC-13) at the end of the subject.
+
+Never commit to develop or main, push, open a PR, force-push, rebase or amend commits.
+
+Append one entry for this prompt to ai-prompts/mostafa.txt in the existing format:
+- Date
+- Student: Mostafa
+- Tool: Antigravity
+- Related Requirement: ACC-13
+- Complete prompt copied verbatim, with secrets replaced by <removed>
+- One-line "How the output was used" listing changed files and implementation commit hashes
+
+Preserve previous entries. Include the log in a final commit; do not attempt to record that commit's own hash inside itself.
+
+Finally report:
+- Changed files
+- Tests added or updated, including reasons for existing test changes
+- Exact verification commands and results
+- Remaining dependencies or blockers, especially ACC-16 if unfinished
+- Commit hashes
+
+How the output was used:
+Implemented admin account listing, moderator creation, password reset, and account suspend/reactivate endpoints with DTOs and audit events in backend/src/modules/admin/admin.module.ts, backend/src/modules/admin/admin.service.ts, backend/src/modules/admin/admin.controller.ts, backend/src/modules/admin/dto/admin-account.response.dto.ts, backend/src/modules/admin/dto/create-moderator.dto.ts, backend/src/modules/admin/dto/list-admin-accounts-query.dto.ts, and backend/src/modules/admin/dto/reset-user-password.dto.ts (a4379d9), and added unit and Supertest API tests in backend/src/modules/admin/admin.service.spec.ts and backend/src/modules/admin/admin.api.spec.ts (e8a25cc).
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Mostafa
+Tool: Antigravity
 Related Requirement: BLG-10
 
 Prompt:

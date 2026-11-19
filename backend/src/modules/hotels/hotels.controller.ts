@@ -35,9 +35,10 @@ import {
 import type { Types } from 'mongoose';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { toDateOnly } from '../../common/dates/date-only.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
@@ -56,6 +57,16 @@ import {
   RoomResponseDto,
 } from './dto/room.response.dto.js';
 import { HotelsService } from './hotels.service.js';
+import { SearchHotelsQueryDto } from './dto/search-hotels-query.dto.js';
+import {
+  HotelSearchResponseDto,
+  PaginatedHotelSearchResponseDto,
+} from './dto/hotel-search.response.dto.js';
+import { StayDatesQueryDto } from './dto/stay-dates-query.dto.js';
+import {
+  AvailableRoomResponseDto,
+  PaginatedAvailableRoomsResponseDto,
+} from './dto/available-room.response.dto.js';
 
 /** 400 VALIDATION_FAILED for a body that mixes fields of two operations. */
 function wrongFields(field: string, message: string): BadRequestException {
@@ -77,6 +88,84 @@ function wrongFields(field: string, message: string): BadRequestException {
 @Controller('hotels')
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
+
+  @Get('search')
+  @Public()
+  @ApiOperation({
+    summary:
+      'HTL-11 / HTL-12 Search available hotels with price and rating filters',
+    description:
+      'Rooms must be active and free for the entire stay, excluding checkout. The requested number of rooms must cover all guests. Prices use the cheapest room that can join such a selection, not the total stay. Search does not hold inventory.',
+    security: [],
+  })
+  @ApiOkResponse({ type: PaginatedHotelSearchResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: invalid search inputs, dates or price range',
+  })
+  async search(
+    @Query() query: SearchHotelsQueryDto,
+  ): Promise<PaginatedHotelSearchResponseDto> {
+    const result = await this.hotels.search(query.toSearchQuery());
+    return {
+      ...result,
+      items: result.items.map((hotel) =>
+        HotelSearchResponseDto.fromResult(hotel),
+      ),
+    };
+  }
+
+  @Get(':id/rooms/available')
+  @Public()
+  @ApiOperation({
+    summary: 'HTL-15 List free rooms and total stay prices',
+    description:
+      'Returns every qualifying room across pages, ordered by ID. The room must be active and free for every night, excluding checkout. Inactive hotels have no bookable rooms. This read does not hold rooms or lock prices.',
+    security: [],
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PaginatedAvailableRoomsResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: invalid ID, stay dates or pagination',
+  })
+  @ApiNotFoundResponse({ description: 'NOT_FOUND: hotel does not exist' })
+  async availableRooms(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: StayDatesQueryDto,
+  ): Promise<PaginatedAvailableRoomsResponseDto> {
+    const result = await this.hotels.getAvailableRooms(
+      id.toHexString(),
+      toDateOnly(query.checkIn),
+      toDateOnly(query.checkOut),
+      query,
+    );
+    return {
+      ...result,
+      items: result.items.map((room) =>
+        AvailableRoomResponseDto.fromView(room),
+      ),
+    };
+  }
+
+  @Get(':id')
+  @Public()
+  @ApiOperation({
+    summary: 'HTL-02 View a hotel profile, policies and rating summary',
+    description:
+      'A null rating average means unrated, not zero stars. Read review text from GET /api/hotels/:id/reviews (HTL-24) and dated rooms from GET /api/hotels/:id/rooms/available (HTL-15).',
+    security: [],
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: HotelProfileResponseDto })
+  @ApiBadRequestResponse({ description: 'VALIDATION_FAILED: invalid hotel ID' })
+  @ApiNotFoundResponse({ description: 'NOT_FOUND: hotel does not exist' })
+  async details(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<HotelProfileResponseDto> {
+    return HotelProfileResponseDto.fromView(
+      await this.hotels.getHotelDetails(id.toHexString()),
+    );
+  }
 
   @Patch(':id/rooms/:roomId')
   @Roles(Role.HOTEL_MODERATOR)

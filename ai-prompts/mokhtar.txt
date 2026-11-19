@@ -361,3 +361,30 @@ Add tests verifying limits already enforced by the code:
 How the output was used:
 Fixed the fake itineraries day validation order (notes before the 60-day cap) after pinning it with red tests and committed the red test then the fix.
 
+=============================================
+
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the final "Changes needed ITN-05" code review feedback on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6].
+
+Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Move Race and Emoji Coverage into the Real API Test Suite
+The 60-day cap under parallel adds and the emoji character count were only tested on the in-memory fake, which cannot race. Fix: put the 57 + 8 Promise.allSettled test and the 2000/2001 emoji test in `src/modules/itineraries/itineraries.api.spec.ts`.
+
+### 2. Deterministic Empty-PATCH Fake Test
+The fake's empty-PATCH test could not fail: with the fake fix set aside it still passed, because `updatedAt = new Date()` landed in the same millisecond. Fix: `vi.useFakeTimers()` and `vi.setSystemTime` before the PATCH.
+
+### 3. Fake Typing Parity
+The fake threw a TypeError for `addDay(id, {cityId: 'cairo', notes: null})` where the service gives 400 VALIDATION_FAILED. Fix: type-check notes and cityId in the fake before `.trim()`.
+
+### 4. Unify the Over-Limit Notes Message
+The over-limit notes message differed between the DTO and the service; one message would be cleaner.
+
+How the output was used:
+Moved the parallel-cap and emoji tests into the API spec, made the fake empty-patch test deterministic, typed the fake before trimming, unified the notes message, ran `npm run verify` (all green: 1245 tests), and committed and pushed the fixes.
+

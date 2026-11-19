@@ -1,17 +1,24 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsString, Matches, MinLength } from 'class-validator';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type { CreateFlightInput } from '../flights.types.js';
 
 const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 export class CreateFlightDto implements CreateFlightInput {
-  @ApiProperty({ example: 'MS 123', minLength: 1 })
+  @ApiProperty({
+    example: 'MS 123',
+    minLength: 1,
+    maxLength: 10,
+    pattern: '^[A-Z0-9 ]+$',
+  })
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   @IsString()
   @MinLength(1)
+  @MaxLength(10)
+  @Matches(/^[A-Z0-9 ]+$/)
   @Matches(/\S/, { message: 'flightNumber must not be blank' })
   flightNumber!: string;
 

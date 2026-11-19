@@ -80,9 +80,24 @@ describe('Flights HTTP API (FLT-03)', () => {
     });
   });
 
+  it('accepts a 10-character flight number after trimming and uppercasing', async () => {
+    const user = await moderator();
+    const response = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send({ ...flight, flightNumber: ' abcd 12345 ' })
+      .expect(201);
+
+    expect(response.body.flightNumber).toBe('ABCD 12345');
+  });
+
   it('rejects unknown airports, identical airports, invalid ordering, and past departures', async () => {
     const user = await moderator();
     const invalidRequests = [
+      { ...flight, flightNumber: 'ABCDEFGHIJK' },
+      { ...flight, flightNumber: 'MS-123' },
+      { ...flight, flightNumber: 'MS😀123' },
       { ...flight, departureAirportId: 'ZZZ' },
       { ...flight, arrivalAirportId: 'JFK' },
       {
@@ -176,6 +191,7 @@ describe('Flights HTTP API (FLT-03)', () => {
 
   it('requires an airline moderator for creation and the own-airline list', async () => {
     const admin = await loginAs(t.connection, UserRole.ADMIN);
+    const airlineId = new Types.ObjectId().toHexString();
     await t
       .http()
       .post('/api/flights')
@@ -183,6 +199,12 @@ describe('Flights HTTP API (FLT-03)', () => {
       .send(flight)
       .expect(403);
     await t.http().post('/api/flights').send(flight).expect(401);
+    await t.http().get(`/api/airlines/${airlineId}/flights`).expect(401);
+    await t
+      .http()
+      .get(`/api/airlines/${airlineId}/flights`)
+      .set('Cookie', admin.cookie)
+      .expect(403);
   });
 
   it('does not accept an airline ID from the moderator request body', async () => {

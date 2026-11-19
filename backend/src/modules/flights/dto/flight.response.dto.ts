@@ -38,7 +38,12 @@ export class FlightResponseDto implements FlightManagementView {
   @ApiProperty()
   airlineId!: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    example: 'MS 123',
+    minLength: 1,
+    maxLength: 10,
+    pattern: '^[A-Z0-9 ]+$',
+  })
   flightNumber!: string;
 
   @ApiProperty()

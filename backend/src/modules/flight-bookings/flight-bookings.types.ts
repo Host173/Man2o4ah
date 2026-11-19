@@ -90,3 +90,11 @@ export interface FlightQuote {
     currency: string;
   };
 }
+
+/** A seat hold (FLT-22): the quote, plus the saved `pending_payment` booking. */
+export interface FlightHold extends FlightQuote {
+  bookingId: string;
+  status: 'pending_payment';
+  /** When the hold ends if unpaid: 10 minutes after the booking was created. */
+  holdExpiresAt: Date;
+}

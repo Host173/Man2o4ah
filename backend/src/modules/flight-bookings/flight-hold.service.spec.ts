@@ -385,6 +385,29 @@ describe('FlightHoldService.hold (FLT-22)', () => {
       expect(hold.status).toBe('pending_payment');
     });
 
+    // Review #147: the hold must use the same "now" as the quote's check, even
+    // when the clock moves while the flights are loaded.
+    it('never lets the hold end after departure, even if the clock moves during the quote', async () => {
+      const request = flightLeavingIn(TEN_MINUTES);
+      const departureAt = new Date(NOW.getTime() + TEN_MINUTES);
+      const checkBookable = flights.checkBookable.bind(flights);
+      vi.spyOn(flights, 'checkBookable').mockImplementation(async (...args) => {
+        // 50 ms of database time pass inside the quote.
+        vi.setSystemTime(new Date(Date.now() + 50));
+        return checkBookable(...args);
+      });
+
+      const hold = await holds.hold(request, USER);
+
+      expect(hold.holdExpiresAt.getTime()).toBeLessThanOrEqual(
+        departureAt.getTime(),
+      );
+      const saved = await bookings
+        .findById(hold.bookingId)
+        .lean<FlightBooking & { createdAt: Date }>();
+      expect(saved?.createdAt).toEqual(NOW);
+    });
+
     it('refuses a flight that leaves in less than 10 minutes, and holds nothing', async () => {
       await expect(
         holds.hold(flightLeavingIn(TEN_MINUTES - 1), USER),

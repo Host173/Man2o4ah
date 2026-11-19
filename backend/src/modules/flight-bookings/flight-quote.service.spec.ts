@@ -374,5 +374,20 @@ describe('FlightQuoteService.quote (FLT-19, FLT-21)', () => {
         invalid('segments[0]'),
       );
     });
+
+    // Review #147: one clear message, not "less than 10 minutes" as well.
+    it('says only "already departed" for a flight that has left', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(OUT_DEPARTS.getTime() + 60_000));
+
+      const error = await quotes.quote(oneWay()).catch((e: unknown) => e);
+
+      const details = (
+        error as { response: { details: { field: string; message: string }[] } }
+      ).response.details.filter((d) => d.field === 'segments[0]');
+      expect(details).toEqual([
+        { field: 'segments[0]', message: 'This flight has already departed' },
+      ]);
+    });
   });
 });

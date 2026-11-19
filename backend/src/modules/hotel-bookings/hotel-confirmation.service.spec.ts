@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakePaymentsService } from '../../../test/fakes/payments.fake.js';
 import { FakeRoomNightInventory } from '../../../test/fakes/room-night-inventory.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
@@ -11,10 +12,12 @@ import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
 import { RESERVATION_REFERENCE } from './hotel-confirmation.service.js';
 import type { HotelHoldRequestDto } from './dto/hotel-hold.dto.js';
 import { HotelBookingsModule } from './hotel-bookings.module.js';
+import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelReservation } from './schemas/hotel-reservation.schema.js';
 
@@ -73,6 +76,9 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
   let holds: HotelHoldService;
   let reservations: Model<HotelReservation>;
   let emitter: EventEmitter2;
+  let job: HotelHoldExpiryJob;
+  // Kareem's working fake: it records every refund request (PAY-03 is a stub).
+  const payments = new FakePaymentsService();
   const hotels = new FakeHotelsService();
   const inventory = new FakeRoomNightInventory(hotels);
   const events = new FakeEvents();
@@ -94,18 +100,22 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
           .overrideProvider(AppEvents)
           .useValue(events)
           .overrideProvider(RESERVATION_REFERENCE)
-          .useValue(testReference),
+          .useValue(testReference)
+          .overrideProvider(PaymentsService)
+          .useValue(payments),
     });
     holds = t.moduleRef.get(HotelHoldService);
     reservations = t.moduleRef.get<Model<HotelReservation>>(
       getModelToken(HotelReservation.name),
     );
     emitter = t.moduleRef.get(EventEmitter2);
+    job = t.moduleRef.get(HotelHoldExpiryJob);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
     Object.assign(hotels, seededHotels());
     events.clear();
+    payments.refunds.length = 0;
     nextReferences.length = 0;
     await clearCollections(t.connection);
   });
@@ -197,5 +207,70 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
     });
     expect((await saved(first.reservationId))?.reference).toBe('HRSAME00');
     expect(events.payloadsOf(Events.HotelReservationConfirmed)).toHaveLength(2);
+  });
+
+  // §8.6 / data-model §8 #14: a payment that arrives after the hold expired is
+  // not confirmed (the rooms may be gone); the user gets all their money back.
+  describe('late payment', () => {
+    it('refunds an expired reservation in full instead of confirming it', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await job.expireDueHolds(hold.holdExpiresAt);
+
+      await paymentSucceeded(hold.reservationId);
+
+      expect(payments.refunds).toEqual([
+        expect.objectContaining({
+          bookingType: 'hotel',
+          bookingId: hold.reservationId,
+          amountMinor: hold.totalMinor,
+          currency: 'USD',
+          reason: 'late_payment',
+        }),
+      ]);
+      expect((await saved(hold.reservationId))?.status).toBe('expired');
+      expect(events.payloadsOf(Events.HotelReservationConfirmed)).toEqual([]);
+    });
+
+    it('asks for the refund once when the late event arrives twice', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await job.expireDueHolds(hold.holdExpiresAt);
+      const refund = vi.spyOn(payments, 'refund');
+
+      await paymentSucceeded(hold.reservationId);
+      await paymentSucceeded(hold.reservationId);
+
+      // payments returns the existing refund for a booking, so one stays one.
+      expect(payments.refunds).toHaveLength(1);
+      expect(refund.mock.calls.every(([r]) => r.userId === USER)).toBe(true);
+    });
+
+    it('never refunds a confirmed reservation that gets a duplicate event', async () => {
+      const hold = await holds.hold(stay(), USER);
+
+      await paymentSucceeded(hold.reservationId);
+      await paymentSucceeded(hold.reservationId);
+
+      expect((await saved(hold.reservationId))?.status).toBe('confirmed');
+      expect(payments.refunds).toEqual([]);
+    });
+
+    it('has exactly one outcome when payment and expiry race', async () => {
+      const hold = await holds.hold(stay(), USER);
+
+      await Promise.allSettled([
+        paymentSucceeded(hold.reservationId),
+        job.expireDueHolds(new Date(hold.holdExpiresAt.getTime() + 1)),
+      ]);
+
+      // Assert the invariant, never which one won.
+      const status = (await saved(hold.reservationId))?.status;
+      if (status === 'confirmed') {
+        expect(payments.refunds).toEqual([]);
+        expect(nightsOf(hold.reservationId)).toHaveLength(2);
+      } else {
+        expect(status).toBe('expired');
+        expect(payments.refunds).toHaveLength(1);
+      }
+    });
   });
 });

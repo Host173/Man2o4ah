@@ -6,13 +6,28 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { AuditAction } from './schemas/audit-log.schema.js';
 
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** ISO 8601 date-time with `Z` or an offset, so the instant is never server-local. */
+const ISO_DATE_TIME =
+  /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const DATE_DESCRIPTION =
   '`YYYY-MM-DD` (that whole UTC day, inclusive) or an ISO date-time (inclusive)';
 
-/** Turns a query value into a Date; `endOfDay` makes a calendar day end at 23:59:59.999Z (GEN-07). */
+/**
+ * Turns a query value into a Date; `endOfDay` makes a calendar day end at 23:59:59.999Z (GEN-07).
+ * Anything that isn't `YYYY-MM-DD` or an ISO date-time becomes an invalid Date, which `@IsDate` rejects.
+ */
 function toBound(value: unknown, endOfDay: boolean): unknown {
   if (typeof value !== 'string') return value;
-  if (!CALENDAR_DAY.test(value)) return new Date(value);
+  if (!CALENDAR_DAY.test(value)) {
+    const day = ISO_DATE_TIME.exec(value)?.[1];
+    if (!day) return new Date(NaN);
+    try {
+      toDateOnly(day); // rejects days that don't exist, e.g. 2026-02-30
+      return new Date(value);
+    } catch {
+      return new Date(NaN);
+    }
+  }
   try {
     const start = toDateOnly(value);
     return endOfDay ? new Date(addDays(start, 1).getTime() - 1) : start;

@@ -9,7 +9,7 @@ import type {
 } from '../../src/modules/audit/audit.types.js';
 import type { PublicApi } from './public-api.js';
 
-/** A working `AuditService` over entries you `add(...)`: filters, newest first, paginated. */
+/** A working `AuditService` over entries you `add(...)`: filters, newest first (ties: id descending), paginated. */
 export class FakeAuditService implements PublicApi<AuditService> {
   private readonly entries: AuditLogView[] = [];
 
@@ -32,7 +32,11 @@ export class FakeAuditService implements PublicApi<AuditService> {
       .filter((entry) => !action || entry.action === action)
       .filter((entry) => !from || entry.createdAt >= from)
       .filter((entry) => !to || entry.createdAt <= to)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      .sort(
+        (a, b) =>
+          b.createdAt.getTime() - a.createdAt.getTime() ||
+          (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+      );
     const items = matching.slice((page - 1) * limit, page * limit);
     return Promise.resolve(toPage(items, matching.length, page, limit));
   }

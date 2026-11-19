@@ -7,7 +7,13 @@ import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { AuditAction, AuditLog } from './schemas/audit-log.schema.js';
 
 const OBJECT_ID = /^[0-9a-f]{24}$/i;
-const SECRET_KEY = /pass(word)?|token|secret|hash/i;
+/**
+ * A secret-looking key: starts with password/passwd/secret or ends with
+ * password/passwd/token/secret/hash/apiKey (`resetToken`, `passwordHash`).
+ * Whole words only, so `passengers` and `passportNo` are kept.
+ */
+const SECRET_KEY =
+  /^(password|passwd|secret)|(password|passwd|token|secret|hash|apikey)$/i;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
@@ -19,14 +25,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-/** A shallow copy of `details` without secret-looking keys, or undefined if nothing is left (GEN-07). */
+/** `value` without secret-looking keys, at every level and inside arrays (GEN-07). */
+function stripSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripSecrets);
+  if (!isPlainObject(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !SECRET_KEY.test(key))
+      .map(([key, item]) => [key, stripSecrets(item)]),
+  );
+}
+
+/** `details` without secrets, or undefined if it isn't a plain object or nothing is left (GEN-07). */
 function sanitizeDetails(
   details: unknown,
 ): Record<string, unknown> | undefined {
   if (!isPlainObject(details)) return undefined;
-  const kept = Object.fromEntries(
-    Object.entries(details).filter(([key]) => !SECRET_KEY.test(key)),
-  );
+  const kept = stripSecrets(details) as Record<string, unknown>;
   return Object.keys(kept).length > 0 ? kept : undefined;
 }
 

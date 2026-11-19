@@ -336,6 +336,52 @@ describe('NotificationsController HTTP API (GEN-01)', () => {
     });
   });
 
+  it('keeps a read booking notification read when the event is retried', async () => {
+    const user = await loginAs(t.connection, Role.USER);
+    const payload = {
+      bookingId: new Types.ObjectId().toString(),
+      userId: user.id,
+      reference: 'FB-RETRY',
+    };
+    await emitter.emitAsync(Events.FlightBookingConfirmed, payload);
+    const list = await t
+      .http()
+      .get('/api/notifications')
+      .set('Cookie', user.cookie);
+    expect(list.status).toBe(200);
+    const id = (list.body.items as NotificationView[])[0]?._id;
+    expect(id).toBeDefined();
+    const marked = await t
+      .http()
+      .patch(`/api/notifications/${id}/read`)
+      .set('Cookie', user.cookie);
+    expect(marked.status).toBe(200);
+
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        emitter.emitAsync(Events.FlightBookingConfirmed, payload),
+      ),
+    );
+
+    const again = await t
+      .http()
+      .get('/api/notifications')
+      .set('Cookie', user.cookie);
+    expect(again.status).toBe(200);
+    expect(again.body.total).toBe(1);
+    expect(again.body.items[0]).toMatchObject({
+      _id: id,
+      readAt: marked.body.readAt,
+      createdAt: list.body.items[0].createdAt,
+    });
+    const count = await t
+      .http()
+      .get('/api/notifications/unread-count')
+      .set('Cookie', user.cookie);
+    expect(count.status).toBe(200);
+    expect(count.body).toEqual({ count: 0 });
+  });
+
   it('documents the four routes in Swagger', () => {
     const document = SwaggerModule.createDocument(
       t.app,

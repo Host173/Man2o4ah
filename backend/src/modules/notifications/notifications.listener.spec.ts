@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
@@ -225,7 +226,7 @@ describe('NotificationsListener (GEN-01)', () => {
       moderatorIds: MODERATORS,
     };
 
-    it.each<[string, () => Promise<unknown>, number]>([
+    describe.each<[string, () => Promise<unknown>, number]>([
       [
         Events.FlightBookingConfirmed,
         () => emitter.emitAsync(Events.FlightBookingConfirmed, booking),
@@ -285,14 +286,30 @@ describe('NotificationsListener (GEN-01)', () => {
         () => emitter.emitAsync(Events.ProviderReactivated, provider),
         MODERATORS.length,
       ],
-    ])(
-      'stores %s only once when it is delivered twice',
-      async (_event, emit, expected) => {
+    ])('%s', (_event, emit, expected) => {
+      it('stores the event only once when it is delivered twice', async () => {
         await emit();
         await emit();
         expect(await model.countDocuments()).toBe(expected);
-      },
-    );
+      });
+
+      it('stores one notification per recipient under concurrent delivery', async () => {
+        const errors = vi.spyOn(Logger.prototype, 'error');
+        try {
+          const results = await Promise.allSettled(
+            Array.from({ length: 8 }, emit),
+          );
+          expect(results.every((result) => result.status === 'fulfilled')).toBe(
+            true,
+          );
+          expect(await model.countDocuments()).toBe(expected);
+          expect(await model.countDocuments({ readAt: null })).toBe(expected);
+          expect(errors).not.toHaveBeenCalled();
+        } finally {
+          errors.mockRestore();
+        }
+      });
+    });
 
     it('stores one notification per moderator when a moderator id repeats', async () => {
       const [first = '', second = ''] = MODERATORS;

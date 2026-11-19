@@ -1094,3 +1094,15 @@ List only real problems (bugs, broken rules, missing required tests), most impor
 How the output was used:
 Implemented hotel details and free-room endpoints, shared stay validation and inventory reads, response DTOs, HotelsService/FakeHotelsService methods and integration/API/fake tests for HTL-02/HTL-15; prepared the feature PR and its requested self-review.
 ================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+see the ticket of gen-01 and read its pr and comments on it and solve the problems and issues
+
+How the output was used:
+Read issue #19 and PR #168, merged origin/develop into isolated fix/GEN-01-review-issues, and added listener concurrency regressions plus an API read-state regression; reproduced duplicate notifications for all 10 events before changing production code.
+================================================

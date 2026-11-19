@@ -1793,3 +1793,14 @@ Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file say
 How the output was used:
 Built the GEN-01 notifications module (content table, service, listener, controller, listener and API specs) in backend/src/modules/notifications on branch feature/GEN-01-app-notifications (worktree man2o4ah-GEN-01), one commit per step.
 ================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-01
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review point 1-2 on PR #168: idempotent notification storing in notifications.service.ts with duplicate-delivery tests in notifications.listener.spec.ts (test commit first, then the fix), pushed to feature/GEN-01-app-notifications.
+================================================

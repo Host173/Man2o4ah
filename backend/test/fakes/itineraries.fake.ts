@@ -30,6 +30,18 @@ import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itine
 import type { PublicApi } from './public-api.js';
 
 function validateNotes(notes: string): string {
+  if (typeof notes !== 'string') {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'notes',
+          message: 'notes must be a string',
+        },
+      ],
+    });
+  }
   if (Array.from(notes).length > MAX_NOTES_LENGTH) {
     throw new BadRequestException({
       code: ErrorCode.ValidationFailed,
@@ -172,8 +184,11 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   ): Promise<ItineraryDayView> {
     const itinerary = this.findOwned(itineraryId, userId);
     // City existence/reference validation (GEN-12 / ITN-05)
-    const cityId = dto.cityId?.trim();
-    if (!cityId) {
+    if (typeof dto.cityId !== 'string') {
+      throw this.invalidField('cityId', 'cityId must be a string');
+    }
+    const cityId = dto.cityId.trim();
+    if (cityId.length === 0) {
       throw this.invalidField('cityId', 'cityId must not be blank');
     }
     const knownCities = await this.referenceData.getCities([cityId]);
@@ -226,10 +241,13 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       return structuredClone(this.toDetail(itinerary).days[index]);
     }
     // City existence/reference validation (GEN-12 / ITN-05)
-    const cityId = dto.cityId?.trim();
     let nextCityId: string | undefined;
     if (dto.cityId !== undefined) {
-      if (!cityId) {
+      if (typeof dto.cityId !== 'string') {
+        throw this.invalidField('cityId', 'cityId must be a string');
+      }
+      const cityId = dto.cityId.trim();
+      if (cityId.length === 0) {
         throw this.invalidField('cityId', 'cityId must not be blank');
       }
       const knownCities = await this.referenceData.getCities([cityId]);

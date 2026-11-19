@@ -31,6 +31,8 @@ export class CreateDayDto {
   })
   @IsOptional()
   @IsString()
-  @MaxLength(MAX_NOTES_LENGTH)
+  @MaxLength(MAX_NOTES_LENGTH, {
+    message: `notes must have at most ${MAX_NOTES_LENGTH} characters`,
+  })
   notes?: string;
 }

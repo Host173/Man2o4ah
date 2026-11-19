@@ -6,6 +6,11 @@ import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
+import { ListReportsQueryDto } from '../moderation/dto/list-reports-query.dto.js';
+import type { ResolveReportDto } from '../moderation/dto/resolve-report.dto.js';
+import { ModerationService } from '../moderation/moderation.service.js';
+import type { ReportView } from '../moderation/moderation.types.js';
+import type { ReportTargetType } from '../moderation/schemas/report.schema.js';
 import type { AdminBookingView } from './admin.types.js';
 import {
   ListAdminBookingsQueryDto,
@@ -13,14 +18,16 @@ import {
 } from './dto/list-admin-bookings-query.dto.js';
 
 /**
- * Admin read-only booking list and platform administration workflows (`ACC-17`).
- * Reads booking data solely through the exported `CTR-04` contracts.
+ * Admin read-only booking list and platform administration workflows (`ACC-17`, `GEN-10`).
+ * Reads booking data solely through the exported `CTR-04` contracts and
+ * delegates content moderation to `ModerationService`.
  */
 @Injectable()
 export class AdminService {
   constructor(
     private readonly flightBookingsService: FlightBookingsService,
     private readonly hotelBookingsService: HotelBookingsService,
+    private readonly moderationService: ModerationService,
   ) {}
 
   /**
@@ -133,6 +140,40 @@ export class AdminService {
       ...pageResult,
       totalPages: Math.min(pageResult.totalPages, maxMergedPages),
     };
+  }
+
+  /** GEN-10: delegates paginated report listing to `ModerationService`. */
+  listReports(
+    query: ListReportsQueryDto = new ListReportsQueryDto(),
+  ): Promise<Paginated<ReportView>> {
+    return this.moderationService.listReports(query);
+  }
+
+  /** GEN-10: delegates report resolution to `ModerationService`. */
+  resolveReport(
+    reportId: string,
+    dto: ResolveReportDto,
+    adminId: string,
+  ): Promise<ReportView> {
+    return this.moderationService.resolveReport(reportId, dto, adminId);
+  }
+
+  /** GEN-10: delegates direct content hiding to `ModerationService`. */
+  hideContent(
+    targetType: ReportTargetType,
+    targetId: string,
+    adminId: string,
+  ): Promise<void> {
+    return this.moderationService.hideContent(targetType, targetId, adminId);
+  }
+
+  /** GEN-10: delegates direct content deletion to `ModerationService`. */
+  deleteContent(
+    targetType: ReportTargetType,
+    targetId: string,
+    adminId: string,
+  ): Promise<void> {
+    return this.moderationService.deleteContent(targetType, targetId, adminId);
   }
 
   private parseDate(value: string, field: 'from' | 'to'): Date {

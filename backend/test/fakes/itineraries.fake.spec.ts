@@ -516,7 +516,8 @@ describe('FakeItinerariesService owner-only methods', () => {
         'user-1',
       );
       // Code points, not UTF-16 units: one emoji is one character.
-      expect(Array.from(accepted.notes).length).toBe(2000);
+      expect(accepted.notes).toBeDefined();
+      expect(Array.from(accepted.notes ?? []).length).toBe(2000);
 
       const error = await itineraries
         .addDay(

@@ -180,7 +180,9 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (!knownCities.has(cityId)) {
       throw this.invalidField('cityId', `Unknown city: ${cityId}`);
     }
-    // 60-day cap (ITN-05)
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    // 60-day cap (ITN-05), after the city and notes checks like the real service.
     if (itinerary.days.length >= MAX_DAYS) {
       throw this.invalidField(
         'days',
@@ -193,7 +195,7 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       dayNumber: dayNumber(index),
       date: dayDate(toDateOnly(itinerary.startDate), index),
       cityId,
-      ...(dto.notes !== undefined ? { notes: validateNotes(dto.notes) } : {}),
+      ...(notes !== undefined ? { notes } : {}),
       activities: [],
       budgetEntries: [],
     };

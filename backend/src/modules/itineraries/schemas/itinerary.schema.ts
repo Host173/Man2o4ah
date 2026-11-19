@@ -39,7 +39,11 @@ export const TransportMode = {
 } as const;
 export type TransportMode = (typeof TransportMode)[keyof typeof TransportMode];
 
-const MAX_DAYS = 60;
+/** ITN-05: an itinerary has at most 60 days. */
+export const MAX_DAYS = 60;
+
+/** A day's notes are at most 2000 characters (code points), untrimmed. */
+export const MAX_NOTES_LENGTH = 2000;
 
 /** Cost of an activity, counted under Activities in the budget summary. */
 @Schema({ _id: false })
@@ -115,11 +119,22 @@ export const BudgetEntrySchema = SchemaFactory.createForClass(BudgetEntry);
 /** Day number (index + 1) and date (startDate + index) are never stored. Keeps its own _id. */
 @Schema()
 export class Day {
+  /** Set by Mongoose on every embedded document. */
+  _id!: Types.ObjectId;
+
   /** → cities (by ID), ITN-09 */
   @Prop({ type: String, required: true })
   cityId!: string;
 
-  @Prop({ type: String, maxlength: 2000 })
+  @Prop({
+    type: String,
+    // Count code points, like the DTO's `MaxLength`: an emoji is one character.
+    validate: {
+      validator: (notes: string) =>
+        Array.from(notes).length <= MAX_NOTES_LENGTH,
+      message: `notes must have at most ${MAX_NOTES_LENGTH} characters.`,
+    },
+  })
   notes?: string;
 
   @Prop({ type: [ActivitySchema], default: [] })
@@ -180,13 +195,21 @@ export class Itinerary {
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   ownerId!: Types.ObjectId;
 
-  /** ITN-01 */
+  /** ITN-01: trimmed, 1-100 characters (code points, so an emoji is one). */
   @Prop({
     type: String,
     required: true,
     trim: true,
-    minlength: 1,
-    maxlength: 100,
+    validate: [
+      {
+        validator: (title: string) => Array.from(title).length >= 1,
+        message: 'title must have at least 1 character.',
+      },
+      {
+        validator: (title: string) => Array.from(title).length <= 100,
+        message: 'title must have at most 100 characters.',
+      },
+    ],
   })
   title!: string;
 

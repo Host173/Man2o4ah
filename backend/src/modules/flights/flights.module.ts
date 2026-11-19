@@ -19,7 +19,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema.js';
       { name: Flight.name, schema: FlightSchema },
     ]),
   ],
-  controllers: [FlightsController,AirlinesController],
+  controllers: [FlightsController, AirlinesController],
   providers: [AirlinesService, FlightsService, SeatInventory],
   // SeatInventory is exported on purpose: flight-bookings calls hold/confirm/release
   // inside its own transaction (data-model 4.1, skill 3.4).

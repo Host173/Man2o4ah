@@ -48,17 +48,17 @@ type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
 @Injectable()
 export class FlightsService {
   constructor(
-  private readonly airlines: AirlinesService,
+    private readonly airlines: AirlinesService,
 
-  @InjectModel(Flight.name)
-  private readonly flightModel: Model<FlightRecord>,
+    @InjectModel(Flight.name)
+    private readonly flightModel: Model<FlightRecord>,
 
-  @InjectModel(Airline.name)
-  private readonly airlineModel: Model<Airline>,
+    @InjectModel(Airline.name)
+    private readonly airlineModel: Model<Airline>,
 
-  @Inject(ReferenceDataService)
-  private readonly referenceData: ReferenceDataService,
-) {}
+    @Inject(ReferenceDataService)
+    private readonly referenceData: ReferenceDataService,
+  ) {}
 
   /**
    * Create a scheduled flight from the two airport-local times (FLT-03, FLT-02,
@@ -168,8 +168,6 @@ export class FlightsService {
     });
     return toPage(items, total, query.page, query.limit);
   }
-
-
 
   /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).

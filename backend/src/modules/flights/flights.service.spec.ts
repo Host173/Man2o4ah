@@ -9,7 +9,7 @@ import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
 
 describe('FlightsService (contract stub)', () => {
-  let moduleRef: TestingModule;
+  let moduleRef: TestingModule | undefined;
   let service: FlightsService;
 
   const airlineProfiles = {
@@ -18,21 +18,23 @@ describe('FlightsService (contract stub)', () => {
   };
 
   beforeAll(async () => {
-    moduleRef = await Test.createTestingModule({
+    const testModule = await Test.createTestingModule({
       providers: [
         FlightsService,
+        { provide: AirlinesService, useValue: airlineProfiles },
         { provide: getModelToken(Flight.name), useValue: {} },
         { provide: getModelToken(Airline.name), useValue: {} },
         { provide: ReferenceDataService, useValue: {} },
       ],
     }).compile();
 
-    service = moduleRef.get(FlightsService);
+    moduleRef = testModule;
+    service = testModule.get(FlightsService);
   });
 
-  afterAll(() => moduleRef.close());
-
-
+  afterAll(async () => {
+    await moduleRef?.close();
+  });
 
   const search = {
     from: 'CAI',
@@ -45,16 +47,6 @@ describe('FlightsService (contract stub)', () => {
     page: 1,
     limit: 10,
   };
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        FlightsService,
-        { provide: AirlinesService, useValue: airlineProfiles },
-      ],
-    }).compile();
-    service = moduleRef.get(FlightsService);
-  });
 
   // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
   it.each([

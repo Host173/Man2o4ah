@@ -342,6 +342,61 @@ describe('FlightHoldService.hold (FLT-22)', () => {
     });
   });
 
+  // backend.md §10: "Business code re-checks expiry at the point of use; never
+  // assume a job already ran." Same rule as HTL-16's pre-clear (#148).
+  describe('an overdue hold (self-review #147)', () => {
+    /** One adult on the return flight, which has `backSeats` free seats. */
+    const backOnly: FlightQuoteRequestDto = {
+      tripType: 'one_way',
+      segments: [{ flightId: BACK, cabinId: BACK_ECO }],
+      passengers: [adult()],
+    };
+
+    beforeEach(() => {
+      reseed(1); // the return flight has one free seat
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-12-01T09:00:00.000Z'));
+    });
+
+    it('no longer blocks its seats: it is expired and released first', async () => {
+      const old = await holds.hold(backOnly, USER);
+      // 11 minutes later, before the expiry job has run.
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+      const fresh = await holds.hold(backOnly, USER);
+
+      expect(fresh.status).toBe('pending_payment');
+      expect((await bookings.findById(old.bookingId).lean())?.status).toBe(
+        'expired',
+      );
+      expect(seats.counters(BACK, BACK_ECO)).toMatchObject({
+        availableSeats: 0,
+        heldSeats: 50, // 49 held from the start + the new hold
+      });
+    });
+
+    it('still blocks while it is within its 10 minutes', async () => {
+      await holds.hold(backOnly, USER);
+      vi.setSystemTime(new Date('2026-12-01T09:09:59.999Z'));
+
+      await expect(holds.hold(backOnly, USER)).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'SEATS_UNAVAILABLE' },
+      });
+    });
+
+    it('leaves overdue holds on other flights to the expiry job', async () => {
+      const other = await holds.hold(oneWay(), USER); // the outbound flight
+      vi.setSystemTime(new Date('2026-12-01T09:11:00.000Z'));
+
+      await holds.hold(backOnly, USER);
+
+      expect((await bookings.findById(other.bookingId).lean())?.status).toBe(
+        'pending_payment',
+      );
+    });
+  });
+
   describe('close to departure (review #147)', () => {
     const SOON = '6553a1f0c2b4e8a9d0f1b006';
     const SOON_ECO = '6553a1f0c2b4e8a9d0f1b007';

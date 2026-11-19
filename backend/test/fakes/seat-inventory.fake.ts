@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -84,6 +85,21 @@ export class FakeSeatInventory implements PublicApi<SeatInventory> {
     newTotal: number,
     expectedTotal: number,
   ): Promise<void> {
+    const details: ValidationDetail[] = [];
+    if (!Number.isInteger(newTotal) || newTotal < 1) {
+      details.push({
+        field: 'newTotal',
+        message: 'must be a positive integer',
+      });
+    }
+    if (!Number.isInteger(expectedTotal)) {
+      details.push({ field: 'expectedTotal', message: 'must be an integer' });
+    }
+    if (details.length > 0) {
+      return Promise.reject(
+        validationFailed('Invalid capacity change', details),
+      );
+    }
     const cabin = this.data
       .flight(flightId)
       ?.cabins.find((c) => c.id === cabinId);
@@ -113,13 +129,23 @@ export class FakeSeatInventory implements PublicApi<SeatInventory> {
       seats: number,
     ) => void,
   ): Promise<void> {
+    const details: ValidationDetail[] = [];
+    items.forEach((item, index) => {
+      if (!Number.isInteger(item.seats) || item.seats < 1) {
+        details.push({
+          field: `items.${index}.seats`,
+          message: 'must be a positive integer',
+        });
+      }
+    });
+    if (details.length > 0) {
+      return Promise.reject(
+        validationFailed('Seats must be positive integers', details),
+      );
+    }
     const before = new Map<string, FlightView>();
     try {
       for (const item of items) {
-        if (!Number.isInteger(item.seats) || item.seats < 1) {
-          // A bug in the caller, not a business case: the real methods are never given this.
-          throw new Error('seats must be a positive integer');
-        }
         const flight = this.data.flight(item.flightId);
         if (flight && !before.has(flight.id)) {
           before.set(flight.id, structuredClone(flight));
@@ -138,6 +164,19 @@ export class FakeSeatInventory implements PublicApi<SeatInventory> {
       );
     }
   }
+}
+
+interface ValidationDetail {
+  field: string;
+  message: string;
+}
+
+function validationFailed(message: string, details: ValidationDetail[]) {
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details,
+  });
 }
 
 function seatsUnavailable() {

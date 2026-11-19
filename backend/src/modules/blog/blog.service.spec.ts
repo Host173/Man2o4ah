@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
+import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
@@ -15,7 +16,19 @@ import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { Session } from '../accounts/schemas/session.schema.js';
-import { User, UserStatus } from '../accounts/schemas/user.schema.js';
+import {
+  ProviderType,
+  User,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { Airport } from '../reference-data/schemas/airport.schema.js';
+import { Attraction } from '../reference-data/schemas/attraction.schema.js';
+import { City } from '../reference-data/schemas/city.schema.js';
+import { Country } from '../reference-data/schemas/country.schema.js';
+import { Currency } from '../reference-data/schemas/currency.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
@@ -45,6 +58,19 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
+      .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
+      // ItinerariesModule imports ReferenceDataModule (ITN-01).
+      .overrideProvider(getModelToken(Country.name))
+      .useValue({})
+      .overrideProvider(getModelToken(City.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Airport.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Attraction.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Currency.name))
+      .useValue({})
       .compile();
 
     expect(moduleRef.get(BlogService)).toBeInstanceOf(BlogService);
@@ -55,6 +81,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let testApp: TestApp | undefined;
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
+  const fakeItineraries = new FakeItinerariesService();
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
@@ -72,7 +99,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     testApp = await createTestApp({
       imports: [BlogModule],
       override: (builder) =>
-        builder.overrideProvider(AccountsService).useValue(fakeAccounts),
+        builder
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(ItinerariesService)
+          .useValue(fakeItineraries),
     });
     service = testApp.moduleRef.get(BlogService);
     appEvents = testApp.moduleRef.get(AppEvents);
@@ -86,10 +117,16 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     likeModel = testApp.moduleRef.get<Model<LikeDocument>>(
       getModelToken(Like.name),
     );
+    await Promise.all([
+      postModel.init(),
+      commentModel.init(),
+      likeModel.init(),
+    ]);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    Object.assign(fakeItineraries, new FakeItinerariesService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -1177,6 +1214,426 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     });
   });
 
+  describe('likes (BLG-06)', () => {
+    it('likes and unlikes a published post idempotently and updates likeCount accurately', async () => {
+      const post = await service.create(
+        {
+          title: 'Likeable Post',
+          body: 'Detailed guide to Luxor.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      // Unliking before any like is a no-op and never drives likeCount negative.
+      const initialUnlike = await service.unlikePost(post._id, otherUserId);
+      expect(initialUnlike).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+
+      // First like creates the Like document and increments likeCount to 1.
+      const liked = await service.likePost(post._id, otherUserId);
+      expect(liked).toEqual({
+        postId: post._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+          userId: new Types.ObjectId(otherUserId),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Repeated like by the same user is idempotent and does not double-increment.
+      const doubleLiked = await service.likePost(post._id, otherUserId);
+      expect(doubleLiked).toEqual({
+        postId: post._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Unlike removes the Like document and decrements likeCount back to 0.
+      const unliked = await service.unlikePost(post._id, otherUserId);
+      expect(unliked).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+
+      // Repeated unlike stays at 0 and never goes negative.
+      const unlikedAgain = await service.unlikePost(post._id, otherUserId);
+      expect(unlikedAgain).toEqual({
+        postId: post._id,
+        likeCount: 0,
+        liked: false,
+      });
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+    });
+
+    it('handles parallel likes from the same user and from different users without drifting likeCount', async () => {
+      const post = await service.create(
+        {
+          title: 'Concurrent Likes Post',
+          body: 'Stress test post.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      // Parallel likes from the SAME user must produce exactly 1 Like doc and likeCount === 1.
+      const sameUserResults = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          service.likePost(post._id, otherUserId),
+        ),
+      );
+      for (const res of sameUserResults) {
+        expect(res.postId).toBe(post._id);
+        expect(res.liked).toBe(true);
+      }
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+          userId: new Types.ObjectId(otherUserId),
+        }),
+      ).toBe(1);
+      expect((await service.getById(post._id)).likeCount).toBe(1);
+
+      // Parallel likes from DIFFERENT users must increment likeCount once per distinct user.
+      const distinctUsers = [
+        ownerId,
+        activeCommenterId,
+        suspendedUserId,
+        new Types.ObjectId().toHexString(),
+      ];
+      await Promise.all(
+        distinctUsers.map((uid) => service.likePost(post._id, uid)),
+      );
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(5);
+      expect((await service.getById(post._id)).likeCount).toBe(5);
+
+      // Parallel unlikes from the SAME user must decrement only once (5 -> 4, never 0).
+      await Promise.all(
+        Array.from({ length: 4 }, () =>
+          service.unlikePost(post._id, otherUserId),
+        ),
+      );
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(4);
+      expect((await service.getById(post._id)).likeCount).toBe(4);
+    });
+
+    it('rejects likes and unlikes on draft, hidden, deactivated-author, or missing posts and validates IDs', async () => {
+      const draft = await service.create(
+        { title: 'Draft', body: 'Hidden draft', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden', body: 'Moderated', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      const deactivatedFlagged = await service.create(
+        {
+          title: 'Deactivated Flagged',
+          body: 'Author deactivated flag',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedFlagged._id) },
+        { $set: { authorDeactivated: true } },
+      );
+      const deactivatedProfile = await service.create(
+        {
+          title: 'Deactivated Profile',
+          body: 'Profile deactivated',
+          status: PostStatus.PUBLISHED,
+        },
+        deactivatedAuthorId,
+      );
+
+      for (const blockedPostId of [
+        draft._id,
+        hidden._id,
+        deactivatedFlagged._id,
+        deactivatedProfile._id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        await expect(
+          service.likePost(blockedPostId, otherUserId),
+        ).rejects.toThrow(NotFoundException);
+        await expect(
+          service.unlikePost(blockedPostId, otherUserId),
+        ).rejects.toThrow(NotFoundException);
+      }
+
+      const invalidLikeErr = await service
+        .likePost('not-an-object-id', otherUserId)
+        .catch((err: unknown) => err);
+      expect(invalidLikeErr).toBeInstanceOf(BadRequestException);
+      expect(
+        (invalidLikeErr as BadRequestException).getResponse(),
+      ).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+
+      const invalidUserErr = await service
+        .unlikePost(draft._id, 'bad-user-id')
+        .catch((err: unknown) => err);
+      expect(invalidUserErr).toBeInstanceOf(BadRequestException);
+      expect(
+        (invalidUserErr as BadRequestException).getResponse(),
+      ).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+    });
+
+    it('re-throws unexpected non-duplicate database errors during likePost', async () => {
+      const post = await service.create(
+        {
+          title: 'DB Error Post',
+          body: 'Testing unexpected create failure',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      vi.spyOn(likeModel, 'create').mockRejectedValueOnce(
+        new Error('db failure'),
+      );
+
+      await expect(service.likePost(post._id, otherUserId)).rejects.toThrow(
+        'db failure',
+      );
+      expect((await service.getById(post._id)).likeCount).toBe(0);
+    });
+
+    it('preserves stored likeCount === like document count (0 or 1) across rounds of concurrent mixed likePost and unlikePost calls from the same user', async () => {
+      const post = await service.create(
+        {
+          title: 'Mixed Race Post',
+          body: 'Testing concurrent like/unlike interleaving from one user.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const postObjectId = new Types.ObjectId(post._id);
+      const userObjectId = new Types.ObjectId(otherUserId);
+
+      for (let round = 0; round < 10; round += 1) {
+        const calls = Array.from({ length: 20 }, (_, index) => {
+          const isLike = (index + round) % 2 === 0;
+          const delayMs = round % 2 === 0 ? 0 : index % 3;
+          const invoke = () =>
+            isLike
+              ? service.likePost(post._id, otherUserId)
+              : service.unlikePost(post._id, otherUserId);
+          return delayMs === 0
+            ? invoke()
+            : new Promise((resolve) => setTimeout(resolve, delayMs)).then(
+                invoke,
+              );
+        });
+
+        const settled = await Promise.allSettled(calls);
+        for (const outcome of settled) {
+          expect(outcome.status).toBe('fulfilled');
+          if (outcome.status === 'fulfilled') {
+            expect(outcome.value.postId).toBe(post._id);
+            expect(typeof outcome.value.liked).toBe('boolean');
+            expect(outcome.value.likeCount).toBeGreaterThanOrEqual(0);
+          }
+        }
+
+        const [storedPost, storedLikes] = await Promise.all([
+          postModel.findById(postObjectId).lean().exec(),
+          likeModel.countDocuments({
+            postId: postObjectId,
+            userId: userObjectId,
+          }),
+        ]);
+
+        expect([0, 1]).toContain(storedLikes);
+        expect(storedPost?.likeCount).toBe(storedLikes);
+      }
+    });
+
+    it('cleans up newly inserted orphan like by _id if the post is deleted between visibility check and $inc (BLG-06)', async () => {
+      const target = await service.create(
+        {
+          title: 'Target Post',
+          body: 'Will be deleted mid-like.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const bystander = await service.create(
+        {
+          title: 'Bystander Post',
+          body: 'Existing like must stay intact.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const normalPost = await service.create(
+        {
+          title: 'Normal Post',
+          body: 'Control normal/idempotent like and prior-delete.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const alreadyDeleted = await service.create(
+        {
+          title: 'Already Deleted Post',
+          body: 'Deleted before likePost is invoked.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      const targetObjectId = new Types.ObjectId(target._id);
+      const bystanderObjectId = new Types.ObjectId(bystander._id);
+      const normalObjectId = new Types.ObjectId(normalPost._id);
+      const alreadyDeletedObjectId = new Types.ObjectId(alreadyDeleted._id);
+      const likerObjectId = new Types.ObjectId(otherUserId);
+
+      // Normal like + idempotent double like on normalPost.
+      const normalLike = await service.likePost(normalPost._id, otherUserId);
+      expect(normalLike).toEqual({
+        postId: normalPost._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: normalObjectId }).exec(),
+      ).toBe(1);
+      expect((await service.getById(normalPost._id)).likeCount).toBe(1);
+
+      const repeatNormalLike = await service.likePost(
+        normalPost._id,
+        otherUserId,
+      );
+      expect(repeatNormalLike).toEqual({
+        postId: normalPost._id,
+        likeCount: 1,
+        liked: true,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: normalObjectId }).exec(),
+      ).toBe(1);
+      expect((await service.getById(normalPost._id)).likeCount).toBe(1);
+
+      // Same user likes bystander post before the race; it must stay unaffected.
+      await service.likePost(bystander._id, otherUserId);
+      expect(
+        await likeModel
+          .countDocuments({
+            postId: bystanderObjectId,
+            userId: likerObjectId,
+          })
+          .exec(),
+      ).toBe(1);
+
+      // Liking an already-deleted post returns 404 NOT_FOUND with 0 likes.
+      await postModel.deleteOne({ _id: alreadyDeletedObjectId }).exec();
+      const preDeletedErr = await service
+        .likePost(alreadyDeleted._id, otherUserId)
+        .catch((err: unknown) => err);
+      expect(preDeletedErr).toBeInstanceOf(NotFoundException);
+      expect((preDeletedErr as NotFoundException).getStatus()).toBe(404);
+      expect((preDeletedErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel
+          .countDocuments({ postId: alreadyDeletedObjectId })
+          .exec(),
+      ).toBe(0);
+
+      // Deterministic race: delete target directly just before delegating to real likeModel.create.
+      type CreateDoc = { postId: Types.ObjectId; userId: Types.ObjectId };
+      const realCreate = likeModel.create.bind(likeModel) as (
+        doc: CreateDoc,
+      ) => Promise<LikeDocument>;
+      const createSpy = vi
+        .spyOn(likeModel, 'create')
+        .mockImplementationOnce((async (doc: CreateDoc) => {
+          await postModel.deleteOne({ _id: targetObjectId }).exec();
+          return realCreate(doc);
+        }) as never);
+
+      let raceErr: unknown;
+      try {
+        raceErr = await service
+          .likePost(target._id, otherUserId)
+          .catch((err: unknown) => err);
+      } finally {
+        createSpy.mockRestore();
+      }
+
+      expect(raceErr).toBeInstanceOf(NotFoundException);
+      expect((raceErr as NotFoundException).getStatus()).toBe(404);
+      expect((raceErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(0);
+
+      // Re-liking the now-deleted post after the race still returns 404 NOT_FOUND and 0 likes.
+      const retryErr = await service
+        .likePost(target._id, otherUserId)
+        .catch((err: unknown) => err);
+      expect(retryErr).toBeInstanceOf(NotFoundException);
+      expect((retryErr as NotFoundException).getStatus()).toBe(404);
+      expect((retryErr as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+      expect(
+        await likeModel.countDocuments({ postId: targetObjectId }).exec(),
+      ).toBe(0);
+
+      // Bystander post's like by the same user remains intact.
+      expect(
+        await likeModel
+          .countDocuments({
+            postId: bystanderObjectId,
+            userId: likerObjectId,
+          })
+          .exec(),
+      ).toBe(1);
+      expect((await service.getById(bystander._id)).likeCount).toBe(1);
+    });
+  });
+
   describe('User deactivation & reactivation events (ACC-12)', () => {
     it('hides author posts on user.deactivated and restores published non-hidden posts on user.reactivated idempotently', async () => {
       const ownersPublished = await service.create(
@@ -1264,6 +1721,836 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
 
       const persisted = await postModel.findById(pub._id).lean();
       expect(persisted?.authorDeactivated).toBe(false);
+    });
+  });
+
+  describe('tags & listByTag (BLG-08)', () => {
+    it('attaches, normalises, deduplicates, and updates tags on create and update', async () => {
+      const created = await service.create(
+        {
+          title: 'Siwa Notes',
+          body: 'Salt lakes.',
+          status: PostStatus.PUBLISHED,
+          tags: ['Travel', ' travel ', 'TRAVEL', '  Egypt-2026  '],
+        },
+        ownerId,
+      );
+      expect(created.tags).toEqual(['travel', 'egypt-2026']);
+
+      // Omitting tags in update leaves existing tags untouched.
+      const titleOnly = await service.update(
+        created._id,
+        { title: 'Siwa Notes Edited' },
+        ownerId,
+      );
+      expect(titleOnly.tags).toEqual(['travel', 'egypt-2026']);
+
+      // Updating tags replaces and normalises them.
+      const retagged = await service.update(
+        created._id,
+        { tags: ['  SIWA ', 'Oasis', 'siwa'] },
+        ownerId,
+      );
+      expect(retagged.tags).toEqual(['siwa', 'oasis']);
+
+      // Empty array clears tags.
+      const cleared = await service.update(created._id, { tags: [] }, ownerId);
+      expect(cleared.tags).toEqual([]);
+    });
+
+    it('rejects invalid tags on create and update with 400 VALIDATION_FAILED', async () => {
+      const post = await service.create(
+        { title: 'Base', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+
+      for (const badTags of [
+        ['t1', 't2', 't3', 't4', 't5', 't6'],
+        ['   '],
+        [''],
+        ['a'.repeat(31)],
+        ['valid', 123] as unknown as string[],
+        'not-an-array' as unknown as string[],
+      ]) {
+        const createErr = await service
+          .create(
+            {
+              title: 'Invalid',
+              body: 'Body',
+              status: PostStatus.DRAFT,
+              tags: badTags,
+            },
+            ownerId,
+          )
+          .catch((err: unknown) => err);
+        expect(createErr).toBeInstanceOf(BadRequestException);
+        expect((createErr as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tags' })],
+        });
+
+        const updateErr = await service
+          .update(post._id, { tags: badTags }, ownerId)
+          .catch((err: unknown) => err);
+        expect(updateErr).toBeInstanceOf(BadRequestException);
+        expect((updateErr as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tags' })],
+        });
+      }
+    });
+
+    it('lists paginated visible published posts by normalised tag and validates requested tag', async () => {
+      const p1 = await service.create(
+        {
+          title: 'First Travel',
+          body: 'One',
+          status: PostStatus.PUBLISHED,
+          tags: ['Travel', 'cairo'],
+        },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        {
+          title: 'Second Travel',
+          body: 'Two',
+          status: PostStatus.PUBLISHED,
+          tags: ['  TRAVEL '],
+        },
+        suspendedUserId,
+      );
+      await service.create(
+        {
+          title: 'Draft Only',
+          body: 'Three',
+          status: PostStatus.DRAFT,
+          tags: ['travel', 'draft-only'],
+        },
+        ownerId,
+      );
+      const hiddenPub = await service.create(
+        {
+          title: 'Hidden Pub',
+          body: 'Four',
+          status: PostStatus.PUBLISHED,
+          tags: ['travel'],
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hiddenPub._id) },
+        { $set: { isHidden: true } },
+      );
+      await service.create(
+        {
+          title: 'Deactivated Author Pub',
+          body: 'Five',
+          status: PostStatus.PUBLISHED,
+          tags: ['travel'],
+        },
+        deactivatedAuthorId,
+      );
+      // Mark the deactivated author's post as deactivated to match ACC-12 event state.
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: deactivatedAuthorId,
+      });
+
+      const byUppercase = await service.listByTag('  TRAVEL ');
+      expect(byUppercase.total).toBe(2);
+      expect(byUppercase.items.map((p) => p._id)).toEqual([p2._id, p1._id]);
+      expect(byUppercase.items[0].authorName).toBe('Suspended Author');
+      expect(byUppercase.items[1].authorName).toBe('Aisha Rawahi');
+
+      const draftOnly = await service.listByTag('DRAFT-ONLY');
+      expect(draftOnly).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const unknown = await service.listByTag('nonexistent');
+      expect(unknown.items).toEqual([]);
+
+      for (const invalidTag of ['', '   ', 'a'.repeat(31)]) {
+        const err = await service
+          .listByTag(invalidTag)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'tag' })],
+        });
+      }
+    });
+  });
+
+  describe('getAuthorPage (BLG-12)', () => {
+    it('returns author display name, join date, paginated visible published posts, and public itineraries without private fields', async () => {
+      const joinDate = new Date('2026-10-05T08:30:00.000Z');
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: ownerId,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            createdAt: joinDate,
+          },
+          {
+            id: otherUserId,
+            name: 'Bob Nomad',
+            email: 'bob@example.com',
+          },
+          {
+            id: suspendedUserId,
+            name: 'Suspended Author',
+            email: 'suspended@example.com',
+            status: UserStatus.SUSPENDED,
+          },
+        ]),
+      );
+
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-1',
+            ownerId,
+            title: 'Upper Egypt Loop',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 5,
+            cityIds: ['cairo', 'luxor'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-other',
+            ownerId: otherUserId,
+            title: 'Other User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-15T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['aswan'],
+            updatedAt: new Date('2026-11-12T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      const p1 = await service.create(
+        {
+          title: 'Older Published',
+          body: 'One',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const p2 = await service.create(
+        {
+          title: 'Newer Published',
+          body: 'Two',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.create(
+        { title: 'Owner Draft', body: 'Secret', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Owner Hidden', body: 'Hidden', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await service.create(
+        { title: 'Other Author Post', body: 'O', status: PostStatus.PUBLISHED },
+        otherUserId,
+      );
+
+      const page = await service.getAuthorPage(ownerId, { page: 1, limit: 1 });
+      expect(page).toMatchObject({
+        id: ownerId,
+        name: 'Aisha Rawahi',
+        createdAt: joinDate,
+        posts: {
+          page: 1,
+          limit: 1,
+          total: 2,
+          totalPages: 2,
+        },
+        itineraries: {
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        },
+      });
+      expect(page.posts.items.map((p) => p._id)).toEqual([p2._id]);
+      expect(page.posts.items[0].authorName).toBe('Aisha Rawahi');
+      expect(page.itineraries.items.map((i) => i.id)).toEqual(['itin-1']);
+      expect(Object.keys(page).sort()).toEqual([
+        'createdAt',
+        'id',
+        'itineraries',
+        'name',
+        'posts',
+      ]);
+
+      const page2 = await service.getAuthorPage(ownerId, { page: 2, limit: 1 });
+      expect(page2.posts.items.map((p) => p._id)).toEqual([p1._id]);
+
+      // Author with no posts or itineraries returns empty lists cleanly.
+      const emptyAuthorPage = await service.getAuthorPage(suspendedUserId);
+      expect(emptyAuthorPage).toMatchObject({
+        id: suspendedUserId,
+        name: 'Suspended Author',
+        posts: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+        itineraries: {
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        },
+      });
+    });
+
+    it('throws 404 NOT_FOUND for unknown or deactivated author and 400 for invalid id', async () => {
+      for (const blockedId of [
+        deactivatedAuthorId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const err = await service
+          .getAuthorPage(blockedId)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as NotFoundException).getResponse()).toMatchObject({
+          code: ErrorCode.NotFound,
+        });
+      }
+
+      const badErr = await service
+        .getAuthorPage('bad-id')
+        .catch((caught: unknown) => caught);
+      expect(badErr).toBeInstanceOf(BadRequestException);
+      expect((badErr as BadRequestException).getResponse()).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+      });
+    });
+
+    it('pages author itineraries independently of posts via itinerariesPage and itinerariesLimit (BLG-12)', async () => {
+      const baseTime = new Date('2026-11-01T00:00:00.000Z').getTime();
+      const seededItineraries = Array.from({ length: 25 }, (_, index) => ({
+        id: `itin-${String(index + 1).padStart(2, '0')}`,
+        ownerId,
+        title: `Trip ${index + 1}`,
+        countryCodes: ['EG'],
+        startDate: new Date('2026-12-01T00:00:00.000Z'),
+        dayCount: 3,
+        cityIds: ['cairo'],
+        // Newest updatedAt is itin-01, oldest is itin-25.
+        updatedAt: new Date(baseTime + (25 - index) * 60_000),
+      }));
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService(seededItineraries),
+      );
+
+      const post1 = await service.create(
+        { title: 'Post 1', body: 'One', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const post2 = await service.create(
+        { title: 'Post 2', body: 'Two', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      // Omitted parameters default both lists to page 1, limit 10.
+      const defaultPage = await service.getAuthorPage(ownerId);
+      expect(defaultPage.posts).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(defaultPage.itineraries).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+      expect(defaultPage.itineraries.items).toHaveLength(10);
+
+      // Page 1, 2, 3 cover all 25 itineraries cleanly without duplicates.
+      const seenIds: string[] = [];
+      for (const [pageNum, expectedCount] of [
+        [1, 10],
+        [2, 10],
+        [3, 5],
+      ] as const) {
+        const res = await service.getAuthorPage(ownerId, {
+          itinerariesPage: pageNum,
+        });
+        expect(res.itineraries).toMatchObject({
+          page: pageNum,
+          limit: 10,
+          total: 25,
+          totalPages: 3,
+        });
+        expect(res.itineraries.items).toHaveLength(expectedCount);
+        seenIds.push(...res.itineraries.items.map((item) => item.id));
+        // Posts remain on page 1 when only itinerariesPage changes.
+        expect(res.posts.page).toBe(1);
+        expect(res.posts.items.map((p) => p._id)).toEqual([
+          post2._id,
+          post1._id,
+        ]);
+      }
+      expect(seenIds).toHaveLength(25);
+      expect(new Set(seenIds).size).toBe(25);
+
+      // Out-of-range itinerariesPage returns empty items cleanly.
+      const pastEnd = await service.getAuthorPage(ownerId, {
+        itinerariesPage: 4,
+      });
+      expect(pastEnd.itineraries).toEqual({
+        items: [],
+        page: 4,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+
+      // itinerariesLimit=50 returns all 25 items in one page.
+      const limit50 = await service.getAuthorPage(ownerId, {
+        itinerariesLimit: 50,
+      });
+      expect(limit50.itineraries.limit).toBe(50);
+      expect(limit50.itineraries.items).toHaveLength(25);
+
+      // Moving posts page=2&limit=1 leaves itineraries on page 1 limit 10.
+      const postsPage2 = await service.getAuthorPage(ownerId, {
+        page: 2,
+        limit: 1,
+      });
+      expect(postsPage2.posts.page).toBe(2);
+      expect(postsPage2.posts.items.map((p) => p._id)).toEqual([post1._id]);
+      expect(postsPage2.itineraries.page).toBe(1);
+      expect(postsPage2.itineraries.limit).toBe(10);
+      expect(postsPage2.itineraries.items).toHaveLength(10);
+    });
+
+    it('throws 404 NOT_FOUND for admin, airline_moderator, and hotel_moderator accounts even with content present (BLG-12)', async () => {
+      const adminId = new Types.ObjectId().toHexString();
+      const airlineModId = new Types.ObjectId().toHexString();
+      const hotelModId = new Types.ObjectId().toHexString();
+
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: ownerId,
+            name: 'Normal User',
+            email: 'user@example.com',
+            role: UserRole.USER,
+          },
+          {
+            id: adminId,
+            name: 'Platform Admin',
+            email: 'admin@example.com',
+            role: UserRole.ADMIN,
+          },
+          {
+            id: airlineModId,
+            name: 'Airline Moderator',
+            email: 'airline-mod@example.com',
+            role: UserRole.AIRLINE_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.AIRLINE,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+          {
+            id: hotelModId,
+            name: 'Hotel Moderator',
+            email: 'hotel-mod@example.com',
+            role: UserRole.HOTEL_MODERATOR,
+            moderatorOf: {
+              providerType: ProviderType.HOTEL,
+              providerId: new Types.ObjectId().toHexString(),
+            },
+          },
+        ]),
+      );
+
+      for (const accountId of [ownerId, adminId, airlineModId, hotelModId]) {
+        await postModel.create({
+          authorId: new Types.ObjectId(accountId),
+          title: `Post by ${accountId}`,
+          body: 'Sample post',
+          status: PostStatus.PUBLISHED,
+          publishedAt: new Date(),
+        });
+      }
+      Object.assign(
+        fakeItineraries,
+        new FakeItinerariesService([
+          {
+            id: 'itin-user',
+            ownerId,
+            title: 'User Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-admin',
+            ownerId: adminId,
+            title: 'Admin Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-airline',
+            ownerId: airlineModId,
+            title: 'Airline Mod Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+          {
+            id: 'itin-hotel',
+            ownerId: hotelModId,
+            title: 'Hotel Mod Trip',
+            countryCodes: ['EG'],
+            startDate: new Date('2026-12-01T00:00:00.000Z'),
+            dayCount: 2,
+            cityIds: ['cairo'],
+            updatedAt: new Date('2026-11-10T10:00:00.000Z'),
+          },
+        ]),
+      );
+
+      for (const nonUserId of [adminId, airlineModId, hotelModId]) {
+        const err = await service
+          .getAuthorPage(nonUserId)
+          .catch((caught: unknown) => caught);
+        expect(err).toBeInstanceOf(NotFoundException);
+        expect((err as NotFoundException).getResponse()).toMatchObject({
+          code: ErrorCode.NotFound,
+        });
+      }
+
+      const userPage = await service.getAuthorPage(ownerId);
+      expect(userPage.id).toBe(ownerId);
+      expect(userPage.posts.items).toHaveLength(1);
+      expect(userPage.itineraries.items).toHaveLength(1);
+    });
+
+    it('resolves role across multiple listAccounts pages when more than 50 accounts share a name prefix (BLG-12)', async () => {
+      const targetAdminId = new Types.ObjectId().toHexString();
+      const decoys = Array.from({ length: 55 }, (_, index) => ({
+        id: new Types.ObjectId().toHexString(),
+        name: `Traveler ${index + 1}`,
+        email: `traveler-${index + 1}@example.com`,
+        role: UserRole.USER,
+        createdAt: new Date(Date.UTC(2026, 10, 2, 0, index + 1)),
+      }));
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: targetAdminId,
+            name: 'Traveler',
+            email: 'admin-traveler@example.com',
+            role: UserRole.ADMIN,
+            createdAt: new Date('2026-11-01T00:00:00.000Z'),
+          },
+          ...decoys,
+        ]),
+      );
+
+      const err = await service
+        .getAuthorPage(targetAdminId)
+        .catch((caught: unknown) => caught);
+      expect(err).toBeInstanceOf(NotFoundException);
+      expect((err as NotFoundException).getResponse()).toMatchObject({
+        code: ErrorCode.NotFound,
+      });
+    });
+  });
+
+  describe('search via listPublished (BLG-09)', () => {
+    it('orders search results by interaction score (likes + comments) descending then publishedAt descending and updates ordering on new engagement', async () => {
+      const oldestMs = new Date('2026-11-10T10:00:00.000Z').getTime();
+
+      const lowScoreNewer = await service.create(
+        {
+          title: 'Desert Safari Guide A',
+          body: 'Dunes and oasis camp.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const tieOlder = await service.create(
+        {
+          title: 'Desert Safari Guide B',
+          body: 'Camel trek and sunset.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const tieNewer = await service.create(
+        {
+          title: 'Desert Safari Guide C',
+          body: 'Stargazing in White Desert.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        otherUserId,
+      );
+      const highestScore = await service.create(
+        {
+          title: 'Desert Safari Guide D',
+          body: 'Full 4x4 route map and tips.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        otherUserId,
+      );
+
+      // Excluded visibility posts sharing the keyword.
+      await service.create(
+        {
+          title: 'Desert Draft',
+          body: 'Unpublished.',
+          status: PostStatus.DRAFT,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const hidden = await service.create(
+        {
+          title: 'Desert Hidden',
+          body: 'Moderated.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+
+      await Promise.all([
+        postModel.updateOne(
+          { _id: new Types.ObjectId(lowScoreNewer._id) },
+          {
+            $set: {
+              likeCount: 1,
+              commentCount: 0,
+              publishedAt: new Date(oldestMs + 40_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(tieOlder._id) },
+          {
+            $set: {
+              likeCount: 2,
+              commentCount: 1,
+              publishedAt: new Date(oldestMs + 20_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(tieNewer._id) },
+          {
+            $set: {
+              likeCount: 1,
+              commentCount: 2,
+              publishedAt: new Date(oldestMs + 30_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(highestScore._id) },
+          {
+            $set: {
+              likeCount: 4,
+              commentCount: 1,
+              publishedAt: new Date(oldestMs + 10_000),
+            },
+          },
+        ),
+      ]);
+
+      // Expect scores: highestScore (5) > tieNewer (3, newer date) > tieOlder (3, older date) > lowScoreNewer (1).
+      const page1 = await service.listPublished({
+        q: '  safari ',
+        page: 1,
+        limit: 2,
+      });
+      expect(page1.total).toBe(4);
+      expect(page1.totalPages).toBe(2);
+      expect(page1.items.map((p) => p._id)).toEqual([
+        highestScore._id,
+        tieNewer._id,
+      ]);
+      expect(page1.items[0].excerpt).toBe('Full 4x4 route map and tips.');
+
+      const page2 = await service.listPublished({
+        q: 'SAFARI',
+        page: 2,
+        limit: 2,
+      });
+      expect(page2.items.map((p) => p._id)).toEqual([
+        tieOlder._id,
+        lowScoreNewer._id,
+      ]);
+
+      // Adding comments + likes on lowScoreNewer pushes it above highestScore (1 -> 7).
+      await service.createComment(
+        lowScoreNewer._id,
+        { body: 'Comment 1' },
+        activeCommenterId,
+      );
+      await service.createComment(
+        lowScoreNewer._id,
+        { body: 'Comment 2' },
+        otherUserId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(lowScoreNewer._id) },
+        { $inc: { likeCount: 4 } },
+      );
+
+      const reordered = await service.listPublished({
+        q: 'safari',
+        page: 1,
+        limit: 4,
+      });
+      expect(reordered.items.map((p) => p._id)).toEqual([
+        lowScoreNewer._id,
+        highestScore._id,
+        tieNewer._id,
+        tieOlder._id,
+      ]);
+    });
+
+    it('matches title, normalised tag, and active/suspended author name safely with special characters and rejects overlong q', async () => {
+      const longBody = `<h1>Heading</h1><p>${'A'.repeat(220)}</p>`;
+      const titleMatch = await service.create(
+        {
+          title: 'Hiking in C++ (South) Canyon',
+          body: longBody,
+          status: PostStatus.PUBLISHED,
+          tags: ['trekking'],
+        },
+        ownerId,
+      );
+      const tagMatch = await service.create(
+        {
+          title: 'Coastal Notes',
+          body: 'Beaches',
+          status: PostStatus.PUBLISHED,
+          tags: ['  Egypt-2026  '],
+        },
+        ownerId,
+      );
+      const suspendedAuthorMatch = await service.create(
+        {
+          title: 'Nomad Journal',
+          body: 'Journal entry.',
+          status: PostStatus.PUBLISHED,
+        },
+        suspendedUserId,
+      );
+      const deactivatedPost = await service.create(
+        {
+          title: 'Deactivated Author C++ Post',
+          body: 'Hidden author.',
+          status: PostStatus.PUBLISHED,
+        },
+        deactivatedAuthorId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedPost._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      // Special regex characters in q must match literally without throwing.
+      const regexSafe = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'C++ (South)',
+      });
+      expect(regexSafe.items.map((p) => p._id)).toEqual([titleMatch._id]);
+      expect(regexSafe.items[0].excerpt).toBe(`Heading ${'A'.repeat(192)}...`);
+
+      // Tag partial match via q.
+      const byTagQuery = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '  EGYPT-20 ',
+      });
+      expect(byTagQuery.items.map((p) => p._id)).toEqual([tagMatch._id]);
+
+      // Author name match via FakeAccountsService.findUserIdsByName (suspended shown, deactivated excluded).
+      const byAuthor = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'suspended',
+      });
+      expect(byAuthor.items.map((p) => p._id)).toEqual([
+        suspendedAuthorMatch._id,
+      ]);
+      expect(byAuthor.items[0].authorName).toBe('Suspended Author');
+
+      const byDeactivatedAuthor = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'Deactivated Author',
+      });
+      expect(byDeactivatedAuthor.items).toEqual([]);
+
+      // Blank q acts as unfiltered browse; 150 emoji (300 UTF-16 units) are accepted cleanly.
+      const blankQ = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '   ',
+      });
+      expect(blankQ.total).toBe(3);
+
+      const emojiSearch = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '😀'.repeat(150),
+      });
+      expect(emojiSearch).toMatchObject({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
     });
   });
 });

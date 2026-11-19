@@ -55,6 +55,7 @@ import {
 import { FakeRoomNightInventory } from './room-night-inventory.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+import { cheapestQualifyingRoomPrice } from '../../src/modules/hotels/hotel-search-pricing.js';
 
 // Disconnected: share production validators without opening a database connection.
 const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
@@ -492,15 +493,12 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
         query.checkIn,
         query.checkOut,
       );
-      const capacity = freeRooms
-        .map((room) => room.maxOccupancy)
-        .sort((a, b) => b - a)
-        .slice(0, rooms)
-        .reduce((sum, occupancy) => sum + occupancy, 0);
-      if (freeRooms.length < rooms || capacity < guests) continue;
-      const pricePerNightMinor = Math.min(
-        ...freeRooms.map((room) => room.pricePerNightMinor),
+      const pricePerNightMinor = cheapestQualifyingRoomPrice(
+        freeRooms,
+        guests,
+        rooms,
       );
+      if (pricePerNightMinor === null) continue;
       if (
         (query.minPriceMinor !== undefined &&
           pricePerNightMinor < query.minPriceMinor) ||

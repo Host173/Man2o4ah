@@ -45,13 +45,24 @@ export function assertDateRange(fromDate: Date, toDate: Date): void {
 }
 
 export function assertStayDates(checkIn: Date, checkOut: Date): void {
-  assertDateRange(checkIn, checkOut);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  if (checkOut <= checkIn || checkIn < today) {
+  const details: { field: string; message: string }[] = [];
+  if (!isDateOnly(checkIn) || checkIn < today)
+    details.push({
+      field: 'checkIn',
+      message: 'must be a UTC calendar date on or after today',
+    });
+  if (!isDateOnly(checkOut) || checkOut <= checkIn)
+    details.push({
+      field: 'checkOut',
+      message: 'must be a UTC calendar date after checkIn',
+    });
+  if (details.length) {
     throw new BadRequestException({
       code: ErrorCode.ValidationFailed,
       message: 'Check-in cannot be in the past; check-out must follow check-in',
+      details,
     });
   }
 }

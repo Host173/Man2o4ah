@@ -385,25 +385,53 @@ describe('FakeItinerariesService owner-only methods', () => {
       expect(response.message).toBe('Validation failed');
     });
     it('returns the day untouched and does not bump updatedAt for an empty patch', async () => {
+      vi.useFakeTimers({ now: new Date('2027-01-01T00:00:00.000Z') });
+      try {
+        const itineraries = new FakeItinerariesService();
+        const created = await itineraries.create(createDto(), 'user-1');
+        const day = await itineraries.addDay(
+          created._id,
+          { cityId: 'cairo', notes: 'Arrival' },
+          'user-1',
+        );
+        // Move the clock on, so a bump would show up as a different updatedAt.
+        vi.setSystemTime(new Date('2027-01-02T00:00:00.000Z'));
+        const before = await itineraries.getById(created._id, 'user-1');
+
+        const untouched = await itineraries.updateDay(
+          created._id,
+          day._id,
+          {},
+          'user-1',
+        );
+        expect(untouched).toMatchObject({ cityId: 'cairo', notes: 'Arrival' });
+
+        const after = await itineraries.getById(created._id, 'user-1');
+        expect(after.updatedAt).toEqual(before.updatedAt);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects a non-string notes value with 400 VALIDATION_FAILED', async () => {
       const itineraries = new FakeItinerariesService();
       const created = await itineraries.create(createDto(), 'user-1');
-      const day = await itineraries.addDay(
-        created._id,
-        { cityId: 'cairo', notes: 'Arrival' },
-        'user-1',
-      );
-      const before = await itineraries.getById(created._id, 'user-1');
 
-      const untouched = await itineraries.updateDay(
-        created._id,
-        day._id,
-        {},
-        'user-1',
-      );
-      expect(untouched).toMatchObject({ cityId: 'cairo', notes: 'Arrival' });
-
-      const after = await itineraries.getById(created._id, 'user-1');
-      expect(after.updatedAt).toEqual(before.updatedAt);
+      const error = await itineraries
+        .addDay(
+          created._id,
+          { cityId: 'cairo', notes: null as unknown as string },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('notes');
     });
 
     it('leaves the day unchanged when a patch fails validation (no partial mutation)', async () => {

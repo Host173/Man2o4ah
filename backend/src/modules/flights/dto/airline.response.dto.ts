@@ -3,6 +3,7 @@ import type {
   AirlineLogoView,
   AirlineView,
   BaggagePolicyView,
+  CancellationTierView,
 } from '../flights.types.js';
 
 export class AirlineLogoResponseDto implements AirlineLogoView {
@@ -19,6 +20,14 @@ export class AirlineBaggagePolicyResponseDto implements BaggagePolicyView {
 
   @ApiProperty({ example: 0 })
   maxExtraBagsPerPassenger!: number;
+}
+
+export class CancellationTierResponseDto implements CancellationTierView {
+  @ApiProperty({ type: 'integer', minimum: 0, example: 7 })
+  daysBefore!: number;
+
+  @ApiProperty({ type: 'integer', minimum: 0, maximum: 100, example: 80 })
+  refundPercent!: number;
 }
 
 /** Airline profile returned by the flights module (FLT-01). */
@@ -41,6 +50,6 @@ export class AirlineResponseDto implements AirlineView {
   @ApiProperty({ type: AirlineBaggagePolicyResponseDto })
   baggagePolicy!: BaggagePolicyView;
 
-  @ApiProperty({ type: 'array', items: { type: 'object' } })
-  cancellationTiers!: AirlineView['cancellationTiers'];
+  @ApiProperty({ type: [CancellationTierResponseDto] })
+  cancellationTiers!: CancellationTierResponseDto[];
 }

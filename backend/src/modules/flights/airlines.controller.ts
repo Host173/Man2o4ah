@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UploadedFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
@@ -31,6 +32,8 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { AirlineResponseDto } from './dto/airline.response.dto.js';
 import { CreateAirlineDto } from './dto/create-airline.dto.js';
 import { UpdateAirlineDto } from './dto/update-airline.dto.js';
+import { UpdateAirlineBaggagePolicyDto } from './dto/update-airline-baggage-policy.dto.js';
+import { UpdateAirlineCancellationPolicyDto } from './dto/update-airline-cancellation-policy.dto.js';
 import { AirlinesService } from './airlines.service.js';
 
 @ApiTags('flights')
@@ -86,6 +89,48 @@ export class AirlinesController {
     @CurrentUser() user: AuthUser,
   ): Promise<AirlineResponseDto> {
     return this.airlines.update(id.toHexString(), dto, user);
+  }
+
+  @Put(':id/baggage-policy')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'FLT-08 Set the assigned airline baggage policy' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: AirlineResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid airline ID or baggage policy',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'Airline moderator role required' })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
+  updateBaggagePolicy(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: UpdateAirlineBaggagePolicyDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<AirlineResponseDto> {
+    return this.airlines.updateBaggagePolicy(id.toHexString(), dto, user);
+  }
+
+  @Put(':id/cancellation-policy')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'FLT-09 Set the assigned airline cancellation tiers',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: AirlineResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid airline ID or cancellation tiers',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'Airline moderator role required' })
+  @ApiNotFoundResponse({ description: 'Airline not found' })
+  updateCancellationPolicy(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: UpdateAirlineCancellationPolicyDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<AirlineResponseDto> {
+    return this.airlines.updateCancellationPolicy(id.toHexString(), dto, user);
   }
 
   @Post(':id/logo')

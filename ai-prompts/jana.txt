@@ -231,3 +231,26 @@ How the output was used:
 Implemented atomic SeatInventory operations, unit and integration coverage (including the concurrency invariant), and matching fake validation; no commit.
 ================================================
 
+**Expected output**
+Moderator sets extra-bag price and maximum, and cancellation tiers with unique days-before values.
+
+**Requirements:** FLT-08, FLT-09
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit (tier and baggage validation boundaries); API
+**TDD required:** No
+
+**Branch:** `feature/FLT-08-airline-baggage-cancellation-policies`
+**PR title:** `FLT-08: Airline baggage and cancellation policies`
+
+**Depends on:** [#33](https://github.com/Host173/Man2o4ah/issues/33) (FLT-01)
+**Blocks:** [#42](https://github.com/Host173/Man2o4ah/issues/42) (FLT-17)
+**Needed end to end by:** [#22](https://github.com/Host173/Man2o4ah/issues/22) (PAY-02), [#52](https://github.com/Host173/Man2o4ah/issues/52) (FLT-19), [#53](https://github.com/Host173/Man2o4ah/issues/53) (FLT-22)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure your tests cover all edge cases andthe implementation matchs the contract and the fake
+
+How the output was used:
+Added airline-moderator-only baggage and cancellation policy replacement endpoints with boundary validation, persistence, API and unit tests, plus a contract-shaped fake assertion and typed Swagger response tiers.
+================================================
+

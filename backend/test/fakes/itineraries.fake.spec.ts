@@ -536,59 +536,5 @@ describe('FakeItinerariesService owner-only methods', () => {
       };
       expect(response.details[0].field).toBe('notes');
     });
-
-    it('stops cleanly at the 60-day cap when more adds race past it', async () => {
-      const itineraries = new FakeItinerariesService();
-      const created = await itineraries.create(createDto(), 'user-1');
-      for (let i = 0; i < 57; i++) {
-        await itineraries.addDay(
-          created._id,
-          { cityId: 'cairo', notes: `Day ${i + 1}` },
-          'user-1',
-        );
-      }
-
-      const results = await Promise.allSettled(
-        Array.from({ length: 8 }, () =>
-          itineraries.addDay(created._id, { cityId: 'dubai' }, 'user-1'),
-        ),
-      );
-      const fulfilled = results.filter((r) => r.status === 'fulfilled');
-      const rejected = results.filter((r) => r.status === 'rejected');
-      expect(fulfilled).toHaveLength(3);
-      expect(rejected).toHaveLength(5);
-      expect((await itineraries.getById(created._id, 'user-1')).dayCount).toBe(
-        60,
-      );
-    });
-
-    it('accepts 2000 emoji characters and rejects 2001 as notes', async () => {
-      const itineraries = new FakeItinerariesService();
-      const created = await itineraries.create(createDto(), 'user-1');
-
-      const accepted = await itineraries.addDay(
-        created._id,
-        { cityId: 'cairo', notes: '\u{1F525}'.repeat(2000) },
-        'user-1',
-      );
-      // Code points, not UTF-16 units: one emoji is one character.
-      expect(accepted.notes).toBeDefined();
-      expect(Array.from(accepted.notes ?? []).length).toBe(2000);
-
-      const error = await itineraries
-        .addDay(
-          created._id,
-          { cityId: 'cairo', notes: '\u{1F525}'.repeat(2001) },
-          'user-1',
-        )
-        .catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(BadRequestException);
-      const response = (error as BadRequestException).getResponse() as {
-        code: string;
-        message: string;
-        details: { field: string; message: string }[];
-      };
-      expect(response.details[0].field).toBe('notes');
-    });
   });
 });

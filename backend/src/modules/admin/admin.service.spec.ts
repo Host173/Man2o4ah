@@ -12,9 +12,25 @@ import { FlightBookingsService } from '../flight-bookings/flight-bookings.servic
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
+import { ListReportsQueryDto } from '../moderation/dto/list-reports-query.dto.js';
+import { ReportResolutionAction } from '../moderation/dto/resolve-report.dto.js';
+import { ModerationService } from '../moderation/moderation.service.js';
+import { ReportTargetType } from '../moderation/schemas/report.schema.js';
 import { AdminModule } from './admin.module.js';
 import { AdminService } from './admin.service.js';
 import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
+
+function createAdminService(
+  flights: FakeFlightBookingsService,
+  hotels: FakeHotelBookingsService,
+  moderation: Partial<ModerationService> = {},
+): AdminService {
+  return new AdminService(
+    flights as unknown as FlightBookingsService,
+    hotels as unknown as HotelBookingsService,
+    moderation as ModerationService,
+  );
+}
 
 function flightView(
   overrides: Partial<FlightBookingAdminView> = {},
@@ -72,9 +88,9 @@ describe('AdminService', () => {
   );
 
   it('returns empty page when no bookings exist', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(new ListAdminBookingsQueryDto());
@@ -103,11 +119,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-13T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const page1 = await service.listBookings(
@@ -124,9 +138,9 @@ describe('AdminService', () => {
   });
 
   it('rejects from > to with VALIDATION_FAILED details', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     await expect(
@@ -151,11 +165,9 @@ describe('AdminService', () => {
       passengerEmail: 'secret@example.com',
       paymentIntentId: 'pi_secret',
     } as FlightBookingAdminView;
-    const service = new AdminService(
-      new FakeFlightBookingsService([
-        leakyFlight,
-      ]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([leakyFlight]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(
@@ -217,11 +229,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-10T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const ids: string[] = [];
@@ -245,10 +255,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService([]);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     await expect(
       service.listBookings(
@@ -305,10 +312,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels10k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     for (const [limit, expectedTotalPages] of [
       [50, 200],
@@ -345,13 +349,9 @@ describe('AdminService', () => {
       expect(hotelsSpy).not.toHaveBeenCalled();
     }
 
-    const smallService = new AdminService(
-      new FakeFlightBookingsService(
-        flights10k.slice(0, 60),
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(
-        hotels10k.slice(0, 60),
-      ) as unknown as HotelBookingsService,
+    const smallService = createAdminService(
+      new FakeFlightBookingsService(flights10k.slice(0, 60)),
+      new FakeHotelBookingsService(hotels10k.slice(0, 60)),
     );
     const smallLast = await smallService.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, { page: 3, limit: 50 }),
@@ -386,10 +386,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels20k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     const flightRes = await service.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, {
@@ -436,5 +433,68 @@ describe('AdminService', () => {
         expect(errors.map((err) => err.property)).toContain('page');
       }
     }
+  });
+
+  it('delegates moderation methods (listReports, resolveReport, hideContent, deleteContent) to ModerationService (GEN-10)', async () => {
+    const listResult = {
+      items: [],
+      page: 1,
+      limit: 10,
+      total: 0,
+      totalPages: 0,
+    };
+    const resolvedView = {
+      _id: 'report-1',
+      reporterId: 'user-1',
+      targetType: ReportTargetType.POST,
+      targetId: 'post-1',
+      reason: 'Spam',
+      status: 'dismissed',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const moderationStub = {
+      listReports: vi.fn().mockResolvedValue(listResult),
+      resolveReport: vi.fn().mockResolvedValue(resolvedView),
+      hideContent: vi.fn().mockResolvedValue(undefined),
+      deleteContent: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
+      moderationStub as unknown as ModerationService,
+    );
+
+    const query = new ListReportsQueryDto();
+    expect(await service.listReports(query)).toBe(listResult);
+    expect(moderationStub.listReports).toHaveBeenCalledWith(query);
+
+    const dto = { action: ReportResolutionAction.DISMISS };
+    expect(await service.resolveReport('report-1', dto, 'admin-1')).toBe(
+      resolvedView,
+    );
+    expect(moderationStub.resolveReport).toHaveBeenCalledWith(
+      'report-1',
+      dto,
+      'admin-1',
+    );
+
+    await service.hideContent(ReportTargetType.POST, 'post-1', 'admin-1');
+    expect(moderationStub.hideContent).toHaveBeenCalledWith(
+      ReportTargetType.POST,
+      'post-1',
+      'admin-1',
+    );
+
+    await service.deleteContent(
+      ReportTargetType.COMMENT,
+      'comment-1',
+      'admin-1',
+    );
+    expect(moderationStub.deleteContent).toHaveBeenCalledWith(
+      ReportTargetType.COMMENT,
+      'comment-1',
+      'admin-1',
+    );
   });
 });

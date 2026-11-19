@@ -11,6 +11,7 @@ import { ReferenceDataService } from '../reference-data/reference-data.service.j
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FlightsModule } from './flights.module.js';
 import { Airline } from './schemas/airline.schema.js';
+import { Flight } from './schemas/flight.schema.js';
 
 describe('Flights HTTP API (FLT-03)', () => {
   let t: TestApp;
@@ -64,6 +65,8 @@ describe('Flights HTTP API (FLT-03)', () => {
       .send(flight)
       .expect(201);
 
+    expect(response.body._id).toMatch(/^[a-f0-9]{24}$/);
+    expect(response.body).not.toHaveProperty('id');
     expect(response.body).toMatchObject({
       airlineId: user.providerId,
       flightNumber: 'MS 123',
@@ -156,10 +159,46 @@ describe('Flights HTTP API (FLT-03)', () => {
 
   it('lists only the moderator airline flights with the standard page shape', async () => {
     const user = await moderator();
-    await t
+    const created = await t
       .http()
       .post('/api/flights')
       .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    const flightDocument = await flights.findById(created.body._id).exec();
+    if (!flightDocument) throw new Error('Created flight was not persisted');
+    flightDocument.cabins.push({
+      cabinClass: 'economy',
+      totalSeats: 2,
+      availableSeats: 2,
+      heldSeats: 0,
+      bookedSeats: 0,
+      priceMinor: 30000,
+      freeBags: 1,
+      maxBagWeightKg: 23,
+    });
+    await flightDocument.save();
+
+    const otherProviderId = new Types.ObjectId().toHexString();
+    const otherModerator = await loginAs(
+      t.connection,
+      UserRole.AIRLINE_MODERATOR,
+      { providerId: otherProviderId },
+    );
+    const airlines = t.moduleRef.get<Model<Airline>>(
+      getModelToken(Airline.name),
+    );
+    await airlines.create({
+      _id: new Types.ObjectId(otherProviderId),
+      name: 'Other Airline',
+      code: 'OA',
+    });
+    await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', otherModerator.cookie)
       .send(flight)
       .expect(201);
 
@@ -176,17 +215,27 @@ describe('Flights HTTP API (FLT-03)', () => {
     });
     expect(response.body.items).toHaveLength(1);
     expect(response.body.items[0]).toMatchObject({
+      _id: created.body._id,
       airlineId: user.providerId,
       flightNumber: 'MS 123',
       departureTimeZone: 'America/New_York',
       arrivalTimeZone: 'Africa/Cairo',
+      cabins: [
+        {
+          _id: expect.stringMatching(/^[a-f0-9]{24}$/),
+          cabinClass: 'economy',
+        },
+      ],
     });
+    expect(response.body.items[0]).not.toHaveProperty('id');
+    expect(response.body.items[0].cabins[0]).not.toHaveProperty('id');
 
-    await t
+    const forbiddenAirline = await t
       .http()
-      .get(`/api/airlines/${new Types.ObjectId().toString()}/flights`)
+      .get(`/api/airlines/${otherProviderId}/flights`)
       .set('Cookie', user.cookie)
       .expect(404);
+    expect(forbiddenAirline.body.code).toBe(ErrorCode.NotFound);
   });
 
   it('requires an airline moderator for creation and the own-airline list', async () => {

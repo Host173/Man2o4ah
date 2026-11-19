@@ -2,9 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
 import type { CabinView, FlightManagementView } from '../flights.types.js';
 
-class CabinResponseDto implements CabinView {
+class CabinResponseDto implements Omit<CabinView, 'id'> {
   @ApiProperty()
-  id!: string;
+  _id!: string;
 
   @ApiProperty()
   cabinClass!: CabinView['cabinClass'];
@@ -31,9 +31,12 @@ class CabinResponseDto implements CabinView {
   maxBagWeightKg!: number;
 }
 
-export class FlightResponseDto implements FlightManagementView {
+export class FlightResponseDto implements Omit<
+  FlightManagementView,
+  'id' | 'cabins'
+> {
   @ApiProperty()
-  id!: string;
+  _id!: string;
 
   @ApiProperty()
   airlineId!: string;
@@ -71,7 +74,7 @@ export class FlightResponseDto implements FlightManagementView {
   hasBookings!: boolean;
 
   @ApiProperty({ type: [CabinResponseDto] })
-  cabins!: CabinView[];
+  cabins!: CabinResponseDto[];
 
   @ApiProperty({ example: 'America/New_York' })
   departureTimeZone!: string;
@@ -80,7 +83,15 @@ export class FlightResponseDto implements FlightManagementView {
   arrivalTimeZone!: string;
 
   static fromView(view: FlightManagementView): FlightResponseDto {
-    return { ...view };
+    const { id, cabins, ...flight } = view;
+    return {
+      ...flight,
+      _id: id,
+      cabins: cabins.map(({ id: cabinId, ...cabin }) => ({
+        ...cabin,
+        _id: cabinId,
+      })),
+    };
   }
 }
 

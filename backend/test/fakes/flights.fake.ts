@@ -122,8 +122,15 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
 
   async listAirlineFlights(
     airlineId: string,
+    moderatorAirlineId: string | undefined,
     query: FlightListQuery,
   ): Promise<Paginated<FlightManagementView>> {
+    if (moderatorAirlineId !== airlineId) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
     if (!this.data.airline(airlineId)) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,

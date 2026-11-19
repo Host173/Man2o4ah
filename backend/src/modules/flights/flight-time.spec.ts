@@ -59,6 +59,18 @@ describe('convertFlightTimes', () => {
     ).toThrow(BadRequestException);
   });
 
+  it('rejects arrival exactly at departure in UTC', () => {
+    expect(() =>
+      convertFlightTimes(
+        '2027-01-10T12:00',
+        'Africa/Cairo',
+        '2027-01-10T14:00',
+        'Asia/Dubai',
+        now,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
   it('rejects past departures and malformed local date-times', () => {
     expect(() =>
       convertFlightTimes(

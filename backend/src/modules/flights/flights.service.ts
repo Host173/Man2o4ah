@@ -128,9 +128,13 @@ export class FlightsService {
    */
   async listAirlineFlights(
     airlineId: string,
+    moderatorAirlineId: string | undefined,
     query: FlightListQuery,
   ): Promise<Paginated<FlightManagementView>> {
     const airlineObjectId = this.objectId(airlineId);
+    if (moderatorAirlineId !== airlineObjectId.toHexString()) {
+      throw this.notFound();
+    }
     if (!(await this.airlineModel.exists({ _id: airlineObjectId }).exec())) {
       throw this.notFound();
     }

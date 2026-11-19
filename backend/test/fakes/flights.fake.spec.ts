@@ -433,7 +433,7 @@ describe('FakeFlightsService', () => {
           arrivalTimeZone: 'Africa/Cairo',
         });
 
-        const page = await flights.listAirlineFlights('a1', {
+        const page = await flights.listAirlineFlights('a1', 'a1', {
           page: 1,
           limit: 10,
         });
@@ -442,6 +442,16 @@ describe('FakeFlightsService', () => {
         expect(page.items.every((flight) => flight.airlineId === 'a1')).toBe(
           true,
         );
+      });
+
+      it('does not list another airline without its assigned moderator ID', async () => {
+        const { flights } = setup();
+        await expect(
+          flights.listAirlineFlights('a2', 'a1', { page: 1, limit: 10 }),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
       });
 
       it('rejects duplicate numbers for the same airline and local date', async () => {

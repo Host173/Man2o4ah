@@ -79,14 +79,11 @@ export class FlightsController {
     @CurrentUser() user: AuthUser,
   ): Promise<PaginatedFlightsResponseDto> {
     const airlineId = id.toHexString();
-    if (user.providerId !== airlineId) {
-      throw new NotFoundException({
-        code: ErrorCode.NotFound,
-        message: 'Airline not found',
-      });
-    }
-
-    const result = await this.flights.listAirlineFlights(airlineId, query);
+    const result = await this.flights.listAirlineFlights(
+      airlineId,
+      user.providerId,
+      query,
+    );
     return {
       ...result,
       items: result.items.map((flight) => FlightResponseDto.fromView(flight)),

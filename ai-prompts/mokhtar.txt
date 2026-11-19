@@ -323,3 +323,41 @@ Align `FakeItinerariesService` behavior completely with the real service:
 How the output was used:
 Fixed fake service updateDay (empty-body early return, atomic validation, notes-before-mutation), reordered addDay validation (city before day cap), added PATCH $-prefixed notes test, ran `npm run verify` (all green: 1237 tests), logged the prompt, and will commit/push to update PR #154.
 
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Validation Order Fix in `itineraries.fake.ts`
+* **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
+* **What to understand & fix:** In `FakeItinerariesService.addDay`, validate `notes` (length/code-point limit) **before** checking the 60-day cap so the fake matches the real service's validation order and error response.
+
+### 2. Missing Tests to Pin Fake Behavior (`itineraries.fake.spec.ts`)
+Right now, if `f86cb72`'s `itineraries.fake.ts` changes are set aside, all itinerary/fake tests still pass because nothing pins those behaviors. Add dedicated fake-spec tests for:
+1. **Empty `PATCH`:** Calling `updateDay` with an empty patch does **not** bump `updatedAt` (leaves the day/timestamp unchanged).
+2. **Failed `PATCH` leaves city untouched:** Calling `updateDay` with `{ cityId: "dubai", notes: <2001 chars> }` fails with `400` / validation error **and** keeps the original `cityId` unchanged (no partial mutation).
+3. **61st day with an unknown city:** Calling `addDay` on a 61st day with an unknown city throws the **city error** (matching the service's validation order).
+4. **61st day with a valid city and 2001-char `notes`:** Calling `addDay` throws the **`notes` error** (not the 60-day cap error).
+
+### 3. Missing Boundary & Concurrency Tests
+Add tests verifying limits already enforced by the code:
+1. **57 days + 8 parallel `addDay` calls:** Stops cleanly at **60 days** total (not just the 10-parallel case).
+2. **Character / code-point notes boundary:** **2000 emoji characters** pass validation, while **2001 emoji characters** fail validation.
+
+### 4. Strict Commit Discipline ("Red Test First")
+* **Do NOT mix the red test and the fix into a single commit.**
+* First, add the new tests covering the gaps above, run the test suite to verify they fail ("red") for the expected reasons, and **commit and push the red test commit(s) first**.
+* Next, apply the `addDay` notes-before-60-day-cap fix in `itineraries.fake.ts` (and any needed test adjustments), verify everything turns **green**, and **commit and push the fix**.
+
+### 5. Final Verification & Prompt Logging
+* Run `npm run format` and the full verification suite (`npm run verify`) and confirm formatting, `oxlint`, TypeScript typechecking, the full test suite, and build all pass with **zero errors**.
+* Log the prompts used for this work into the repository's prompts file following project rules.
+* Push all commits to `feature/ITN-05-days-city-groups` and verify `gh pr checks` is green.
+
+How the output was used:
+Fixed the fake itineraries day validation order (notes before the 60-day cap) after pinning it with red tests and committed the red test then the fix.
+

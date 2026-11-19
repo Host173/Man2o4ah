@@ -1,5 +1,6 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
 import type { Paginated } from '../../common/pagination/paginated.js';
+import { AirlinesService } from './airlines.service.js';
 import type {
   AirlineView,
   BookabilityResult,
@@ -19,6 +20,8 @@ import type {
  */
 @Injectable()
 export class FlightsService {
+  constructor(private readonly airlines: AirlinesService) {}
+
   /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
@@ -67,21 +70,16 @@ export class FlightsService {
     throw new NotImplementedException('search: implemented in FLT-11');
   }
 
-  /** One airline by ID, or `null` (ACC-13). Implemented in FLT-01. */
+  /** One airline by ID, or `null` (FLT-01, ACC-13). */
   getAirline(airlineId: string): Promise<AirlineView | null> {
-    void airlineId;
-    throw new NotImplementedException('getAirline: implemented in FLT-01');
+    return this.airlines.getAirline(airlineId);
   }
 
   /**
    * Activate or deactivate an airline (ACC-15) and return it. Idempotent.
-   * Throws 404 `NOT_FOUND` if it doesn't exist. Implemented in FLT-01.
+   * Throws 404 `NOT_FOUND` if it doesn't exist. Admin calls this via ACC-15.
    */
   setAirlineActive(airlineId: string, isActive: boolean): Promise<AirlineView> {
-    void airlineId;
-    void isActive;
-    throw new NotImplementedException(
-      'setAirlineActive: implemented in FLT-01',
-    );
+    return this.airlines.setAirlineActive(airlineId, isActive);
   }
 }

@@ -1659,6 +1659,58 @@ Done means:
 - Store with one `insertMany` per event.
 
 **Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages. Follow the existing controller style (see `backend/src/modules/blog/blog.controller.ts`, `backend/src/modules/reference-data/reference-data.controller.ts`): `@ApiTags`, `@ApiCookieAuth()`, `@ApiOperation({ summary: 'GEN-01 …' })` on every route, typed `@ApiOkResponse`, and `@ApiUnauthorizedResponse` / `@ApiBadRequestResponse` / `@ApiNotFoundResponse` where they apply.
+Related Requirement: ITN-18
+
+Prompt:
+@"C:\Users\karee\Downloads\ITN18_EXECUTION.md"
+do this now on  a new branch
+[Attached: ITN18_EXECUTION.md]
+# Execution — ITN-18: Exchange rates
+
+Issue #18. Lane D of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4. **TDD is required** for this ticket: the conversion tests are committed, failing, before the conversion code.
+
+## Goal
+
+Implement the `fx` module: fetch rates from FXRatesAPI once a day, cache them in `exchange_rates`, convert amounts between currencies in minor units, and expose the latest rates publicly. Today `FxService.getConverter` and `FxService.convert` throw `NotImplementedException('… implemented in ITN-18')`; Mokhtar's itinerary budgets (ITN-14) need them.
+
+Done means:
+1. A pure conversion function (minor units, half-up rounding), test-first.
+2. An adapter for FXRatesAPI that tests replace (no test ever touches the network).
+3. A daily refresh (and one at start-up if today's rates are missing) that never throws and keeps the last rates on failure.
+4. `FxService.getConverter()` / `convert()` implemented, and `GET /api/exchange-rates/latest` (public).
+
+**Out of scope:** converting booking prices or anything outside the fx module (the multi-currency booking work agreed with the TAs comes after M1), the budget summary itself (ITN-14), the frontend, CI.
+
+## Context you need
+
+**Requirement ITN-18 (verbatim):** "The system shall convert all itinerary budget amounts to the user's preferred currency (from the supported currency list) using exchange rates fetched once per day from a configured public exchange-rate API and cached in the database, and show the rate date. If the API is unavailable, the last cached rates are used. Booking prices are not converted (PAY-04)."
+
+**Rules (`domain-rules.md` §2, `data-model.md` §1.3 and §3.9):**
+- FXRatesAPI: `GET https://api.fxratesapi.com/latest?base=USD&currencies=EGP,AED,...` (`api_key` **only if** `FXRATES_API_KEY` is set). Success: `{ success: true, date, base, rates }`. Failure: `{ success: false, error, description }`. Only the backend calls it; the key never leaves the server and never appears in a log or an error message.
+- The refresh runs daily, and at start-up if today's document is missing. It inserts `exchange_rates { rateDate, base, rates, fetchedAt, source: 'fxratesapi' }` and **never throws to callers**: on any failure it logs and keeps the old data.
+- Conversion uses the **newest** document: `amount × rates[to] / rates[from]`, adjusted for each currency's `minorUnits` (JPY has 0, the others 2), **rounded half up** (`Math.round` on non-negative values). Unknown currency → `400 UNSUPPORTED_CURRENCY`. No rates at all → `503 RATES_UNAVAILABLE`.
+- Supported currencies = the `currencies` collection (reference-data): `ReferenceDataService.listCurrencies()` returns `CurrencyView { code, name, minorUnits }[]` sorted by code (today AED, EGP, EUR, GBP, JPY, SAR, USD). `data-model.md` §6.1 allows fx → reference-data.
+- Testing (`testing.md` §5): FXRatesAPI sits behind an adapter class; tests swap the adapter and never call the network. Time: `vi.useFakeTimers({ toFake: ['Date'] })` + `vi.setSystemTime(...)` (fake **only** `Date`: faking timers breaks the MongoDB driver), and `vi.useRealTimers()` in `afterEach`.
+
+**The schema exists, don't change it** (`backend/src/modules/fx/schemas/exchange-rate.schema.ts`): `rateDate` (DateOnly, **unique** index), `base`, `rates` (Map of positive numbers, must contain `base` = 1), `fetchedAt`, `source`. One document per UTC day.
+
+**The contract stays exactly as it is** (`fx.service.ts`, `fx.types.ts`):
+```ts
+getConverter(): Promise<Converter>   // loads the newest rates once; 503 RATES_UNAVAILABLE if none
+convert(amountMinor: number, from: string, to: string): Promise<{ amountMinor: number; rateDate: string }>
+interface Converter { rateDate: string /* 'YYYY-MM-DD' */; convert(amountMinor: number, from: string, to: string): number }
+```
+`FakeFxService` (`backend/test/fakes/fx.fake.ts`) `implements PublicApi<FxService>`, so **don't add public methods to `FxService`**: the refresh and the latest-rates read go in a separate internal class (step 4). The fake computes `Math.round((amountMinor * rateTo * 10^minorTo) / (rateFrom * 10^minorFrom))`; the real conversion must use the same formula so they agree.
+
+**Existing code to reuse:**
+- `backend/src/common/money/money.ts`: `assertMinor(n)` (non-negative safe integer, else a plain `Error` → 500: a bad amount is a programming error).
+- `backend/src/common/dates/date-only.ts`: `toDateOnly('YYYY-MM-DD')`. Today's UTC date: `toDateOnly(new Date().toISOString().slice(0, 10))`; a DateOnly back to text: `date.toISOString().slice(0, 10)`.
+- Errors: `ErrorCode.UnsupportedCurrency` (400), `ErrorCode.RatesUnavailable` (503) in `backend/src/common/errors/error-codes.ts`: `new BadRequestException({ code, message: \`Unsupported currency: ${code}\` })`, `new ServiceUnavailableException({ code, message: 'Exchange rates are unavailable' })`.
+- `@Public()` from `backend/src/modules/accounts/auth/decorators.ts`. `@Cron` from `@nestjs/schedule` (already installed; `ScheduleModule.forRoot()` is in `AppModule`, not in `createTestApp`, so crons never fire in tests).
+- `ReferenceDataSeedService.run()` (`backend/src/modules/reference-data/seed/reference-data-seed.service.ts`) loads the real currencies in tests.
+- `ConfigModule` is global; `createTestApp` serves `TEST_CONFIG` (`backend/test/support/test-config.ts`).
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages (use the global `fetch` of Node).
 
 **Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files. Run the full `npm run verify` once, at the end (G1).
 
@@ -1763,6 +1815,160 @@ Get the model with `t.moduleRef.get<Model<Notification>>(getModelToken(Notificat
 
 Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-01`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN01_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
 **Commit:** `chore(ai): log the GEN-01 prompt (GEN-01)`
+2. `git worktree add ../man2o4ah-ITN-18 -b feature/ITN-18-exchange-rates origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/modules/fx src/modules/reference-data` must pass (develop's admin test was broken until PR #166 merged). If not, stop and report.
+
+## Step 1 (TDD, red): conversion tests
+
+New file `backend/src/modules/fx/fx-conversion.spec.ts`, for a function that doesn't exist yet:
+```ts
+// fx-conversion.ts (step 2)
+export interface ConverterInput { rateDate: string; rates: Record<string, number>; minorUnits: Record<string, number> }
+export function buildConverter(input: ConverterInput): Converter
+```
+Use these rates (per 1 USD) and minor units in the tests: `USD 1`, `EGP 50`, `EUR 0.9`, `JPY 150`, `AED 3.6725`; minor units `USD 2, EGP 2, EUR 2, JPY 0, AED 2`.
+
+Decision table, one `it` per row:
+
+| amountMinor | from → to | Expect | Why |
+|---|---|---|---|
+| 10000 | USD → EGP | 500000 | $100 = 5000 EGP |
+| 500000 | EGP → USD | 10000 | the reverse |
+| 10000 | USD → JPY | 15000 | $100 = ¥15000, JPY has no minor units |
+| 15000 | JPY → USD | 10000 | the reverse |
+| 1 | USD → EUR | 1 | 0.9 rounds half up to 1 |
+| 1 | EUR → USD | 1 | 1.111… rounds down to 1 |
+| 3 | EUR → EGP | 167 | 3 × 50 / 0.9 = 166.67 rounds up |
+| 0 | USD → EGP | 0 | zero stays zero |
+| 12345 | EGP → EGP | 12345 | same currency: unchanged, no rounding |
+| 10000 | USD → AED | 36725 | non-round rate |
+
+Plus:
+- half up exactly: with rates `{ USD: 1, XXX: 0.5 }` and minor units 2 for both, `1 USD → XXX` = 1 (0.5 → 1), `3 USD → XXX` = 2 (1.5 → 2);
+- `rateDate` is passed through unchanged;
+- unknown `from` or `to` (`'ZZZ'`) → `BadRequestException` with `code: 'UNSUPPORTED_CURRENCY'`;
+- a currency in `rates` but missing from `minorUnits`, or the reverse → the same 400;
+- `'constructor'` and `'toString'` as a currency → the same 400 (look codes up with `Object.hasOwn`, never `in` or plain indexing);
+- a negative or fractional `amountMinor` (`-1`, `1.5`) → throws (a plain `Error` from `assertMinor`).
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(fx): pin minor-unit conversion and half-up rounding (ITN-18)`
+
+## Step 2 (TDD, green): the conversion
+
+New `backend/src/modules/fx/fx-conversion.ts` with `ConverterInput` and `buildConverter`:
+- `convert(amountMinor, from, to)`: `assertMinor(amountMinor)`; both codes must exist (own property) in `rates` and in `minorUnits`, else 400 `UNSUPPORTED_CURRENCY` naming the unknown code; `from === to` → return `amountMinor`; else `Math.round((amountMinor * rates[to] * 10 ** minorUnits[to]) / (rates[from] * 10 ** minorUnits[from]))`.
+- `rateDate` copied from the input.
+
+Step 1's tests pass now; nothing else changes.
+**Commit:** `feat(fx): convert amounts between currencies in minor units (ITN-18)`
+
+## Step 3: the FXRatesAPI adapter
+
+New `backend/src/modules/fx/fx-rates.client.ts`:
+```ts
+/** Fetches the latest rates per 1 `base`; throws on any failure (FxRatesService catches). */
+export interface FxRatesClient { fetchLatest(base: string, currencies: string[]): Promise<Record<string, number>> }
+export const FX_RATES_CLIENT = Symbol('FX_RATES_CLIENT');
+@Injectable() export class FxRatesApiClient implements FxRatesClient { … }
+```
+`FxRatesApiClient` (injects `ConfigService`):
+- URL `https://api.fxratesapi.com/latest` with `URLSearchParams({ base, currencies: currencies.join(',') })`, plus `api_key` only when `FXRATES_API_KEY` is a non-empty string.
+- `fetch(url, { signal: AbortSignal.timeout(10_000) })`.
+- Not `res.ok` → throw `Error(\`FXRatesAPI answered ${res.status}\`)`. A body that isn't an object, has `success === false`, or has no `rates` object → throw `Error(\`FXRatesAPI error: ${description ?? 'unexpected response'}\`)`.
+- Return only the `rates` entries whose value is a finite number (others are dropped; the service decides what is missing).
+- **Never put the URL (it may contain the key) in an error or a log.**
+
+Tests `fx-rates.client.spec.ts` (unit; `vi.stubGlobal('fetch', vi.fn())`, `vi.unstubAllGlobals()` in `afterEach`; build the client with `new FxRatesApiClient({ get: (k: string) => values[k] } as unknown as ConfigService)`):
+- the URL has `base=USD` and `currencies=EGP%2CJPY` (or `EGP,JPY`), and **no** `api_key` when the key is unset or `''`; with a key, `api_key=<key>` is present;
+- a `signal` is passed;
+- 200 `{ success: true, rates: { EGP: 50, JPY: 150, BAD: 'x' } }` → `{ EGP: 50, JPY: 150 }`;
+- 500 → throws `FXRatesAPI answered 500`; `{ success: false, description: 'Invalid key' }` → throws, message contains `Invalid key`; `{ success: true }` (no rates) → throws; `fetch` rejecting → rejects;
+- with a key set, no thrown error message contains the key.
+
+**Commit:** `feat(fx): add the FXRatesAPI adapter (ITN-18)`
+
+## Step 4: refresh, latest rates and the converter
+
+**Config.** In `backend/src/config/validate.ts` accept two optional variables: `FXRATES_API_KEY` (any string) and `FX_AUTO_REFRESH` (if set, must be `'true'` or `'false'`, else throw a clear message). If `backend/src/config/validate.spec.ts` exists, add one test per rule. In `backend/test/support/test-config.ts` add `FX_AUTO_REFRESH: 'false'` to `TEST_CONFIG` (no app built by any test may call the network at start-up). In `.env.example` (repository root), under `# backend/.env`, add:
+```
+# Exchange rates (ITN-18). Optional: FXRatesAPI works without a key at low volume.
+FXRATES_API_KEY=
+# false = no fetch at start-up or by the daily job (offline development)
+FX_AUTO_REFRESH=true
+```
+
+**New internal class `backend/src/modules/fx/fx-rates.service.ts`, `FxRatesService`** (provided by `FxModule`, **not exported**). Injects the `ExchangeRate` model, `ReferenceDataService`, `@Inject(FX_RATES_CLIENT) client: FxRatesClient`, `ConfigService`; has a `Logger`. `export const FX_BASE = 'USD';` (the base every document stores; the platform currency).
+
+- `async refresh(): Promise<'inserted' | 'exists' | 'failed'>`, never throws:
+  1. `today` = today's UTC DateOnly. If a document with `rateDate: today` exists → `'exists'` (the API is called at most once a day).
+  2. `codes` = the supported currency codes from `listCurrencies()`. None → warn `No supported currencies; run npm run seed:reference` → `'failed'` (don't call the API).
+  3. `rates = await client.fetchLatest(FX_BASE, codes without FX_BASE)`.
+  4. Build the stored map: `FX_BASE → 1`, then every other supported code → `rates[code]`. If any supported code is missing or not a finite number > 0 → treat the whole fetch as failed (`missing or invalid rate for <code>`), store nothing. Extra currencies in the answer are ignored.
+  5. `create({ rateDate: today, base: FX_BASE, rates: map, fetchedAt: new Date(), source: 'fxratesapi' })` → `'inserted'`.
+  6. Any error in 3–5: a duplicate-key error (`code === 11000`, another refresh won the race) → `'exists'`; anything else → `logger.warn(\`Exchange-rate refresh failed: ${message}\`)` → `'failed'`.
+- `async latest(): Promise<ExchangeRatesView>`: the newest document (`sort({ rateDate: -1 })`, `.lean()`), or 503 `RATES_UNAVAILABLE`. `ExchangeRatesView = { base: string; rateDate: string; fetchedAt: string; source: string; rates: Record<string, number> }` (in `fx.types.ts`; `rates` keys sorted). A lean `Map` field can come back as a plain object or a `Map`: handle both (`value instanceof Map ? Object.fromEntries(value) : value`).
+- `onApplicationBootstrap(): void`: if `FX_AUTO_REFRESH` isn't `'false'`, start `void this.refresh()` **without awaiting** (start-up never waits for, or fails because of, the API).
+- `@Cron('5 0 * * *', { name: 'fx-daily-refresh', timeZone: 'UTC' }) async dailyRefresh(): Promise<void>`: same flag check, then `await this.refresh()`.
+
+**`FxService` (`fx.service.ts`, the contract):** inject the `ExchangeRate` model and `ReferenceDataService`.
+- `getConverter()`: newest document or 503; `minorUnits` from `listCurrencies()` (`code → minorUnits`); return `buildConverter({ rateDate, rates, minorUnits })`. Rates load **once per call**, so a budget summary converts many amounts with one read.
+- `convert(amountMinor, from, to)`: `const c = await this.getConverter(); return { amountMinor: c.convert(amountMinor, from, to), rateDate: c.rateDate };`.
+- Update the JSDoc, removing "Implemented in ITN-18".
+
+**Controller `fx.controller.ts`:** `@ApiTags('exchange-rates') @Controller('exchange-rates')`, `@Public() @Get('latest')` → `FxRatesService.latest()`. `@ApiOperation({ summary: 'ITN-18 Latest cached exchange rates (per 1 USD) and their date' })`, `@ApiOkResponse({ type: ExchangeRatesResponseDto })` (new `dto/exchange-rates.response.dto.ts`; `rates` as `{ type: 'object', additionalProperties: { type: 'number' }, example: { USD: 1, EGP: 50.12 } }`), `@ApiServiceUnavailableResponse({ description: 'RATES_UNAVAILABLE: no rates fetched yet' })`.
+
+**`fx.module.ts`:** import `ReferenceDataModule` too; providers `FxService`, `FxRatesService`, `{ provide: FX_RATES_CLIENT, useClass: FxRatesApiClient }`; controller `FxController`; export `FxService` only.
+
+**Commit:** `feat(fx): refresh rates daily, keep the last ones on failure, and expose them (ITN-18)`
+
+## Step 5: integration, API and parity tests
+
+Replace `backend/src/modules/fx/fx.service.spec.ts` (its tests assert the stub throws; that behaviour is gone).
+
+Shared setup for the specs below:
+```ts
+const client = { fetchLatest: vi.fn<FxRatesClient['fetchLatest']>() };
+t = await createTestApp({
+  imports: [FxModule],
+  override: (b) => b.overrideProvider(FX_RATES_CLIENT).useValue(client),
+});
+await t.moduleRef.get(ReferenceDataSeedService).run();   // real currencies
+// beforeEach: client.fetchLatest.mockReset(); delete all exchange_rates documents (keep the currencies);
+// afterEach: vi.useRealTimers();
+```
+A helper returns a good answer: `{ AED: 3.6725, EGP: 50, EUR: 0.9, GBP: 0.8, JPY: 150, SAR: 3.75 }`.
+
+**`fx-rates.service.spec.ts` (integration):**
+1. **first refresh:** returns `'inserted'`; the client was called once with `('USD', ['AED','EGP','EUR','GBP','JPY','SAR'])`; one document with `rateDate` = today 00:00Z, `base: 'USD'`, 7 rates including `USD: 1`, `source: 'fxratesapi'`.
+2. **once a day:** a second refresh the same day → `'exists'`, the client wasn't called again, still 1 document.
+3. **next day:** `vi.setSystemTime` one day later → `'inserted'`, 2 documents.
+4. **API failures keep the old rates:** with yesterday's document stored, the client rejects → `'failed'`, no new document, no throw; `FxService.getConverter()` still works and its `rateDate` is yesterday's.
+5. **bad answers:** a missing `SAR`, `EGP: 0`, `EGP: -1` → `'failed'` each, nothing stored.
+6. **no currencies:** delete the `currencies` collection's documents first (re-seed afterwards) → `'failed'` and the client wasn't called.
+7. **race:** two `refresh()` calls at once (`Promise.all`) → exactly 1 document; each result is `'inserted'` or `'exists'`.
+8. **start-up flag:** after `createTestApp` (flag `'false'`) the client was never called. `onApplicationBootstrap()` of a `FxRatesService` built by hand with a config whose flag is `'true'` (`new FxRatesService(model, referenceData, client, { get: () => 'true' } as unknown as ConfigService)`) calls the client once (`await vi.waitFor(() => expect(client.fetchLatest).toHaveBeenCalledTimes(1))`).
+
+**`fx.service.spec.ts` (integration, replaces the stub test):**
+- no documents → `getConverter()` and `convert()` reject with `code: 'RATES_UNAVAILABLE'` (503);
+- with a document: `convert(10000, 'USD', 'EGP')` → `{ amountMinor: 500000, rateDate: 'YYYY-MM-DD' of that document }`; `JPY` uses 0 minor units (`convert(10000, 'USD', 'JPY')` → 15000);
+- with two documents, the newest `rateDate` is used;
+- an unknown code → `code: 'UNSUPPORTED_CURRENCY'`.
+
+**`fx.api.spec.ts`:**
+- `GET /api/exchange-rates/latest` with no cookie and no rates → 503 `RATES_UNAVAILABLE`;
+- after a refresh → 200 `{ base: 'USD', rateDate: today, fetchedAt: ISO string, source: 'fxratesapi', rates: { AED…USD } }`, no login needed;
+- Swagger: the path has a `get` whose summary contains `ITN-18`.
+
+**`fx.parity.spec.ts`:** the real `FxService` (with a stored document whose rates are `USD 1, EGP 50, EUR 0.9, JPY 150, AED 3.6725, GBP 0.8, SAR 3.75`) and `new FakeFxService({ rates: <same>, rateDate: <same> })` give equal results for at least 8 conversions (each pair of the decision table in step 1, valid amounts only).
+
+**Commit:** `test(fx): cover the refresh, the fallback, the endpoint and the fake (ITN-18)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: ITN-18`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: ITN18_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the ITN-18 prompt (ITN-18)`
 
 ## Gates
 
@@ -1782,6 +1988,26 @@ Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file say
 
 - Don't change other modules, `common/` (events included), the schema, CI, the frontend or docs. No new packages. Don't emit any event.
 - Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+| G2 | `cd backend && npx vitest run src/modules/fx src/config test/fakes/fx.fake.spec.ts src/modules/platform-contracts.api.spec.ts` | 0 failed; at least 45 tests passed |
+| G3 | `git grep -n "implemented in ITN-18" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/fx/` (not `schemas/`), `backend/src/config/validate.ts` (and its spec if it exists), `backend/test/support/test-config.ts`, `.env.example`, `ai-prompts/kareem.txt` |
+| G5 | TDD order: the command below the table | first `test(fx): pin …`, then `feat(fx): convert …` |
+| G6 | TDD red: `git show <sha of the test(fx) commit>:backend/src/modules/fx/fx-conversion.ts` | an error that the path does not exist in that commit (the tests came before the code); and your step 1 run showed the spec failing |
+| G7 | no network in tests: `git grep -n "api.fxratesapi.com" -- backend/src ':!backend/src/modules/fx/fx-rates.client.ts' ':!*.spec.ts'` | no output, and every spec that builds `FxModule` overrides `FX_RATES_CLIENT` or runs with `FX_AUTO_REFRESH: 'false'` |
+| G8 | coverage lines for `fx.service.ts` and `fx-rates.service.ts` in the G1 output | ≥ 90% each |
+| G9 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(ITN-18)` |
+| G10 | `git status --porcelain` | empty |
+
+G5, from the repository root:
+```bash
+git log --reverse --format=%s origin/develop..HEAD | head -2
+```
+
+## Constraints
+
+- Don't change the `exchange_rates` schema, the `FxService` / `Converter` contract, `FakeFxService`, `common/`, other modules, CI, the frontend or docs. No new packages.
+- Never log or return the API key or the request URL.
+- Never weaken, skip or delete a test to pass a gate (the stub test in step 5 is replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
 - Stage files by name. Don't push. Don't open or merge a PR.
 
 ## Report
@@ -1792,15 +2018,34 @@ Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file say
 
 How the output was used:
 Built the GEN-01 notifications module (content table, service, listener, controller, listener and API specs) in backend/src/modules/notifications on branch feature/GEN-01-app-notifications (worktree man2o4ah-GEN-01), one commit per step.
+- Each gate's result in one line (G2 with the test count, G8 with the %).
+- Contract-adjacent changes to flag in the PR: new env variables `FXRATES_API_KEY` and `FX_AUTO_REFRESH`; `TEST_CONFIG` gains `FX_AUTO_REFRESH: 'false'`; `FxModule` now imports `ReferenceDataModule`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented the fx module (ITN-18) on feature/ITN-18-exchange-rates: conversion function (tests first), FXRatesAPI adapter, FxRatesService refresh, FxService, public GET /api/exchange-rates/latest, config validation and specs; 5 commits before this log entry, not pushed.
+
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-18
+
+Prompt:
+every thing is fine open a pr
+
+How the output was used:
+Pushed feature/ITN-18-exchange-rates and opened the ITN-18 PR into develop; one prompt-log commit added.
 ================================================
 Date: 2026-11-19
 Student: Kareem
 Tool: Claude Code
 Related Requirement: GEN-01
+Related Requirement: ITN-18
 
 Prompt:
 you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
 
 How the output was used:
 Fixed review point 1-2 on PR #168: idempotent notification storing in notifications.service.ts with duplicate-delivery tests in notifications.listener.spec.ts (test commit first, then the fix), pushed to feature/GEN-01-app-notifications.
+Fixed review points 1-2 on PR #171 (exact half-up rounding and result overflow check in fx-conversion.ts, shared with test/fakes/fx.fake.ts) with tests committed first, pushed to feature/ITN-18-exchange-rates.
 ================================================

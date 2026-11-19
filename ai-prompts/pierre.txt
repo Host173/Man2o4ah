@@ -901,3 +901,16 @@ The following browser pages are currently shared with you and can be interacted 
 How the output was used:
 Committed failing oversized-block regressions first as 8cce2cb, then limited parseRoomBlockOperation to 365 inclusive nights with 400 VALIDATION_FAILED and toDate details; updated Swagger descriptions and API boundary tests; backend npm run verify passed all gates with 1369 tests across 103 files; prepared the fix for push to PR #161 and documented a #161-first merge plan requiring combined DTOs/routes and both suites on still-open PR #162; left optional past-date and reactivation behavior unchanged.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+ik start implening it the make a pr
+
+How the output was used:
+Implemented HTL-11/12 in backend/src/modules/hotels/hotels.service.ts and hotels.controller.ts, added search request/response DTOs, added integration/API tests, replaced the implemented search stub assertion and improved stay-date validation details; backend npm run verify passed with 1705 tests across 115 files; prepared feature/HTL-11-hotel-search for commit and a pull request into develop, preserving the original working tree.
+================================================

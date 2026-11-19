@@ -84,7 +84,7 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
     expect(stored?.mustChangePassword).toBe(false);
   });
 
-  it("deletes the user's other sessions, keeps the current one and other users' sessions", async () => {
+  it("deletes all of the user's sessions, including the current one, but keeps other users' sessions", async () => {
     const user = await createUser();
     const other = await createUser();
     const current = await createSession(user._id);
@@ -98,9 +98,9 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
     });
 
     const left = await sessions.find().lean();
-    expect(left.map((s) => s._id.toString()).sort()).toEqual(
-      [current._id.toString(), othersSession._id.toString()].sort(),
-    );
+    expect(left.map((s) => s._id.toString())).toEqual([
+      othersSession._id.toString(),
+    ]);
   });
 
   it('wrong current password → 400 VALIDATION_FAILED on currentPassword; nothing changes', async () => {

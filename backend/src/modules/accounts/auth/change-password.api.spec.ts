@@ -2,6 +2,7 @@ import { Controller, Delete, Get, Post } from '@nestjs/common';
 import bcrypt from 'bcrypt';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { vi } from 'vitest';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
 import { loginAs } from '../../../../test/support/auth.js';
 import { clearCollections } from '../../../../test/support/clear-collections.js';
@@ -34,6 +35,17 @@ const URL = '/api/auth/change-password';
 const CURRENT = 'abcdefg1';
 const NEW = 'hijklmn2';
 const MINUTE = 60_000;
+
+function setCookies(headers: Record<string, unknown>): string[] {
+  const cookies = headers['set-cookie'];
+  if (
+    !Array.isArray(cookies) ||
+    !cookies.every((value: unknown) => typeof value === 'string')
+  ) {
+    throw new Error('Expected Set-Cookie response headers');
+  }
+  return cookies;
+}
 
 describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () => {
   let t: TestApp;
@@ -130,7 +142,7 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
       );
     });
 
-    it('logs out every other session; this one stays logged in', async () => {
+    it('logs out every session, including the calling session (data model section 3.2)', async () => {
       const u = await loggedIn();
       await extraSession(u.id);
       await extraSession(u.id);
@@ -142,12 +154,12 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
         .send({ currentPassword: CURRENT, newPassword: NEW })
         .expect(204);
 
-      const left = await sessions.find({ userId: u.id }).lean();
-      expect(left.map((s) => s._id.toString())).toEqual([u.sid]);
-      await t.http().get('/api/auth/me').set('Cookie', u.cookie).expect(200);
+      expect(await sessions.countDocuments({ userId: u.id })).toBe(0);
+      const me = await t.http().get('/api/auth/me').set('Cookie', u.cookie);
+      expectError(me, 401, ErrorCode.SessionExpired);
     });
 
-    it('does not set or clear cookies', async () => {
+    it('clears both authentication cookies at their original path', async () => {
       const u = await loggedIn();
 
       const res = await t
@@ -157,7 +169,18 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
         .send({ currentPassword: CURRENT, newPassword: NEW });
 
       expect(res.status).toBe(204);
-      expect(res.headers['set-cookie']).toBeUndefined();
+      const cookies = setCookies(res.headers);
+      expect(cookies).toEqual([
+        expect.stringMatching(/^access_token=;/),
+        expect.stringMatching(/^refresh_token=;/),
+      ]);
+      for (const cookie of cookies) {
+        expect(cookie).toContain('Path=/');
+        expect(cookie).toContain('Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+        expect(cookie).toContain('HttpOnly');
+        expect(cookie).toContain('Secure');
+        expect(cookie).toContain('SameSite=Lax');
+      }
     });
   });
 
@@ -316,8 +339,9 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
       expectError(res, 403, ErrorCode.PasswordChangeRequired);
     });
 
-    it('unblocks the same session once the password is changed', async () => {
+    it('requires a new login after the forced change, then unblocks the account', async () => {
       const u = await loggedIn(UserRole.AIRLINE_MODERATOR, true);
+      const email = (await users.findById(u.id).lean())?.email ?? '';
       await t
         .http()
         .get('/api/probe/private')
@@ -335,14 +359,74 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
         .http()
         .get('/api/probe/private')
         .set('Cookie', u.cookie)
+        .expect(401);
+
+      const login = await t
+        .http()
+        .post('/api/auth/login')
+        .send({ email, password: NEW });
+      expect(login.status).toBe(200);
+      expect(login.body.user.mustChangePassword).toBe(false);
+      const cookies = setCookies(login.headers);
+      const cookie = cookies.map((line) => line.split(';')[0]).join('; ');
+      await t
+        .http()
+        .get('/api/probe/private')
+        .set('Cookie', cookie)
         .expect(200);
       await t
         .http()
         .post('/api/probe/private')
-        .set('Cookie', u.cookie)
+        .set('Cookie', cookie)
         .expect(201);
-      const me = await t.http().get('/api/auth/me').set('Cookie', u.cookie);
+      const me = await t.http().get('/api/auth/me').set('Cookie', cookie);
       expect(me.body).toMatchObject({ mustChangePassword: false });
+    });
+
+    it('rejects a temporary-password login checked before the password changes but resumed afterward', async () => {
+      const u = await loggedIn(UserRole.USER, true);
+      const account = await users.findById(u.id).lean();
+      if (!account) throw new Error('Test account was not created');
+      let checked = () => {};
+      const passwordChecked = new Promise<void>((resolve) => {
+        checked = resolve;
+      });
+      let resume = () => {};
+      const resumeLogin = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const compare = bcrypt.compare.bind(bcrypt);
+      const paused = vi
+        .spyOn(bcrypt, 'compare')
+        .mockImplementationOnce(async (password, hash) => {
+          const matches = await compare(password, hash);
+          checked();
+          await resumeLogin;
+          return matches;
+        });
+      const pendingLogin = t
+        .http()
+        .post('/api/auth/login')
+        .send({ email: account.email, password: CURRENT })
+        .then((response) => response);
+
+      try {
+        await passwordChecked;
+        await t
+          .http()
+          .patch(URL)
+          .set('Cookie', u.cookie)
+          .send({ currentPassword: CURRENT, newPassword: NEW })
+          .expect(204);
+      } finally {
+        resume();
+        paused.mockRestore();
+      }
+
+      const login = await pendingLogin;
+      expectError(login, 401, ErrorCode.InvalidCredentials);
+      expect(login.headers['set-cookie']).toBeUndefined();
+      expect(await sessions.countDocuments({ userId: u.id })).toBe(0);
     });
 
     it('the new password works at login and the temporary one no longer does', async () => {

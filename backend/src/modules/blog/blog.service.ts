@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -19,6 +20,10 @@ import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
 import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
+import type { StoredImage } from '../storage/storage.service.js';
 import {
   buildExcerpt,
   MAX_TAG_LENGTH,
@@ -58,11 +63,13 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post, tag, search, author page, and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, BLG-12, ACC-12).
- * Other blog endpoints and listeners ship in later Sprint 2 tickets.
+ * Travel blog post, tag, search, images, author page, and comment workflows
+ * (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, BLG-10, BLG-12, ACC-12).
  */
 @Injectable()
 export class BlogService {
+  private readonly logger = new Logger(BlogService.name);
+
   constructor(
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(Post.name) private readonly postModel: Model<StoredPost>,
@@ -71,6 +78,7 @@ export class BlogService {
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
     private readonly accountsService: AccountsService,
     private readonly itinerariesService: ItinerariesService,
+    private readonly storageService: StorageService,
   ) {}
 
   /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
@@ -603,28 +611,126 @@ export class BlogService {
   }
 
   /**
-   * BLG-04: deletes the authenticated owner's post along with its comments and
-   * likes in one transaction; throws 404 if missing or owned by someone else.
+   * BLG-04 / BLG-10: deletes the authenticated owner's post along with its
+   * comments and likes in one transaction, then deletes stored image files
+   * after commit; throws 404 if missing or owned by someone else.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
 
+    let imageKeys: string[] = [];
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
+        imageKeys = [];
         const deleted = await this.postModel
           .findOneAndDelete({ _id: id, authorId }, { session })
           .lean()
           .exec();
         if (!deleted) throw this.notFound();
 
+        imageKeys = deleted.images.map((image) => image.key);
         await this.commentModel.deleteMany({ postId: id }, { session }).exec();
         await this.likeModel.deleteMany({ postId: id }, { session }).exec();
       });
-      // BLG-10 will delete stored post image files after the transaction commits.
     } finally {
       await session.endSession();
+    }
+
+    for (const key of imageKeys) {
+      await this.storageService.delete(key);
+    }
+  }
+
+  /**
+   * BLG-10 / GEN-08: attaches one uploaded image (max 5 atomically) to the
+   * authenticated owner's post. Propagates `StorageService` errors unchanged and
+   * deletes the stored file on any post-save failure or limit/race rejection.
+   */
+  async addImage(
+    postId: string,
+    file: UploadedImage | undefined,
+    userId: string,
+  ): Promise<PostView> {
+    const id = this.parseId(postId, 'postId');
+    const authorId = this.parseId(userId, 'userId');
+
+    const existing = await this.postModel
+      .findOne({ _id: id, authorId })
+      .select({ images: 1 })
+      .lean()
+      .exec();
+    if (!existing) throw this.notFound();
+
+    if (!file) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          { field: 'file', message: 'must contain a JPG or PNG image' },
+        ],
+      });
+    }
+
+    if (existing.images.length >= MAX_IMAGES_PER_ITEM) {
+      throw this.imageLimitExceeded();
+    }
+
+    const stored = await this.storageService.save(file);
+    try {
+      const updated = (await this.postModel
+        .findOneAndUpdate(
+          {
+            _id: id,
+            authorId,
+            [`images.${MAX_IMAGES_PER_ITEM - 1}`]: { $exists: false },
+          },
+          { $push: { images: stored } },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .lean()
+        .exec()) as PostRecord | null;
+      if (!updated) {
+        if (!(await this.postModel.exists({ _id: id, authorId }).exec())) {
+          throw this.notFound();
+        }
+        throw this.imageLimitExceeded();
+      }
+      return this.toView(updated);
+    } catch (error) {
+      return this.discardUnattachedImage(id, stored, error);
+    }
+  }
+
+  /**
+   * BLG-10 / GEN-08: removes one image reference from the authenticated owner's
+   * post and deletes the file from storage only when something was removed.
+   */
+  async removeImage(
+    postId: string,
+    imageId: string,
+    userId: string,
+  ): Promise<void> {
+    const id = this.parseId(postId, 'postId');
+    const imageObjectId = this.parseId(imageId, 'imageId');
+    const authorId = this.parseId(userId, 'userId');
+
+    const before = await this.postModel
+      .findOneAndUpdate(
+        { _id: id, authorId, 'images._id': imageObjectId },
+        { $pull: { images: { _id: imageObjectId } } },
+        { returnDocument: 'before' },
+      )
+      .lean()
+      .exec();
+    if (!before) throw this.notFound();
+
+    const removed = before.images.find((image) =>
+      image._id.equals(imageObjectId),
+    );
+    if (removed) {
+      await this.storageService.delete(removed.key);
     }
   }
 
@@ -852,6 +958,40 @@ export class BlogService {
     });
   }
 
+  private imageLimitExceeded(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.LimitExceeded,
+      message: `A post can have at most ${MAX_IMAGES_PER_ITEM} images`,
+    });
+  }
+
+  private async discardUnattachedImage(
+    postId: Types.ObjectId,
+    image: StoredImage,
+    failure: unknown,
+  ): Promise<never> {
+    try {
+      const attached = await this.postModel
+        .exists({
+          _id: postId,
+          images: { $elemMatch: { _id: image._id, key: image.key } },
+        })
+        .exec();
+      if (!attached) {
+        await this.storageService.delete(image.key);
+      }
+    } catch (cleanupError) {
+      this.logger.error(
+        `Could not reconcile post ${postId.toHexString()} image ${image._id.toHexString()}`,
+      );
+      throw new AggregateError(
+        [failure, cleanupError],
+        'Post image cleanup failed',
+      );
+    }
+    throw failure;
+  }
+
   private toView(post: PostRecord): PostView {
     return {
       _id: post._id.toHexString(),
@@ -862,6 +1002,7 @@ export class BlogService {
       images: post.images.map((image) => ({
         _id: image._id.toHexString(),
         key: image.key,
+        url: this.storageService.urlOf(image.key),
       })),
       status: post.status,
       ...(post.publishedAt !== undefined

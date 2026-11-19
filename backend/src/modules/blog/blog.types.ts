@@ -2,10 +2,11 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import type { PublicItinerarySummary } from '../itineraries/itineraries.types.js';
 import type { PostStatus } from './schemas/post.schema.js';
 
-/** Plain view of an image reference on a post (GEN-08). */
+/** Plain view of an image reference on a post (`BLG-10`, `GEN-08`). */
 export interface PostImageView {
   _id: string;
   key: string;
+  url: string;
 }
 
 /**

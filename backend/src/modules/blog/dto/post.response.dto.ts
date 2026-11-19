@@ -18,6 +18,9 @@ export class PostImageResponseDto implements PostImageView {
 
   @ApiProperty({ example: 'cairo-123.jpg' })
   key!: string;
+
+  @ApiProperty({ example: '/uploads/cairo-123.jpg' })
+  url!: string;
 }
 
 /** Swagger response model for a blog post (`BLG-01`, `BLG-03`, `BLG-04`). */

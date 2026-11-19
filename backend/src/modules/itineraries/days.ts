@@ -25,6 +25,37 @@ export function cityIdsOf(days: readonly { cityId: string }[]): string[] {
 }
 
 /**
+ * ITN-08: puts the stored days in the order of `dayIds`. The service checks
+ * that the IDs are a permutation of the current days before calling this, so
+ * the result has the same days and their nested content, only reordered.
+ * Numbers and dates are never stored: they follow from the new positions.
+ */
+export function orderDaysById<T>(
+  days: readonly T[],
+  dayIds: readonly string[],
+  idOf: (day: T) => string,
+): T[] {
+  const byId = new Map(days.map((day) => [idOf(day), day]));
+  return dayIds.map((id) => {
+    const day = byId.get(id);
+    if (day === undefined) throw new Error(`Unknown day: ${id}`);
+    return day;
+  });
+}
+
+/**
+ * ITN-07: drops the transport costs tied to a deleted day. Unlike the day's
+ * activities and budget entries, these are stored in a separate array, so a
+ * delete must filter them in the same update (the schema validates the links).
+ */
+export function withoutTransportCostsOf<T extends { dayId: unknown }>(
+  costs: readonly T[],
+  dayId: string,
+): T[] {
+  return costs.filter((cost) => String(cost.dayId) !== dayId);
+}
+
+/**
  * ITN-09: consecutive days in the same city form one group, in chronological
  * order. `checkOut` is the day after the group's last day, which is the
  * check-in/check-out pair ITN-25 reuses for the hotel search. The budget

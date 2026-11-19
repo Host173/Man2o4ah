@@ -460,3 +460,16 @@ The over-limit notes message differed between the DTO and the service; one messa
 
 How the output was used:
 Moved the parallel-cap and emoji tests into the API spec, made the fake empty-patch test deterministic, typed the fake before trimming, unified the notes message, ran `npm run verify` (all green: 1245 tests), and committed and pushed the fixes.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-07/08
+
+Prompt:
+The user attached the updated `SELF_REVIEW_PROMPT (2).md` and reported a self-review blocker on ITN-07: the review stopped at the conflict gate because the branch was 180 commits behind `origin/develop` with conflicts. Critical rule: do NOT create a new branch or a new Pull Request - switch to the existing ITN-07 branch (which has an open PR), pull it, merge `origin/develop` into it (never rebase), resolve all conflicts preserving both sides (specifically ai-prompts/mokhtar.txt, backend/test/fakes/itineraries.fake.ts and backend/test/fakes/itineraries.fake.spec.ts), verify zero conflicts, then fully execute the self-review loop until clean, run npm run format and npm run verify, log prompts, commit, push directly to the existing ITN-07 remote branch, and update the existing PR with the PR summary and the complete Self-Review Report.
+
+How the output was used:
+Switched to the existing `feature/ITN-07-delete-reorder-days` branch (PR #155), pulled it, and merged `origin/develop` (180 commits behind) without rebasing. Resolved all three conflicts keeping both sides: the ITN-07 fake methods (deleteDay/reorderDays) plus develop's invalidField/validation, both fake spec test sets, and all prompt-log entries from both sides. `git merge-tree --write-tree` reported no conflicts and the working tree was clean. Ran the full self-review: `npm ci` + `npm run verify` passed (1964 tests initially, 98.31% lines on itineraries.service.ts); read the whole diff - all ITN-07/08 clauses have tests, routes are Own with 404 for foreign data, errors use the shared shape, TDD order holds, prompt log only appended. Wrote 6 throwaway probes: 3 found a real fake-parity bug (fake reorderDays threw generic errors or silently dropped/duplicated days for non-permutation input). Added a red fake-spec test (975fa83) then fixed the fake to validate permutations with 400 VALIDATION_FAILED on dayIds (a40c124); re-ran all probes clean. Re-ran `npm run format` and `npm run verify` (1965 tests, all green), then committed, pushed to the existing branch, and updated PR #155 with the report.
+

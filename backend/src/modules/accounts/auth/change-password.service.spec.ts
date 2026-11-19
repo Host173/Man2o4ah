@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { vi } from 'vitest';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
 import { clearCollections } from '../../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../../test/support/mongo-memory.js';
@@ -218,6 +219,33 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
       bcrypt.compare('second123', hash),
     ]);
     expect(matches.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('if logging out the other sessions fails, the password is not changed either (one transaction)', async () => {
+    const user = await createUser(true);
+    const current = await createSession(user._id);
+    await createSession(user._id);
+    const before = await storedHash(user._id);
+    const failing = vi
+      .spyOn(sessions, 'deleteMany')
+      .mockRejectedValueOnce(new Error('network blip'));
+
+    try {
+      await expect(
+        auth.changePassword(user._id.toString(), current._id.toString(), {
+          currentPassword: CURRENT,
+          newPassword: NEW,
+        }),
+      ).rejects.toThrow('network blip');
+    } finally {
+      failing.mockRestore();
+    }
+
+    expect(await storedHash(user._id)).toBe(before);
+    expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+      true,
+    );
+    expect(await sessions.countDocuments()).toBe(2);
   });
 
   it('an account deleted after the guard ran → 401 SESSION_EXPIRED', async () => {

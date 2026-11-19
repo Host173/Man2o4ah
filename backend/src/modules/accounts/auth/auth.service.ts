@@ -7,9 +7,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import bcrypt from 'bcrypt';
-import type { Model, Types } from 'mongoose';
+import type { Connection, Model, Types } from 'mongoose';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
 import type { ChangePasswordDto } from '../dto/change-password.dto.js';
 import type { LoginDto } from '../dto/login.dto.js';
@@ -102,6 +102,7 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
     private readonly jwt: JwtService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -209,18 +210,33 @@ export class AuthService {
       throw sameAsTemporaryPassword();
     }
 
+    // Hashed before the transaction: it's slow and needn't be redone on a retry.
     const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
-    // Conditional on the hash just checked: if a parallel change won, this
-    // one's current password is no longer right (no read-then-write).
-    const result = await this.userModel.updateOne(
-      { _id: user._id, passwordHash: user.passwordHash },
-      { $set: { passwordHash, mustChangePassword: false } },
-    );
-    if (result.modifiedCount === 0) {
-      throw wrongCurrentPassword();
-    }
 
-    await this.sessionModel.deleteMany({ userId: user._id, _id: { $ne: sid } });
+    // One transaction: the new password and the logout of the other sessions
+    // must happen together, so a failure can't leave old sessions alive with
+    // the password already changed (data-model.md §1.9).
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Conditional on the hash just checked: if a parallel change won,
+        // this one's current password is no longer right (no read-then-write).
+        const result = await this.userModel.updateOne(
+          { _id: user._id, passwordHash: user.passwordHash },
+          { $set: { passwordHash, mustChangePassword: false } },
+          { session },
+        );
+        if (result.modifiedCount === 0) {
+          throw wrongCurrentPassword();
+        }
+        await this.sessionModel.deleteMany(
+          { userId: user._id, _id: { $ne: sid } },
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   /**

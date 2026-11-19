@@ -1,5 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Schema as MongooseSchema, Types } from 'mongoose';
+import {
+  Error as MongooseError,
+  Schema as MongooseSchema,
+  Types,
+} from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import {
   ImageRef,
@@ -22,6 +26,19 @@ export class Post {
   /** → users */
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   authorId!: Types.ObjectId;
+
+  /** BLG-13: reference only; itinerary access stays with ItinerariesService. */
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    set: (value: unknown) => {
+      // Mongoose otherwise casts a singleton array through its toString().
+      if (Array.isArray(value)) {
+        throw new MongooseError.CastError('ObjectId', value, 'itineraryId');
+      }
+      return value;
+    },
+  })
+  itineraryId?: Types.ObjectId;
 
   @Prop({
     type: String,

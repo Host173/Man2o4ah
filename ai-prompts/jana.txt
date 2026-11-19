@@ -231,3 +231,61 @@ How the output was used:
 Implemented atomic SeatInventory operations, unit and integration coverage (including the concurrency invariant), and matching fake validation; no commit.
 ================================================
 
+================================================
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-03
+
+Prompt:
+implement this ticket: # FLT-03: Create flights in local time #35
+
+Open
+
+Blocked by:[FLT-01: Airline profile](https://github.com/Host173/Man2o4ah/issues/33)Blocked by 1 issue
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/35#issue-6313313781)
+
+**Expected output**
+Moderator creates a flight with airports from the dataset and local times converted with each airport's time zone; duplicate number on the same local date rejected; own-airline list.
+
+**Requirements:** FLT-03, FLT-02, GEN-06
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit (time-zone conversion, DST, arrival after departure); API
+**TDD required:** Yes
+
+**Branch:** `feature/FLT-03-create-flights-local-time`
+**PR title:** `FLT-03: Create flights in local time`
+
+**Depends on:** [#33](https://github.com/Host173/Man2o4ah/issues/33) (FLT-01), [#9](https://github.com/Host173/Man2o4ah/issues/9) (CTR-05)
+**Blocks:** [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04), [#39](https://github.com/Host173/Man2o4ah/issues/39) (FLT-06), [#40](https://github.com/Host173/Man2o4ah/issues/40) (FLT-30)
+**Works end to end once these merge:** [#16](https://github.com/Host173/Man2o4ah/issues/16) (GEN-12)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* make sure the implementation matches the fakes and contract and read the agent.example and readme first my name is jana since TDD is required once you create the test files commit them first then the rest of the code
+
+How the output was used:
+Changed backend/src/modules/flights, backend/test/fakes/flights.fake.ts and its tests, backend/package.json and package-lock.json; tests-first commit bbfcc00.
+================================================
+
+
+================================================
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-03
+
+Prompt:
+1. **Rule**: `POST /api/flights` returns `id` and no `_id` (reproduced), and the list/cabin DTOs expose the same naming, violating api-contract.md §3. Fix: map internal view IDs to `_id` at the HTTP boundary and document/assert that shape ([flight.response.dto.ts:36](https://github.com/Host173/Man2o4ah/blob/f5fe4e4e9a214edd788252b7a6a87ad6035e43e6/backend/src/modules/flights/dto/flight.response.dto.ts#L36)).
+2. **Rule**: Own-airline authorization is only in the controller; the exported list service accepts any airline ID without caller scope, contrary to auth.md §6 (ownership is checked in services). Fix: pass the authenticated provider ID into the service, validate ownership there, and update the fake ([flights.service.ts:129](https://github.com/Host173/Man2o4ah/blob/f5fe4e4e9a214edd788252b7a6a87ad6035e43e6/backend/src/modules/flights/flights.service.ts#L129)).
+Missing tests: canonical `_id` response shape; arrival exactly equal to departure in UTC; list isolation with flights seeded for two different airlines (current list test seeds only one).
+Probes: 8 tried, 1 found a problem (7 passed); temporary probe file deleted. Verified invalid dates/types/unknown fields, auth/role/ownership, concurrent duplicate creation, two-airline isolation and local-date versus UTC-date uniqueness.
+Open questions: Kareem should decide how to disambiguate the repeated DST fall-back hour; suggest rejecting ambiguous local times until a selection policy is specified. fix
+
+How the output was used:
+Mapped flight and cabin IDs to `_id`, moved list ownership validation into the flights service and fake, and added API and unit regression tests; no commit.
+================================================

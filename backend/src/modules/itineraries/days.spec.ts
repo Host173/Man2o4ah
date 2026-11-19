@@ -1,5 +1,11 @@
 import { toDateOnly } from '../../common/dates/date-only.js';
-import { cityGroups, dayDate, dayNumber } from './days.js';
+import {
+  cityGroups,
+  dayDate,
+  dayNumber,
+  orderDaysById,
+  withoutTransportCostsOf,
+} from './days.js';
 
 const startDate = toDateOnly('2027-04-01');
 
@@ -92,5 +98,112 @@ describe('cityGroups (ITN-09)', () => {
       checkIn: '2027-01-30',
       checkOut: '2027-02-01',
     });
+  });
+});
+
+/** Just enough of a stored day to identify it. */
+const trip = [
+  { _id: 'd1', cityId: 'cairo' },
+  { _id: 'd2', cityId: 'dubai' },
+  { _id: 'd3', cityId: 'cairo' },
+];
+const dayId = (day: { _id: string }) => day._id;
+
+describe('orderDaysById (ITN-08)', () => {
+  it('returns the days in the requested order', () => {
+    expect(orderDaysById(trip, ['d3', 'd1', 'd2'], dayId).map(dayId)).toEqual([
+      'd3',
+      'd1',
+      'd2',
+    ]);
+  });
+
+  it('keeps the day objects and leaves the input list alone', () => {
+    const before = [...trip];
+
+    const ordered = orderDaysById(trip, ['d2', 'd3', 'd1'], dayId);
+
+    expect(ordered[0]).toBe(trip[1]);
+    expect(trip).toEqual(before);
+  });
+
+  it('accepts the current order as a no-op', () => {
+    expect(orderDaysById(trip, ['d1', 'd2', 'd3'], dayId)).toEqual(trip);
+  });
+});
+
+describe('withoutTransportCostsOf (ITN-07)', () => {
+  const costs = [
+    { _id: 'c1', dayId: 'd1' },
+    { _id: 'c2', dayId: 'd2' },
+    { _id: 'c3', dayId: 'd1' },
+  ];
+
+  it('drops every cost of the deleted day and keeps the rest in order', () => {
+    expect(withoutTransportCostsOf(costs, 'd1')).toEqual([
+      { _id: 'c2', dayId: 'd2' },
+    ]);
+  });
+
+  it('returns a new list, so the stored costs are not mutated', () => {
+    const kept = withoutTransportCostsOf(costs, 'd2');
+
+    expect(kept).not.toBe(costs);
+    expect(costs).toHaveLength(3);
+  });
+
+  it('keeps every cost when the day has none', () => {
+    expect(withoutTransportCostsOf(costs, 'd3')).toEqual(costs);
+  });
+});
+
+describe('recalculation after delete and reorder (ITN-07, ITN-08)', () => {
+  it('renumbers and re-dates the remaining days after a delete', () => {
+    const remaining = trip.filter((day) => day._id !== 'd2');
+
+    expect(remaining.map((_, index) => dayNumber(index))).toEqual([1, 2]);
+    expect(remaining.map((_, index) => dayDate(startDate, index))).toEqual([
+      '2027-04-01',
+      '2027-04-02',
+    ]);
+    expect(cityGroups(remaining, startDate)).toEqual([
+      {
+        cityId: 'cairo',
+        fromDay: 1,
+        toDay: 2,
+        dayCount: 2,
+        checkIn: '2027-04-01',
+        checkOut: '2027-04-03',
+      },
+    ]);
+  });
+
+  it('regroups and re-dates the days after a reorder', () => {
+    const reordered = orderDaysById(trip, ['d3', 'd1', 'd2'], dayId);
+
+    expect(reordered.map((_, index) => dayNumber(index))).toEqual([1, 2, 3]);
+    expect(reordered.map((_, index) => dayDate(startDate, index))).toEqual([
+      '2027-04-01',
+      '2027-04-02',
+      '2027-04-03',
+    ]);
+    expect(cityGroups(reordered, startDate)).toEqual([
+      {
+        cityId: 'cairo',
+        fromDay: 1,
+        toDay: 2,
+        dayCount: 2,
+        checkIn: '2027-04-01',
+        checkOut: '2027-04-03',
+      },
+      {
+        cityId: 'dubai',
+        fromDay: 3,
+        toDay: 3,
+        dayCount: 1,
+        checkIn: '2027-04-03',
+        checkOut: '2027-04-04',
+      },
+    ]);
   });
 });

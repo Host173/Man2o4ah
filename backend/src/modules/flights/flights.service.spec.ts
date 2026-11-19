@@ -1,14 +1,41 @@
 import { NotImplementedException } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { AirlinesService } from './airlines.service.js';
 import { FlightsService } from './flights.service.js';
+import { Airline } from './schemas/airline.schema.js';
+import { Flight } from './schemas/flight.schema.js';
 
 describe('FlightsService (contract stub)', () => {
+  let moduleRef: TestingModule | undefined;
   let service: FlightsService;
+
   const airlineProfiles = {
     getAirline: vi.fn(),
     setAirlineActive: vi.fn(),
   };
+
+  beforeAll(async () => {
+    const testModule = await Test.createTestingModule({
+      providers: [
+        FlightsService,
+        { provide: AirlinesService, useValue: airlineProfiles },
+        { provide: getModelToken(Flight.name), useValue: {} },
+        { provide: getModelToken(Airline.name), useValue: {} },
+        { provide: ReferenceDataService, useValue: {} },
+      ],
+    }).compile();
+
+    moduleRef = testModule;
+    service = testModule.get(FlightsService);
+  });
+
+  afterAll(async () => {
+    await moduleRef?.close();
+  });
+
   const search = {
     from: 'CAI',
     to: 'DXB',
@@ -20,16 +47,6 @@ describe('FlightsService (contract stub)', () => {
     page: 1,
     limit: 10,
   };
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        FlightsService,
-        { provide: AirlinesService, useValue: airlineProfiles },
-      ],
-    }).compile();
-    service = moduleRef.get(FlightsService);
-  });
 
   // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
   it.each([

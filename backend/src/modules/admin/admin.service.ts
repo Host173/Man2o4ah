@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { BookingType } from '../../common/database/booking-type.js';
 import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -7,24 +11,39 @@ import { Events } from '../../common/events/events.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { AccountsService } from '../accounts/accounts.service.js';
-import { ProviderType } from '../accounts/schemas/user.schema.js';
+import type { AccountListItem } from '../accounts/accounts.types.js';
+import {
+  isValidPassword,
+  PASSWORD_RULE_MESSAGE,
+} from '../accounts/auth/password-rule.js';
+import {
+  ProviderType,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
 import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import type { AdminBookingView } from './admin.types.js';
+import type { CreateModeratorDto } from './dto/create-moderator.dto.js';
+import { ListAdminAccountsQueryDto } from './dto/list-admin-accounts-query.dto.js';
 import {
   ListAdminBookingsQueryDto,
   MAX_ADMIN_BOOKINGS_DEPTH,
 } from './dto/list-admin-bookings-query.dto.js';
+import type { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
 
 const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
+const VALID_ROLES = new Set<string>(Object.values(UserRole));
+const VALID_STATUSES = new Set<string>(Object.values(UserStatus));
 const VALID_PROVIDER_TYPES = new Set<string>(Object.values(ProviderType));
 
 /**
- * Admin read-only booking list and provider moderation workflows (`ACC-15`, `ACC-17`).
- * Reads and mutates cross-module data solely through exported module contracts (`CTR-01`..`CTR-04`).
+ * Admin read-only booking list, account management, provider moderation, and
+ * delegation workflows (`ACC-07a`, `ACC-13`, `ACC-14`, `ACC-15`, `ACC-16`, `ACC-17`).
+ * Reads and mutates external data solely through exported module contracts (`CTR-01`..`CTR-04`).
  */
 @Injectable()
 export class AdminService {
@@ -150,6 +169,167 @@ export class AdminService {
   }
 
   /**
+   * ACC-14: delegates paginated, searchable, filterable account listing to
+   * `AccountsService.listAccounts` (`CTR-01`).
+   */
+  async listAccounts(
+    query: ListAdminAccountsQueryDto = new ListAdminAccountsQueryDto(),
+  ): Promise<Paginated<AccountListItem>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    if (query.role !== undefined && !VALID_ROLES.has(query.role)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field: 'role', message: 'role must be a valid UserRole' }],
+      });
+    }
+    if (query.status !== undefined && !VALID_STATUSES.has(query.status)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          { field: 'status', message: 'status must be a valid UserStatus' },
+        ],
+      });
+    }
+
+    const q = query.q?.trim();
+    const result = await this.accountsService.listAccounts({
+      page,
+      limit,
+      ...(q ? { q } : {}),
+      ...(query.role !== undefined ? { role: query.role } : {}),
+      ...(query.status !== undefined ? { status: query.status } : {}),
+    });
+
+    return {
+      ...result,
+      items: result.items.map((item) => this.toPublicAccountItem(item)),
+    };
+  }
+
+  /**
+   * ACC-13: verifies the target airline (`FlightsService.getAirline`) or hotel
+   * (`HotelsService.getHotel`) exists, delegates moderator creation to
+   * `AccountsService.createModerator`, and emits `AuditAction.MODERATOR_CREATED`.
+   */
+  async createModerator(
+    dto: CreateModeratorDto,
+    adminId: string,
+  ): Promise<AccountListItem> {
+    this.assertObjectId(dto.providerId, 'providerId');
+    this.assertValidTemporaryPassword(dto.temporaryPassword);
+
+    if (dto.role === UserRole.AIRLINE_MODERATOR) {
+      const airline = await this.flightsService.getAirline(dto.providerId);
+      if (!airline) {
+        throw new NotFoundException({
+          code: ErrorCode.NotFound,
+          message: 'Airline not found',
+        });
+      }
+    } else if (dto.role === UserRole.HOTEL_MODERATOR) {
+      const hotel = await this.hotelsService.getHotel(dto.providerId);
+      if (!hotel) {
+        throw new NotFoundException({
+          code: ErrorCode.NotFound,
+          message: 'Hotel not found',
+        });
+      }
+    } else {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'role',
+            message: 'role must be airline_moderator or hotel_moderator',
+          },
+        ],
+      });
+    }
+
+    const created = await this.accountsService.createModerator({
+      name: dto.name.trim(),
+      email: dto.email.trim().toLowerCase(),
+      role: dto.role,
+      providerId: dto.providerId,
+      temporaryPassword: dto.temporaryPassword,
+    });
+
+    const providerType =
+      created.moderatorOf?.providerType ??
+      (dto.role === UserRole.AIRLINE_MODERATOR
+        ? ProviderType.AIRLINE
+        : ProviderType.HOTEL);
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: AuditAction.MODERATOR_CREATED,
+      target: { type: 'user', id: created.id },
+      details: {
+        role: created.role,
+        providerType,
+        providerId: dto.providerId,
+      },
+    });
+
+    return this.toPublicAccountItem(created);
+  }
+
+  /**
+   * ACC-07a: validates the temporary password, delegates reset to
+   * `AccountsService.resetPassword`, and emits `AuditAction.PASSWORD_RESET`.
+   */
+  async resetUserPassword(
+    userId: string,
+    dto: ResetUserPasswordDto,
+    adminId: string,
+  ): Promise<void> {
+    this.assertObjectId(userId, 'id');
+    this.assertValidTemporaryPassword(dto.temporaryPassword);
+
+    await this.accountsService.resetPassword(userId, dto.temporaryPassword);
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: AuditAction.PASSWORD_RESET,
+      target: { type: 'user', id: userId },
+    });
+  }
+
+  /**
+   * ACC-15 / ACC-16: delegates suspension (`active -> suspended`) to
+   * `AccountsService.suspend` and emits `AuditAction.ACCOUNT_SUSPENDED`.
+   */
+  async suspendAccount(userId: string, adminId: string): Promise<void> {
+    this.assertObjectId(userId, 'id');
+    await this.accountsService.suspend(userId);
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: AuditAction.ACCOUNT_SUSPENDED,
+      target: { type: 'user', id: userId },
+    });
+  }
+
+  /**
+   * ACC-15 / ACC-16: delegates reactivation (`suspended -> active`) to
+   * `AccountsService.reactivate` and emits `AuditAction.ACCOUNT_REACTIVATED`.
+   */
+  async reactivateAccount(userId: string, adminId: string): Promise<void> {
+    this.assertObjectId(userId, 'id');
+    await this.accountsService.reactivate(userId);
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: AuditAction.ACCOUNT_REACTIVATED,
+      target: { type: 'user', id: userId },
+    });
+  }
+
+  /**
    * ACC-15: deactivates an airline or hotel via its owning service, resolves
    * its moderators through `AccountsService.getModeratorIds`, and emits
    * `provider.deactivated` and `admin.action` (`PROVIDER_DEACTIVATED`).
@@ -188,13 +368,7 @@ export class AdminService {
         details: [{ field: 'type', message: 'type must be airline or hotel' }],
       });
     }
-    if (typeof providerId !== 'string' || !OBJECT_ID_HEX_RE.test(providerId)) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Validation failed',
-        details: [{ field: 'id', message: 'id must be a valid ObjectId' }],
-      });
-    }
+    this.assertObjectId(providerId, 'id');
 
     // Look up recipients before mutating so lookup failures leave provider state untouched.
     const moderatorIds = await this.accountsService.getModeratorIds(
@@ -224,6 +398,53 @@ export class AdminService {
         : AuditAction.PROVIDER_DEACTIVATED,
       target: { type, id: providerId },
     });
+  }
+
+  private assertObjectId(value: string, field: string): void {
+    if (typeof value !== 'string' || !OBJECT_ID_HEX_RE.test(value)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field, message: `${field} must be a valid ObjectId` }],
+      });
+    }
+  }
+
+  private assertValidTemporaryPassword(temporaryPassword: unknown): void {
+    if (
+      typeof temporaryPassword !== 'string' ||
+      !isValidPassword(temporaryPassword)
+    ) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'temporaryPassword',
+            message: PASSWORD_RULE_MESSAGE,
+          },
+        ],
+      });
+    }
+  }
+
+  private toPublicAccountItem(item: AccountListItem): AccountListItem {
+    return {
+      id: item.id,
+      name: item.name,
+      email: item.email,
+      role: item.role,
+      status: item.status,
+      ...(item.moderatorOf !== undefined
+        ? {
+            moderatorOf: {
+              providerType: item.moderatorOf.providerType,
+              providerId: item.moderatorOf.providerId,
+            },
+          }
+        : {}),
+      createdAt: item.createdAt,
+    };
   }
 
   private parseDate(value: string, field: 'from' | 'to'): Date {
@@ -262,4 +483,3 @@ export class AdminService {
     return { ...base, bookingType: BookingType.HOTEL, status: row.status };
   }
 }
-

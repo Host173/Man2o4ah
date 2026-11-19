@@ -74,6 +74,27 @@ export interface FlightView {
   cabins: CabinView[];
 }
 
+/** A flight-management response includes the airport zones needed to display its UTC instants locally. */
+export interface FlightManagementView extends FlightView {
+  departureTimeZone: string;
+  arrivalTimeZone: string;
+}
+
+/** Flight fields supplied by an airline moderator; the airline ID comes from authentication. */
+export interface CreateFlightInput {
+  flightNumber: string;
+  departureAirportId: string;
+  arrivalAirportId: string;
+  departureLocal: string;
+  arrivalLocal: string;
+}
+
+/** Pagination for a moderator's own-airline flight list. */
+export interface FlightListQuery {
+  page: number;
+  limit: number;
+}
+
 /** A flight together with its airline: everything a booking needs to price and snapshot a segment. */
 export interface FlightWithAirline {
   flight: FlightView;

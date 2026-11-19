@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { AuditService } from '../../src/modules/audit/audit.service.js';
@@ -17,6 +19,15 @@ export class FakeAuditService implements PublicApi<AuditService> {
 
   list(query: AuditLogQueryDto): Promise<Paginated<AuditLogView>> {
     const { action, from, to, page, limit } = query;
+    if (from && to && from > to) {
+      return Promise.reject(
+        new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Validation failed',
+          details: [{ field: 'from', message: 'from must be on or before to' }],
+        }),
+      );
+    }
     const matching = this.entries
       .filter((entry) => !action || entry.action === action)
       .filter((entry) => !from || entry.createdAt >= from)

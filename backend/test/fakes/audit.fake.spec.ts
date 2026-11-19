@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { AuditLogQueryDto } from '../../src/modules/audit/audit.types.js';
 import type { AuditLogView } from '../../src/modules/audit/audit.types.js';
@@ -73,5 +74,16 @@ describe('FakeAuditService', () => {
   it('returns an empty page when nothing matches', async () => {
     const page = await filled().list(query({ action: 'content_hidden' }));
     expect(page).toMatchObject({ items: [], total: 0, totalPages: 0 });
+  });
+
+  it('rejects from after to with 400 VALIDATION_FAILED, like the real service', async () => {
+    const error: unknown = await filled()
+      .list(query({ from: '2026-11-03', to: '2026-11-02' }))
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      details: [{ field: 'from' }],
+    });
   });
 });

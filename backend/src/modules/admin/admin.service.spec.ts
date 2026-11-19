@@ -1,20 +1,57 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { describe, expect, it, vi } from 'vitest';
+import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
+import { FakeFlightsData } from '../../../test/fakes/flights-data.fake.js';
+import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
+import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import type { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import {
+  ProviderType,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
+import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
+import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import { AdminModule } from './admin.module.js';
 import { AdminService } from './admin.service.js';
+import { AdminProviderParamsDto } from './dto/admin-provider-params.dto.js';
 import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
+
+function createAdminService(
+  flightBookings: FakeFlightBookingsService = new FakeFlightBookingsService([]),
+  hotelBookings: FakeHotelBookingsService = new FakeHotelBookingsService([]),
+  deps: {
+    accounts?: FakeAccountsService;
+    flights?: FakeFlightsService;
+    hotels?: FakeHotelsService;
+    events?: FakeEvents;
+  } = {},
+): AdminService {
+  return new AdminService(
+    flightBookings as unknown as FlightBookingsService,
+    hotelBookings as unknown as HotelBookingsService,
+    (deps.accounts ?? new FakeAccountsService()) as unknown as AccountsService,
+    (deps.flights ?? new FakeFlightsService()) as unknown as FlightsService,
+    (deps.hotels ?? new FakeHotelsService()) as unknown as HotelsService,
+    (deps.events ?? new FakeEvents()) as unknown as AppEvents,
+  );
+}
 
 function flightView(
   overrides: Partial<FlightBookingAdminView> = {},
@@ -72,9 +109,9 @@ describe('AdminService', () => {
   );
 
   it('returns empty page when no bookings exist', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(new ListAdminBookingsQueryDto());
@@ -103,11 +140,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-13T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const page1 = await service.listBookings(
@@ -124,9 +159,9 @@ describe('AdminService', () => {
   });
 
   it('rejects from > to with VALIDATION_FAILED details', async () => {
-    const service = new AdminService(
-      new FakeFlightBookingsService([]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
     );
 
     await expect(
@@ -151,11 +186,9 @@ describe('AdminService', () => {
       passengerEmail: 'secret@example.com',
       paymentIntentId: 'pi_secret',
     } as FlightBookingAdminView;
-    const service = new AdminService(
-      new FakeFlightBookingsService([
-        leakyFlight,
-      ]) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService([]) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService([leakyFlight]),
+      new FakeHotelBookingsService([]),
     );
 
     const res = await service.listBookings(
@@ -217,11 +250,9 @@ describe('AdminService', () => {
         createdAt: new Date('2026-11-10T12:00:00.000Z'),
       }),
     ];
-    const service = new AdminService(
-      new FakeFlightBookingsService(
-        flights,
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(hotels) as unknown as HotelBookingsService,
+    const service = createAdminService(
+      new FakeFlightBookingsService(flights),
+      new FakeHotelBookingsService(hotels),
     );
 
     const ids: string[] = [];
@@ -245,10 +276,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService([]);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     await expect(
       service.listBookings(
@@ -305,10 +333,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels10k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     for (const [limit, expectedTotalPages] of [
       [50, 200],
@@ -345,13 +370,9 @@ describe('AdminService', () => {
       expect(hotelsSpy).not.toHaveBeenCalled();
     }
 
-    const smallService = new AdminService(
-      new FakeFlightBookingsService(
-        flights10k.slice(0, 60),
-      ) as unknown as FlightBookingsService,
-      new FakeHotelBookingsService(
-        hotels10k.slice(0, 60),
-      ) as unknown as HotelBookingsService,
+    const smallService = createAdminService(
+      new FakeFlightBookingsService(flights10k.slice(0, 60)),
+      new FakeHotelBookingsService(hotels10k.slice(0, 60)),
     );
     const smallLast = await smallService.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, { page: 3, limit: 50 }),
@@ -386,10 +407,7 @@ describe('AdminService', () => {
     const fakeHotels = new FakeHotelBookingsService(hotels20k);
     const flightsSpy = vi.spyOn(fakeFlights, 'listForAdmin');
     const hotelsSpy = vi.spyOn(fakeHotels, 'listForAdmin');
-    const service = new AdminService(
-      fakeFlights as unknown as FlightBookingsService,
-      fakeHotels as unknown as HotelBookingsService,
-    );
+    const service = createAdminService(fakeFlights, fakeHotels);
 
     const flightRes = await service.listBookings(
       plainToInstance(ListAdminBookingsQueryDto, {
@@ -436,5 +454,194 @@ describe('AdminService', () => {
         expect(errors.map((err) => err.property)).toContain('page');
       }
     }
+  });
+
+  it('validates AdminProviderParamsDto route params (ACC-15)', async () => {
+    for (const type of [ProviderType.AIRLINE, ProviderType.HOTEL]) {
+      const valid = plainToInstance(AdminProviderParamsDto, {
+        type,
+        id: '6736f0b2c5a1b2c3d4e51001',
+      });
+      expect(await validate(valid)).toHaveLength(0);
+    }
+
+    for (const bad of [
+      { type: 'flight', id: '6736f0b2c5a1b2c3d4e51001' },
+      { type: 'AIRLINE', id: '6736f0b2c5a1b2c3d4e51001' },
+      { type: '', id: '6736f0b2c5a1b2c3d4e51001' },
+      { type: 'airline', id: 'not-an-id' },
+      { type: 'hotel', id: ' 6736f0b2c5a1b2c3d4e51001 ' },
+    ]) {
+      const dto = plainToInstance(AdminProviderParamsDto, bad);
+      expect((await validate(dto)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('orchestrates provider deactivation/reactivation, validates inputs, enforces lookup-before-write order, and suppresses events on failures (ACC-15)', async () => {
+    const airlineId = '6736f0b2c5a1b2c3d4e51001';
+    const hotelId = '6736f0b2c5a1b2c3d4e52001';
+    const adminId = '6736f0b2c5a1b2c3d4e59001';
+    const modA1 = '6736f0b2c5a1b2c3d4e53001';
+    const modA2 = '6736f0b2c5a1b2c3d4e53002';
+
+    const fakeAccounts = new FakeAccountsService([
+      {
+        id: modA1,
+        name: 'Airline Mod Active',
+        email: 'moda1@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        status: UserStatus.ACTIVE,
+        moderatorOf: {
+          providerType: ProviderType.AIRLINE,
+          providerId: airlineId,
+        },
+      },
+      {
+        id: modA2,
+        name: 'Airline Mod Suspended',
+        email: 'moda2@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        status: UserStatus.SUSPENDED,
+        moderatorOf: {
+          providerType: ProviderType.AIRLINE,
+          providerId: airlineId,
+        },
+      },
+    ]);
+    const flightsData = new FakeFlightsData();
+    flightsData.addAirline({ id: airlineId, code: 'MS', name: 'EgyptAir' });
+    const fakeFlights = new FakeFlightsService(flightsData);
+    const fakeHotels = new FakeHotelsService({
+      hotels: [
+        {
+          id: hotelId,
+          name: 'Nile Hotel',
+          address: '1 Nile St',
+          cityId: 'cairo',
+          countryCode: 'EG',
+          photos: [],
+          amenities: [],
+          checkInTime: '14:00',
+          checkOutTime: '12:00',
+          cancellationPolicy: { tiers: [] },
+          isActive: true,
+          ratingSummary: { average: null, count: 0 },
+        },
+      ],
+    });
+    const fakeEvents = new FakeEvents();
+
+    const getModsSpy = vi.spyOn(fakeAccounts, 'getModeratorIds');
+    const setAirlineSpy = vi.spyOn(fakeFlights, 'setAirlineActive');
+    const setHotelSpy = vi.spyOn(fakeHotels, 'setActive');
+    const suspendSpy = vi.spyOn(fakeAccounts, 'suspend');
+    const reactivateSpy = vi.spyOn(fakeAccounts, 'reactivate');
+
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
+      {
+        accounts: fakeAccounts,
+        flights: fakeFlights,
+        hotels: fakeHotels,
+        events: fakeEvents,
+      },
+    );
+
+    // Direct validation on invalid type and malformed ID
+    await expect(
+      service.deactivateProvider('flight' as ProviderType, airlineId, adminId),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'type' }],
+      },
+    });
+    await expect(
+      service.reactivateProvider(ProviderType.HOTEL, 'bad-id', adminId),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'id' }],
+      },
+    });
+    expect(getModsSpy).not.toHaveBeenCalled();
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect(setHotelSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.emitted).toHaveLength(0);
+
+    // Airline deactivate looks up moderators before mutating and isolates HotelsService
+    await service.deactivateProvider(ProviderType.AIRLINE, airlineId, adminId);
+    expect(getModsSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      setAirlineSpy.mock.invocationCallOrder[0],
+    );
+    expect(setAirlineSpy).toHaveBeenCalledWith(airlineId, false);
+    expect(setHotelSpy).not.toHaveBeenCalled();
+    expect((await fakeFlights.getAirline(airlineId))?.isActive).toBe(false);
+    expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
+      {
+        providerType: ProviderType.AIRLINE,
+        providerId: airlineId,
+        moderatorIds: [modA1, modA2],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: adminId,
+        action: AuditAction.PROVIDER_DEACTIVATED,
+        target: { type: ProviderType.AIRLINE, id: airlineId },
+      },
+    ]);
+
+    // Hotel reactivate with zero moderators still emits with []
+    fakeEvents.clear();
+    getModsSpy.mockClear();
+    setAirlineSpy.mockClear();
+    setHotelSpy.mockClear();
+    await service.reactivateProvider(ProviderType.HOTEL, hotelId, adminId);
+    expect(getModsSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      setHotelSpy.mock.invocationCallOrder[0],
+    );
+    expect(setHotelSpy).toHaveBeenCalledWith(hotelId, true);
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
+      {
+        providerType: ProviderType.HOTEL,
+        providerId: hotelId,
+        moderatorIds: [],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: adminId,
+        action: AuditAction.PROVIDER_REACTIVATED,
+        target: { type: ProviderType.HOTEL, id: hotelId },
+      },
+    ]);
+
+    // Lookup failure leaves provider state untouched and emits zero events
+    fakeEvents.clear();
+    setAirlineSpy.mockClear();
+    getModsSpy.mockRejectedValueOnce(new Error('lookup failed'));
+    await expect(
+      service.reactivateProvider(ProviderType.AIRLINE, airlineId, adminId),
+    ).rejects.toThrow('lookup failed');
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect((await fakeFlights.getAirline(airlineId))?.isActive).toBe(false);
+    expect(fakeEvents.emitted).toHaveLength(0);
+
+    // Provider write failure emits zero events (e.g. missing provider or write error)
+    const missingId = '6736f0b2c5a1b2c3d4e59999';
+    await expect(
+      service.deactivateProvider(ProviderType.HOTEL, missingId, adminId),
+    ).rejects.toMatchObject({
+      constructor: NotFoundException,
+      response: { code: ErrorCode.NotFound },
+    });
+    expect(fakeEvents.emitted).toHaveLength(0);
+    expect(suspendSpy).not.toHaveBeenCalled();
+    expect(reactivateSpy).not.toHaveBeenCalled();
   });
 });

@@ -66,14 +66,14 @@ describe('AuditListener (GEN-07)', () => {
     await emit({
       details: {
         reason: 'spam',
-        user: { name: 'Ali', password: 'p', session: { refreshToken: 'r' } },
+        user: { name: 'Ali', password: 'p', session: { refreshToken: 'r', device: 'web' } },
         list: [{ token: 't', seat: '12A' }, 'plain', 3],
       },
     });
     const doc = await model.findOne().lean();
     expect(doc?.details).toEqual({
       reason: 'spam',
-      user: { name: 'Ali', session: {} },
+      user: { name: 'Ali', session: { device: 'web' } },
       list: [{ seat: '12A' }, 'plain', 3],
     });
   });

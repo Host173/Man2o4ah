@@ -59,6 +59,8 @@ describe('AirlinesService integration (FLT-01, ACC-15)', () => {
   });
 
   it('returns null for an unknown airline and enforces unique codes', async () => {
+    await expect(airlines.getAirline('nope')).resolves.toBeNull();
+    await expect(flights.getAirline('nope')).resolves.toBeNull();
     await expect(airlines.getAirline('000000000000000000000001')).resolves.toBe(
       null,
     );
@@ -110,6 +112,9 @@ describe('AirlinesService integration (FLT-01, ACC-15)', () => {
     await expect(
       flights.setAirlineActive('000000000000000000000001', true),
     ).rejects.toMatchObject({ status: 404 });
+    await expect(flights.setAirlineActive('nope', false)).rejects.toMatchObject(
+      { status: 404 },
+    );
   });
 
   it('replaces an airline logo and removes the old stored image', async () => {

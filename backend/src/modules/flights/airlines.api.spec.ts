@@ -28,6 +28,7 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
 
   beforeEach(async () => {
     if (testApp) await clearCollections(testApp.connection);
+    await Promise.all(storage.keys().map((key) => storage.delete(key)));
   });
 
   afterAll(async () => {
@@ -86,6 +87,12 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
     expect(profile.status).toBe(200);
     expect(profile.body).toEqual(created.body);
 
+    const unknown = await testApp!
+      .http()
+      .get(`/api/airlines/${new Types.ObjectId().toHexString()}`);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.code).toBe(ErrorCode.NotFound);
+
     const duplicate = await testApp!
       .http()
       .post('/api/airlines')
@@ -139,6 +146,13 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
 
     expect(updated.status).toBe(200);
     expect(updated.body).toMatchObject({ name: 'Nile Air', code: 'NA' });
+
+    const unauthenticated = await testApp!
+      .http()
+      .patch(`/api/airlines/${airline.id}`)
+      .send({ name: 'Not logged in' });
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.body.code).toBe(ErrorCode.NotAuthenticated);
 
     const anotherModerator = await loginAs(
       testApp!.connection,
@@ -201,5 +215,85 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       .set('Cookie', moderator.cookie);
     expect(missing.status).toBe(400);
     expect(missing.body.code).toBe(ErrorCode.ValidationFailed);
+  });
+
+  it('rejects duplicate airline codes when a moderator edits a profile', async () => {
+    const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });
+    await airlines.create({ name: 'Nile Air', code: 'NA' });
+    const moderator = await loginAs(
+      testApp!.connection,
+      UserRole.AIRLINE_MODERATOR,
+      { providerId: airline.id },
+    );
+
+    const duplicate = await testApp!
+      .http()
+      .patch(`/api/airlines/${airline.id}`)
+      .set('Cookie', moderator.cookie)
+      .send({ code: 'na' });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.code).toBe(ErrorCode.Conflict);
+  });
+
+  it('scopes logo upload to the assigned airline and requires a moderator login', async () => {
+    const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });
+    const anotherModerator = await loginAs(
+      testApp!.connection,
+      UserRole.AIRLINE_MODERATOR,
+      { providerId: new Types.ObjectId().toHexString() },
+    );
+    const logo = () =>
+      testApp!
+        .http()
+        .post(`/api/airlines/${airline.id}/logo`)
+        .attach('file', Buffer.from('logo image'), {
+          filename: 'logo.png',
+          contentType: 'image/png',
+        });
+
+    const hidden = await logo().set('Cookie', anotherModerator.cookie);
+    expect(hidden.status).toBe(404);
+    expect(hidden.body.code).toBe(ErrorCode.NotFound);
+
+    const unauthenticated = await logo();
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.body.code).toBe(ErrorCode.NotAuthenticated);
+
+    const regularUser = await loginAs(testApp!.connection, UserRole.USER);
+    const wrongRole = await logo().set('Cookie', regularUser.cookie);
+    expect(wrongRole.status).toBe(403);
+    expect(wrongRole.body.code).toBe(ErrorCode.ForbiddenRole);
+    expect(storage.keys()).toHaveLength(0);
+  });
+
+  it('keeps only the final logo after parallel replacements', async () => {
+    const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });
+    const moderator = await loginAs(
+      testApp!.connection,
+      UserRole.AIRLINE_MODERATOR,
+      { providerId: airline.id },
+    );
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        testApp!
+          .http()
+          .post(`/api/airlines/${airline.id}/logo`)
+          .set('Cookie', moderator.cookie)
+          .attach('file', Buffer.from(`logo image ${index}`), {
+            filename: `logo-${index}.png`,
+            contentType: 'image/png',
+          }),
+      ),
+    );
+    expect(responses.map((response) => response.status)).toEqual([
+      201, 201, 201, 201, 201,
+    ]);
+
+    const current = await airlines.getAirline(airline.id);
+    const currentKey = current?.logo?.url.replace('/uploads/', '');
+    expect(currentKey).toBeDefined();
+    expect(storage.keys()).toEqual([currentKey]);
+    expect(storage.has(currentKey!)).toBe(true);
   });
 });

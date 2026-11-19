@@ -1591,3 +1591,205 @@ about my issues which issues can be done in parrelel so i finish quickly and whi
 How the output was used:
 "1. yes go" approved the shared search fix: escapeRegex now writes a NUL character as \x00, so q=a%00b no longer answers 500 (BLG-09 search and the reference-data lists). Test commit first (TDD), then the fix; also removed the lint warning in the reference-data API test. Answer to the rest given in chat.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-01
+
+Prompt:
+@"C:\Users\karee\Downloads\GEN01_EXECUTION.md"
+execute this and create a pr from develop to work on , i have 2 more exec fils should i gave it to you also , and you open new convo that will create there branches also
+
+[Attached: GEN01_EXECUTION.md]
+# Execution — GEN-01: In-app notifications
+
+Issue #19. Lane B of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+Build the `notifications` module: it **listens to events** other modules emit and stores one notification per recipient, and it gives every logged-in user four endpoints: their list, their unread count, mark one as read, mark all as read. Today the module only registers its schema.
+
+Done means:
+1. A listener for each of the 10 notification events in the table below.
+2. `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`.
+3. Integration tests for the listeners and API tests for the endpoints.
+
+**Out of scope:** emitting any event (bookings, payments, accounts and admin emit them in their own tickets), email (GEN-01b, issue #94), the frontend, CI, the data model.
+
+## Context you need
+
+**Requirement GEN-01 (verbatim):** "The system shall show in-app notifications (unread count, notification list, mark as read) for booking confirmation, cancellation and refund, flight schedule change, and account or provider suspension."
+
+**Rules from the docs:**
+- The module **listens to events**; no module calls it to notify (`domain-rules.md` §8, `data-model.md` §6.1: notifications calls no other module).
+- Events: `backend/src/common/events/events.ts` (`Events.X`) and `event-payloads.ts` (`PayloadOf<typeof Events.X>`). Listen with `@OnEvent(Events.X)` from `@nestjs/event-emitter`; never a string literal. IDs arrive as strings.
+- Lists are paginated, page size 10 (GEN-05): extend `PaginationQueryDto` usage and return `{ items, page, limit, total, totalPages }` (`backend/src/common/pagination/`: `paginate`, `toPage`, `Paginated`).
+- JSON: IDs keep the field name `_id` (24-hex string), instants are ISO strings, enum values lowercase (`api-contract.md` §3).
+- Access **User** = any logged-in account, every role (users, admins, moderators). Routes need no decorator: the global guards (from `AccountsModule`) already require a login. Read the user with `@CurrentUser() user: AuthUser` (`user.id` is the user's `_id`) from `backend/src/modules/accounts/auth/decorators.ts` / `auth.types.ts`.
+- `:id` params use `ParseObjectIdPipe` from `@nestjs/mongoose` (as `blog.controller.ts` does): a malformed id answers **400 `VALIDATION_FAILED`**.
+- Errors: `new NotFoundException({ code: ErrorCode.NotFound, message: 'Notification not found' })`.
+
+**The schema exists, don't change it** (`backend/src/modules/notifications/schemas/notification.schema.ts`):
+`userId` (ObjectId, recipient), `type` (`NotificationType` enum), `title` (≤ 100), `message` (≤ 500), `entity?` (`{ type, id }`, what to open), `readAt?` (null or absent = unread), timestamps; index `{ userId: 1, readAt: 1, createdAt: -1 }`. `{ readAt: null }` in a filter matches both null and a missing field, so it means "unread".
+
+**Event → notification (build exactly this):**
+
+| Event | Recipient(s) | `type` | `title` | `message` | `entity` |
+|---|---|---|---|---|---|
+| `FlightBookingConfirmed` `{ bookingId, userId, reference }` | `userId` | `booking_confirmed` | `Flight booking confirmed` | `Your flight booking ${reference} is confirmed.` | `{ type: 'flight_booking', id: bookingId }` |
+| `FlightBookingCancelled` (same payload) | `userId` | `booking_cancelled` | `Flight booking cancelled` | `Your flight booking ${reference} was cancelled.` | `{ type: 'flight_booking', id: bookingId }` |
+| `HotelReservationConfirmed` (same payload) | `userId` | `booking_confirmed` | `Hotel reservation confirmed` | `Your hotel reservation ${reference} is confirmed.` | `{ type: 'hotel_reservation', id: bookingId }` |
+| `HotelReservationCancelled` (same payload) | `userId` | `booking_cancelled` | `Hotel reservation cancelled` | `Your hotel reservation ${reference} was cancelled.` | `{ type: 'hotel_reservation', id: bookingId }` |
+| `RefundUpdated` `{ refundId, userId, status }` | `userId` | `refund_updated` | `Refund update` | `pending`: `Your refund is being processed.` · `refunded`: `Your refund is complete.` · `failed`: `Your refund failed. Please contact support.` | `{ type: 'refund', id: refundId }` |
+| `FlightBookingRescheduled` `{ bookingId, userId }` | `userId` | `flight_schedule_changed` | `Flight schedule changed` | `A flight in your booking has new times. Check your booking for the new schedule.` | `{ type: 'flight_booking', id: bookingId }` |
+| `AccountSuspended` `{ userId }` | `userId` | `account_suspended` | `Account suspended` | `Your account was suspended by an administrator.` | none |
+| `AccountReactivated` `{ userId }` | `userId` | `account_reactivated` | `Account reactivated` | `Your account is active again.` | none |
+| `ProviderDeactivated` `{ providerType, providerId, moderatorIds }` | **each** id in `moderatorIds` | `provider_deactivated` | `Airline deactivated` / `Hotel deactivated` | `Your airline was deactivated by an administrator.` / `Your hotel …` | `{ type: providerType, id: providerId }` |
+| `ProviderReactivated` (same payload) | each moderator | `provider_reactivated` | `Airline reactivated` / `Hotel reactivated` | `Your airline is active again.` / `Your hotel …` | `{ type: providerType, id: providerId }` |
+
+- `providerType` is `'airline' | 'hotel'` (`ProviderType` in `accounts/schemas/user.schema.ts`); `RefundStatus` is `'pending' | 'refunded' | 'failed'` (`payments/schemas/refund.schema.ts`).
+- The `flight_cancelled` type stays in the enum but no event produces it: a cancelled flight reaches users as `flight-booking.cancelled` per booking. Don't add an event.
+- **Duplicates:** don't deduplicate. Each emit happens once, after the emitter's own conditional update commits, so one emit = one notification.
+
+**Handler rules:**
+- A recipient id that isn't a 24-hex ObjectId is skipped with a `Logger` warning (no throw); the other recipients of the same event are still stored.
+- A handler never throws to the emitter: wrap its body in `try/catch` and log the error (`@nestjs/event-emitter` would swallow it anyway, but the log must say what failed).
+- Store with one `insertMany` per event.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages. Follow the existing controller style (see `backend/src/modules/blog/blog.controller.ts`, `backend/src/modules/reference-data/reference-data.controller.ts`): `@ApiTags`, `@ApiCookieAuth()`, `@ApiOperation({ summary: 'GEN-01 …' })` on every route, typed `@ApiOkResponse`, and `@ApiUnauthorizedResponse` / `@ApiBadRequestResponse` / `@ApiNotFoundResponse` where they apply.
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files. Run the full `npm run verify` once, at the end (G1).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. `git worktree add ../man2o4ah-GEN-01 -b feature/GEN-01-app-notifications origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/common/events` must pass (develop's admin test was broken until PR #166 merged). If not, stop and report.
+
+## Step 1: the content table (pure functions)
+
+New file `backend/src/modules/notifications/notification-content.ts`:
+```ts
+/** A notification about to be stored; `userId` is a string as events carry it. */
+export interface NewNotification {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  entity?: { type: string; id: string };
+}
+```
+One exported function per row group, each returning `NewNotification[]`, built **exactly** from the table: `bookingConfirmed(kind: 'flight' | 'hotel', p)`, `bookingCancelled(kind, p)`, `refundUpdated(p)`, `flightBookingRescheduled(p)`, `accountSuspended(p)`, `accountReactivated(p)`, `providerDeactivated(p)`, `providerReactivated(p)`. Payload parameter types come from `PayloadOf<typeof Events.X>`. No database code here.
+
+Tests `notification-content.spec.ts` (unit): every row of the table → the exact `type`, `title`, `message`, `entity`; all three refund statuses; a provider event with 3 moderators → 3 items with the right ids, with 0 → `[]`; with a 40-character reference every title is ≤ 100 and every message ≤ 500 characters.
+
+**Commit:** `feat(notifications): build notification texts from events (GEN-01)`
+
+## Step 2: service
+
+New file `notifications.service.ts`, `NotificationsService` (provided by the module, **not exported**: nobody else calls it):
+- `create(items: NewNotification[]): Promise<number>`: drops items whose `userId` isn't a valid 24-hex ObjectId (warn once per dropped id), `insertMany` the rest with `userId: new Types.ObjectId(item.userId)` and `readAt: null`; returns how many were stored. Empty input → 0 without a database call.
+- `list(userId: string, query: PaginationQueryDto): Promise<Paginated<NotificationView>>`: the user's notifications, newest first, sort `{ createdAt: -1, _id: -1 }` (the `_id` tie-break keeps pages stable).
+- `unreadCount(userId: string): Promise<number>`: `countDocuments({ userId, readAt: null })`.
+- `markRead(userId: string, id: Types.ObjectId): Promise<NotificationView>`:
+  1. `findOneAndUpdate({ _id: id, userId, readAt: null }, { $set: { readAt: new Date() } }, { new: true })`.
+  2. If nothing matched: `findOne({ _id: id, userId })`. Found → return it unchanged (already read: idempotent, the **first** `readAt` is kept). Not found (missing, or another user's) → 404 `NOT_FOUND`. Another user's notification is a 404, never a 403, so ids can't be probed.
+- `markAllRead(userId: string): Promise<number>`: `updateMany({ userId, readAt: null }, { $set: { readAt: new Date() } })`, returns `modifiedCount`.
+
+`NotificationView` (in `notifications.types.ts`) is the response shape: `{ _id: string; type; title; message; entity?: { type; id }; readAt: string | null; createdAt: string }`. Map every document through one `toView` function: `_id` and dates as strings, `readAt` absent → `null`, `entity` omitted when absent.
+
+**Commit:** `feat(notifications): list, count and mark notifications as read (GEN-01)`
+
+## Step 3: listener
+
+New file `notifications.listener.ts`, `NotificationsListener` (a provider of the module). One `@OnEvent(Events.X)` method per event in the table (10 methods), each `async`, each: build items with step 1's function → `await this.notifications.create(items)`, all inside `try/catch` that logs `Failed to store notifications for <event name>` with the error message.
+
+Register `NotificationsService` and `NotificationsListener` as providers in `notifications.module.ts` (keep the `MongooseModule.forFeature`).
+
+**Commit:** `feat(notifications): store notifications from booking, refund, account and provider events (GEN-01)`
+
+## Step 4: controller and DTOs
+
+New `dto/notification.response.dto.ts` (Swagger classes, same fields as `NotificationView`): `NotificationEntityDto`, `NotificationResponseDto` (`readAt` nullable, `type` with `enum: Object.values(NotificationType)`), `PaginatedNotificationsResponseDto` (`items` + page fields), `UnreadCountResponseDto` `{ count: number }`, `ReadAllResponseDto` `{ updated: number }`.
+
+New `notifications.controller.ts`, `@ApiTags('notifications') @ApiCookieAuth() @Controller('notifications')`. Declare the routes in this order:
+
+| Route | Returns |
+|---|---|
+| `GET /api/notifications?page&limit` | 200 `PaginatedNotificationsResponseDto` |
+| `GET /api/notifications/unread-count` | 200 `{ count }` |
+| `PATCH /api/notifications/read-all` | 200 `{ updated }` |
+| `PATCH /api/notifications/:id/read` | 200 `NotificationResponseDto`; 404 not yours / missing; 400 bad id |
+
+Add the controller to the module.
+
+**Commit:** `feat(notifications): add the notification endpoints (GEN-01)`
+
+## Step 5: tests
+
+Both specs use the real module on the in-memory database:
+```ts
+t = await createTestApp({ imports: [NotificationsModule] });
+emitter = t.moduleRef.get(EventEmitter2);   // emit with: await emitter.emitAsync(Events.X, payload)
+beforeEach(() => clearCollections(t.connection));
+```
+Get the model with `t.moduleRef.get<Model<Notification>>(getModelToken(Notification.name))`. Log in with `loginAs(t.connection, Role.USER)` (any role works; `backend/test/support/auth.ts`). Because `clearCollections` also deletes users and sessions, log in **inside** each test (or after the clear).
+
+**`notifications.listener.spec.ts` (integration):**
+- each of the 10 events stores exactly the row's document (`userId` as ObjectId, `type`, `title`, `message`, `entity`, `readAt` null);
+- `ProviderDeactivated` with 3 moderator ids → 3 documents, one per moderator; with `[]` → none;
+- an invalid `userId` (`'not-an-id'`) → no document and `emitAsync` resolves; a provider event with one invalid and two valid ids → 2 documents;
+- `RefundUpdated` for each status → the status's message.
+
+**`notifications.api.spec.ts`:**
+1. All 4 routes without a cookie → 401.
+2. **List:** create 12 notifications for user A (use the model directly, `createdAt` set through `collection.insertMany` with explicit dates so the order is known) and 2 for user B → A's page 1 has 10 items newest first, page 2 has 2, `total` 12, `totalPages` 2; none of B's appear; each item has `_id` (24-hex), `readAt: null`, ISO `createdAt`, and no `userId` field.
+3. `?limit=51` → 400 `VALIDATION_FAILED`; `?page=0` → 400.
+4. **Unread count:** 3 unread + 1 read for A → `{ count: 3 }`; B's don't count.
+5. **Mark one:** 200 with `readAt` set (ISO); the count drops by 1; marking it again → 200 with the **same** `readAt`.
+6. **Mark one, not yours:** B marks A's id → 404 `NOT_FOUND`, and A's stays unread; a random valid ObjectId → 404; `/api/notifications/abc/read` → 400 `VALIDATION_FAILED`.
+7. **Mark all:** A has 3 unread + 1 read, B has 2 unread → A's call returns `{ updated: 3 }`, A's count 0, B's count still 2; calling again → `{ updated: 0 }`.
+8. **Every role:** an admin and an airline moderator can list and count their own notifications (200).
+9. **Concurrency:** 5 parallel `PATCH /:id/read` on one unread notification → all 200, and all 5 bodies have the same `readAt`.
+10. **End to end through an event:** emit `FlightBookingConfirmed` for A's id, then `GET /api/notifications` as A shows it with the confirmed title.
+11. **Swagger:** `SwaggerModule.createDocument(t.app, new DocumentBuilder().build())` has the four paths (`/api/notifications`, `/api/notifications/unread-count`, `/api/notifications/read-all`, `/api/notifications/{id}/read`), each with a summary containing `GEN-01` and the tag `notifications`.
+
+**Commit:** `test(notifications): cover the listeners and the endpoints (GEN-01)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-01`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN01_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-01 prompt (GEN-01)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/notifications` | 3 spec files; 0 failed; at least 35 tests passed |
+| G3 | every event of the table has a handler: `grep -c "@OnEvent(Events\." backend/src/modules/notifications/notifications.listener.ts` | `10` |
+| G4 | `git diff --name-only origin/develop...HEAD` | only files under `backend/src/modules/notifications/` (the schema file unchanged) and `ai-prompts/kareem.txt` |
+| G5 | `git diff origin/develop...HEAD -- backend/src/modules/notifications/schemas backend/src/common` | empty |
+| G6 | Negative gate: in `markRead`, drop `userId` from both filters; run `npx vitest run src/modules/notifications/notifications.api.spec.ts` | case 6 fails; restore and it passes |
+| G7 | coverage line for `notifications.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-01)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- Don't change other modules, `common/` (events included), the schema, CI, the frontend or docs. No new packages. Don't emit any event.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Built the GEN-01 notifications module (content table, service, listener, controller, listener and API specs) in backend/src/modules/notifications on branch feature/GEN-01-app-notifications (worktree man2o4ah-GEN-01), one commit per step.
+================================================

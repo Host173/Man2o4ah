@@ -49,8 +49,8 @@ export class AirlinesController {
   @ApiBadRequestResponse({ description: 'Invalid airline profile' })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'Admin role required' })
-  create(@Body() dto: CreateAirlineDto): Promise<AirlineResponseDto> {
-    return this.airlines.create(dto);
+  async create(@Body() dto: CreateAirlineDto): Promise<AirlineResponseDto> {
+    return AirlineResponseDto.fromView(await this.airlines.create(dto));
   }
 
   @Public()
@@ -70,7 +70,7 @@ export class AirlinesController {
         message: 'Airline not found',
       });
     }
-    return airline;
+    return AirlineResponseDto.fromView(airline);
   }
 
   @Patch(':id')
@@ -83,12 +83,14 @@ export class AirlinesController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'Airline moderator role required' })
   @ApiNotFoundResponse({ description: 'Airline not found' })
-  update(
+  async update(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Body() dto: UpdateAirlineDto,
     @CurrentUser() user: AuthUser,
   ): Promise<AirlineResponseDto> {
-    return this.airlines.update(id.toHexString(), dto, user);
+    return AirlineResponseDto.fromView(
+      await this.airlines.update(id.toHexString(), dto, user),
+    );
   }
 
   @Put(':id/baggage-policy')
@@ -103,12 +105,14 @@ export class AirlinesController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'Airline moderator role required' })
   @ApiNotFoundResponse({ description: 'Airline not found' })
-  updateBaggagePolicy(
+  async updateBaggagePolicy(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Body() dto: UpdateAirlineBaggagePolicyDto,
     @CurrentUser() user: AuthUser,
   ): Promise<AirlineResponseDto> {
-    return this.airlines.updateBaggagePolicy(id.toHexString(), dto, user);
+    return AirlineResponseDto.fromView(
+      await this.airlines.updateBaggagePolicy(id.toHexString(), dto, user),
+    );
   }
 
   @Put(':id/cancellation-policy')
@@ -125,12 +129,14 @@ export class AirlinesController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'Airline moderator role required' })
   @ApiNotFoundResponse({ description: 'Airline not found' })
-  updateCancellationPolicy(
+  async updateCancellationPolicy(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Body() dto: UpdateAirlineCancellationPolicyDto,
     @CurrentUser() user: AuthUser,
   ): Promise<AirlineResponseDto> {
-    return this.airlines.updateCancellationPolicy(id.toHexString(), dto, user);
+    return AirlineResponseDto.fromView(
+      await this.airlines.updateCancellationPolicy(id.toHexString(), dto, user),
+    );
   }
 
   @Post(':id/logo')
@@ -144,11 +150,13 @@ export class AirlinesController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'Airline moderator role required' })
   @ApiNotFoundResponse({ description: 'Airline not found' })
-  updateLogo(
+  async updateLogo(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @UploadedFile() file: UploadedImage | undefined,
     @CurrentUser() user: AuthUser,
   ): Promise<AirlineResponseDto> {
-    return this.airlines.updateLogo(id.toHexString(), file, user);
+    return AirlineResponseDto.fromView(
+      await this.airlines.updateLogo(id.toHexString(), file, user),
+    );
   }
 }

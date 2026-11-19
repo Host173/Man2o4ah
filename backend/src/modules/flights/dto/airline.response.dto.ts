@@ -31,9 +31,18 @@ export class CancellationTierResponseDto implements CancellationTierView {
 }
 
 /** Airline profile returned by the flights module (FLT-01). */
-export class AirlineResponseDto implements AirlineView {
+export class AirlineResponseDto implements Omit<AirlineView, 'id'> {
   @ApiProperty({ example: '6736f0b2c5a1b2c3d4e5f602' })
-  id!: string;
+  _id!: string;
+
+  static fromView(view: AirlineView): AirlineResponseDto {
+    const { id, ...airline } = view;
+
+    return {
+      ...airline,
+      _id: id,
+    };
+  }
 
   @ApiProperty({ example: 'Cairo Air' })
   name!: string;

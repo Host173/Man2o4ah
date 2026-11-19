@@ -68,6 +68,7 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
     });
     expect(document.components?.schemas?.AirlineResponseDto).toMatchObject({
       properties: {
+        _id: { type: 'string' },
         cancellationTiers: {
           type: 'array',
           items: {
@@ -76,6 +77,9 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
         },
       },
     });
+    expect(document.components?.schemas?.AirlineResponseDto).not.toHaveProperty(
+      'properties.id',
+    );
     expect(document.paths['/api/airlines/{id}']?.patch?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -107,11 +111,12 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       },
       cancellationTiers: [],
     });
-    expect(created.body.id).toMatch(/^[0-9a-f]{24}$/);
+    expect(created.body._id).toMatch(/^[0-9a-f]{24}$/);
+    expect(created.body).not.toHaveProperty('id');
 
     const profile = await testApp!
       .http()
-      .get(`/api/airlines/${created.body.id}`);
+      .get(`/api/airlines/${created.body._id}`);
     expect(profile.status).toBe(200);
     expect(profile.body).toEqual(created.body);
 
@@ -174,6 +179,8 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
 
     expect(updated.status).toBe(200);
     expect(updated.body).toMatchObject({ name: 'Nile Air', code: 'NA' });
+    expect(updated.body._id).toBe(airline.id);
+    expect(updated.body).not.toHaveProperty('id');
 
     const unauthenticated = await testApp!
       .http()
@@ -232,6 +239,8 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       });
 
     expect(uploaded.status).toBe(201);
+    expect(uploaded.body._id).toBe(airline.id);
+    expect(uploaded.body).not.toHaveProperty('id');
     expect(uploaded.body.logo).toMatchObject({
       id: expect.stringMatching(/^[0-9a-f]{24}$/),
       url: expect.stringMatching(/^\/uploads\//),
@@ -347,6 +356,8 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       },
       cancellationTiers: [],
     });
+    expect(minimum.body._id).toBe(airline.id);
+    expect(minimum.body).not.toHaveProperty('id');
 
     const disabled = await testApp!
       .http()
@@ -443,6 +454,8 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       { daysBefore: 0, refundPercent: 0 },
       { daysBefore: Number.MAX_SAFE_INTEGER, refundPercent: 100 },
     ]);
+    expect(response.body._id).toBe(airline.id);
+    expect(response.body).not.toHaveProperty('id');
 
     const cleared = await testApp!
       .http()

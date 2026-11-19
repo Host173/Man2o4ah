@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Types } from 'mongoose';
+import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
@@ -37,6 +37,7 @@ export class AirlinesService {
   }
 
   async getAirline(airlineId: string): Promise<AirlineView | null> {
+    if (!Types.ObjectId.isValid(airlineId)) return null;
     const airline = await this.airlineModel.findById(airlineId).lean().exec();
     return airline ? this.toView(airline as AirlineRecord) : null;
   }
@@ -70,7 +71,7 @@ export class AirlinesService {
     file: UploadedImage | undefined,
     user: AuthUser,
   ): Promise<AirlineView> {
-    const current = await this.findOwned(airlineId, user.providerId);
+    await this.findOwned(airlineId, user.providerId);
     if (!file) {
       throw new BadRequestException({
         code: ErrorCode.ValidationFailed,
@@ -80,26 +81,35 @@ export class AirlinesService {
     }
 
     const stored = await this.storage.save(file);
-    const airline = await this.airlineModel
-      .findByIdAndUpdate(
-        airlineId,
-        { $set: { logo: { _id: stored._id, key: stored.key } } },
-        { returnDocument: 'after', runValidators: true },
-      )
-      .lean()
-      .exec();
-    if (!airline) {
+    let previous: AirlineRecord | null;
+    try {
+      previous = (await this.airlineModel
+        .findOneAndUpdate(
+          { _id: new Types.ObjectId(airlineId) },
+          { $set: { logo: { _id: stored._id, key: stored.key } } },
+          { returnDocument: 'before', runValidators: true },
+        )
+        .lean()
+        .exec()) as AirlineRecord | null;
+    } catch (error) {
+      await this.storage.delete(stored.key);
+      throw error;
+    }
+    if (!previous) {
       await this.storage.delete(stored.key);
       throw this.notFound();
     }
-    if (current.logo) await this.storage.delete(current.logo.key);
-    return this.toView(airline as AirlineRecord);
+
+    if (previous.logo) await this.storage.delete(previous.logo.key);
+    previous.logo = { _id: stored._id, key: stored.key };
+    return this.toView(previous);
   }
 
   async setAirlineActive(
     airlineId: string,
     isActive: boolean,
   ): Promise<AirlineView> {
+    if (!Types.ObjectId.isValid(airlineId)) throw this.notFound();
     const airline = await this.airlineModel
       .findByIdAndUpdate(
         airlineId,
@@ -116,6 +126,7 @@ export class AirlinesService {
     airlineId: string,
     providerId: string | undefined,
   ): Promise<AirlineRecord> {
+    if (!Types.ObjectId.isValid(airlineId)) throw this.notFound();
     const airline = await this.airlineModel.findById(airlineId).lean().exec();
     if (!airline || !providerId || airline._id.toString() !== providerId) {
       throw this.notFound();

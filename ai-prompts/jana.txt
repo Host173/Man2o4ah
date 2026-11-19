@@ -224,3 +224,50 @@ How the output was used:
 Explicitly documented airline path parameters as strings in Swagger and added an API regression assertion; no commit.
 ================================================
 
+================================================
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-01
+
+Prompt:
+1. Bad IDs: `getAirline('nope')` throws a CastError (500) instead of returning `null`, and `setAirlineActive('nope', false)` gives 400 instead of 404. Check `Types.ObjectId.isValid(id)` first, like the contract and the fake.
+2. Parallel logo uploads leave orphan files (5 at once → 2 files stored, the airline points to 1). Use `findOneAndUpdate` returning the old document and delete the key it returns.
+3. Add the missing API tests: GET unknown ID → 404; logo by another airline's moderator → 404; logo with no login → 401 and wrong role → 403; PATCH with no login → 401; PATCH duplicate code → 409; a parallel logo replace. fix those in FLT-01
+
+<tagged_files>
+* c:\Users\hema_\Man2o4ah\backend\src\main.ts (27 lines)
+</tagged_files>
+
+[Attached: main.ts]
+import { readFileSync } from 'node:fs';
+import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  const config = app.get(ConfigService);
+
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
+  });
+
+  const { version } = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ) as { version: string };
+  setupSwagger(app, version);
+
+  await app.listen(config.get<number>('PORT', 4000));
+}
+await bootstrap();
+
+How the output was used:
+Fixed bad airline IDs and atomic logo replacement in backend/src/modules/flights/airlines.service.ts; added FLT-01 API and integration regression tests. The tagged backend/src/main.ts was not changed.
+================================================
+

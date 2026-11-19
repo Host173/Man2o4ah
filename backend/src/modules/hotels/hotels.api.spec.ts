@@ -64,6 +64,524 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
   });
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
+  describe('public hotel details and free rooms (HTL-02 / HTL-15)', () => {
+    const dates = { checkIn: '2099-12-01', checkOut: '2099-12-04' };
+
+    async function fixture() {
+      const hotel = await service.create(profile);
+      const room = await rooms.create({
+        hotelId: hotel.id,
+        name: '101',
+        type: 'Deluxe King',
+        beds: 2,
+        maxOccupancy: 3,
+        pricePerNightMinor: 12345,
+        availability: [
+          {
+            fromDate: toDateOnly(dates.checkIn),
+            toDate: toDateOnly('2099-12-03'),
+          },
+        ],
+      });
+      return { hotel, room };
+    }
+
+    it('returns the exact public profile with photo URLs, policies and an unrated summary without dates or login', async () => {
+      const { hotel } = await fixture();
+      const photoId = new Types.ObjectId();
+      await hotels.updateOne(
+        { _id: hotel.id },
+        {
+          $set: {
+            photos: [{ _id: photoId, key: 'hotel.jpg' }],
+            checkInTime: '15:30',
+            checkOutTime: '11:00',
+            cancellationPolicy: {
+              tiers: [{ daysBefore: 7, refundPercent: 80 }],
+            },
+          },
+        },
+      );
+      const response = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}`)
+        .expect(200);
+      expect(response.body).toEqual({
+        _id: hotel.id,
+        ...profile,
+        countryCode: 'EG',
+        photos: [
+          {
+            _id: photoId.toHexString(),
+            key: 'hotel.jpg',
+            url: '/uploads/hotel.jpg',
+          },
+        ],
+        checkInTime: '15:30',
+        checkOutTime: '11:00',
+        cancellationPolicy: { tiers: [{ daysBefore: 7, refundPercent: 80 }] },
+        isActive: true,
+        ratingSummary: { average: null, count: 0 },
+      });
+    });
+
+    it('allows registered users to read the stored guest rating and dated rooms with exact prices', async () => {
+      const { hotel, room } = await fixture();
+      await hotels.updateOne(
+        { _id: hotel.id },
+        {
+          $set: { ratingSummary: { average: 4.6, count: 23 } },
+        },
+      );
+      const user = await loginAs(t.connection, Role.USER);
+      const details = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}`)
+        .set('Cookie', user.cookie)
+        .expect(200);
+      expect(details.body.ratingSummary).toEqual({ average: 4.6, count: 23 });
+      const response = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}/rooms/available`)
+        .set('Cookie', user.cookie)
+        .query(dates)
+        .expect(200);
+      expect(response.body).toEqual({
+        items: [
+          {
+            _id: room._id.toHexString(),
+            hotelId: hotel.id,
+            name: '101',
+            type: 'Deluxe King',
+            beds: 2,
+            maxOccupancy: 3,
+            pricePerNightMinor: 12345,
+            totalMinor: 37035,
+          },
+        ],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+      const guest = await t
+        .http()
+        .get(`/api/hotels/${hotel.id}/rooms/available`)
+        .query(dates)
+        .expect(200);
+      expect(guest.body).toEqual(response.body);
+    });
+
+    it('returns only free rooms, uses paginated list metadata, and does not hold inventory', async () => {
+      const { hotel, room } = await fixture();
+      await rooms.create({
+        hotelId: hotel.id,
+        name: '102',
+        type: 'Single',
+        beds: 1,
+        maxOccupancy: 1,
+        pricePerNightMinor: 9000,
+        availability: room.availability,
+      });
+      const path = `/api/hotels/${hotel.id}/rooms/available`;
+      const first = await t
+        .http()
+        .get(path)
+        .query({ ...dates, limit: 1 })
+        .expect(200);
+      const second = await t
+        .http()
+        .get(path)
+        .query({ ...dates, limit: 1, page: 2 })
+        .expect(200);
+      expect(first.body).toMatchObject({
+        items: [{ _id: room._id.toHexString() }],
+        page: 1,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(second.body).toMatchObject({
+        items: [{ name: '102' }],
+        page: 2,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(await nights.countDocuments()).toBe(0);
+      await nights.create({
+        hotelId: hotel.id,
+        roomId: room._id,
+        date: toDateOnly('2099-12-03'),
+        kind: 'blocked',
+        blockId: new Types.ObjectId(),
+      });
+      const filtered = await t.http().get(path).query(dates).expect(200);
+      expect(filtered.body).toMatchObject({
+        items: [{ name: '102' }],
+        total: 1,
+      });
+      await rooms.updateMany(
+        { hotelId: hotel.id },
+        { $set: { isActive: false } },
+      );
+      const empty = await t.http().get(path).query(dates).expect(200);
+      expect(empty.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('rejects missing, impossible, timestamp, past and reversed dates, invalid pagination and unknown query fields', async () => {
+      const { hotel } = await fixture();
+      const path = `/api/hotels/${hotel.id}/rooms/available`;
+      for (const query of [
+        {},
+        { checkIn: dates.checkIn },
+        { checkOut: dates.checkOut },
+        { ...dates, checkIn: '2099-02-30' },
+        { ...dates, checkOut: '2099-02-30' },
+        { ...dates, checkIn: '2099-12-01T00:00:00Z' },
+        { ...dates, checkIn: '2000-01-01' },
+        { ...dates, checkOut: dates.checkIn },
+        { ...dates, checkOut: '2099-11-30' },
+        { ...dates, page: 0 },
+        { ...dates, limit: 51 },
+        { ...dates, limit: 1.5 },
+        { ...dates, page: 1e100 },
+        { ...dates, totalMinor: 1 },
+        { ...dates, guests: 2 },
+      ]) {
+        const response = await t.http().get(path).query(query).expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: expect.any(Array),
+        });
+      }
+    });
+
+    it('returns shared 400/404 errors for malformed and missing hotel IDs on both routes', async () => {
+      for (const id of ['invalid', new Types.ObjectId().toHexString()]) {
+        for (const suffix of ['', '/rooms/available']) {
+          const response = await t
+            .http()
+            .get(`/api/hotels/${id}${suffix}`)
+            .query(suffix ? dates : {})
+            .expect(id === 'invalid' ? 400 : 404);
+          expect(response.body.code).toBe(
+            id === 'invalid' ? ErrorCode.ValidationFailed : ErrorCode.NotFound,
+          );
+        }
+      }
+    });
+
+    it('documents both public operations, required dates, pagination and typed responses in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      const details = document.paths['/api/hotels/{id}']?.get;
+      const available = document.paths['/api/hotels/{id}/rooms/available']?.get;
+      expect(details).toMatchObject({
+        security: [],
+        summary: expect.stringContaining('HTL-02'),
+        responses: {
+          '200': {
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/HotelProfileResponseDto',
+                },
+              },
+            },
+          },
+        },
+      });
+      expect(available).toMatchObject({
+        security: [],
+        summary: expect.stringContaining('HTL-15'),
+        parameters: expect.arrayContaining([
+          expect.objectContaining({ name: 'checkIn', required: true }),
+          expect.objectContaining({ name: 'checkOut', required: true }),
+          expect.objectContaining({ name: 'limit' }),
+        ]),
+        responses: {
+          '200': {
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PaginatedAvailableRoomsResponseDto',
+                },
+              },
+            },
+          },
+        },
+      });
+      expect(
+        document.components?.schemas?.AvailableRoomResponseDto,
+      ).toMatchObject({
+        properties: {
+          _id: expect.any(Object),
+          pricePerNightMinor: expect.any(Object),
+          totalMinor: {
+            type: 'integer',
+            minimum: 1,
+            description: expect.any(String),
+          },
+        },
+      });
+    });
+  });
+
+  describe('public hotel search (HTL-11 / HTL-12)', () => {
+    const query = {
+      cityId: 'cairo',
+      checkIn: '2099-12-01',
+      checkOut: '2099-12-04',
+      guests: 2,
+    };
+
+    async function fixture() {
+      const hotel = await service.create(profile);
+      await rooms.create({
+        hotelId: hotel.id,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 12345,
+        availability: [
+          {
+            fromDate: toDateOnly(query.checkIn),
+            toDate: toDateOnly('2099-12-03'),
+          },
+        ],
+      });
+      return hotel;
+    }
+
+    it('works without login, defaults to one room and returns the exact paginated HTTP shape', async () => {
+      const hotel = await fixture();
+      const response = await t
+        .http()
+        .get('/api/hotels/search')
+        .query(query)
+        .expect(200);
+      expect(response.body).toEqual({
+        items: [
+          {
+            _id: hotel.id,
+            ...profile,
+            countryCode: 'EG',
+            photos: [],
+            checkInTime: '14:00',
+            checkOutTime: '12:00',
+            cancellationPolicy: { tiers: [] },
+            isActive: true,
+            ratingSummary: { average: null, count: 0 },
+            pricePerNightMinor: 12345,
+          },
+        ],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+    });
+
+    it('also works for a registered user with country, price, rating, sorting and pagination inputs', async () => {
+      const hotel = await fixture();
+      await hotels.updateOne(
+        { _id: hotel.id },
+        { $set: { ratingSummary: { average: 4.5, count: 2 } } },
+      );
+      const user = await loginAs(t.connection, Role.USER);
+      const { cityId, ...dates } = query;
+      void cityId;
+      const response = await t
+        .http()
+        .get('/api/hotels/search')
+        .set('Cookie', user.cookie)
+        .query({
+          ...dates,
+          countryCode: 'EG',
+          rooms: 1,
+          minPrice: 12345,
+          maxPrice: 12345,
+          minRating: 4.5,
+          sortBy: 'rating',
+          sortOrder: 'desc',
+          page: 1,
+          limit: 1,
+        })
+        .expect(200);
+      expect(response.body).toMatchObject({
+        items: [{ _id: hotel.id, pricePerNightMinor: 12345 }],
+        page: 1,
+        limit: 1,
+        total: 1,
+        totalPages: 1,
+      });
+    });
+
+    it('does not advertise or filter on a cheaper room that cannot accommodate the requested group', async () => {
+      const hotel = await fixture();
+      await rooms.create({
+        hotelId: hotel.id,
+        name: 'single',
+        type: 'Single',
+        beds: 1,
+        maxOccupancy: 1,
+        pricePerNightMinor: 100,
+        availability: [
+          {
+            fromDate: toDateOnly(query.checkIn),
+            toDate: toDateOnly('2099-12-03'),
+          },
+        ],
+      });
+      const result = await t
+        .http()
+        .get('/api/hotels/search')
+        .query(query)
+        .expect(200);
+      expect(result.body.items[0]?.pricePerNightMinor).toBe(12345);
+      const filtered = await t
+        .http()
+        .get('/api/hotels/search')
+        .query({ ...query, maxPrice: 100 })
+        .expect(200);
+      expect(filtered.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('returns a successful empty page when availability or rating filters do not match', async () => {
+      await fixture();
+      for (const filter of [{ rooms: 2 }, { minRating: 1 }]) {
+        const response = await t
+          .http()
+          .get('/api/hotels/search')
+          .query({ ...query, ...filter })
+          .expect(200);
+        expect(response.body).toEqual({
+          items: [],
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0,
+        });
+      }
+    });
+
+    it.each([
+      ['cityId', { cityId: '' }],
+      ['countryCode', { countryCode: 'EGP' }],
+      ['checkIn', { checkIn: '2099-02-30' }],
+      ['checkIn', { checkIn: '2099-12-01T00:00:00Z' }],
+      ['checkIn', { checkIn: '2000-01-01' }],
+      ['checkOut', { checkOut: '2099-12-01' }],
+      ['guests', { guests: 0 }],
+      ['guests', { guests: 1.5 }],
+      ['rooms', { rooms: 0 }],
+      ['minPrice', { minPrice: -1 }],
+      ['minPrice', { minPrice: Number.MAX_SAFE_INTEGER + 1 }],
+      ['maxPrice', { maxPrice: 1.5 }],
+      ['maxPrice', { minPrice: 200, maxPrice: 100 }],
+      ['minRating', { minRating: 0 }],
+      ['minRating', { minRating: 5.1 }],
+      ['sortBy', { sortBy: 'name' }],
+      ['sortOrder', { sortOrder: 'invalid' }],
+      ['page', { page: 0 }],
+      ['limit', { limit: 51 }],
+      ['unknown', { unknown: 'value' }],
+    ] as const)(
+      'returns 400 VALIDATION_FAILED with details for invalid %s',
+      async (field, invalid) => {
+        const response = await t
+          .http()
+          .get('/api/hotels/search')
+          .query({ ...query, ...invalid })
+          .expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: expect.arrayContaining([expect.objectContaining({ field })]),
+        });
+      },
+    );
+
+    it('requires dates, guest count and a destination', async () => {
+      const response = await t.http().get('/api/hotels/search').expect(400);
+      expect(response.body).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+        details: expect.arrayContaining([
+          expect.objectContaining({ field: 'checkIn' }),
+          expect.objectContaining({ field: 'checkOut' }),
+          expect.objectContaining({ field: 'guests' }),
+        ]),
+      });
+      const { cityId, ...withoutDestination } = query;
+      void cityId;
+      const missingDestination = await t
+        .http()
+        .get('/api/hotels/search')
+        .query(withoutDestination)
+        .expect(400);
+      expect(missingDestination.body).toMatchObject({
+        code: ErrorCode.ValidationFailed,
+        details: expect.arrayContaining([
+          expect.objectContaining({ field: 'cityId' }),
+        ]),
+      });
+    });
+
+    it('documents the public route, query defaults and paginated response in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      const route = document.paths['/api/hotels/search']?.get;
+      expect(route).toMatchObject({
+        security: [],
+        parameters: expect.arrayContaining([
+          expect.objectContaining({ name: 'checkIn', required: true }),
+          expect.objectContaining({
+            name: 'rooms',
+            schema: { default: 1, minimum: 1, type: 'integer' },
+          }),
+        ]),
+      });
+      expect(route?.responses['200']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/PaginatedHotelSearchResponseDto',
+            },
+          },
+        },
+      });
+      expect(
+        document.components?.schemas?.HotelSearchResponseDto,
+      ).toMatchObject({
+        properties: {
+          _id: expect.any(Object),
+          pricePerNightMinor: {
+            type: 'integer',
+            minimum: 1,
+            description: expect.any(String),
+          },
+        },
+      });
+    });
+  });
+
   describe('room availability and edit endpoints (HTL-04 / HTL-05)', () => {
     const range = { fromDate: '2099-12-01', toDate: '2099-12-05' };
     const operations = [
@@ -1994,6 +2512,9 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
     expect(document.components?.schemas?.UpdateHotelPoliciesDto).toMatchObject({
       required: ['checkInTime', 'checkOutTime', 'cancellationPolicy'],
     });
-    expect(document.paths['/api/hotels/{id}']?.get).toBeUndefined();
+    expect(document.paths['/api/hotels/{id}']?.get).toMatchObject({
+      security: [],
+      summary: expect.stringContaining('HTL-02'),
+    });
   });
 });

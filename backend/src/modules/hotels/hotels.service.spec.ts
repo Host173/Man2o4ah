@@ -16,6 +16,7 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
+import type { HotelSearchQuery } from './hotels.types.js';
 import { RoomNightInventory } from './room-night-inventory.js';
 import { RoomNight } from './schemas/room-night.schema.js';
 import { Hotel } from './schemas/hotel.schema.js';
@@ -65,6 +66,611 @@ describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('hotel details and free rooms (HTL-02 / HTL-15)', () => {
+    const checkIn = toDateOnly('2099-12-01');
+    const checkOut = toDateOnly('2099-12-04');
+
+    async function fixture(fields: Partial<Room>[] = [{}]) {
+      const hotel = await hotels.create({ ...profile, countryCode: 'EG' });
+      const seededRooms = await rooms.create(
+        fields.map((overrides, index) => ({
+          hotelId: hotel._id,
+          name: String(index + 1),
+          type: 'Double',
+          beds: 1,
+          maxOccupancy: 2,
+          pricePerNightMinor: 12345,
+          availability: [{ fromDate: checkIn, toDate: addDays(checkOut, -1) }],
+          ...overrides,
+        })),
+      );
+      return { hotel, seededRooms };
+    }
+
+    it('returns stored profile, policies and rating without needing review data', async () => {
+      const { hotel } = await fixture();
+      expect(
+        await service.getHotelDetails(hotel._id.toHexString()),
+      ).toMatchObject({
+        ...profile,
+        checkInTime: '14:00',
+        checkOutTime: '12:00',
+        cancellationPolicy: { tiers: [] },
+        ratingSummary: { average: null, count: 0 },
+      });
+      await hotels.updateOne(
+        { _id: hotel._id },
+        {
+          $set: {
+            checkInTime: '15:30',
+            checkOutTime: '11:00',
+            cancellationPolicy: {
+              tiers: [{ daysBefore: 7, refundPercent: 80 }],
+            },
+            ratingSummary: { average: 4.7, count: 12 },
+          },
+        },
+      );
+      expect(
+        await service.getHotelDetails(hotel._id.toHexString()),
+      ).toMatchObject({
+        checkInTime: '15:30',
+        checkOutTime: '11:00',
+        cancellationPolicy: { tiers: [{ daysBefore: 7, refundPercent: 80 }] },
+        ratingSummary: { average: 4.7, count: 12 },
+      });
+    });
+
+    it('excludes inactive, partially available, held, reserved, blocked and other-hotel rooms without changing inventory', async () => {
+      const { hotel, seededRooms } = await fixture([
+        { maxOccupancy: 1 },
+        { isActive: false },
+        { availability: [] },
+        { availability: [{ fromDate: checkIn, toDate: checkIn }] },
+        {},
+        {},
+        {},
+        {
+          availability: [
+            { fromDate: checkIn, toDate: checkIn },
+            { fromDate: addDays(checkIn, 2), toDate: addDays(checkOut, -1) },
+          ],
+        },
+      ]);
+      await fixture();
+      await nights.create([
+        ...seededRooms.slice(4, 6).map((room) => ({
+          hotelId: hotel._id,
+          roomId: room._id,
+          date: addDays(checkIn, 1),
+          kind: 'reservation' as const,
+          reservationId: new Types.ObjectId(),
+        })),
+        {
+          hotelId: hotel._id,
+          roomId: seededRooms[6]._id,
+          date: addDays(checkOut, -1),
+          kind: 'blocked',
+          blockId: new Types.ObjectId(),
+        },
+      ]);
+      const before = await nights.find().lean();
+      const result = await service.getAvailableRooms(
+        hotel._id.toHexString(),
+        checkIn,
+        checkOut,
+      );
+      expect(result).toEqual({
+        items: [
+          {
+            id: seededRooms[0]._id.toHexString(),
+            hotelId: hotel._id.toHexString(),
+            name: '1',
+            type: 'Double',
+            beds: 1,
+            maxOccupancy: 1,
+            pricePerNightMinor: 12345,
+            totalMinor: 37035,
+          },
+        ],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+      expect(await nights.find().lean()).toEqual(before);
+      expect(await rooms.distinct('inventoryVersion')).toEqual([0]);
+    });
+
+    it('ignores occupied nights before check-in and on checkout, including a one-night stay', async () => {
+      const { hotel, seededRooms } = await fixture();
+      await nights.create(
+        [addDays(checkIn, -1), checkOut].map((date) => ({
+          hotelId: hotel._id,
+          roomId: seededRooms[0]._id,
+          date,
+          kind: 'blocked' as const,
+          blockId: new Types.ObjectId(),
+        })),
+      );
+      expect(
+        await service.getAvailableRooms(
+          hotel._id.toHexString(),
+          checkIn,
+          checkOut,
+        ),
+      ).toMatchObject({ items: [{ totalMinor: 37035 }], total: 1 });
+      expect(
+        await service.getAvailableRooms(
+          hotel._id.toHexString(),
+          checkIn,
+          addDays(checkIn, 1),
+        ),
+      ).toMatchObject({ items: [{ totalMinor: 12345 }], total: 1 });
+    });
+
+    it('paginates all free rooms in stable ID order and returns empty pages and inactive hotel availability', async () => {
+      const { hotel, seededRooms } = await fixture(
+        Array.from({ length: 12 }, () => ({})),
+      );
+      const id = hotel._id.toHexString();
+      const first = await service.getAvailableRooms(id, checkIn, checkOut);
+      const second = await service.getAvailableRooms(id, checkIn, checkOut, {
+        page: 2,
+      });
+      expect(first).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(first.items).toHaveLength(10);
+      expect([...first.items, ...second.items].map((room) => room.id)).toEqual(
+        seededRooms.map((room) => room._id.toHexString()).sort(),
+      );
+      expect(
+        await service.getAvailableRooms(id, checkIn, checkOut, { page: 3 }),
+      ).toEqual({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      await service.setActive(id, false);
+      expect(await service.getAvailableRooms(id, checkIn, checkOut)).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('rejects invalid service dates, IDs, pagination and unsafe stay totals explicitly', async () => {
+      const { hotel } = await fixture();
+      const id = hotel._id.toHexString();
+      for (const [from, to] of [
+        [toDateOnly('2000-01-01'), checkOut],
+        [checkIn, checkIn],
+        [checkOut, checkIn],
+        [new Date('invalid'), checkOut],
+        [new Date('2099-12-01T12:00:00Z'), checkOut],
+      ]) {
+        await expect(
+          service.getAvailableRooms(id, from, to),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: ErrorCode.ValidationFailed,
+            details: expect.any(Array),
+          },
+        });
+      }
+      for (const pagination of [
+        { page: 0 },
+        { limit: 51 },
+        { page: 1.5 },
+        { page: 1e100 },
+      ]) {
+        await expect(
+          service.getAvailableRooms(id, checkIn, checkOut, pagination),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      for (const target of ['invalid', new Types.ObjectId().toHexString()]) {
+        const status = target === 'invalid' ? 400 : 404;
+        const code =
+          status === 400 ? ErrorCode.ValidationFailed : ErrorCode.NotFound;
+        await expect(service.getHotelDetails(target)).rejects.toMatchObject({
+          status,
+          response: { code },
+        });
+        await expect(
+          service.getAvailableRooms(target, checkIn, checkOut),
+        ).rejects.toMatchObject({ status, response: { code } });
+      }
+      await rooms.updateMany(
+        { hotelId: hotel._id },
+        { $set: { pricePerNightMinor: Number.MAX_SAFE_INTEGER } },
+      );
+      await expect(
+        service.getAvailableRooms(id, checkIn, checkOut),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('hotel search (HTL-11 / HTL-12)', () => {
+    const checkIn = toDateOnly('2099-12-01');
+    const checkOut = toDateOnly('2099-12-04');
+    const query: HotelSearchQuery = {
+      cityId: 'cairo',
+      checkIn,
+      checkOut,
+      guests: 2,
+    };
+
+    async function seedHotel(
+      fields: Partial<Hotel> = {},
+      roomFields: Partial<Room>[] = [{}],
+    ) {
+      const hotel = await hotels.create({
+        name: 'Search hotel',
+        address: '1 Test Street',
+        cityId: 'cairo',
+        countryCode: 'EG',
+        ...fields,
+      });
+      const seededRooms = await rooms.create(
+        roomFields.map((fields, index) => ({
+          hotelId: hotel._id,
+          name: String(index + 1),
+          type: 'Double',
+          beds: 1,
+          maxOccupancy: 2,
+          pricePerNightMinor: 10000,
+          availability: [{ fromDate: checkIn, toDate: addDays(checkOut, -1) }],
+          ...fields,
+        })),
+      );
+      return { hotel, seededRooms };
+    }
+
+    it('matches active hotels by city or country and returns plain service views', async () => {
+      const cairo = await seedHotel();
+      const luxor = await seedHotel({ cityId: 'luxor' });
+      await seedHotel({ cityId: 'rome', countryCode: 'IT' });
+      await seedHotel({ isActive: false });
+      await seedHotel({}, []);
+
+      const byCity = await service.search(query);
+      expect(byCity).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+      expect(byCity.items).toMatchObject([
+        { id: cairo.hotel._id.toHexString(), pricePerNightMinor: 10000 },
+      ]);
+      expect(byCity.items[0]).not.toHaveProperty('_id');
+      expect(byCity.items[0]).not.toHaveProperty('__v');
+      const byCountry = await service.search({
+        ...query,
+        cityId: undefined,
+        countryCode: 'EG',
+      });
+      expect(byCountry.items.map((hotel) => hotel.id).sort()).toEqual(
+        [cairo.hotel._id.toHexString(), luxor.hotel._id.toHexString()].sort(),
+      );
+      expect(await service.search({ ...query, countryCode: 'IT' })).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+      expect(
+        await service.search({ ...query, cityId: 'unknown-city' }),
+      ).toEqual({ items: [], page: 1, limit: 10, total: 0, totalPages: 0 });
+    });
+
+    it('uses only the requested number of largest room occupancies, defaulting to one room', async () => {
+      await seedHotel(
+        {},
+        [4, 2, 1].map((maxOccupancy) => ({ maxOccupancy })),
+      );
+      expect(
+        (await service.search({ ...query, guests: 6, rooms: 2 })).total,
+      ).toBe(1);
+      expect(
+        (await service.search({ ...query, guests: 7, rooms: 2 })).total,
+      ).toBe(0);
+      expect(
+        (await service.search({ ...query, guests: 7, rooms: 3 })).total,
+      ).toBe(1);
+      expect((await service.search({ ...query, rooms: 4 })).total).toBe(0);
+      expect((await service.search({ ...query, guests: 4 })).total).toBe(1);
+      expect((await service.search({ ...query, guests: 5 })).total).toBe(0);
+    });
+
+    it.each(['reservation', 'blocked'] as const)(
+      'excludes rooms with a %s night anywhere in the stay (holds use reservation nights too)',
+      async (kind) => {
+        const { hotel, seededRooms } = await seedHotel({}, [{}, {}]);
+        await nights.create({
+          hotelId: hotel._id,
+          roomId: seededRooms[0]._id,
+          date: addDays(checkIn, 1),
+          kind,
+          ...(kind === 'reservation'
+            ? { reservationId: new Types.ObjectId() }
+            : { blockId: new Types.ObjectId() }),
+        });
+        expect((await service.search({ ...query, rooms: 2 })).total).toBe(0);
+        expect((await service.search(query)).total).toBe(1);
+        expect(await nights.countDocuments()).toBe(1);
+        expect(
+          (await rooms.findById(seededRooms[0]._id).lean())?.inventoryVersion,
+        ).toBe(0);
+      },
+    );
+
+    it('includes the first night and excludes checkout when reading busy nights and availability', async () => {
+      const { hotel, seededRooms } = await seedHotel();
+      for (const date of [addDays(checkIn, -1), checkOut]) {
+        await nights.create({
+          hotelId: hotel._id,
+          roomId: seededRooms[0]._id,
+          date,
+          kind: 'blocked',
+          blockId: new Types.ObjectId(),
+        });
+      }
+      expect((await service.search(query)).total).toBe(1);
+      await nights.create({
+        hotelId: hotel._id,
+        roomId: seededRooms[0]._id,
+        date: checkIn,
+        kind: 'blocked',
+        blockId: new Types.ObjectId(),
+      });
+      expect((await service.search(query)).total).toBe(0);
+    });
+
+    it('rejects inactive rooms, gaps in availability and switching rooms during the stay', async () => {
+      await seedHotel({}, [
+        { isActive: false },
+        { availability: [] },
+        {
+          availability: [
+            { fromDate: checkIn, toDate: checkIn },
+            { fromDate: addDays(checkIn, 2), toDate: checkOut },
+          ],
+        },
+        {
+          availability: [{ fromDate: addDays(checkIn, 1), toDate: checkOut }],
+        },
+      ]);
+      expect((await service.search(query)).total).toBe(0);
+    });
+
+    it.each([
+      { occupancies: [1, 2], guests: 2, count: 1, price: 20000 },
+      { occupancies: [1, 2, 4], guests: 6, count: 2, price: 20000 },
+      { occupancies: [1, 2, 4], guests: 5, count: 2, price: 10000 },
+      { occupancies: [2, 2, 4], guests: 6, count: 2, price: 10000 },
+      { occupancies: [1, 2, 4], guests: 7, count: 3, price: 10000 },
+    ])(
+      'prices only rooms that fit $guests guests with $count rooms of capacities $occupancies',
+      async ({ occupancies, guests, count, price }) => {
+        await seedHotel(
+          {},
+          occupancies.map((maxOccupancy, index) => ({
+            maxOccupancy,
+            pricePerNightMinor: (index + 1) * 10000,
+          })),
+        );
+        const search = { ...query, guests, rooms: count };
+        const result = await service.search(search);
+        expect(result.items[0]?.pricePerNightMinor).toBe(price);
+        expect(
+          (await service.search({ ...search, maxPriceMinor: price - 1 })).total,
+        ).toBe(0);
+        expect(
+          (
+            await service.search({
+              ...search,
+              minPriceMinor: price,
+              maxPriceMinor: price,
+            })
+          ).total,
+        ).toBe(1);
+      },
+    );
+
+    it('sorts and paginates using the capacity-qualified nightly price', async () => {
+      const misleading = await seedHotel({}, [
+        { maxOccupancy: 1, pricePerNightMinor: 100 },
+        { maxOccupancy: 2, pricePerNightMinor: 20000 },
+      ]);
+      const cheaper = await seedHotel({}, [{ pricePerNightMinor: 10000 }]);
+      const result = await service.search({
+        ...query,
+        sortBy: 'price',
+        limit: 1,
+      });
+      expect(result.items.map((hotel) => hotel.id)).toEqual([
+        cheaper.hotel._id.toHexString(),
+      ]);
+      expect(result.total).toBe(2);
+      expect(
+        (
+          await service.search({
+            ...query,
+            sortBy: 'price',
+            page: 2,
+            limit: 1,
+          })
+        ).items.map((hotel) => hotel.id),
+      ).toEqual([misleading.hotel._id.toHexString()]);
+    });
+
+    it('filters inclusively on the cheapest qualifying whole-stay room, not room sums or stay totals', async () => {
+      const { hotel, seededRooms } = await seedHotel({}, [
+        { maxOccupancy: 4, pricePerNightMinor: 10000 },
+        { pricePerNightMinor: 20000 },
+        { pricePerNightMinor: 1 },
+        { pricePerNightMinor: 2, isActive: false },
+        { pricePerNightMinor: 3, availability: [] },
+      ]);
+      await nights.create({
+        hotelId: hotel._id,
+        roomId: seededRooms[2]._id,
+        date: checkIn,
+        kind: 'reservation',
+        reservationId: new Types.ObjectId(),
+      });
+      const matching = await service.search({
+        ...query,
+        guests: 6,
+        rooms: 2,
+        minPriceMinor: 10000,
+        maxPriceMinor: 10000,
+      });
+      expect(matching.total).toBe(1);
+      expect(matching.items[0].pricePerNightMinor).toBe(10000);
+      expect(
+        (await service.search({ ...query, maxPriceMinor: 9999 })).total,
+      ).toBe(0);
+      expect(
+        (await service.search({ ...query, minPriceMinor: 10001 })).total,
+      ).toBe(0);
+    });
+
+    it('filters and sorts by guest averages rather than stars, keeping unrated hotels last', async () => {
+      const unrated = await seedHotel({ starRating: 5 });
+      const lower = await seedHotel(
+        { starRating: 1, ratingSummary: { average: 3.5, count: 2 } },
+        [{ pricePerNightMinor: 30000 }],
+      );
+      const higher = await seedHotel(
+        { starRating: 2, ratingSummary: { average: 4.8, count: 10 } },
+        [{ pricePerNightMinor: 20000 }],
+      );
+      expect((await service.search(query)).total).toBe(3);
+      const rated = await service.search({ ...query, minRating: 3.5 });
+      expect(rated.total).toBe(2);
+      expect(
+        rated.items.every((hotel) => hotel.ratingSummary.average !== null),
+      ).toBe(true);
+      expect((await service.search({ ...query, minRating: 5 })).total).toBe(0);
+
+      for (const sortOrder of ['asc', 'desc'] as const) {
+        const result = await service.search({
+          ...query,
+          sortBy: 'rating',
+          sortOrder,
+        });
+        expect(result.items.map((hotel) => hotel.id)).toEqual([
+          ...(sortOrder === 'asc'
+            ? [lower.hotel._id.toHexString(), higher.hotel._id.toHexString()]
+            : [higher.hotel._id.toHexString(), lower.hotel._id.toHexString()]),
+          unrated.hotel._id.toHexString(),
+        ]);
+      }
+      const ascending = await service.search({ ...query, sortBy: 'price' });
+      expect(ascending.items.map((hotel) => hotel.pricePerNightMinor)).toEqual([
+        10000, 20000, 30000,
+      ]);
+      const descending = await service.search({
+        ...query,
+        sortBy: 'price',
+        sortOrder: 'desc',
+      });
+      expect(descending.items.map((hotel) => hotel.pricePerNightMinor)).toEqual(
+        [30000, 20000, 10000],
+      );
+    });
+
+    it('paginates after qualification and sorting, including ties and out-of-range pages', async () => {
+      await Promise.all(Array.from({ length: 12 }, () => seedHotel()));
+      await seedHotel({ isActive: false });
+      const first = await service.search({ ...query, sortBy: 'price' });
+      const second = await service.search({
+        ...query,
+        sortBy: 'price',
+        page: 2,
+      });
+      expect(first).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(first.items).toHaveLength(10);
+      expect(second.items).toHaveLength(2);
+      expect(
+        new Set([...first.items, ...second.items].map((hotel) => hotel.id))
+          .size,
+      ).toBe(12);
+      expect(await service.search({ ...query, page: 3 })).toEqual({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+    });
+
+    it('allows check-in today in UTC', async () => {
+      const today = toDateOnly(new Date().toISOString().slice(0, 10));
+      await seedHotel({}, [
+        { availability: [{ fromDate: today, toDate: today }] },
+      ]);
+      expect(
+        (
+          await service.search({
+            ...query,
+            checkIn: today,
+            checkOut: addDays(today, 1),
+          })
+        ).total,
+      ).toBe(1);
+    });
+
+    it.each<[string, Partial<HotelSearchQuery>]>([
+      ['cityId', { cityId: undefined }],
+      ['checkIn', { checkIn: toDateOnly('2000-01-01') }],
+      ['checkIn', { checkIn: new Date('invalid') }],
+      ['checkOut', { checkOut: checkIn }],
+      ['checkOut', { checkOut: addDays(checkIn, -1) }],
+      ['guests', { guests: 0 }],
+      ['rooms', { rooms: 1.5 }],
+      ['page', { page: 0 }],
+      ['limit', { limit: 51 }],
+      ['minPrice', { minPriceMinor: -1 }],
+      ['maxPrice', { maxPriceMinor: 1.5 }],
+      ['maxPrice', { minPriceMinor: 200, maxPriceMinor: 100 }],
+      ['minRating', { minRating: 0 }],
+    ])('rejects invalid %s at the service boundary', async (field, invalid) => {
+      await expect(
+        service.search({ ...query, ...invalid }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: expect.arrayContaining([expect.objectContaining({ field })]),
+        },
+      });
+    });
+  });
 
   describe('room blocks, deactivation and deletion (HTL-06)', () => {
     let hotelId: string;

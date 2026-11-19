@@ -38,6 +38,11 @@ import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
+import {
+  RoomAvailabilityDto,
+  SetRoomAvailabilityDto,
+} from './dto/room-availability.dto.js';
+import { UpdateRoomDto } from './dto/update-room.dto.js';
 import { HotelProfileResponseDto } from './dto/hotel-profile.response.dto.js';
 import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import { UpdateHotelDto } from './dto/update-hotel.dto.js';
@@ -58,6 +63,98 @@ import { HotelsService } from './hotels.service.js';
 @Controller('hotels')
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
+
+  @Patch(':id/rooms/:roomId')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary: 'HTL-05 Edit room beds, occupancy and nightly price',
+    description:
+      'Beds and maximum occupancy may be reduced even when a future reservation has more guests. Existing reservations are not modified or invalidated; occupancy limits are checked when booking. Price changes do not affect existing reservation snapshots.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiOkResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid ID or numeric room fields' })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found, or not assigned to this moderator',
+  })
+  async updateRoom(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: UpdateRoomDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    return RoomResponseDto.fromView(
+      await this.hotels.updateRoom(
+        id.toHexString(),
+        roomId.toHexString(),
+        input,
+        user.providerId,
+      ),
+    );
+  }
+
+  @Post(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({ summary: 'HTL-04 Add an inclusive bookable date range' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiCreatedResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid ID, calendar dates or overlapping bookable ranges',
+  })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found, or not assigned to this moderator',
+  })
+  async addRoomAvailability(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: RoomAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    return RoomResponseDto.fromView(
+      await this.hotels.addRoomAvailability(
+        id.toHexString(),
+        roomId.toHexString(),
+        input,
+        user.providerId,
+      ),
+    );
+  }
+
+  @Patch(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary: 'HTL-05 Replace all bookable date ranges (SET_RANGES)',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'roomId', type: String })
+  @ApiOkResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid ID, calendar dates, operation or overlapping ranges',
+  })
+  @ApiNotFoundResponse({
+    description: 'Hotel or room not found, or not assigned to this moderator',
+  })
+  @ApiConflictResponse({
+    description:
+      'AVAILABILITY_HAS_RESERVATIONS: a reservation night from today onward would be excluded',
+  })
+  async setRoomAvailability(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('roomId', ParseObjectIdPipe) roomId: Types.ObjectId,
+    @Body() input: SetRoomAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<RoomResponseDto> {
+    return RoomResponseDto.fromView(
+      await this.hotels.setRoomAvailability(
+        id.toHexString(),
+        roomId.toHexString(),
+        input,
+        user.providerId,
+      ),
+    );
+  }
 
   @Post(':id/rooms')
   @Roles(Role.HOTEL_MODERATOR)

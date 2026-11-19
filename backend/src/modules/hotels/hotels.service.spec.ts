@@ -8,6 +8,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { toDateOnly } from '../../common/dates/date-only.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
@@ -15,6 +16,8 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
+import { RoomNightInventory } from './room-night-inventory.js';
+import { RoomNight } from './schemas/room-night.schema.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
 
@@ -143,6 +146,334 @@ describe('HotelsService (HTL-01 / HTL-03 integration)', () => {
         response: { code: ErrorCode.ValidationFailed },
       });
       expect(await service.getHotel(created.id)).toEqual(created);
+    });
+  });
+
+  describe('room availability and edits (HTL-04 / HTL-05)', () => {
+    const input = {
+      name: '101',
+      type: 'Double',
+      beds: 1,
+      maxOccupancy: 2,
+      pricePerNightMinor: 10000,
+    };
+    const range = { fromDate: '2099-12-01', toDate: '2099-12-05' };
+
+    async function fixture() {
+      const hotel = await service.create(profile);
+      const room = await service.createRoom(hotel.id, input, hotel.id);
+      return { hotelId: hotel.id, roomId: room.id };
+    }
+
+    async function reserve(hotelId: string, roomId: string) {
+      const session = await t.connection.startSession();
+      try {
+        await session.withTransaction(() =>
+          t.moduleRef
+            .get(RoomNightInventory)
+            .reserve(
+              hotelId,
+              [roomId],
+              toDateOnly(range.fromDate),
+              toDateOnly('2099-12-03'),
+              new Types.ObjectId().toHexString(),
+              { session },
+            ),
+        );
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    it('adds ranges without losing existing dates, sorts and merges adjacent nights', async () => {
+      const { hotelId, roomId } = await fixture();
+      await service.addRoomAvailability(hotelId, roomId, range, hotelId);
+      await service.addRoomAvailability(
+        hotelId,
+        roomId,
+        { fromDate: '2099-12-10', toDate: '2099-12-10' },
+        hotelId,
+      );
+      const updated = await service.addRoomAvailability(
+        hotelId,
+        roomId,
+        { fromDate: '2099-12-06', toDate: '2099-12-09' },
+        hotelId,
+      );
+      expect(updated.availability).toEqual([
+        {
+          fromDate: toDateOnly('2099-12-01'),
+          toDate: toDateOnly('2099-12-10'),
+        },
+      ]);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 3,
+      });
+    });
+
+    it('replaces all ranges and allows clearing an unreserved room', async () => {
+      const { hotelId, roomId } = await fixture();
+      await service.addRoomAvailability(hotelId, roomId, range, hotelId);
+      const updated = await service.setRoomAvailability(
+        hotelId,
+        roomId,
+        {
+          op: 'SET_RANGES',
+          ranges: [
+            { fromDate: '2099-12-12', toDate: '2099-12-13' },
+            { fromDate: '2099-12-10', toDate: '2099-12-11' },
+          ],
+        },
+        hotelId,
+      );
+      expect(updated.availability).toEqual([
+        {
+          fromDate: toDateOnly('2099-12-10'),
+          toDate: toDateOnly('2099-12-13'),
+        },
+      ]);
+      expect(
+        await service.setRoomAvailability(
+          hotelId,
+          roomId,
+          { op: 'SET_RANGES', ranges: [] },
+          hotelId,
+        ),
+      ).toMatchObject({ availability: [] });
+    });
+
+    it('rejects overlapping additions and replacements without partial changes', async () => {
+      const { hotelId, roomId } = await fixture();
+      const original = await service.addRoomAvailability(
+        hotelId,
+        roomId,
+        range,
+        hotelId,
+      );
+      const overlapping = { fromDate: '2099-12-05', toDate: '2099-12-07' };
+      for (const change of [
+        () =>
+          service.addRoomAvailability(hotelId, roomId, overlapping, hotelId),
+        () =>
+          service.setRoomAvailability(
+            hotelId,
+            roomId,
+            { op: 'SET_RANGES', ranges: [range, overlapping] },
+            hotelId,
+          ),
+      ]) {
+        await expect(change()).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+        expect(await service.getRooms(hotelId)).toEqual([original]);
+        expect(await rooms.findById(roomId).lean()).toMatchObject({
+          inventoryVersion: 1,
+        });
+      }
+    });
+
+    it('preserves reserved nights and rolls back rejected availability removal', async () => {
+      const { hotelId, roomId } = await fixture();
+      await service.addRoomAvailability(hotelId, roomId, range, hotelId);
+      await reserve(hotelId, roomId);
+      const original = await rooms.findById(roomId).lean();
+      for (const ranges of [
+        [],
+        [{ fromDate: '2099-12-02', toDate: '2099-12-05' }],
+      ]) {
+        await expect(
+          service.setRoomAvailability(
+            hotelId,
+            roomId,
+            { op: 'SET_RANGES', ranges },
+            hotelId,
+          ),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.AvailabilityHasReservations },
+        });
+        expect(await rooms.findById(roomId).lean()).toEqual(original);
+      }
+      const updated = await service.setRoomAvailability(
+        hotelId,
+        roomId,
+        {
+          op: 'SET_RANGES',
+          ranges: [{ fromDate: '2099-12-01', toDate: '2099-12-02' }],
+        },
+        hotelId,
+      );
+      expect(updated.availability).toEqual([
+        {
+          fromDate: toDateOnly('2099-12-01'),
+          toDate: toDateOnly('2099-12-02'),
+        },
+      ]);
+      expect(
+        await t.connection.model<RoomNight>(RoomNight.name).countDocuments(),
+      ).toBe(2);
+    });
+
+    it('edits only beds, occupancy and price and leaves held room views and inventory unchanged', async () => {
+      const { hotelId, roomId } = await fixture();
+      const quoted = await service.addRoomAvailability(
+        hotelId,
+        roomId,
+        range,
+        hotelId,
+      );
+      await reserve(hotelId, roomId);
+      const before = await rooms.findById(roomId).lean();
+      const nights = t.connection.model<RoomNight>(RoomNight.name);
+      const held = await nights.find().lean();
+      const supplied = {
+        beds: 2,
+        maxOccupancy: 4,
+        pricePerNightMinor: 12000,
+        name: 'spoofed',
+        hotelId: new Types.ObjectId().toHexString(),
+        isActive: false,
+        availability: [],
+        hasEverBeenReserved: false,
+      };
+      const updated = await service.updateRoom(
+        hotelId,
+        roomId,
+        supplied,
+        hotelId,
+      );
+      expect(updated).toEqual({
+        ...quoted,
+        beds: 2,
+        maxOccupancy: 4,
+        pricePerNightMinor: 12000,
+        hasEverBeenReserved: true,
+      });
+      expect(quoted.pricePerNightMinor).toBe(10000);
+      expect(await nights.find().lean()).toEqual(held);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: before?.inventoryVersion,
+      });
+      const partial = await service.updateRoom(
+        hotelId,
+        roomId,
+        { beds: 1 },
+        hotelId,
+      );
+      expect(partial).toEqual({ ...updated, beds: 1 });
+      await expect(
+        service.updateRoom(
+          hotelId,
+          roomId,
+          { beds: 3, pricePerNightMinor: 0 },
+          hotelId,
+        ),
+      ).rejects.toMatchObject({ name: 'ValidationError' });
+      expect(await service.getRooms(hotelId)).toEqual([partial]);
+    });
+
+    it('hides rooms outside the assigned hotel and validates malformed IDs for all edits', async () => {
+      const { hotelId, roomId } = await fixture();
+      const other = await service.create(profile);
+      const missing = new Types.ObjectId().toHexString();
+      const operations = (
+        hotel: string,
+        room: string,
+        assigned: string | undefined,
+      ) => [
+        () => service.updateRoom(hotel, room, { beds: 2 }, assigned),
+        () => service.addRoomAvailability(hotel, room, range, assigned),
+        () =>
+          service.setRoomAvailability(
+            hotel,
+            room,
+            { op: 'SET_RANGES', ranges: [] },
+            assigned,
+          ),
+      ];
+      const scopes: [string, string, string | undefined][] = [
+        [hotelId, roomId, other.id],
+        [hotelId, roomId, undefined],
+        [other.id, roomId, other.id],
+        [hotelId, missing, hotelId],
+        [missing, roomId, missing],
+      ];
+      for (const [hotel, room, assigned] of scopes) {
+        for (const operation of operations(hotel, room, assigned)) {
+          await expect(operation()).rejects.toMatchObject({
+            status: 404,
+            response: { code: ErrorCode.NotFound },
+          });
+        }
+      }
+      for (const operation of operations(hotelId, 'invalid', hotelId)) {
+        await expect(operation()).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      expect((await service.getRooms(hotelId))[0]).toMatchObject({
+        ...input,
+        availability: [],
+      });
+    });
+
+    it('retains both successful concurrent additions rather than overwriting one', async () => {
+      const { hotelId, roomId } = await fixture();
+      const results = await Promise.allSettled([
+        service.addRoomAvailability(hotelId, roomId, range, hotelId),
+        service.addRoomAvailability(
+          hotelId,
+          roomId,
+          { fromDate: '2099-12-10', toDate: '2099-12-12' },
+          hotelId,
+        ),
+      ]);
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(2);
+      expect((await service.getRooms(hotelId))[0].availability).toEqual([
+        {
+          fromDate: toDateOnly(range.fromDate),
+          toDate: toDateOnly(range.toDate),
+        },
+        {
+          fromDate: toDateOnly('2099-12-10'),
+          toDate: toDateOnly('2099-12-12'),
+        },
+      ]);
+    });
+
+    it('never leaves a concurrent reservation outside the saved availability', async () => {
+      const { hotelId, roomId } = await fixture();
+      await service.addRoomAvailability(hotelId, roomId, range, hotelId);
+      const results = await Promise.allSettled([
+        reserve(hotelId, roomId),
+        service.setRoomAvailability(
+          hotelId,
+          roomId,
+          { op: 'SET_RANGES', ranges: [] },
+          hotelId,
+        ),
+      ]);
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const saved = (await service.getRooms(hotelId))[0];
+      const held = await t.connection
+        .model<RoomNight>(RoomNight.name)
+        .find()
+        .lean();
+      for (const night of held) {
+        expect(
+          saved.availability.some(
+            ({ fromDate, toDate }) =>
+              fromDate <= night.date && night.date <= toDate,
+          ),
+        ).toBe(true);
+      }
+      expect(held.length).toBe(saved.availability.length ? 2 : 0);
     });
   });
 

@@ -19,7 +19,7 @@ import {
   assertStayDates,
   normalizeAvailability,
 } from '../../src/modules/hotels/room-date-ranges.js';
-import { FakeHotelsService } from './hotels.fake.js';
+import type { FakeHotelsService } from './hotels.fake.js';
 import type { PublicApi } from './public-api.js';
 
 /**

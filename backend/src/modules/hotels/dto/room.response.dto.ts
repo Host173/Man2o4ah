@@ -32,13 +32,22 @@ export class RoomResponseDto implements Omit<RoomView, 'id' | 'availability'> {
   @ApiProperty({ type: 'integer', minimum: 1 })
   maxOccupancy!: number;
 
-  @ApiProperty({ type: 'integer', minimum: 1 })
+  @ApiProperty({
+    type: 'integer',
+    minimum: 1,
+    description:
+      'Current nightly price in USD cents; existing reservations keep their price snapshot',
+  })
   pricePerNightMinor!: number;
 
   @ApiProperty()
   isActive!: boolean;
 
-  @ApiProperty({ type: [RoomAvailabilityResponseDto] })
+  @ApiProperty({
+    type: [RoomAvailabilityResponseDto],
+    description:
+      'Inclusive bookable nights, sorted, without overlaps and with adjacent ranges merged',
+  })
   availability!: RoomAvailabilityResponseDto[];
 
   @ApiProperty()

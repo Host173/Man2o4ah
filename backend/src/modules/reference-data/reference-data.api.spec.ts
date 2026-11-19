@@ -38,7 +38,10 @@ describe('Reference data HTTP API (GEN-12, FLT-02, GEN-05)', () => {
       currency: 'EGP',
     });
     const names = all.body.items.map((c: { name: string }) => c.name);
-    expect(names).toEqual([...names].sort());
+    // MongoDB sorts strings by code unit, like this compare.
+    expect(names).toEqual(
+      [...names].sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
 
     const united = await t.http().get('/api/countries?q=UNITED').expect(200);
     expect(ids(united.body)).toEqual(['AE', 'GB', 'US']);

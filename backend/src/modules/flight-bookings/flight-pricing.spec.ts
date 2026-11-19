@@ -18,12 +18,11 @@ const segment = (
   fareMinor: number,
   extraBagPriceMinor = 0,
   airlineId = 'airline-A',
-): PricedSegment =>
-  ({
-    fareMinor,
-    extraBagPriceMinor,
-    airlineId,
-  }) as unknown as PricedSegment;
+): PricedSegment => ({
+  airlineId,
+  fareMinor,
+  extraBagPriceMinor,
+});
 
 describe('priceFlightBooking (FLT-12, FLT-19)', () => {
   it('charges one adult the cabin fare on a one-way trip', () => {

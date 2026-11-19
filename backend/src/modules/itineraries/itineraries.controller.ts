@@ -3,12 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
@@ -38,6 +40,7 @@ import {
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
+import { ItineraryPdf } from './itinerary-pdf.js';
 import type {
   ItineraryDayView,
   ItineraryDetailView,
@@ -48,7 +51,10 @@ import type {
 @ApiCookieAuth()
 @Controller('itineraries')
 export class ItinerariesController {
-  constructor(private readonly itinerariesService: ItinerariesService) {}
+  constructor(
+    private readonly itinerariesService: ItinerariesService,
+    private readonly itineraryPdf: ItineraryPdf,
+  ) {}
 
   @Post()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
@@ -90,6 +96,34 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDetailView> {
     return this.itinerariesService.getById(id.toHexString(), user.id);
+  }
+
+  @Get(':id/pdf')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({ summary: 'ITN-28 Export or print my itinerary as PDF' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({
+    description: 'Downloadable, printable itinerary PDF',
+    content: {
+      'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary not found or owned by another user',
+  })
+  async exportPdf(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<StreamableFile> {
+    return new StreamableFile(
+      await this.itineraryPdf.export(id.toHexString(), user.id),
+      {
+        type: 'application/pdf',
+        disposition: `attachment; filename="itinerary-${id.toHexString()}.pdf"`,
+      },
+    );
   }
 
   @Patch(':id')

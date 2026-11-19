@@ -7,6 +7,7 @@ import { BookingType } from '../../common/database/booking-type.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
 import {
   HotelReservation,
@@ -43,6 +44,7 @@ export class HotelConfirmationService {
     private readonly events: AppEvents,
     @Inject(RESERVATION_REFERENCE)
     private readonly newReference: () => string,
+    private readonly payments: PaymentsService,
   ) {}
 
   @OnEvent(Events.PaymentSucceeded)
@@ -80,7 +82,9 @@ export class HotelConfirmationService {
         );
       } catch (error) {
         if (isDuplicateKey(error)) continue; // reference taken: try another
-        if (isInvalidTransition(error)) return; // already confirmed, or unknown
+        // Not pending any more: already confirmed (a duplicate event, nothing
+        // to do), unknown, or expired before the payment arrived (late payment).
+        if (isInvalidTransition(error)) return this.refundIfLate(reservationId);
         throw error;
       }
 
@@ -98,5 +102,33 @@ export class HotelConfirmationService {
     throw new Error(
       `No free reference after ${MAX_REFERENCE_TRIES} tries for ${reservationId}`,
     );
+  }
+
+  /**
+   * The payment came after the hold expired (§8.6, data-model §8 #14): the
+   * rooms may already be someone else's, so the reservation is not confirmed
+   * and the whole amount is refunded. Payments keeps one refund per booking,
+   * so a repeated event can't refund twice. Only `expired` qualifies: a
+   * confirmed reservation is never refunded here.
+   */
+  private async refundIfLate(reservationId: string): Promise<void> {
+    const reservation = await this.reservationModel
+      .findById(reservationId, {
+        status: 1,
+        userId: 1,
+        totalMinor: 1,
+        currency: 1,
+      })
+      .lean();
+    if (reservation?.status !== HotelReservationStatus.EXPIRED) return;
+
+    await this.payments.refund({
+      bookingType: BookingType.HOTEL,
+      bookingId: reservationId,
+      userId: reservation.userId.toString(),
+      amountMinor: reservation.totalMinor,
+      currency: reservation.currency,
+      reason: 'late_payment',
+    });
   }
 }

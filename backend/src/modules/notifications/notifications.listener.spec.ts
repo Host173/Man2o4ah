@@ -218,6 +218,142 @@ describe('NotificationsListener (GEN-01)', () => {
     ]);
   });
 
+  describe('duplicate delivery (handlers are idempotent)', () => {
+    const provider = {
+      providerType: 'airline' as const,
+      providerId: PROVIDER,
+      moderatorIds: MODERATORS,
+    };
+
+    it.each<[string, () => Promise<unknown>, number]>([
+      [
+        Events.FlightBookingConfirmed,
+        () => emitter.emitAsync(Events.FlightBookingConfirmed, booking),
+        1,
+      ],
+      [
+        Events.FlightBookingCancelled,
+        () => emitter.emitAsync(Events.FlightBookingCancelled, booking),
+        1,
+      ],
+      [
+        Events.HotelReservationConfirmed,
+        () => emitter.emitAsync(Events.HotelReservationConfirmed, booking),
+        1,
+      ],
+      [
+        Events.HotelReservationCancelled,
+        () => emitter.emitAsync(Events.HotelReservationCancelled, booking),
+        1,
+      ],
+      [
+        Events.RefundUpdated,
+        () =>
+          emitter.emitAsync(Events.RefundUpdated, {
+            refundId: REFUND,
+            userId: USER,
+            status: 'refunded',
+          }),
+        1,
+      ],
+      [
+        Events.FlightBookingRescheduled,
+        () =>
+          emitter.emitAsync(Events.FlightBookingRescheduled, {
+            bookingId: BOOKING,
+            userId: USER,
+          }),
+        1,
+      ],
+      [
+        Events.AccountSuspended,
+        () => emitter.emitAsync(Events.AccountSuspended, { userId: USER }),
+        1,
+      ],
+      [
+        Events.AccountReactivated,
+        () => emitter.emitAsync(Events.AccountReactivated, { userId: USER }),
+        1,
+      ],
+      [
+        Events.ProviderDeactivated,
+        () => emitter.emitAsync(Events.ProviderDeactivated, provider),
+        MODERATORS.length,
+      ],
+      [
+        Events.ProviderReactivated,
+        () => emitter.emitAsync(Events.ProviderReactivated, provider),
+        MODERATORS.length,
+      ],
+    ])(
+      'stores %s only once when it is delivered twice',
+      async (_event, emit, expected) => {
+        await emit();
+        await emit();
+        expect(await model.countDocuments()).toBe(expected);
+      },
+    );
+
+    it('stores one notification per moderator when a moderator id repeats', async () => {
+      const [first = '', second = ''] = MODERATORS;
+      await emitter.emitAsync(Events.ProviderDeactivated, {
+        ...provider,
+        moderatorIds: [first, first, second],
+      });
+      const docs = await stored();
+      expect(docs.map((doc) => doc.userId.toString())).toEqual([first, second]);
+    });
+
+    it('stores each refund status once, in order', async () => {
+      for (const status of ['pending', 'pending', 'refunded'] as const) {
+        await emitter.emitAsync(Events.RefundUpdated, {
+          refundId: REFUND,
+          userId: USER,
+          status,
+        });
+      }
+      const docs = await stored();
+      expect(docs.map((doc) => doc.message)).toEqual([
+        'Your refund is being processed.',
+        'Your refund is complete.',
+      ]);
+    });
+
+    it('notifies again when an account is suspended a second time after a reactivation', async () => {
+      await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
+      await emitter.emitAsync(Events.AccountReactivated, { userId: USER });
+      await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
+      const docs = await stored();
+      expect(docs.map((doc) => doc.type)).toEqual([
+        'account_suspended',
+        'account_reactivated',
+        'account_suspended',
+      ]);
+    });
+
+    it('notifies again when a provider is deactivated a second time after a reactivation', async () => {
+      const one = { ...provider, moderatorIds: [MODERATORS[0] ?? ''] };
+      await emitter.emitAsync(Events.ProviderDeactivated, one);
+      await emitter.emitAsync(Events.ProviderReactivated, one);
+      await emitter.emitAsync(Events.ProviderDeactivated, one);
+      const docs = await stored();
+      expect(docs.map((doc) => doc.type)).toEqual([
+        'provider_deactivated',
+        'provider_reactivated',
+        'provider_deactivated',
+      ]);
+    });
+
+    it('notifies about a new reschedule once the earlier one was read', async () => {
+      const rescheduled = { bookingId: BOOKING, userId: USER };
+      await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);
+      await model.updateMany({}, { $set: { readAt: new Date() } });
+      await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);
+      expect(await model.countDocuments()).toBe(2);
+      expect(await model.countDocuments({ readAt: null })).toBe(1);
+    });
+  });
+
   it('does not throw to the emitter when storing fails', async () => {
     const insertMany = vi
       .spyOn(model, 'insertMany')

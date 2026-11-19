@@ -12,6 +12,7 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import type { CreateDayDto } from './dto/create-day.dto.js';
 import { ItinerariesModule } from './itineraries.module.js';
 import { ItinerariesService } from './itineraries.service.js';
 import { Itinerary, ItineraryVisibility } from './schemas/itinerary.schema.js';
@@ -36,6 +37,10 @@ function errorDetails(error: unknown): {
     code: string;
     details: { field: string; message: string }[];
   };
+}
+
+function dayDto(overrides: Partial<CreateDayDto> = {}): CreateDayDto {
+  return { cityId: 'cairo', ...overrides };
 }
 
 describe('ItinerariesService (ITN-01, ITN-03)', () => {
@@ -63,6 +68,25 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   afterAll(async () => {
     await t.close();
   }, HOOK_TIMEOUT);
+
+  /** Inserts `count` days straight into the model, to reach the 60-day limit quickly. */
+  async function seedDays(itineraryId: string, count: number): Promise<void> {
+    await itineraryModel.updateOne(
+      { _id: new Types.ObjectId(itineraryId) },
+      {
+        $set: {
+          days: Array.from({ length: count }, () => ({
+            _id: new Types.ObjectId(),
+            cityId: 'cairo',
+            activities: [],
+            budgetEntries: [],
+          })),
+          dayCount: count,
+          cityIds: ['cairo'],
+        },
+      },
+    );
+  }
 
   describe('create', () => {
     it('creates a private itinerary owned by the user with trimmed title and DateOnly start date', async () => {
@@ -534,6 +558,457 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         itineraries.delete(created._id, intruder.id),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(await itineraryModel.countDocuments({}).exec()).toBe(1);
+    });
+  });
+
+  describe('addDay (ITN-05)', () => {
+    it('appends a day with its number, date and empty details, and recomputes the derived fields', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const first = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: '  Arrival day  ' }),
+        owner.id,
+      );
+
+      expect(first).toMatchObject({
+        dayNumber: 1,
+        date: '2027-04-01',
+        cityId: 'cairo',
+        notes: '  Arrival day  ',
+        activities: [],
+        budgetEntries: [],
+      });
+      expect(first._id).toMatch(/^[0-9a-f]{24}$/);
+
+      const second = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+      expect(second).toMatchObject({ dayNumber: 2, date: '2027-04-02' });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.dayCount).toBe(2);
+      expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
+      expect(stored?.days).toHaveLength(2);
+      expect(stored?.days[0]._id.toHexString()).toBe(first._id);
+    });
+
+    it('accepts the 60th day and rejects the 61st (boundary values)', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await seedDays(created._id, 59);
+
+      const sixtieth = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      expect(sixtieth.dayNumber).toBe(60);
+      expect(sixtieth.date).toBe('2027-05-30');
+
+      const error = await itineraries
+        .addDay(created._id, dayDto({ cityId: 'cairo' }), owner.id)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(errorDetails(error).code).toBe(ErrorCode.ValidationFailed);
+      expect(errorDetails(error).details[0].field).toBe('days');
+      expect((await itineraries.getById(created._id, owner.id)).dayCount).toBe(
+        60,
+      );
+    });
+
+    it('rejects a blank, non-string or unknown city with 400 on cityId', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      for (const cityId of ['   ', 'nowhere', 42 as never]) {
+        const error = await itineraries
+          .addDay(created._id, dayDto({ cityId }), owner.id)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(errorDetails(error).details[0].field).toBe('cityId');
+      }
+
+      expect(await itineraryModel.countDocuments({}).exec()).toBe(1);
+      expect((await itineraries.getById(created._id, owner.id)).days).toEqual(
+        [],
+      );
+    });
+
+    it('accepts notes of 2000 characters and rejects 2001', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const longest = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'n'.repeat(2000) }),
+        owner.id,
+      );
+      expect(longest.notes).toHaveLength(2000);
+
+      const error = await itineraries
+        .addDay(
+          created._id,
+          dayDto({ cityId: 'cairo', notes: 'n'.repeat(2001) }),
+          owner.id,
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(errorDetails(error).details[0].field).toBe('notes');
+    });
+
+    it('stores $-prefixed notes verbatim as literal values', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const withMoney = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: '$100 for dinner' }),
+        owner.id,
+      );
+      expect(withMoney.notes).toBe('$100 for dinner');
+
+      const withRoot = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai', notes: '$$ROOT' }),
+        owner.id,
+      );
+      expect(withRoot.notes).toBe('$$ROOT');
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
+      expect(stored?.days[1].notes).toBe('$$ROOT');
+    });
+
+    it('omits the notes key entirely when a day is added without notes', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      expect(day).not.toHaveProperty('notes');
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0]).not.toHaveProperty('notes');
+    });
+
+    it('returns 404 for another user’s itinerary and for an unknown one', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const intruder = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      await expect(
+        itineraries.addDay(
+          created._id,
+          dayDto({ cityId: 'cairo' }),
+          intruder.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        itineraries.addDay(
+          new Types.ObjectId().toHexString(),
+          dayDto({ cityId: 'cairo' }),
+          owner.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect((await itineraries.getById(created._id, owner.id)).days).toEqual(
+        [],
+      );
+    });
+
+    it('rejects malformed IDs with 400 VALIDATION_FAILED', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+
+      await expect(
+        itineraries.addDay('not-an-id', dayDto({ cityId: 'cairo' }), owner.id),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('updateDay (ITN-05)', () => {
+    it('changes the city and notes and recomputes cityIds', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const first = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.updateDay(
+        created._id,
+        first._id,
+        { cityId: 'dubai', notes: 'Moved to Dubai' },
+        owner.id,
+      );
+      expect(updated).toMatchObject({
+        _id: first._id,
+        dayNumber: 1,
+        date: '2027-04-01',
+        cityId: 'dubai',
+        notes: 'Moved to Dubai',
+      });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
+      expect(stored?.dayCount).toBe(2);
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.cityGroups).toEqual([
+        expect.objectContaining({ cityId: 'dubai', fromDay: 1, toDay: 1 }),
+        expect.objectContaining({ cityId: 'cairo', fromDay: 2, toDay: 2 }),
+      ]);
+    });
+
+    it('leaves omitted fields unchanged, and an empty body changes nothing', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'Arrival' }),
+        owner.id,
+      );
+
+      const notesOnly = await itineraries.updateDay(
+        created._id,
+        day._id,
+        { notes: 'Late arrival' },
+        owner.id,
+      );
+      expect(notesOnly).toMatchObject({
+        cityId: 'cairo',
+        notes: 'Late arrival',
+      });
+
+      const untouched = await itineraries.updateDay(
+        created._id,
+        day._id,
+        {},
+        owner.id,
+      );
+      expect(untouched).toEqual(notesOnly);
+    });
+
+    it('updates $-prefixed notes verbatim through the day edit', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.updateDay(
+        created._id,
+        day._id,
+        { notes: '$100 for dinner' },
+        owner.id,
+      );
+      expect(updated).toMatchObject({ notes: '$100 for dinner' });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
+    });
+
+    it('rejects an unknown city and over-long notes with 400', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      for (const [body, field] of [
+        [{ cityId: 'nowhere' }, 'cityId'],
+        [{ cityId: '   ' }, 'cityId'],
+        [{ notes: 'n'.repeat(2001) }, 'notes'],
+      ] as const) {
+        const error = await itineraries
+          .updateDay(created._id, day._id, body, owner.id)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(errorDetails(error).details[0].field).toBe(field);
+      }
+    });
+
+    it('returns 404 for a foreign itinerary, an unknown day and a day of another itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const intruder = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const other = await itineraries.create(
+        createDto({ title: 'Another trip' }),
+        owner.id,
+      );
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      const otherDay = await itineraries.addDay(
+        other._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+
+      for (const [itineraryId, dayId, userId] of [
+        [created._id, day._id, intruder.id],
+        [created._id, new Types.ObjectId().toHexString(), owner.id],
+        [created._id, otherDay._id, owner.id],
+      ] as const) {
+        await expect(
+          itineraries.updateDay(
+            itineraryId,
+            dayId,
+            { cityId: 'dubai' },
+            userId,
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      }
+    });
+
+    it('rejects malformed IDs with 400 VALIDATION_FAILED', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      for (const [itineraryId, dayId] of [
+        ['not-an-id', day._id],
+        [created._id, 'not-an-id'],
+      ]) {
+        await expect(
+          itineraries.updateDay(
+            itineraryId,
+            dayId,
+            { cityId: 'dubai' },
+            owner.id,
+          ),
+        ).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    });
+  });
+
+  describe('cityGroups (ITN-09)', () => {
+    it('groups consecutive same-city days and dates them from the start date', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      for (const cityId of ['cairo', 'cairo', 'dubai', 'cairo']) {
+        await itineraries.addDay(created._id, dayDto({ cityId }), owner.id);
+      }
+
+      const detail = await itineraries.getById(created._id, owner.id);
+
+      expect(detail.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDay: 1,
+          toDay: 2,
+          dayCount: 2,
+          checkIn: '2027-04-01',
+          checkOut: '2027-04-03',
+        },
+        {
+          cityId: 'dubai',
+          fromDay: 3,
+          toDay: 3,
+          dayCount: 1,
+          checkIn: '2027-04-03',
+          checkOut: '2027-04-04',
+        },
+        {
+          cityId: 'cairo',
+          fromDay: 4,
+          toDay: 4,
+          dayCount: 1,
+          checkIn: '2027-04-04',
+          checkOut: '2027-04-05',
+        },
+      ]);
+    });
+
+    it('moves every day and group date when the start date changes', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.update(
+        created._id,
+        { startDate: '2027-04-10' },
+        owner.id,
+      );
+
+      expect(updated.days.map((day) => day.date)).toEqual([
+        '2027-04-10',
+        '2027-04-11',
+      ]);
+      expect(updated.cityGroups).toEqual([
+        expect.objectContaining({
+          checkIn: '2027-04-10',
+          checkOut: '2027-04-12',
+        }),
+      ]);
+    });
+  });
+
+  describe('concurrent day writes (ITN-05 review)', () => {
+    it('does not lose a day edit when adds overlap', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const first = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const results = await Promise.allSettled([
+        itineraries.addDay(created._id, dayDto({ cityId: 'dubai' }), owner.id),
+        itineraries.updateDay(
+          created._id,
+          first._id,
+          { notes: 'edited' },
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(2);
+      expect(detail.days[0].notes).toBe('edited');
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(2);
+      expect(stored?.dayCount).toBe(2);
+      expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
     });
   });
 });

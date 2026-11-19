@@ -37,7 +37,7 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { CreateHotelDto } from './dto/create-hotel.dto.js';
@@ -56,6 +56,11 @@ import {
   RoomResponseDto,
 } from './dto/room.response.dto.js';
 import { HotelsService } from './hotels.service.js';
+import { SearchHotelsQueryDto } from './dto/search-hotels-query.dto.js';
+import {
+  HotelSearchResponseDto,
+  PaginatedHotelSearchResponseDto,
+} from './dto/hotel-search.response.dto.js';
 
 /** 400 VALIDATION_FAILED for a body that mixes fields of two operations. */
 function wrongFields(field: string, message: string): BadRequestException {
@@ -77,6 +82,32 @@ function wrongFields(field: string, message: string): BadRequestException {
 @Controller('hotels')
 export class HotelsController {
   constructor(@Inject(HotelsService) private readonly hotels: HotelsService) {}
+
+  @Get('search')
+  @Public()
+  @ApiOperation({
+    summary:
+      'HTL-11 / HTL-12 Search available hotels with price and rating filters',
+    description:
+      'Rooms must be active and free for the entire stay, excluding checkout. The requested number of rooms must cover all guests. Prices use the cheapest room that can join such a selection, not the total stay. Search does not hold inventory.',
+    security: [],
+  })
+  @ApiOkResponse({ type: PaginatedHotelSearchResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: invalid search inputs, dates or price range',
+  })
+  async search(
+    @Query() query: SearchHotelsQueryDto,
+  ): Promise<PaginatedHotelSearchResponseDto> {
+    const result = await this.hotels.search(query.toSearchQuery());
+    return {
+      ...result,
+      items: result.items.map((hotel) =>
+        HotelSearchResponseDto.fromResult(hotel),
+      ),
+    };
+  }
 
   @Patch(':id/rooms/:roomId')
   @Roles(Role.HOTEL_MODERATOR)

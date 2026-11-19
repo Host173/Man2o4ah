@@ -11,6 +11,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { addDays } from '../../common/dates/date-only.js';
+import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
@@ -40,13 +42,14 @@ import type {
   RoomNightView,
   RoomView,
 } from './hotels.types.js';
-import { parseAvailabilityRange } from './room-date-ranges.js';
+import { assertStayDates, parseAvailabilityRange } from './room-date-ranges.js';
 import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
 import { RoomNight, RoomNightKind } from './schemas/room-night.schema.js';
 import { parseRoomBlockOperation } from './room-block-operation.js';
+import { cheapestQualifyingRoomPrice } from './hotel-search-pricing.js';
 
 type StoredHotel = Omit<Hotel, 'photos'> & {
   photos: (Hotel['photos'][number] & { _id: Types.ObjectId })[];
@@ -429,9 +432,146 @@ export class HotelsService {
     throw new NotImplementedException('getRoomNights: implemented in INV-02');
   }
 
-  search(query: HotelSearchQuery): Promise<Paginated<HotelSearchResult>> {
-    void query;
-    throw new NotImplementedException('search: implemented in HTL-11');
+  /** HTL-11/12: reads inventory without holding it; reusable by ITN-25. */
+  async search(query: HotelSearchQuery): Promise<Paginated<HotelSearchResult>> {
+    assertStayDates(query.checkIn, query.checkOut);
+    this.validateSearch(query);
+    const { rooms = 1, page = 1, limit = 10 } = query;
+    const hotels = await this.hotelModel
+      .find({
+        isActive: true,
+        ...(query.cityId !== undefined ? { cityId: query.cityId } : {}),
+        ...(query.countryCode !== undefined
+          ? { countryCode: query.countryCode }
+          : {}),
+      })
+      .lean()
+      .exec();
+    if (!hotels.length) return toPage([], 0, page, limit);
+
+    const hotelIds = hotels.map((hotel) => hotel._id);
+    const [candidates, busyIds] = await Promise.all([
+      this.roomModel
+        .find({
+          hotelId: { $in: hotelIds },
+          isActive: true,
+          availability: {
+            $elemMatch: {
+              fromDate: { $lte: query.checkIn },
+              toDate: { $gte: addDays(query.checkOut, -1) },
+            },
+          },
+        })
+        .lean()
+        .exec(),
+      this.roomNightModel
+        .distinct('roomId', {
+          hotelId: { $in: hotelIds },
+          date: { $gte: query.checkIn, $lt: query.checkOut },
+        })
+        .exec(),
+    ]);
+    const busy = new Set(busyIds.map((id) => id.toHexString()));
+    const freeByHotel = new Map<string, typeof candidates>();
+    for (const room of candidates) {
+      if (busy.has(room._id.toHexString())) continue;
+      const hotelId = room.hotelId.toHexString();
+      const free = freeByHotel.get(hotelId) ?? [];
+      free.push(room);
+      freeByHotel.set(hotelId, free);
+    }
+
+    const matches: HotelSearchResult[] = [];
+    for (const hotel of hotels) {
+      const free = freeByHotel.get(hotel._id.toHexString()) ?? [];
+      const pricePerNightMinor = cheapestQualifyingRoomPrice(
+        free,
+        query.guests,
+        rooms,
+      );
+      if (pricePerNightMinor === null) continue;
+      if (
+        (query.minPriceMinor !== undefined &&
+          pricePerNightMinor < query.minPriceMinor) ||
+        (query.maxPriceMinor !== undefined &&
+          pricePerNightMinor > query.maxPriceMinor) ||
+        (query.minRating !== undefined &&
+          (hotel.ratingSummary.average === null ||
+            hotel.ratingSummary.average < query.minRating))
+      )
+        continue;
+      matches.push({ ...this.toView(hotel), pricePerNightMinor });
+    }
+
+    const direction = query.sortOrder === 'desc' ? -1 : 1;
+    matches.sort((a, b) => {
+      if (query.sortBy) {
+        const left =
+          query.sortBy === 'price'
+            ? a.pricePerNightMinor
+            : a.ratingSummary.average;
+        const right =
+          query.sortBy === 'price'
+            ? b.pricePerNightMinor
+            : b.ratingSummary.average;
+        if (left === null && right !== null) return 1;
+        if (right === null && left !== null) return -1;
+        if (left !== null && right !== null && left !== right)
+          return (left - right) * direction;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    return toPage(
+      matches.slice((page - 1) * limit, page * limit),
+      matches.length,
+      page,
+      limit,
+    );
+  }
+
+  private validateSearch(query: HotelSearchQuery): void {
+    const details: { field: string; message: string }[] = [];
+    if (!query.cityId && !query.countryCode) {
+      details.push({
+        field: 'cityId',
+        message: 'supply cityId or countryCode',
+      });
+    }
+    for (const [field, value] of [
+      ['guests', query.guests],
+      ['rooms', query.rooms ?? 1],
+      ['page', query.page ?? 1],
+      ['limit', query.limit ?? 10],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1)
+        details.push({ field, message: 'must be a positive safe integer' });
+    }
+    if (query.limit !== undefined && query.limit > 50)
+      details.push({ field: 'limit', message: 'must not exceed 50' });
+    for (const [field, value] of [
+      ['minPrice', query.minPriceMinor],
+      ['maxPrice', query.maxPriceMinor],
+    ] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
+        details.push({ field, message: 'must be a non-negative safe integer' });
+    }
+    if (
+      query.minPriceMinor !== undefined &&
+      query.maxPriceMinor !== undefined &&
+      query.minPriceMinor > query.maxPriceMinor
+    )
+      details.push({ field: 'maxPrice', message: 'must be at least minPrice' });
+    if (
+      query.minRating !== undefined &&
+      !(query.minRating >= 1 && query.minRating <= 5)
+    )
+      details.push({ field: 'minRating', message: 'must be between 1 and 5' });
+    if (details.length)
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid hotel search',
+        details,
+      });
   }
 
   /**

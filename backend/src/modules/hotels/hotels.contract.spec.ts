@@ -37,10 +37,6 @@ describe('hotels contracts (stubs)', () => {
   const checkOut = toDateOnly('2026-11-17');
   const calls: [string, () => unknown][] = [
     ['getRoomNights', () => hotels.getRoomNights('hotel-1', checkIn, checkOut)],
-    [
-      'search',
-      () => hotels.search({ cityId: 'cairo', checkIn, checkOut, guests: 2 }),
-    ],
   ];
 
   it.each(calls)(

@@ -1,22 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
-import { getModelToken } from '@nestjs/mongoose';
-import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { describe, expect, it, vi } from 'vitest';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
+import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
+import { createTestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
-import { FlightBooking } from '../flight-bookings/schemas/flight-booking.schema.js';
-import { Airline } from '../flights/schemas/airline.schema.js';
-import { Flight } from '../flights/schemas/flight.schema.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
-import { HotelReservation } from '../hotel-bookings/schemas/hotel-reservation.schema.js';
-import { Review } from '../hotel-bookings/schemas/review.schema.js';
 import { AdminModule } from './admin.module.js';
 import { AdminService } from './admin.service.js';
 import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
@@ -60,24 +55,21 @@ function hotelView(
 }
 
 describe('AdminService', () => {
-  it('provides and exports AdminService from AdminModule', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AdminModule],
-    })
-      .overrideProvider(getModelToken(FlightBooking.name))
-      .useValue({})
-      .overrideProvider(getModelToken(Airline.name))
-      .useValue({})
-      .overrideProvider(getModelToken(Flight.name))
-      .useValue({})
-      .overrideProvider(getModelToken(HotelReservation.name))
-      .useValue({})
-      .overrideProvider(getModelToken(Review.name))
-      .useValue({})
-      .compile();
-
-    expect(moduleRef.get(AdminService)).toBeInstanceOf(AdminService);
-  });
+  it(
+    'provides and exports AdminService from AdminModule',
+    async () => {
+      // The real module graph on the in-memory database: booking modules
+      // inject the Mongoose connection (transactions), so models alone
+      // aren't enough to build AdminModule.
+      const t = await createTestApp({ imports: [AdminModule] });
+      try {
+        expect(t.moduleRef.get(AdminService)).toBeInstanceOf(AdminService);
+      } finally {
+        await t.close();
+      }
+    },
+    HOOK_TIMEOUT,
+  );
 
   it('returns empty page when no bookings exist', async () => {
     const service = new AdminService(

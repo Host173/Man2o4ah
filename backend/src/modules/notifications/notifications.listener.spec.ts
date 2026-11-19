@@ -47,14 +47,16 @@ describe('NotificationsListener (GEN-01)', () => {
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
-  const stored = () => model.find().sort({ _id: 1 }).lean();
+  const stored = () => model.find().sort({ createdAt: 1, _id: 1 }).lean();
 
   async function expectStored(
     userIds: string[],
     expected: Expected,
   ): Promise<void> {
     const docs = await stored();
-    expect(docs.map((doc) => doc.userId.toString())).toEqual(userIds);
+    expect(docs.map((doc) => doc.userId.toString()).sort()).toEqual(
+      [...userIds].sort(),
+    );
     for (const doc of docs) {
       expect(doc.userId).toBeInstanceOf(Types.ObjectId);
       expect(doc.type).toBe(expected.type);
@@ -213,7 +215,7 @@ describe('NotificationsListener (GEN-01)', () => {
       moderatorIds: [MODERATORS[0] ?? '', 'not-an-id', MODERATORS[2] ?? ''],
     });
     const docs = await stored();
-    expect(docs.map((doc) => doc.userId.toString())).toEqual([
+    expect(docs.map((doc) => doc.userId.toString()).sort()).toEqual([
       MODERATORS[0],
       MODERATORS[2],
     ]);
@@ -318,7 +320,10 @@ describe('NotificationsListener (GEN-01)', () => {
         moderatorIds: [first, first, second],
       });
       const docs = await stored();
-      expect(docs.map((doc) => doc.userId.toString())).toEqual([first, second]);
+      expect(docs.map((doc) => doc.userId.toString()).sort()).toEqual([
+        first,
+        second,
+      ]);
     });
 
     it('stores each refund status once, in order', async () => {
@@ -361,6 +366,28 @@ describe('NotificationsListener (GEN-01)', () => {
       ]);
     });
 
+    it('keeps rapid account state changes ordered even in the same millisecond', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-19T20:00:00.000Z'));
+      try {
+        for (let cycle = 0; cycle < 3; cycle += 1) {
+          await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
+          await emitter.emitAsync(Events.AccountReactivated, { userId: USER });
+        }
+        const docs = await stored();
+        expect(docs.map((doc) => doc.type)).toEqual([
+          'account_suspended',
+          'account_reactivated',
+          'account_suspended',
+          'account_reactivated',
+          'account_suspended',
+          'account_reactivated',
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('notifies about a new reschedule once the earlier one was read', async () => {
       const rescheduled = { bookingId: BOOKING, userId: USER };
       await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);
@@ -372,14 +399,14 @@ describe('NotificationsListener (GEN-01)', () => {
   });
 
   it('does not throw to the emitter when storing fails', async () => {
-    const insertMany = vi
-      .spyOn(model, 'insertMany')
+    const updateOne = vi
+      .spyOn(model, 'updateOne')
       .mockRejectedValueOnce(new Error('database is down'));
     await expect(
       emitter.emitAsync(Events.AccountReactivated, { userId: USER }),
     ).resolves.toBeDefined();
-    expect(insertMany).toHaveBeenCalledTimes(1);
-    insertMany.mockRestore();
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    updateOne.mockRestore();
     expect(await model.countDocuments()).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { mongo, Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
@@ -54,6 +55,8 @@ export class NotificationsService {
    * - suspended/reactivated pairs: skipped when the user's latest notification
    *   of the pair already has the same type, so a later real change still notifies.
    * Repeated recipients in one call are stored once.
+   * Concurrent deliveries use the same deterministic ObjectId; the existing
+   * unique _id index prevents duplicate inserts without a schema change.
    */
   async create(items: NewNotification[]): Promise<number> {
     const rejected = new Set<string>();
@@ -64,7 +67,7 @@ export class NotificationsService {
         return false;
       }
       const key = JSON.stringify([
-        item.userId,
+        item.userId.toLowerCase(),
         item.type,
         item.entity?.type,
         item.entity?.id,
@@ -95,36 +98,65 @@ export class NotificationsService {
       : { entity: { $exists: false } };
 
     const pair = TOGGLE_PAIRS.find((types) => types.includes(item.type));
-    if (pair) {
-      const latest = await this.notificationModel
-        .findOne({ userId, type: { $in: [...pair] }, ...entityFilter })
-        .sort({ createdAt: -1, _id: -1 })
-        .lean();
-      if (latest?.type === item.type) return false;
-      await this.notificationModel.insertMany([this.toRecord(item)]);
-      return true;
+    const unreadOnly = item.type === NotificationType.FLIGHT_SCHEDULE_CHANGED;
+    const latest = await this.notificationModel
+      .findOne({
+        userId,
+        ...entityFilter,
+        ...(pair
+          ? { type: { $in: [...pair] } }
+          : { type: item.type, message: item.message }),
+      })
+      .sort({ createdAt: -1, _id: -1 })
+      .lean();
+    if (
+      latest &&
+      (pair ? latest.type === item.type : !unreadOnly || latest.readAt == null)
+    ) {
+      return false;
     }
 
-    // Conditional insert: the filter is the notification's identity, so a
-    // repeat matches the stored one and changes nothing.
-    const unreadOnly = item.type === NotificationType.FLIGHT_SCHEDULE_CHANGED;
-    const result = await this.notificationModel.updateOne(
-      {
-        userId,
-        type: item.type,
-        message: item.message,
-        ...entityFilter,
-        ...(unreadOnly ? { readAt: null } : {}),
-      },
-      {
-        $setOnInsert: {
-          title: item.title,
-          ...(unreadOnly ? {} : { readAt: null }),
-        },
-      },
-      { upsert: true },
+    // The previous alert distinguishes a new toggle/reschedule from its retries.
+    const identity = JSON.stringify([
+      userId.toHexString(),
+      item.type,
+      item.entity?.type,
+      item.entity?.id,
+      item.message,
+      latest?._id.toHexString(),
+    ]);
+    const id = new Types.ObjectId(
+      createHash('sha256').update(identity).digest().subarray(0, 12),
     );
-    return result.upsertedCount > 0;
+    // Hashed ids are not chronological: keep successive state changes ordered
+    // even when the clock returns the same millisecond.
+    const createdAt = new Date(
+      Math.max(Date.now(), latest ? latest.createdAt.getTime() + 1 : 0),
+    );
+    try {
+      const result = await this.notificationModel.updateOne(
+        { _id: id },
+        {
+          $setOnInsert: {
+            ...this.toRecord(item),
+            createdAt,
+            updatedAt: createdAt,
+          },
+        },
+        { upsert: true, timestamps: false, runValidators: true },
+      );
+      return result.upsertedCount > 0;
+    } catch (error) {
+      if (
+        error instanceof mongo.MongoServerError &&
+        error.code === 11000 &&
+        error.keyValue?._id instanceof Types.ObjectId &&
+        error.keyValue._id.equals(id)
+      ) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   private toRecord(item: NewNotification) {

@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
-  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -13,10 +12,10 @@ import {
   Min,
 } from 'class-validator';
 import { toDateOnly } from '../../../common/dates/date-only.js';
-import { PaginationQueryDto } from '../../../common/pagination/pagination-query.dto.js';
 import type { HotelSearchQuery } from '../hotels.types.js';
+import { StayDatesQueryDto } from './stay-dates-query.dto.js';
 
-export class SearchHotelsQueryDto extends PaginationQueryDto {
+export class SearchHotelsQueryDto extends StayDatesQueryDto {
   @ApiPropertyOptional({
     example: 'cairo',
     description: 'Supply cityId or countryCode; supplying both matches both',
@@ -30,26 +29,6 @@ export class SearchHotelsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @Matches(/^[A-Z]{2}$/)
   countryCode?: string;
-
-  @ApiProperty({
-    type: String,
-    format: 'date',
-    example: '2026-12-01',
-    description: 'First night, inclusive; cannot be before today in UTC',
-  })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  @IsISO8601({ strict: true })
-  checkIn!: string;
-
-  @ApiProperty({
-    type: String,
-    format: 'date',
-    example: '2026-12-03',
-    description: 'Checkout date, exclusive; must follow checkIn',
-  })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  @IsISO8601({ strict: true })
-  checkOut!: string;
 
   @ApiProperty({ type: 'integer', minimum: 1 })
   @Type(() => Number)

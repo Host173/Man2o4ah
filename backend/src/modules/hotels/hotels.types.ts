@@ -71,6 +71,6 @@ export interface HotelSearchQuery {
 }
 
 export interface HotelSearchResult extends HotelView {
-  /** The cheapest qualifying room's price, not the total stay price. */
+  /** Cheapest room that can join a capacity-valid selection of the requested room count; not the total stay price. */
   pricePerNightMinor: number;
 }

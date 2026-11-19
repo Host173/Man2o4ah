@@ -922,6 +922,39 @@ describe('FakeHotelsService', () => {
     expect((await hotels.search(query)).total).toBe(1);
   });
 
+  it.each([
+    { occupancies: [1, 2], guests: 2, count: 1, price: 20000 },
+    { occupancies: [1, 2, 4], guests: 6, count: 2, price: 20000 },
+    { occupancies: [1, 2, 4], guests: 5, count: 2, price: 10000 },
+    { occupancies: [2, 2, 4], guests: 6, count: 2, price: 10000 },
+    { occupancies: [1, 2, 4], guests: 7, count: 3, price: 10000 },
+  ])(
+    'prices only rooms that fit $guests guests with $count rooms of capacities $occupancies',
+    async ({ occupancies, guests, count, price }) => {
+      hotels.data.rooms = occupancies.map((maxOccupancy, index) =>
+        room([ids.room1, ids.room2, ids.room3][index], {
+          maxOccupancy,
+          pricePerNightMinor: (index + 1) * 10000,
+        }),
+      );
+      const search = { ...query, guests, rooms: count };
+      const result = await hotels.search(search);
+      expect(result.items[0]?.pricePerNightMinor).toBe(price);
+      expect(
+        (await hotels.search({ ...search, maxPriceMinor: price - 1 })).total,
+      ).toBe(0);
+      expect(
+        (
+          await hotels.search({
+            ...search,
+            minPriceMinor: price,
+            maxPriceMinor: price,
+          })
+        ).total,
+      ).toBe(1);
+    },
+  );
+
   it('filters by location, inclusive nightly price, and updated rating; unrated hotels are excluded by rating filters', async () => {
     expect(
       (

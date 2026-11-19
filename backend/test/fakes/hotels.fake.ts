@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
-import { addDays } from '../../src/common/dates/date-only.js';
+import { addDays, daysBetween } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -27,6 +27,7 @@ import type { UpdateHotelPoliciesDto } from '../../src/modules/hotels/dto/update
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
+  AvailableRoomView,
   HotelSearchQuery,
   HotelSearchResult,
   HotelTransactionOptions,
@@ -227,6 +228,59 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     return structuredClone(
       this.data.hotels.find((hotel) => hotel.id === id) ?? null,
     );
+  }
+
+  async getHotelDetails(hotelId: string): Promise<HotelView> {
+    return structuredClone(this.requireHotel(hotelId));
+  }
+
+  async getAvailableRooms(
+    hotelId: string,
+    checkIn: Date,
+    checkOut: Date,
+    { page = 1, limit = 10 }: { page?: number; limit?: number } = {},
+  ): Promise<Paginated<AvailableRoomView>> {
+    assertStayDates(checkIn, checkOut);
+    const details = [];
+    for (const [field, value, max] of [
+      ['page', page, Number.MAX_SAFE_INTEGER],
+      ['limit', limit, 50],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > max)
+        details.push({ field, message: `must be an integer from 1 to ${max}` });
+    }
+    if (details.length)
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid room pagination',
+        details,
+      });
+    const hotel = this.requireHotel(hotelId);
+    if (!hotel.isActive) return toPage([], 0, page, limit);
+    const free = this.availableRooms(hotel.id, checkIn, checkOut).sort((a, b) =>
+      a.id.localeCompare(b.id),
+    );
+    const nights = daysBetween(checkIn, checkOut);
+    const items = free.slice((page - 1) * limit, page * limit).map((room) => {
+      const totalMinor = room.pricePerNightMinor * nights;
+      if (!Number.isSafeInteger(totalMinor))
+        throw new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Stay price exceeds the supported integer range',
+          details: [{ field: 'checkOut', message: 'stay total is too large' }],
+        });
+      return {
+        id: room.id,
+        hotelId: room.hotelId,
+        name: room.name,
+        type: room.type,
+        beds: room.beds,
+        maxOccupancy: room.maxOccupancy,
+        pricePerNightMinor: room.pricePerNightMinor,
+        totalMinor,
+      };
+    });
+    return toPage(items, free.length, page, limit);
   }
 
   async createRoom(

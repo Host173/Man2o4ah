@@ -564,6 +564,7 @@ How the output was used:
 Pushed feature/FLT-22-flight-seat-hold and feature/HTL-16-hotel-room-hold; posted the follow-up replies on PR #147 and #148 with gh
 ================================================
 ================================================
+Date: 2026-11-19
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
@@ -574,8 +575,6 @@ push both and make pr list
 
 How the output was used:
 Pushed feature/FLT-19-flight-booking-quote (8a1ce59) and feature/GEN-11-booking-lifecycle-refund-rules (18eb409); drafted the review replies for PR #130 and #131
-================================================
-================================================
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
@@ -586,8 +585,6 @@ wait should i be just commenting on the conversation
 
 How the output was used:
 Answer only, no files changed
-================================================
-================================================
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
@@ -598,8 +595,6 @@ now i want to start the new blocked endpoints
 
 How the output was used:
 Answer only, no files changed (checked merges; FLT-22 plan)
-================================================
-================================================
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
@@ -610,32 +605,55 @@ are you following the excel sheet for project requirements?
 
 How the output was used:
 Answer only, no files changed
-================================================
-================================================
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
 Related Requirement: FLT-22
 
 Prompt:
+HTL 17 AND FLT 19 opened up, make some plans for them and then inform me , ensure the plans are maximum 4 steps each
+
+How the output was used:
+Answer only, no files changed (plans for #165 FLT-19 bag price once per airline and #59 HTL-17 hotel confirmation)
+Date: 2026-11-19
 so that no other user may steal the seats, commit
 
 How the output was used:
 Committed flight-hold.service.spec.ts (failing TDD tests for FLT-22)
-================================================
-================================================
 Date: 2026-11-17
 Student: Aya
 Tool: Claude Code
 Related Requirement: FLT-22
 
 Prompt:
+lets do htl 17 first
+
+How the output was used:
+Created feature/HTL-17-hotel-confirmation from develop; added booking-reference.spec.ts (failing TDD tests); no commit yet
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i ran it but one test failed
+
+How the output was used:
+Answer only, no files changed (explained the failing run: booking-reference.ts does not exist yet)
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+how can i create a file from terminal
+
+How the output was used:
+Answer only, no files changed
 because the payment could fail in the middle, commit
 
 How the output was used:
 Committed flight-hold-expiry.job.spec.ts (failing TDD tests for the FLT-22 expiry job)
-================================================
-================================================
 Date: 2026-11-18
 Student: Aya
 Tool: Claude Code
@@ -646,8 +664,6 @@ check the new requested changes on those PRs and then fix them
 
 How the output was used:
 FLT-22 (#147): merged develop, tests 5112bb1, fixes 9d23b27 (expiry skips failed holds), 773e8a0 (refuse holds < 10 min before departure), f190e1b (users only); npm run verify passed. HTL-16 fixes on its own branch
-================================================
-================================================
 Date: 2026-11-18
 Student: Aya
 Tool: Claude Code
@@ -663,6 +679,13 @@ FLT-22: tests 4517d7d, quote refuses flights leaving in < 10 min d0ca83c (rule m
 Date: 2026-11-19
 Student: Aya
 Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i created it and the tests pass now
+
+How the output was used:
+Answer only, no files changed (review of booking-reference.ts)
 Related Requirement: FLT-22
 
 Prompt:
@@ -675,6 +698,13 @@ Merged develop into FLT-22 (0043d47, prompt-log conflict resolved by keeping dev
 Date: 2026-11-19
 Student: Aya
 Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i commited it now move on to step 2
+
+How the output was used:
+Added hotel-confirmation.service.spec.ts (failing TDD tests for the payment.succeeded handler); no commit yet
 Related Requirement: FLT-22
 
 Prompt:
@@ -724,6 +754,13 @@ Answer only, no files changed (self-review of #174 HTL-17 and #147 FLT-22; probe
 Date: 2026-11-19
 Student: Aya
 Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+commit and do service
+
+How the output was used:
+Committed 7be29f4 (confirmation tests); added hotel-confirmation.service.ts, moved the lost-race check into booking-lifecycle.ts (isInvalidTransition) and registered the service; no commit yet
 Related Requirement: FLT-22
 
 Prompt:

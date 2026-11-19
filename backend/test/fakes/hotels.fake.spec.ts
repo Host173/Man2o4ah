@@ -78,6 +78,87 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  describe('hotel details and free rooms (HTL-02 / HTL-15)', () => {
+    it('returns detached profiles and paginates free rooms with stay totals', async () => {
+      const details = await hotels.getHotelDetails(ids.hotel1);
+      details.ratingSummary.count = 10;
+      expect(hotels.data.hotels[0].ratingSummary.count).toBe(0);
+      await inventory.reserve(
+        ids.hotel1,
+        [ids.room1],
+        checkIn,
+        checkOut,
+        ids.reservation1,
+      );
+      expect(
+        await hotels.getAvailableRooms(ids.hotel1, checkIn, checkOut, {
+          limit: 1,
+        }),
+      ).toEqual({
+        items: [
+          {
+            id: ids.room2,
+            hotelId: ids.hotel1,
+            name: ids.room2,
+            type: 'Double',
+            beds: 1,
+            maxOccupancy: 2,
+            pricePerNightMinor: 10000,
+            totalMinor: 20000,
+          },
+        ],
+        page: 1,
+        limit: 1,
+        total: 1,
+        totalPages: 1,
+      });
+      await hotels.setActive(ids.hotel1, false);
+      expect(
+        await hotels.getAvailableRooms(ids.hotel1, checkIn, checkOut),
+      ).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('preserves invalid-input, missing-hotel and price-overflow errors', async () => {
+      await expect(hotels.getHotelDetails(ids.missing)).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        hotels.getAvailableRooms('invalid', checkIn, checkOut),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      for (const pagination of [{ limit: 51 }, { page: 0 }]) {
+        await expect(
+          hotels.getAvailableRooms(ids.hotel1, checkIn, checkOut, pagination),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+      await expect(
+        hotels.getAvailableRooms(ids.hotel1, checkIn, checkIn),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      hotels.data.rooms[0].pricePerNightMinor = Number.MAX_SAFE_INTEGER;
+      await expect(
+        hotels.getAvailableRooms(ids.hotel1, checkIn, checkOut),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
   describe('room management (HTL-06)', () => {
     const block = {
       op: 'BLOCK' as const,

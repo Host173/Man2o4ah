@@ -11,7 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
-import { addDays } from '../../common/dates/date-only.js';
+import { addDays, daysBetween } from '../../common/dates/date-only.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
@@ -34,6 +34,7 @@ import type { UpdateRoomDto } from './dto/update-room.dto.js';
 import type { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
+  AvailableRoomView,
   HotelSearchQuery,
   HotelSearchResult,
   HotelTransactionOptions,
@@ -216,6 +217,66 @@ export class HotelsService {
       .lean()
       .exec();
     return hotel ? this.toView(hotel) : null;
+  }
+
+  /** HTL-02: public profile and stored rating summary; reviews are served by hotel-bookings. */
+  async getHotelDetails(hotelId: string): Promise<HotelView> {
+    const hotel = await this.getHotel(hotelId);
+    if (!hotel) throw this.notFound();
+    return hotel;
+  }
+
+  /** HTL-15: all free rooms, paginated by ID. Inactive hotels have no bookable rooms. Does not hold inventory. */
+  async getAvailableRooms(
+    hotelId: string,
+    checkIn: Date,
+    checkOut: Date,
+    { page = 1, limit = 10 }: { page?: number; limit?: number } = {},
+  ): Promise<Paginated<AvailableRoomView>> {
+    assertStayDates(checkIn, checkOut);
+    const details = [];
+    for (const [field, value, max] of [
+      ['page', page, Number.MAX_SAFE_INTEGER],
+      ['limit', limit, 50],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > max)
+        details.push({ field, message: `must be an integer from 1 to ${max}` });
+    }
+    if (details.length)
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid room pagination',
+        details,
+      });
+    const hotel = await this.getHotelDetails(hotelId);
+    if (!hotel.isActive) return toPage([], 0, page, limit);
+    const free = await this.freeRooms(
+      [this.parseId(hotelId)],
+      checkIn,
+      checkOut,
+    );
+    free.sort((a, b) => a._id.toHexString().localeCompare(b._id.toHexString()));
+    const nights = daysBetween(checkIn, checkOut);
+    const items = free.slice((page - 1) * limit, page * limit).map((room) => {
+      const totalMinor = room.pricePerNightMinor * nights;
+      if (!Number.isSafeInteger(totalMinor))
+        throw new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Stay price exceeds the supported integer range',
+          details: [{ field: 'checkOut', message: 'stay total is too large' }],
+        });
+      return {
+        id: room._id.toHexString(),
+        hotelId: room.hotelId.toHexString(),
+        name: room.name,
+        type: room.type,
+        beds: room.beds,
+        maxOccupancy: room.maxOccupancy,
+        pricePerNightMinor: room.pricePerNightMinor,
+        totalMinor,
+      };
+    });
+    return toPage(items, free.length, page, limit);
   }
 
   /**
@@ -450,31 +511,13 @@ export class HotelsService {
     if (!hotels.length) return toPage([], 0, page, limit);
 
     const hotelIds = hotels.map((hotel) => hotel._id);
-    const [candidates, busyIds] = await Promise.all([
-      this.roomModel
-        .find({
-          hotelId: { $in: hotelIds },
-          isActive: true,
-          availability: {
-            $elemMatch: {
-              fromDate: { $lte: query.checkIn },
-              toDate: { $gte: addDays(query.checkOut, -1) },
-            },
-          },
-        })
-        .lean()
-        .exec(),
-      this.roomNightModel
-        .distinct('roomId', {
-          hotelId: { $in: hotelIds },
-          date: { $gte: query.checkIn, $lt: query.checkOut },
-        })
-        .exec(),
-    ]);
-    const busy = new Set(busyIds.map((id) => id.toHexString()));
+    const candidates = await this.freeRooms(
+      hotelIds,
+      query.checkIn,
+      query.checkOut,
+    );
     const freeByHotel = new Map<string, typeof candidates>();
     for (const room of candidates) {
-      if (busy.has(room._id.toHexString())) continue;
       const hotelId = room.hotelId.toHexString();
       const free = freeByHotel.get(hotelId) ?? [];
       free.push(room);
@@ -527,6 +570,36 @@ export class HotelsService {
       page,
       limit,
     );
+  }
+
+  private async freeRooms(
+    hotelIds: Types.ObjectId[],
+    checkIn: Date,
+    checkOut: Date,
+  ) {
+    const [candidates, busyIds] = await Promise.all([
+      this.roomModel
+        .find({
+          hotelId: { $in: hotelIds },
+          isActive: true,
+          availability: {
+            $elemMatch: {
+              fromDate: { $lte: checkIn },
+              toDate: { $gte: addDays(checkOut, -1) },
+            },
+          },
+        })
+        .lean()
+        .exec(),
+      this.roomNightModel
+        .distinct('roomId', {
+          hotelId: { $in: hotelIds },
+          date: { $gte: checkIn, $lt: checkOut },
+        })
+        .exec(),
+    ]);
+    const busy = new Set(busyIds.map((id) => id.toHexString()));
+    return candidates.filter((room) => !busy.has(room._id.toHexString()));
   }
 
   private validateSearch(query: HotelSearchQuery): void {

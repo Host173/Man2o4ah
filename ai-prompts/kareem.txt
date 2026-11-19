@@ -1543,3 +1543,51 @@ ok check the plg-09 pr and check if all the problem we had through out the pr ar
 How the output was used:
 Checked BLG-09 (#144) against every review point. Found its red "Prompt log entry" check was a false failure: mostafa.txt on develop had no final newline, so appending made the last line look changed. Fixed the append-only check in .github/workflows/pr-checks.yml to ignore a newline-only change on the last line, tested it on the real diff and six synthetic cases, and opened this PR.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: HTL-06
+
+Prompt:
+#161 in this pr resolve conflict (mostly accept both) and  use lint,.
+make the auto review every 4 hour
+
+How the output was used:
+Merged develop into HTL-06 (#161). Kept both sides, except the two routes both sides defined: PATCH rooms/:roomId and PATCH rooms/:roomId/availability now have one handler each, as endpoints.md specifies (numeric edits or isActive: false; SET_RANGES, BLOCK or UNBLOCK), with tests for mixed bodies. Removed duplicate imports and helpers from the merge; npm run verify passed. Review task set to every 4 hours.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: ACC-17
+
+Prompt:
+1. yes go
+2. yes and it was ok for that time
+3. they have requested changes 
+
+about my issues which issues can be done in parrelel so i finish quickly and which want work other than cod like setting up a tool or somehtng ,
+
+How the output was used:
+While running the full suite for the NUL fix, found develop's CI red: after #148 (HTL-16) and #149 (ACC-17) merged together, the AdminModule test built the module with fake models only, and HotelHoldService now injects the Mongoose connection. The test now builds AdminModule on the in-memory database (createTestApp); unused imports removed. npm run verify passed.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-05
+
+Prompt:
+1. yes go
+2. yes and it was ok for that time
+3. they have requested changes 
+
+about my issues which issues can be done in parrelel so i finish quickly and which want work other than cod like setting up a tool or somehtng ,
+
+How the output was used:
+"1. yes go" approved the shared search fix: escapeRegex now writes a NUL character as \x00, so q=a%00b no longer answers 500 (BLG-09 search and the reference-data lists). Test commit first (TDD), then the fix; also removed the lint warning in the reference-data API test. Answer to the rest given in chat.
+================================================

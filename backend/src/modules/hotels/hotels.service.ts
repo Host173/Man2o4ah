@@ -22,6 +22,13 @@ import { StorageService } from '../storage/storage.service.js';
 import type { StoredImage } from '../storage/storage.service.js';
 import type { CreateHotelDto } from './dto/create-hotel.dto.js';
 import type { CreateRoomDto } from './dto/create-room.dto.js';
+import type { RoomBlockOperationDto } from './dto/room-block-operation.dto.js';
+import type { RoomBlockResponseDto } from './dto/room-block-operation.dto.js';
+import type {
+  RoomAvailabilityDto,
+  SetRoomAvailabilityDto,
+} from './dto/room-availability.dto.js';
+import type { UpdateRoomDto } from './dto/update-room.dto.js';
 import type { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
@@ -29,12 +36,17 @@ import type {
   HotelSearchResult,
   HotelTransactionOptions,
   HotelView,
+  RoomDateRange,
   RoomNightView,
   RoomView,
 } from './hotels.types.js';
+import { parseAvailabilityRange } from './room-date-ranges.js';
+import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
+import { RoomNight, RoomNightKind } from './schemas/room-night.schema.js';
+import { parseRoomBlockOperation } from './room-block-operation.js';
 
 type StoredHotel = Omit<Hotel, 'photos'> & {
   photos: (Hotel['photos'][number] & { _id: Types.ObjectId })[];
@@ -58,6 +70,9 @@ export class HotelsService {
   constructor(
     @InjectModel(Hotel.name) private readonly hotelModel: Model<StoredHotel>,
     @InjectModel(Room.name) private readonly roomModel: Model<Room>,
+    @InjectModel(RoomNight.name)
+    private readonly roomNightModel: Model<RoomNight>,
+    @Inject(RoomNightInventory) private readonly inventory: RoomNightInventory,
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
     @Inject(StorageService) private readonly storage: StorageService,
@@ -241,6 +256,65 @@ export class HotelsService {
     }
   }
 
+  /** HTL-05: only edits the assigned hotel's room fields; reservation price snapshots are never rewritten. */
+  async updateRoom(
+    hotelId: string,
+    roomId: string,
+    input: UpdateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const room = await this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    const fields: UpdateRoomDto = {};
+    if (input.beds !== undefined) fields.beds = input.beds;
+    if (input.maxOccupancy !== undefined)
+      fields.maxOccupancy = input.maxOccupancy;
+    if (input.pricePerNightMinor !== undefined) {
+      fields.pricePerNightMinor = input.pricePerNightMinor;
+    }
+    const updated = await this.roomModel
+      .findOneAndUpdate(
+        { _id: room._id, hotelId: room.hotelId },
+        { $set: fields },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.roomNotFound();
+    return this.toRoomView(updated);
+  }
+
+  /** HTL-04: adds inclusive bookable nights; overlaps are invalid, adjacent ranges merge. */
+  async addRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: RoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    return this.saveAvailability(
+      hotelId,
+      roomId,
+      [parseAvailabilityRange(input)],
+      moderatorHotelId,
+      true,
+    );
+  }
+
+  /** HTL-05: replaces all ranges; cannot exclude reservation nights from today onward, including holds. */
+  async setRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: SetRoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    return this.saveAvailability(
+      hotelId,
+      roomId,
+      input.ranges.map(parseAvailabilityRange),
+      moderatorHotelId,
+      false,
+    );
+  }
+
   /** HTL-03: paginated moderator list, including inactive rooms, in stable ID order. */
   async listRooms(
     hotelId: string,
@@ -272,6 +346,73 @@ export class HotelsService {
       .lean()
       .exec();
     return rooms.map((room) => this.toRoomView(room));
+  }
+
+  /** HTL-06: BLOCK is inclusive; UNBLOCK requires a block belonging to this room (otherwise 404). */
+  async manageRoomBlock(
+    hotelId: string,
+    roomId: string,
+    input: RoomBlockOperationDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomBlockResponseDto> {
+    const operation = parseRoomBlockOperation(input);
+    return this.withAssignedRoom(
+      hotelId,
+      roomId,
+      moderatorHotelId,
+      async (room, options) => {
+        if (operation.op === 'BLOCK') {
+          const blockId = await this.inventory.block(
+            room._id.toHexString(),
+            operation.fromDate,
+            operation.toDate,
+            options,
+          );
+          return { blockId };
+        }
+        const block = await this.roomNightModel
+          .exists({
+            roomId: room._id,
+            kind: RoomNightKind.BLOCKED,
+            blockId: operation.blockId,
+          })
+          .session(options.session);
+        if (!block) throw this.notFound();
+        await this.inventory.unblock(operation.blockId, options);
+        return { blockId: operation.blockId };
+      },
+    );
+  }
+
+  /** HTL-06: rejects today's/future reserved nights; retains the room and its history. */
+  async deactivateRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    return this.withAssignedRoom(
+      hotelId,
+      roomId,
+      moderatorHotelId,
+      async (room, options) => {
+        await this.inventory.deactivate(room._id.toHexString(), options);
+        return { ...this.toRoomView(room), isActive: false };
+      },
+    );
+  }
+
+  /** HTL-06: only never-reserved rooms can be deleted; their blocks are removed atomically. */
+  async deleteRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<void> {
+    await this.withAssignedRoom(
+      hotelId,
+      roomId,
+      moderatorHotelId,
+      (room, options) => this.inventory.delete(room._id.toHexString(), options),
+    );
   }
 
   /** Taken nights in the inclusive date range, for HTL-08's room status view. */
@@ -328,6 +469,70 @@ export class HotelsService {
     if (!result.matchedCount) throw this.notFound();
   }
 
+  private async assignedRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+    options?: HotelTransactionOptions,
+  ) {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    const roomObjectId = this.parseId(roomId, 'roomId');
+    if (
+      !(await this.hotelModel.exists({ _id: id }).setOptions(options ?? {}))
+    ) {
+      throw this.notFound();
+    }
+    const room = await this.roomModel
+      .findOne({ _id: roomObjectId, hotelId: id }, undefined, options)
+      .lean()
+      .exec();
+    if (!room) throw this.roomNotFound();
+    return room;
+  }
+
+  private async saveAvailability(
+    hotelId: string,
+    roomId: string,
+    ranges: RoomDateRange[],
+    moderatorHotelId: string | undefined,
+    append: boolean,
+  ): Promise<RoomView> {
+    const session = await this.roomModel.db.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        const room = await this.assignedRoom(
+          hotelId,
+          roomId,
+          moderatorHotelId,
+          { session },
+        );
+        const view = this.toRoomView(room);
+        await this.inventory.setAvailability(
+          view.id,
+          append ? [...view.availability, ...ranges] : ranges,
+          { session },
+        );
+        const updated = await this.roomModel
+          .findOne({ _id: room._id, hotelId: room.hotelId }, undefined, {
+            session,
+          })
+          .lean()
+          .exec();
+        if (!updated) throw this.roomNotFound();
+        return this.toRoomView(updated);
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private roomNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Room not found',
+    });
+  }
+
   private async profileFields(
     input: UpdateHotelDto,
   ): Promise<Partial<ProfileFields>> {
@@ -357,6 +562,35 @@ export class HotelsService {
       fields.countryCode = city.countryCode;
     }
     return fields;
+  }
+
+  private async withAssignedRoom<T>(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+    work: (
+      room: Room & { _id: Types.ObjectId },
+      options: HotelTransactionOptions,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const id = this.assignedHotelId(hotelId, moderatorHotelId);
+    const target = this.parseId(roomId, 'roomId');
+    const session = await this.roomModel.db.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        if (!(await this.hotelModel.exists({ _id: id }).session(session))) {
+          throw this.notFound();
+        }
+        const room = await this.roomModel
+          .findOne({ _id: target, hotelId: id })
+          .session(session)
+          .lean();
+        if (!room) throw this.notFound();
+        return work(room, { session });
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   private assignedHotelId(

@@ -10,15 +10,17 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
-import { toDateOnly } from '../../common/dates/date-only.js';
+import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { HotelsModule } from './hotels.module.js';
 import { HotelsService } from './hotels.service.js';
+import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
+import { RoomNight } from './schemas/room-night.schema.js';
 
 const profile = {
   name: 'Nile View Hotel',
@@ -29,11 +31,13 @@ const profile = {
   amenities: ['Wi-Fi', 'Pool'],
 };
 
-describe('Hotels API (HTL-01 / HTL-03)', () => {
+describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
   let t: TestApp;
   let service: HotelsService;
   let hotels: Model<Hotel>;
   let rooms: Model<Room>;
+  let nights: Model<RoomNight>;
+  let inventory: RoomNightInventory;
   const storage = new FakeStorageService();
 
   beforeAll(async () => {
@@ -49,6 +53,8 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
     service = t.moduleRef.get(HotelsService);
     hotels = t.moduleRef.get<Model<Hotel>>(getModelToken(Hotel.name));
     rooms = t.moduleRef.get<Model<Room>>(getModelToken(Room.name));
+    nights = t.moduleRef.get<Model<RoomNight>>(getModelToken(RoomNight.name));
+    inventory = t.moduleRef.get(RoomNightInventory);
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
@@ -57,6 +63,791 @@ describe('Hotels API (HTL-01 / HTL-03)', () => {
     await Promise.all(storage.keys().map((key) => storage.delete(key)));
   });
   afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  describe('room availability and edit endpoints (HTL-04 / HTL-05)', () => {
+    const range = { fromDate: '2099-12-01', toDate: '2099-12-05' };
+    const operations = [
+      { method: 'post', suffix: '/availability', body: range },
+      {
+        method: 'patch',
+        suffix: '/availability',
+        body: { op: 'SET_RANGES', ranges: [range] },
+      },
+      { method: 'patch', suffix: '', body: { beds: 2 } },
+    ] as const;
+
+    async function fixture() {
+      const hotel = await service.create(profile);
+      const room = await service.createRoom(
+        hotel.id,
+        {
+          name: '101',
+          type: 'Double',
+          beds: 1,
+          maxOccupancy: 2,
+          pricePerNightMinor: 10000,
+        },
+        hotel.id,
+      );
+      const moderator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotel.id,
+      });
+      return {
+        hotel,
+        room,
+        cookie: moderator.cookie,
+        path: `/api/hotels/${hotel.id}/rooms/${room.id}`,
+      };
+    }
+
+    it('adds and replaces bookable ranges with inclusive, normalized calendar-date responses', async () => {
+      const { path, cookie, room } = await fixture();
+      const added = await t
+        .http()
+        .post(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send(range)
+        .expect(201);
+      expect(added.body).toEqual({
+        _id: room.id,
+        hotelId: room.hotelId,
+        name: room.name,
+        type: room.type,
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        isActive: true,
+        hasEverBeenReserved: false,
+        availability: [range],
+      });
+      const replaced = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send({
+          op: 'SET_RANGES',
+          ranges: [
+            { fromDate: '2099-12-12', toDate: '2099-12-12' },
+            { fromDate: '2099-12-10', toDate: '2099-12-11' },
+          ],
+        })
+        .expect(200);
+      expect(replaced.body.availability).toEqual([
+        { fromDate: '2099-12-10', toDate: '2099-12-12' },
+      ]);
+      const cleared = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send({ op: 'SET_RANGES', ranges: [] })
+        .expect(200);
+      expect(cleared.body.availability).toEqual([]);
+    });
+
+    it('partially edits only the allowed numeric room fields at their minimum boundaries', async () => {
+      const { path, cookie, hotel, room } = await fixture();
+      const updated = await t
+        .http()
+        .patch(path)
+        .set('Cookie', cookie)
+        .send({
+          beds: 2,
+          maxOccupancy: 4,
+          pricePerNightMinor: 12000,
+        })
+        .expect(200);
+      expect(updated.body).toMatchObject({
+        _id: room.id,
+        hotelId: hotel.id,
+        name: room.name,
+        beds: 2,
+        maxOccupancy: 4,
+        pricePerNightMinor: 12000,
+      });
+      const partial = await t
+        .http()
+        .patch(path)
+        .set('Cookie', cookie)
+        .send({ pricePerNightMinor: 1 })
+        .expect(200);
+      expect(partial.body).toEqual({ ...updated.body, pricePerNightMinor: 1 });
+    });
+
+    it('requires login and the hotel-moderator role for all three operations', async () => {
+      const { path } = await fixture();
+      for (const operation of operations) {
+        const response = await t
+          .http()
+          [operation.method](path + operation.suffix)
+          .send(operation.body)
+          .expect(401);
+        expect(response.body.code).toBe(ErrorCode.NotAuthenticated);
+      }
+      for (const role of [Role.USER, Role.ADMIN, Role.AIRLINE_MODERATOR]) {
+        const user = await loginAs(t.connection, role);
+        for (const operation of operations) {
+          const response = await t
+            .http()
+            [operation.method](path + operation.suffix)
+            .set('Cookie', user.cookie)
+            .send(operation.body)
+            .expect(403);
+          expect(response.body.code).toBe(ErrorCode.ForbiddenRole);
+        }
+      }
+    });
+
+    it('returns 404 for another hotel, a mismatched room and missing resources', async () => {
+      const { path, hotel, room, cookie } = await fixture();
+      const other = await service.create(profile);
+      const otherModerator = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: other.id,
+      });
+      const missing = new Types.ObjectId().toHexString();
+      const missingModerator = await loginAs(
+        t.connection,
+        Role.HOTEL_MODERATOR,
+        { providerId: missing },
+      );
+      for (const operation of operations) {
+        for (const [base, auth] of [
+          [path, otherModerator.cookie],
+          [`/api/hotels/${other.id}/rooms/${room.id}`, otherModerator.cookie],
+          [`/api/hotels/${hotel.id}/rooms/${missing}`, cookie],
+          [`/api/hotels/${missing}/rooms/${room.id}`, missingModerator.cookie],
+        ]) {
+          const response = await t
+            .http()
+            [operation.method](base + operation.suffix)
+            .set('Cookie', auth)
+            .send(operation.body)
+            .expect(404);
+          expect(response.body.code).toBe(ErrorCode.NotFound);
+        }
+      }
+      expect(await service.getRooms(hotel.id)).toEqual([room]);
+    });
+
+    it('rejects invalid calendar dates, reversed or overlapping ranges, and unsupported operations', async () => {
+      const { path, cookie, hotel, room } = await fixture();
+      const invalid = [
+        {},
+        { fromDate: '2099-02-30', toDate: '2099-03-01' },
+        { ...range, fromDate: '2099-12-01T00:00:00Z' },
+        { ...range, fromDate: null },
+        { ...range, toDate: '2099-11-30' },
+        { ...range, reservationId: new Types.ObjectId().toHexString() },
+      ];
+      for (const body of invalid) {
+        for (const method of ['post', 'patch'] as const) {
+          const response = await t
+            .http()
+            [method](`${path}/availability`)
+            .set('Cookie', cookie)
+            .send(
+              method === 'post' ? body : { op: 'SET_RANGES', ranges: [body] },
+            )
+            .expect(400);
+          expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+        }
+      }
+      for (const body of [
+        {},
+        { ranges: [] },
+        { op: 'BLOCK', ranges: [] },
+        { op: 'SET_RANGES', ranges: null },
+        { op: 'SET_RANGES', ranges: [null] },
+        { op: 'SET_RANGES', ranges: 'invalid' },
+        { op: 'SET_RANGES', ranges: [range, range] },
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', cookie)
+          .send(body)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      expect(await service.getRooms(hotel.id)).toEqual([room]);
+      await t
+        .http()
+        .post(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send(range)
+        .expect(201);
+      const overlap = await t
+        .http()
+        .post(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send({
+          fromDate: '2099-12-05',
+          toDate: '2099-12-07',
+        })
+        .expect(400);
+      expect(overlap.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+
+    it('validates edit bounds, nulls, numeric strings, protected fields and both route IDs', async () => {
+      const { path, cookie, hotel, room } = await fixture();
+      for (const field of ['beds', 'maxOccupancy', 'pricePerNightMinor']) {
+        for (const value of [
+          0,
+          -1,
+          1.5,
+          '2',
+          null,
+          Number.MAX_SAFE_INTEGER + 1,
+        ]) {
+          const response = await t
+            .http()
+            .patch(path)
+            .set('Cookie', cookie)
+            .send({ [field]: value })
+            .expect(400);
+          expect(response.body).toMatchObject({
+            code: ErrorCode.ValidationFailed,
+            details: expect.arrayContaining([
+              expect.objectContaining({ field }),
+            ]),
+          });
+        }
+      }
+      for (const field of [
+        'hotelId',
+        'name',
+        'type',
+        'isActive',
+        'availability',
+        'inventoryVersion',
+        'hasEverBeenReserved',
+      ]) {
+        const response = await t
+          .http()
+          .patch(path)
+          .set('Cookie', cookie)
+          .send({ beds: 2, [field]: 'spoofed' })
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      for (const base of [
+        `/api/hotels/invalid/rooms/${room.id}`,
+        `/api/hotels/${hotel.id}/rooms/invalid`,
+      ]) {
+        for (const operation of operations) {
+          const response = await t
+            .http()
+            [operation.method](base + operation.suffix)
+            .set('Cookie', cookie)
+            .send(operation.body)
+            .expect(400);
+          expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+        }
+      }
+      expect(await service.getRooms(hotel.id)).toEqual([room]);
+    });
+
+    it('returns 409 AVAILABILITY_HAS_RESERVATIONS when a held night would be removed', async () => {
+      const { path, cookie, hotel, room } = await fixture();
+      await t
+        .http()
+        .post(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send(range)
+        .expect(201);
+      const session = await t.connection.startSession();
+      try {
+        await session.withTransaction(() =>
+          t.moduleRef
+            .get(RoomNightInventory)
+            .reserve(
+              hotel.id,
+              [room.id],
+              toDateOnly('2099-12-01'),
+              toDateOnly('2099-12-02'),
+              new Types.ObjectId().toHexString(),
+              { session },
+            ),
+        );
+      } finally {
+        await session.endSession();
+      }
+      const response = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', cookie)
+        .send({ op: 'SET_RANGES', ranges: [] })
+        .expect(409);
+      expect(response.body.code).toBe(ErrorCode.AvailabilityHasReservations);
+      expect((await service.getRooms(hotel.id))[0].availability).toEqual([
+        {
+          fromDate: toDateOnly(range.fromDate),
+          toDate: toDateOnly(range.toDate),
+        },
+      ]);
+    });
+
+    it('documents all three operations, validated request bodies and room responses in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder()
+          .setTitle('Travel Platform API')
+          .setVersion('0.0.1')
+          .addCookieAuth('access_token')
+          .build(),
+      );
+      const path = '/api/hotels/{id}/rooms/{roomId}';
+      for (const [operation, status, request] of [
+        [
+          document.paths[`${path}/availability`]?.post,
+          '201',
+          'RoomAvailabilityDto',
+        ],
+        [
+          document.paths[`${path}/availability`]?.patch,
+          '200',
+          'RoomAvailabilityOperationDto',
+        ],
+        [document.paths[path]?.patch, '200', 'PatchRoomDto'],
+      ] as const) {
+        expect(operation?.summary).toMatch(/HTL-04|HTL-05/);
+        expect(operation?.security).toEqual([{ cookie: [] }]);
+        for (const error of ['400', '401', '403', '404'])
+          expect(operation?.responses[error]).toBeDefined();
+        expect(operation?.requestBody).toMatchObject({
+          content: {
+            'application/json': {
+              schema: { $ref: `#/components/schemas/${request}` },
+            },
+          },
+        });
+        const ok = operation?.responses[status] as unknown as {
+          content: { 'application/json': { schema: Record<string, unknown> } };
+        };
+        const schema = ok.content['application/json'].schema;
+        // The PATCH availability route also answers BLOCK/UNBLOCK (HTL-06).
+        expect(
+          schema.$ref ?? (schema.oneOf as { $ref: string }[])[0]?.$ref,
+        ).toBe('#/components/schemas/RoomResponseDto');
+      }
+      expect(
+        document.paths[`${path}/availability`]?.patch?.responses['409'],
+      ).toBeDefined();
+    });
+  });
+
+  describe('room management endpoints (HTL-06)', () => {
+    let hotelId: string;
+    let roomId: string;
+    let path: string;
+    let fromDate: Date;
+    let toDate: Date;
+    let blockBody: { op: 'BLOCK'; fromDate: string; toDate: string };
+    const actions = ['BLOCK', 'UNBLOCK', 'DEACTIVATE', 'DELETE'] as const;
+    type Action = (typeof actions)[number];
+
+    beforeEach(async () => {
+      hotelId = (await service.create(profile)).id;
+      const today = toDateOnly(new Date().toISOString().slice(0, 10));
+      fromDate = addDays(today, 2);
+      toDate = addDays(today, 4);
+      const room = await rooms.create({
+        hotelId,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        availability: [{ fromDate: today, toDate: addDays(today, 30) }],
+      });
+      roomId = room._id.toHexString();
+      path = `/api/hotels/${hotelId}/rooms/${roomId}`;
+      blockBody = {
+        op: 'BLOCK',
+        fromDate: fromDate.toISOString().slice(0, 10),
+        toDate: toDate.toISOString().slice(0, 10),
+      };
+    });
+
+    function mutation(action: Action, target = path) {
+      if (action === 'DELETE') return t.http().delete(target);
+      if (action === 'DEACTIVATE')
+        return t.http().patch(target).send({ isActive: false });
+      return t
+        .http()
+        .patch(`${target}/availability`)
+        .send(
+          action === 'BLOCK'
+            ? blockBody
+            : { op: 'UNBLOCK', blockId: new Types.ObjectId().toHexString() },
+        );
+    }
+
+    async function moderator() {
+      return loginAs(t.connection, Role.HOTEL_MODERATOR, {
+        providerId: hotelId,
+      });
+    }
+
+    it('blocks inclusive dates, returns the block ID and removes exactly that block', async () => {
+      const user = await moderator();
+      const created = await mutation('BLOCK')
+        .set('Cookie', user.cookie)
+        .expect(200);
+      expect(created.body).toEqual({
+        blockId: expect.stringMatching(/^[a-f0-9]{24}$/),
+      });
+      expect(
+        await nights.countDocuments({ blockId: created.body.blockId }),
+      ).toBe(3);
+      const unblocked = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', user.cookie)
+        .send({ op: 'UNBLOCK', blockId: created.body.blockId })
+        .expect(200);
+      expect(unblocked.body).toEqual(created.body);
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it('rejects oversized blocks before inventory writes with a field-level validation error', async () => {
+      const user = await moderator();
+      const block = vi
+        .spyOn(inventory, 'block')
+        .mockResolvedValue(new Types.ObjectId().toHexString());
+      for (const dates of [
+        { fromDate: '2028-01-01', toDate: '2028-12-31' },
+        { fromDate: '2030-01-01', toDate: '2999-12-31' },
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send({ op: 'BLOCK', ...dates })
+          .expect(400);
+        expect(response.body).toMatchObject({
+          code: ErrorCode.ValidationFailed,
+          details: [
+            {
+              field: 'toDate',
+              message: expect.any(String),
+            },
+          ],
+        });
+      }
+      expect(block).not.toHaveBeenCalled();
+      expect(await nights.countDocuments()).toBe(0);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 0,
+      });
+    });
+
+    it('persists exactly 365 nights at the inclusive block limit across a leap day', async () => {
+      const user = await moderator();
+      const response = await t
+        .http()
+        .patch(`${path}/availability`)
+        .set('Cookie', user.cookie)
+        .send({
+          op: 'BLOCK',
+          fromDate: '2028-01-01',
+          toDate: '2028-12-30',
+        })
+        .expect(200);
+      expect(response.body).toEqual({
+        blockId: expect.stringMatching(/^[a-f0-9]{24}$/),
+      });
+      const blocked = await nights
+        .find({ roomId, blockId: response.body.blockId })
+        .sort({ date: 1 })
+        .lean();
+      expect(blocked).toHaveLength(365);
+      expect(blocked[0].date).toEqual(toDateOnly('2028-01-01'));
+      expect(blocked[364].date).toEqual(toDateOnly('2028-12-30'));
+      expect(await nights.countDocuments()).toBe(365);
+    });
+
+    it('returns a plain inactive room with calendar dates, and deletes a never-reserved room with its blocks', async () => {
+      const user = await moderator();
+      const response = await mutation('DEACTIVATE')
+        .set('Cookie', user.cookie)
+        .expect(200);
+      expect(response.body).toEqual({
+        _id: roomId,
+        hotelId,
+        name: '101',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+        isActive: false,
+        hasEverBeenReserved: false,
+        availability: [
+          {
+            fromDate: toDateOnly(new Date().toISOString().slice(0, 10))
+              .toISOString()
+              .slice(0, 10),
+            toDate: addDays(
+              toDateOnly(new Date().toISOString().slice(0, 10)),
+              30,
+            )
+              .toISOString()
+              .slice(0, 10),
+          },
+        ],
+      });
+      await mutation('BLOCK').set('Cookie', user.cookie).expect(200);
+      const deleted = await mutation('DELETE')
+        .set('Cookie', user.cookie)
+        .expect(204);
+      expect(deleted.text).toBe('');
+      expect(await rooms.findById(roomId)).toBeNull();
+      expect(await nights.countDocuments()).toBe(0);
+    });
+
+    it.each(actions)(
+      'enforces login, moderator role and hotel/room scope for %s',
+      async (action) => {
+        const unauthenticated = await mutation(action).expect(401);
+        expect(unauthenticated.body.code).toBe(ErrorCode.NotAuthenticated);
+        for (const role of [Role.USER, Role.ADMIN, Role.AIRLINE_MODERATOR]) {
+          const user = await loginAs(t.connection, role);
+          const forbidden = await mutation(action)
+            .set('Cookie', user.cookie)
+            .expect(403);
+          expect(forbidden.body.code).toBe(ErrorCode.ForbiddenRole);
+        }
+        const otherHotelId = (
+          await service.create({ ...profile, name: 'Other Hotel' })
+        ).id;
+        const user = await moderator();
+        const other = await loginAs(t.connection, Role.HOTEL_MODERATOR, {
+          providerId: otherHotelId,
+        });
+        const wrongAssignment = await mutation(action)
+          .set('Cookie', other.cookie)
+          .expect(404);
+        expect(wrongAssignment.body.code).toBe(ErrorCode.NotFound);
+        for (const target of [
+          `/api/hotels/${otherHotelId}/rooms/${roomId}`,
+          `/api/hotels/${hotelId}/rooms/${new Types.ObjectId().toHexString()}`,
+        ]) {
+          const missing = await mutation(action, target)
+            .set('Cookie', user.cookie)
+            .expect(404);
+          expect(missing.body.code).toBe(ErrorCode.NotFound);
+        }
+        const ownOtherHotel = await mutation(
+          action,
+          `/api/hotels/${otherHotelId}/rooms/${roomId}`,
+        )
+          .set('Cookie', other.cookie)
+          .expect(404);
+        expect(ownOtherHotel.body.code).toBe(ErrorCode.NotFound);
+        const badId = await mutation(
+          action,
+          `/api/hotels/${hotelId}/rooms/invalid`,
+        )
+          .set('Cookie', user.cookie)
+          .expect(400);
+        expect(badId.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(await rooms.findById(roomId).lean()).toMatchObject({
+          isActive: true,
+          inventoryVersion: 0,
+        });
+        expect(await nights.countDocuments()).toBe(0);
+      },
+    );
+
+    it('does not unblock another room or mistake a reservation ID for a block ID', async () => {
+      const user = await moderator();
+      const otherRoom = await rooms.create({
+        hotelId,
+        name: '102',
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightMinor: 10000,
+      });
+      const block = await service.manageRoomBlock(
+        hotelId,
+        otherRoom._id.toHexString(),
+        blockBody,
+        hotelId,
+      );
+      const reservationId = new Types.ObjectId().toHexString();
+      await t.connection.transaction((session) =>
+        inventory.reserve(
+          hotelId,
+          [roomId],
+          fromDate,
+          addDays(toDate, 1),
+          reservationId,
+          { session },
+        ),
+      );
+      for (const blockId of [
+        block.blockId,
+        reservationId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send({ op: 'UNBLOCK', blockId })
+          .expect(404);
+        expect(response.body.code).toBe(ErrorCode.NotFound);
+      }
+      expect(await nights.countDocuments({ blockId: block.blockId })).toBe(3);
+      expect(await nights.countDocuments({ reservationId })).toBe(3);
+    });
+
+    it('rejects invalid and mixed operation fields without writing any nights', async () => {
+      const user = await moderator();
+      for (const body of [
+        {},
+        { op: 'OTHER' },
+        { op: 'BLOCK' },
+        { ...blockBody, fromDate: null },
+        { ...blockBody, fromDate: '2026-02-29' },
+        { ...blockBody, toDate: '2026-12-01T00:00:00Z' },
+        {
+          ...blockBody,
+          fromDate: blockBody.toDate,
+          toDate: blockBody.fromDate,
+        },
+        { ...blockBody, blockId: new Types.ObjectId().toHexString() },
+        { ...blockBody, reservationId: new Types.ObjectId().toHexString() },
+        { op: 'UNBLOCK' },
+        { op: 'UNBLOCK', blockId: null },
+        { op: 'UNBLOCK', blockId: 'invalid' },
+        {
+          ...blockBody,
+          op: 'UNBLOCK',
+          blockId: new Types.ObjectId().toHexString(),
+        },
+        // One route for HTL-05 and HTL-06: an operation takes only its own fields.
+        {
+          op: 'SET_RANGES',
+          ranges: [],
+          blockId: new Types.ObjectId().toHexString(),
+        },
+        {
+          op: 'UNBLOCK',
+          blockId: new Types.ObjectId().toHexString(),
+          ranges: [],
+        },
+      ]) {
+        const response = await t
+          .http()
+          .patch(`${path}/availability`)
+          .set('Cookie', user.cookie)
+          .send(body)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      for (const body of [
+        {},
+        { isActive: true },
+        { isActive: null },
+        { isActive: 'false' },
+        { isActive: false, inventoryVersion: 9 },
+        // Deactivation can't be combined with HTL-05 edits on the same route.
+        { isActive: false, beds: 2 },
+      ]) {
+        const response = await t
+          .http()
+          .patch(path)
+          .set('Cookie', user.cookie)
+          .send(body)
+          .expect(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+      expect(await nights.countDocuments()).toBe(0);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        inventoryVersion: 0,
+        isActive: true,
+      });
+    });
+
+    it('returns reservation conflicts without partial changes, and retains history after release', async () => {
+      const user = await moderator();
+      const reservationId = new Types.ObjectId().toHexString();
+      await t.connection.transaction((session) =>
+        inventory.reserve(
+          hotelId,
+          [roomId],
+          fromDate,
+          addDays(toDate, 1),
+          reservationId,
+          { session },
+        ),
+      );
+      for (const [action, code] of [
+        ['BLOCK', ErrorCode.OverlapsReservationOrBlock],
+        ['DEACTIVATE', ErrorCode.RoomHasReservations],
+        ['DELETE', ErrorCode.RoomHasReservations],
+      ] as const) {
+        const response = await mutation(action)
+          .set('Cookie', user.cookie)
+          .expect(409);
+        expect(response.body.code).toBe(code);
+      }
+      expect(await nights.countDocuments()).toBe(3);
+      expect(await rooms.findById(roomId).lean()).toMatchObject({
+        isActive: true,
+        inventoryVersion: 1,
+      });
+      await t.connection.transaction((session) =>
+        inventory.release(reservationId, { session }),
+      );
+      const response = await mutation('DELETE')
+        .set('Cookie', user.cookie)
+        .expect(409);
+      expect(response.body.code).toBe(ErrorCode.RoomWasReserved);
+      await mutation('DEACTIVATE').set('Cookie', user.cookie).expect(200);
+    });
+
+    it('documents the HTL-06 operations, request/response types, authentication and conflicts in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        t.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      const availability =
+        document.paths['/api/hotels/{id}/rooms/{roomId}/availability']?.patch;
+      const room = document.paths['/api/hotels/{id}/rooms/{roomId}'];
+      for (const endpoint of [availability, room?.patch, room?.delete]) {
+        expect(endpoint).toMatchObject({
+          summary: expect.stringContaining('HTL-06'),
+          security: [{ cookie: [] }],
+          responses: {
+            '400': expect.any(Object),
+            '401': expect.any(Object),
+            '403': expect.any(Object),
+            '404': expect.any(Object),
+            '409': expect.any(Object),
+          },
+        });
+      }
+      expect(availability?.requestBody).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/RoomAvailabilityOperationDto',
+            },
+          },
+        },
+      });
+      expect(room?.patch?.requestBody).toMatchObject({
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PatchRoomDto' },
+          },
+        },
+      });
+      expect(room?.delete?.responses).toHaveProperty('204');
+    });
+  });
 
   describe('room endpoints (HTL-03)', () => {
     const input = {

@@ -1591,3 +1591,234 @@ about my issues which issues can be done in parrelel so i finish quickly and whi
 How the output was used:
 "1. yes go" approved the shared search fix: escapeRegex now writes a NUL character as \x00, so q=a%00b no longer answers 500 (BLG-09 search and the reference-data lists). Test commit first (TDD), then the fix; also removed the lint warning in the reference-data API test. Answer to the rest given in chat.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-08
+
+Prompt:
+execute this file , branch a new branch from develop
+[Attached: GEN08_EXECUTION.md]
+# Execution — GEN-08: Image uploads (StorageService)
+
+Issue #17. Lane A of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+Implement `StorageService` (module `storage`) so images are really saved on the server's disk, served under `/uploads/<key>`, deleted and copied. Today every method throws `NotImplementedException('… implemented in GEN-08')`, so every image feature (hotel photos, airline logo, activity images, blog images, itinerary clones) answers 501 outside tests.
+
+Done means:
+1. `save(file)` validates the image (type, size **and real content**) and writes it under a random file name.
+2. `delete(key)` removes the file; a missing file is not an error.
+3. `copy(key)` writes a new copy under a new key (itinerary clones).
+4. Tests run on a real temporary folder, and the upload rejections are tested over HTTP.
+
+**Out of scope:** any controller or endpoint in another module, the per-item image counts (≤ 5 per post/activity/hotel, 1 logo: the feature services enforce them), the frontend, CI, the data model docs, cloud storage.
+
+## Context you need
+
+**Requirement GEN-08 (verbatim):** "The system shall accept image uploads in JPG or PNG format, up to 5 MB each, with up to 5 images per post, activity or hotel and 1 logo per airline, stored on the server and served by URL. Uploads outside these limits are rejected with an error."
+
+**Data model §1.6:** files are stored on the server's disk and served by URL. Documents store `ImageRef = { _id: ObjectId, key: string }`; `key` is the stored file name. The URL is computed, never stored. Removing an image deletes the file.
+
+**The contract (`backend/src/modules/storage/storage.service.ts`) stays exactly as it is:**
+```ts
+export interface StoredImage { _id: Types.ObjectId; key: string; }
+save(file: UploadedImage): Promise<StoredImage>   // validates, saves under a random key
+delete(key: string): Promise<void>                // a missing file is not an error
+copy(key: string): Promise<StoredImage>           // new file, new key (ITN-21 clones)
+urlOf(key: string): string                        // `/uploads/${key}`, unchanged
+```
+Don't rename, add or remove a public method: `FakeStorageService` (`backend/test/fakes/storage.fake.ts`) `implements PublicApi<StorageService>`, and other members' tests use that fake.
+
+**Existing code to reuse, not duplicate:**
+- `backend/src/modules/storage/image-rules.ts`: `MAX_IMAGE_BYTES` (5 MB), `ALLOWED_IMAGE_TYPES` (`image/jpeg → jpg`, `image/png → png`), `UploadedImage`, `assertImageAllowed(file)` (400 `VALIDATION_FAILED`, `details: [{ field: 'file', message }]` for a wrong type, > 5 MB, or 0 bytes). **Don't change `assertImageAllowed`'s behaviour**: the fake calls it, and other members' tests upload dummy bytes such as `Buffer.from('x')` through the fake.
+- `backend/src/modules/storage/image-upload.decorator.ts`: `@ImageUpload()` (Multer in memory, `fileSize` limit 5 MB, 1 file). A file over 5 MB is cut off by Multer before it reaches the service and answers **413 `REQUEST_FAILED`** (the hotels API tests already pin this). Don't change the decorator.
+- `backend/src/app.setup.ts`: `configureApp` serves `resolve(uploadDir)` at `/uploads/`. `backend/src/main.ts` passes `UPLOAD_DIR` (default `'uploads'`). `ConfigModule` is global, so any provider can inject `ConfigService`.
+- `backend/test/support/test-app.ts`: `createTestApp` makes a temporary upload folder (`t.uploadDir`) and passes it to `configureApp`, **but not to the config**: `ConfigService.get('UPLOAD_DIR')` is undefined in tests today. Step 1 fixes that.
+- Error shape: `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Invalid image', details: [{ field: 'file', message }] })`, `new NotFoundException({ code: ErrorCode.NotFound, message: 'File not found' })` (`ErrorCode` from `backend/src/common/errors/error-codes.ts`).
+- `@Public()` is in `backend/src/modules/accounts/auth/decorators.ts`.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style (single quotes, trailing commas). No new npm packages: use `node:fs/promises`, `node:path`, `node:crypto`.
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files (`npx vitest run <paths>`). Run the full `npm run verify` once, at the end (G1).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. Create your own folder and branch: `git worktree add ../man2o4ah-GEN-08 -b feature/GEN-08-image-uploads origin/develop`, then work only in `../man2o4ah-GEN-08`. If the branch already exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. Check that develop is green for this run: `npx vitest run src/modules/admin src/modules/storage`. If anything fails, stop and report (develop's admin test was broken until PR #166 merged).
+5. Confirm the stub: `git grep -n "implemented in GEN-08" -- backend/src` lists `save`, `delete` and `copy`. If not, stop and report.
+
+## Step 1: the test app passes its upload folder to the config
+
+In `backend/test/support/test-app.ts`, the `ConfigModule.forRoot` call loads `TEST_CONFIG`. Change its `load` to:
+```ts
+load: [() => ({ ...TEST_CONFIG, UPLOAD_DIR: uploadDir })],
+```
+(`uploadDir` is already created above the builder.) Nothing else in that file changes.
+
+In `backend/test/support/test-app.spec.ts` add one test: after `createTestApp()`, `t.moduleRef.get(ConfigService).get('UPLOAD_DIR')` equals `t.uploadDir`.
+
+**Commit:** `test(support): give the test config the temporary upload folder (GEN-08)`
+
+## Step 2: check the real file content
+
+In `image-rules.ts` add, below `assertImageAllowed`:
+
+```ts
+/** The image type a file's first bytes show, or undefined if it is neither JPG nor PNG (GEN-08). */
+export function detectImageType(bytes: Buffer): keyof typeof ALLOWED_IMAGE_TYPES | undefined
+```
+- JPEG: the first 3 bytes are `FF D8 FF` → `'image/jpeg'`.
+- PNG: the first 8 bytes are `89 50 4E 47 0D 0A 1A 0A` → `'image/png'`.
+- Anything else, including a buffer shorter than the signature → `undefined`.
+
+```ts
+/** Throws 400 VALIDATION_FAILED (field `file`) unless the bytes are a JPG or PNG of the declared type (GEN-08). Called by StorageService.save only, never by the fake. */
+export function assertImageContent(file: UploadedImage): void
+```
+- `detectImageType(file.buffer)` is `undefined` → message `'the file is not a JPG or PNG image'`.
+- Detected type ≠ `file.mimetype` → message `'the file content does not match its type'`.
+- Same exception shape as `assertImageAllowed` (`message: 'Invalid image'`, `details: [{ field: 'file', message }]`).
+
+Why only in the real service: the type in the request is only what the browser claims. A renamed `.exe` sent as `image/png` must not end up served from our server. The fake skips it so other members' tests can keep using dummy bytes.
+
+Tests in `image-rules.spec.ts` (add, don't change existing ones):
+- `detectImageType`: a JPEG signature (+ padding) → `image/jpeg`; a PNG signature → `image/png`; `GIF89a…` → `undefined`; an empty buffer → `undefined`; `FF D8` only (2 bytes) → `undefined`; the PNG signature missing its last byte → `undefined`.
+- `assertImageContent`: PNG bytes + `image/png` passes; JPEG bytes + `image/jpeg` passes; JPEG bytes + `image/png` → 400 with the "does not match" detail; text bytes + `image/png` → 400 with the "not a JPG or PNG" detail. Assert `getResponse()` has `code: 'VALIDATION_FAILED'` and `details[0].field === 'file'`.
+
+**Commit:** `feat(storage): check an image's real content by its signature (GEN-08)`
+
+## Step 3: implement StorageService
+
+Rewrite the body of `storage.service.ts` (keep the `StoredImage` interface and the method signatures; update the JSDoc, removing "Implemented in GEN-08").
+
+```ts
+/** Keys this service creates: a random name plus `.jpg` or `.png`. Anything else (`../x.png`, `a/b.png`) is never a stored file. */
+const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(jpg|png)$/;
+```
+(The pattern also accepts the fake's ObjectId-style keys, so a key written by either works.)
+
+- **Constructor:** inject `ConfigService`; `this.dir = resolve(config.get<string>('UPLOAD_DIR') ?? 'uploads')`. Same default and the same `resolve` as `main.ts`/`configureApp`, so the service writes exactly where the static route reads. Change `import type { Types }` to a value import (`new Types.ObjectId()` is needed). Add a `Logger` (`new Logger(StorageService.name)`).
+- **`save(file)`:**
+  1. If `file` is missing (a controller passed `undefined` because the request had no file) → 400 `VALIDATION_FAILED`, `details: [{ field: 'file', message: 'an image file is required' }]`.
+  2. `assertImageAllowed(file)`, then `assertImageContent(file)`.
+  3. The extension comes from `ALLOWED_IMAGE_TYPES[file.mimetype]` (now proven to match the content).
+  4. Write through the private `write` below.
+- **`delete(key)`:** if `key` doesn't match `KEY_PATTERN` → log a warning (`Ignored delete of an invalid image key`; don't log the key's full content if longer than 100 characters) and return. Otherwise `unlink(join(this.dir, key))`; ignore an error whose `code` is `'ENOENT'` (already gone, retrying is safe); rethrow any other error.
+- **`copy(key)`:** invalid key → `NotFoundException` (`code: NOT_FOUND`, `'File not found'`), same as the fake for an unknown key. Read the file; `ENOENT` → the same 404; other errors rethrow. The extension is the source key's extension. Write through `write`.
+- **`urlOf(key)`:** unchanged.
+- **private `write(bytes, extension)`:** `await mkdir(this.dir, { recursive: true })`; `key = \`${randomUUID()}.${extension}\``; `await writeFile(join(this.dir, key), bytes, { flag: 'wx' })` (`wx` = fail rather than overwrite); return `{ _id: new Types.ObjectId(), key }`.
+
+Never build a path from client text: `join(this.dir, key)` is only ever called with a key that matched `KEY_PATTERN`.
+
+In `backend/test/fakes/storage.fake.ts` change only the class JSDoc: add that the fake does **not** check the file's real content (magic bytes), so tests may use any bytes. No code change.
+
+**Commit:** `feat(storage): save, delete and copy image files on disk (GEN-08)`
+
+## Step 4: integration tests
+
+Replace `backend/src/modules/storage/storage.service.spec.ts` (today's "(stub)" tests assert the methods throw; that behaviour is gone, so they are replaced, not kept).
+
+Setup:
+```ts
+let t: TestApp;
+let storage: StorageService;
+beforeAll(async () => {
+  t = await createTestApp({ imports: [StorageModule] });
+  storage = t.moduleRef.get(StorageService);
+}, HOOK_TIMEOUT);
+afterAll(() => t.close(), HOOK_TIMEOUT);
+```
+Helpers in the spec: `png(size)` = the PNG signature followed by zero bytes up to `size`; `jpeg(size)` = `FF D8 FF` + zeros; `image(bytes, mimetype, name)` returns an `UploadedImage` (`size: bytes.length`). To read a served file as bytes with Supertest:
+```ts
+const res = await t.http().get(`/uploads/${key}`).buffer(true)
+  .parse((r, done) => { const chunks: Buffer[] = []; r.on('data', (c: Buffer) => chunks.push(c)); r.on('end', () => done(null, Buffer.concat(chunks))); });
+```
+(`/uploads` is not under `/api`.) Use `readdir(t.uploadDir)` to check what is on disk. Before each test, empty `t.uploadDir` (`rm` each entry), so tests don't depend on each other.
+
+Cases (one `it` each unless grouped):
+1. **save PNG:** key matches `/^[0-9a-f-]{36}\.png$/`; `_id` is a `Types.ObjectId`; the file at `join(t.uploadDir, key)` has exactly the uploaded bytes; `GET /uploads/<key>` → 200, `content-type` starts with `image/png`, body equals the bytes.
+2. **save JPEG:** key ends in `.jpg`.
+3. **random names:** saving the same bytes twice gives two different keys and two files.
+4. **size boundaries:** exactly `MAX_IMAGE_BYTES` → saved; `MAX_IMAGE_BYTES + 1` → 400, `details[0].field === 'file'`; 0 bytes → 400. After the rejections only the accepted file is on disk.
+5. **wrong content:** `image/gif` → 400; JPEG bytes declared `image/png` → 400; text bytes declared `image/png` → 400. Nothing written.
+6. **missing file:** `save(undefined as unknown as UploadedImage)` → 400 with message `'an image file is required'` in details.
+7. **delete:** removes the file and `GET /uploads/<key>` → 404 afterwards; a second delete resolves; deleting a valid but never-saved key resolves.
+8. **delete never leaves the folder:** write a sentinel file in a separate temp folder (`mkdtempSync(join(tmpdir(), 'outside-'))`); call `delete` with `'../' + basename(sentinelDir) + '/sentinel.png'` style keys and with `'a/b.png'`, `''`, `'x.gif'`: each resolves and the sentinel still exists. Clean the temp folder up in `finally`.
+9. **copy:** new key ≠ old key, same extension, same bytes; delete the original → the copy is still on disk and served.
+10. **copy failures:** a never-saved valid key → rejects with `NotFoundException` whose response has `code: 'NOT_FOUND'`; `'../x.png'` → the same 404.
+11. **concurrency:** 20 parallel `save` calls (`Promise.all`) → 20 distinct keys and 20 files.
+12. **urlOf:** `'a.png'` → `'/uploads/a.png'`.
+
+**Commit:** `test(storage): cover save, delete and copy on a real folder (GEN-08)`
+
+## Step 5: API rejections
+
+New file `backend/src/modules/storage/storage.api.spec.ts`. There is no storage endpoint, so the spec declares a tiny test-only controller that uses the real decorator, exactly as feature modules do:
+```ts
+@Controller('test-uploads')
+class UploadTestController {
+  constructor(private readonly storage: StorageService) {}
+  @Public()
+  @Post()
+  @ImageUpload()
+  upload(@UploadedFile() file: UploadedImage): Promise<StoredImage> {
+    return this.storage.save(file);
+  }
+}
+// createTestApp({ imports: [StorageModule], controllers: [UploadTestController] })
+```
+Cases (`POST /api/test-uploads`, `.attach('file', bytes, { filename, contentType })`):
+- a valid PNG → 201 `{ _id: <24-hex string>, key }`, and `GET /uploads/<key>` → 200;
+- exactly 5 MB PNG → 201 (if Multer answers 413 here, stop and report; don't change the decorator);
+- 5 MB + 1 → **413** with `code: 'REQUEST_FAILED'` (Multer's limit), and nothing on disk;
+- a GIF (`image/gif`) → 400 `VALIDATION_FAILED`;
+- text bytes sent as `photo.png`, `image/png` → 400 `VALIDATION_FAILED`;
+- no file at all (`.field('x', 'y')` only) → 400 `VALIDATION_FAILED`;
+- two files in one request → 400 `VALIDATION_FAILED`.
+After the test, only the accepted files are in `t.uploadDir`.
+
+**Commit:** `test(storage): reject bad uploads over HTTP (GEN-08)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-08`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN08_EXECUTION.md]` plus its full content), `How the output was used` (one line: what was built, the commits). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-08 prompt (GEN-08)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/storage test/support/test-app.spec.ts test/fakes/storage.fake.spec.ts` | 0 failed; at least 35 tests passed |
+| G3 | `git grep -n "implemented in GEN-08" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: `backend/src/modules/storage/*` (image-rules.ts, image-rules.spec.ts, storage.service.ts, storage.service.spec.ts, storage.api.spec.ts), `backend/test/support/test-app.ts`, `backend/test/support/test-app.spec.ts`, `backend/test/fakes/storage.fake.ts`, `ai-prompts/kareem.txt` |
+| G5 | Negative gate: in `storage.service.ts`, comment out the `assertImageContent(file)` call; run `npx vitest run src/modules/storage` | at least 2 tests fail; restore the line and the same run passes |
+| G6 | Negative gate: replace the `KEY_PATTERN` check in `delete` with `if (false)`; run case 8 | it fails (or the sentinel is gone); restore and it passes |
+| G7 | coverage line for `storage.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-08)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- Don't change any other module, `common/`, CI, the frontend, or docs. No new packages.
+- Don't change `assertImageAllowed`, `@ImageUpload` or the public signatures.
+- Never weaken, skip or delete a test to pass a gate (the stub tests in step 4 are replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Any decision this file didn't settle, with the reason.
+
+develop is green now
+
+How the output was used:
+Built StorageService on disk (random keys, JPG/PNG type, size and magic-byte checks, safe delete and copy) on feature/GEN-08-image-uploads; test app passes its upload folder to the config; real-folder and HTTP upload tests; commits: test(support), feat(storage) x2, test(storage) x2, chore(ai).
+================================================

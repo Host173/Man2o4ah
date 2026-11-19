@@ -17,6 +17,8 @@ import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
 import {
+  LOCKOUT_MS,
+  MAX_FAILED_LOGIN_ATTEMPTS,
   REFRESH_TOKEN_BYTES,
   REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   SESSION_IDLE_MS,
@@ -56,6 +58,20 @@ function sessionExpired() {
   });
 }
 
+/** Whole minutes left in a lockout, rounded up so it never says 0 (ACC-05). */
+export function lockoutMinutesLeft(lockedUntil: Date, now: number): number {
+  return Math.ceil((lockedUntil.getTime() - now) / 60_000);
+}
+
+/** 401 ACCOUNT_LOCKED with the minutes left in the message (ACC-05). */
+function accountLocked(lockedUntil: Date, now: number) {
+  const minutes = lockoutMinutesLeft(lockedUntil, now);
+  return new UnauthorizedException({
+    code: ErrorCode.AccountLocked,
+    message: `Too many failed login attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
+  });
+}
+
 /** SHA-256 of a refresh token, the only form a session stores (auth.md §3). */
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -88,17 +104,26 @@ export class AuthService {
   ) {}
 
   /**
-   * ACC-04, ACC-19 (auth.md §4). Unknown email, wrong password or a
-   * deactivated account → 401 INVALID_CREDENTIALS; right password on a
-   * suspended account → 403 ACCOUNT_SUSPENDED. Otherwise creates a session
+   * ACC-04, ACC-05, ACC-19 (auth.md §4), in this order: unknown email or a
+   * deactivated account → 401 INVALID_CREDENTIALS; a lock still running →
+   * 401 ACCOUNT_LOCKED (even with the right password); a wrong password →
+   * counted, and the 5th in a row locks for 15 minutes (ACCOUNT_LOCKED),
+   * otherwise INVALID_CREDENTIALS; right password on a suspended account →
+   * 403 ACCOUNT_SUSPENDED. Otherwise resets the counter, creates a session
    * holding only the refresh token's hash and signs a 15-minute access token.
    * The tokens are for the cookies only, never a JSON body.
    */
   async login(dto: LoginDto): Promise<LoginResult> {
-    const user = await this.userModel
+    const found = await this.userModel
       .findOne({ email: dto.email })
       .select('+passwordHash')
       .lean();
+    // A deactivated account is treated exactly like an unknown email (ACC-12).
+    const user = found?.status === UserStatus.DEACTIVATED ? null : found;
+
+    if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      throw accountLocked(user.lockedUntil, Date.now());
+    }
 
     // Compare even when there's no user, so timing reveals nothing.
     this.dummyHash ??= bcrypt.hash(
@@ -108,7 +133,11 @@ export class AuthService {
     const hash = user?.passwordHash ?? (await this.dummyHash);
     const passwordMatches = await bcrypt.compare(dto.password, hash);
 
-    if (!user || user.status === UserStatus.DEACTIVATED || !passwordMatches) {
+    if (!user) {
+      throw invalidCredentials();
+    }
+    if (!passwordMatches) {
+      await this.countFailedLogin(user._id);
       throw invalidCredentials();
     }
     // Only after the right password: a stranger can't learn the account is suspended.
@@ -118,6 +147,12 @@ export class AuthService {
         message: 'Your account is suspended',
       });
     }
+
+    // A successful login resets the counter and any expired lock (ACC-05).
+    await this.userModel.updateOne(
+      { _id: user._id },
+      { $set: { failedLoginAttempts: 0, lockedUntil: null } },
+    );
 
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
     const now = Date.now();
@@ -204,6 +239,50 @@ export class AuthService {
       ...(providerId ? { providerId } : {}),
     };
     return this.jwt.signAsync(payload);
+  }
+
+  /**
+   * ACC-05: counts one wrong password and, on the 5th in a row, locks the
+   * account for 15 minutes and resets the counter; then throws
+   * 401 ACCOUNT_LOCKED. Returns normally below the limit (the caller throws
+   * INVALID_CREDENTIALS).
+   *
+   * Every step is a single atomic update, never read-then-write, so parallel
+   * wrong passwords can't slip past the limit:
+   * - `$inc` only matches while the account isn't locked, so an attempt that
+   *   finishes after another one locked the account isn't counted towards
+   *   the next round;
+   * - only the attempt(s) that see a count of 5 or more lock the account.
+   */
+  private async countFailedLogin(userId: Types.ObjectId): Promise<void> {
+    const now = Date.now();
+    const notLocked = {
+      $or: [{ lockedUntil: null }, { lockedUntil: { $lte: new Date(now) } }],
+    };
+
+    const counted = await this.userModel
+      .findOneAndUpdate(
+        { _id: userId, ...notLocked },
+        { $inc: { failedLoginAttempts: 1 } },
+        { returnDocument: 'after', projection: { failedLoginAttempts: 1 } },
+      )
+      .lean();
+
+    if (!counted) {
+      // Another attempt locked the account while this one was checking the password.
+      throw accountLocked(new Date(now + LOCKOUT_MS), now);
+    }
+    if (counted.failedLoginAttempts < MAX_FAILED_LOGIN_ATTEMPTS) return;
+
+    const lockedUntil = new Date(now + LOCKOUT_MS);
+    await this.userModel.updateOne(
+      {
+        _id: userId,
+        failedLoginAttempts: { $gte: MAX_FAILED_LOGIN_ATTEMPTS },
+      },
+      { $set: { lockedUntil, failedLoginAttempts: 0 } },
+    );
+    throw accountLocked(lockedUntil, now);
   }
 
   /**

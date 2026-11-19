@@ -61,16 +61,17 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'ACC-04 Log in',
+    summary: 'ACC-04, ACC-05 Log in',
     description:
-      'Sets the httpOnly access_token and refresh_token cookies (ACC-19); tokens are never in the body. Swagger UI keeps the cookie for later calls.',
+      'Sets the httpOnly access_token and refresh_token cookies (ACC-19); tokens are never in the body. Swagger UI keeps the cookie for later calls. Five wrong passwords in a row lock the account for 15 minutes (ACC-05); a successful login resets the count.',
   })
   @ApiOkResponse({ type: AuthUserResponseDto })
   @ApiBadRequestResponse({
     description: 'VALIDATION_FAILED: email or password missing or malformed',
   })
   @ApiUnauthorizedResponse({
-    description: 'INVALID_CREDENTIALS: invalid email or password',
+    description:
+      'INVALID_CREDENTIALS: invalid email or password. ACCOUNT_LOCKED: 5 failed attempts in a row; the message says how many minutes are left',
   })
   @ApiForbiddenResponse({ description: 'ACCOUNT_SUSPENDED: account suspended' })
   async login(

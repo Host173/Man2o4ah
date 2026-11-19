@@ -613,6 +613,7 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `authorId` | ObjectId → users | ✓ | |
+| `itineraryId` | ObjectId → itineraries | | optional reference to one of the author's public or private itineraries (BLG-13); no embedded copy |
 | `title` | string | ✓ | 1–150 chars |
 | `body` | string | ✓ | 1–20000 chars |
 | `tags` | string[] | ✓ | 0–5; trimmed, lowercased, 1–30 chars, unique (BLG-08) |
@@ -627,6 +628,8 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 Indexes: `{ status: 1, isHidden: 1, authorDeactivated: 1, publishedAt: -1 }` · `{ authorId: 1, updatedAt: -1 }` · `{ tags: 1, status: 1 }`
 
 Search (BLG-09) orders by `likeCount + commentCount` descending, then `publishedAt` descending (computed in the aggregation, not stored). Deleting a post deletes its comments, likes and image files.
+
+BLG-13 schema prerequisite: existing posts need no migration and the indexes stay unchanged. The attachment API ships separately and must verify ownership through `ItinerariesService.getById(itineraryId, authorId)` before storing the reference. Attaching an itinerary does not publish it, copy its contents, or bypass its visibility and ownership checks.
 
 #### `comments`
 | Field | Type | Req | Rules |

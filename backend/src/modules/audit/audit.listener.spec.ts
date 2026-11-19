@@ -66,7 +66,11 @@ describe('AuditListener (GEN-07)', () => {
     await emit({
       details: {
         reason: 'spam',
-        user: { name: 'Ali', password: 'p', session: { refreshToken: 'r', device: 'web' } },
+        user: {
+          name: 'Ali',
+          password: 'p',
+          session: { refreshToken: 'r', device: 'web' },
+        },
         list: [{ token: 't', seat: '12A' }, 'plain', 3],
       },
     });

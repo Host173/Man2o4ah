@@ -105,6 +105,13 @@ describe('GET /api/admin/audit-logs (GEN-07)', () => {
     '?from=2026-02-30',
     '?limit=51',
     '?from=2026-11-20&to=2026-11-19',
+    '?from=1',
+    '?from=2026',
+    '?to=2026-11',
+    '?from=2026-11-19T10:00',
+    '?from=2026-02-30T00:00:00Z',
+    '?from=November 19, 2026',
+    '?page=0',
   ])('answers 400 VALIDATION_FAILED for %s', async (qs) => {
     const res = await t
       .http()
@@ -112,6 +119,26 @@ describe('GET /api/admin/audit-logs (GEN-07)', () => {
       .set('Cookie', cookie)
       .expect(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('accepts an ISO date-time with an offset as an exact bound', async () => {
+    const collection = t.connection.collection('audit_logs');
+    await collection.insertMany(
+      ['2026-11-19T07:59:59.999Z', '2026-11-19T08:00:00.000Z'].map((at) => ({
+        actorId: new Types.ObjectId(),
+        action: 'account_suspended',
+        target: { type: 'user', id: at },
+        createdAt: new Date(at),
+      })),
+    );
+    const res = await t
+      .http()
+      .get(`${URL}?from=${encodeURIComponent('2026-11-19T10:00:00+02:00')}`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(
+      res.body.items.map((i: { target: { id: string } }) => i.target.id),
+    ).toEqual(['2026-11-19T08:00:00.000Z']);
   });
 
   it('documents the route in Swagger', () => {

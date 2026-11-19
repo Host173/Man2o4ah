@@ -62,6 +62,34 @@ describe('AuditListener (GEN-07)', () => {
     expect(doc?.details).toEqual({ reason: 'spam', note: 'ok' });
   });
 
+  it('drops secret keys at every level, inside arrays too', async () => {
+    await emit({
+      details: {
+        reason: 'spam',
+        user: { name: 'Ali', password: 'p', session: { refreshToken: 'r' } },
+        list: [{ token: 't', seat: '12A' }, 'plain', 3],
+      },
+    });
+    const doc = await model.findOne().lean();
+    expect(doc?.details).toEqual({
+      reason: 'spam',
+      user: { name: 'Ali', session: {} },
+      list: [{ seat: '12A' }, 'plain', 3],
+    });
+  });
+
+  it('keeps harmless keys that only contain a secret-like word', async () => {
+    await emit({
+      details: { passengers: 2, passportNo: 'A123', hashtags: ['x'] },
+    });
+    const doc = await model.findOne().lean();
+    expect(doc?.details).toEqual({
+      passengers: 2,
+      passportNo: 'A123',
+      hashtags: ['x'],
+    });
+  });
+
   it('stores no details when nothing is left or details is not a plain object', async () => {
     await emit({ details: { password: 'x' } });
     await emit({ details: ['a'] });

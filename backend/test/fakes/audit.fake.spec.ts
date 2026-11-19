@@ -35,6 +35,17 @@ describe('FakeAuditService', () => {
     expect(ids(await filled().list(query()))).toEqual(['c', 'b', 'a']);
   });
 
+  it('breaks ties on createdAt by id, newest id first, like the real service', async () => {
+    const audit = new FakeAuditService();
+    const at = '2026-11-01T10:00:00.000Z';
+    audit.add(entry('6736f0b2c5a1b2c3d4e5f601', 'account_suspended', at));
+    audit.add(entry('6736f0b2c5a1b2c3d4e5f602', 'account_suspended', at));
+    expect(ids(await audit.list(query()))).toEqual([
+      '6736f0b2c5a1b2c3d4e5f602',
+      '6736f0b2c5a1b2c3d4e5f601',
+    ]);
+  });
+
   it('filters by action', async () => {
     const page = await filled().list(query({ action: 'account_suspended' }));
     expect(ids(page)).toEqual(['c', 'a']);

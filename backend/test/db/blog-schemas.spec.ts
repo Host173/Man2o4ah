@@ -98,6 +98,7 @@ describe('blog schemas', () => {
       });
     }
     expect(PostSchema.path('authorId').instance).toBe('ObjectId');
+    expect(PostSchema.path('itineraryId').instance).toBe('ObjectId');
     expect(CommentSchema.path('postId').instance).toBe('ObjectId');
     expect(CommentSchema.path('authorId').instance).toBe('ObjectId');
     expect(LikeSchema.path('postId').instance).toBe('ObjectId');
@@ -114,6 +115,7 @@ describe('blog schemas', () => {
       expect(post.isHidden).toBe(false);
       expect(post.authorDeactivated).toBe(false);
       expect(post.publishedAt).toBeUndefined();
+      expect(post.get('itineraryId')).toBeUndefined();
       expect(post.get('createdAt')).toBeInstanceOf(Date);
       expect(post.get('updatedAt')).toBeInstanceOf(Date);
     });
@@ -136,6 +138,27 @@ describe('blog schemas', () => {
           postDoc({ authorId: new Types.ObjectId().toHexString() }),
         ).validate(),
       ).resolves.toBeUndefined();
+    });
+
+    it('persists an optional itinerary reference without embedding itinerary data', async () => {
+      const itineraryId = new Types.ObjectId();
+      const post = await posts.create(postDoc({ itineraryId }));
+      const stored = await posts.collection.findOne({ _id: post._id });
+      expect(stored?.itineraryId).toEqual(itineraryId);
+      expect(stored).not.toHaveProperty('itinerary');
+    });
+
+    it('casts a hex itinerary ID and rejects malformed references', async () => {
+      const itineraryId = new Types.ObjectId().toHexString();
+      const post = await posts.create(postDoc({ itineraryId }));
+      const stored = await posts.collection.findOne({ _id: post._id });
+      expect(stored?.itineraryId).toEqual(new Types.ObjectId(itineraryId));
+
+      for (const invalid of ['abc', { title: 'Private trip' }, [itineraryId]]) {
+        await expect(
+          new posts(postDoc({ itineraryId: invalid })).validate(),
+        ).rejects.toThrow(/itineraryId/);
+      }
     });
 
     it('accepts only draft or published', async () => {

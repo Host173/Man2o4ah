@@ -3210,5 +3210,92 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
       expect(fakeStorage.keys()).toEqual([imageKey]);
     });
+
+    it('keeps the image reference if storage.delete fails on DELETE image and still returns 204 if storage.delete fails during DELETE post', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const sampleBytes = Buffer.from('api-failure-image-bytes');
+
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'HTTP Storage Failure Handling',
+          body: 'Published post body.',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = created.body._id as string;
+
+      const up1 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'one.png',
+          contentType: 'image/png',
+        });
+      const up2 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'two.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(up1.status).toBe(201);
+      expect(up2.status).toBe(201);
+
+      const img1 = up2.body.images[0] as { _id: string; key: string };
+      const img2 = up2.body.images[1] as { _id: string; key: string };
+
+      // removeImage fails when storage.delete rejects -> reference stays on post.
+      const removeSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockRejectedValueOnce(new Error('storage delete error'));
+      const failedRemoveRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${img1._id}`)
+        .set('Cookie', owner.cookie);
+      expect(failedRemoveRes.status).toBe(500);
+      expect(failedRemoveRes.body.code).toBe(ErrorCode.InternalError);
+      removeSpy.mockRestore();
+
+      const afterFailedRemove = await testApp!
+        .http()
+        .get(`/api/posts/${postId}`);
+      expect(afterFailedRemove.status).toBe(200);
+      expect(
+        afterFailedRemove.body.images.map((item: { _id: string }) => item._id),
+      ).toEqual([img1._id, img2._id]);
+
+      // delete post attempts every file even if one fails and still returns 204.
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      const postDeleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockImplementation(async (key) => {
+          if (key === img1.key) {
+            throw new Error('storage unlink failed');
+          }
+          return realDelete(key);
+        });
+      const deletePostRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}`)
+        .set('Cookie', owner.cookie);
+      expect(deletePostRes.status).toBe(204);
+      expect(postDeleteSpy).toHaveBeenCalledTimes(2);
+      expect(postDeleteSpy).toHaveBeenCalledWith(img1.key);
+      expect(postDeleteSpy).toHaveBeenCalledWith(img2.key);
+      postDeleteSpy.mockRestore();
+
+      expect(fakeStorage.has(img1.key)).toBe(true);
+      expect(fakeStorage.has(img2.key)).toBe(false);
+
+      const missingAfterDelete = await testApp!
+        .http()
+        .get(`/api/posts/${postId}`);
+      expect(missingAfterDelete.status).toBe(404);
+      expect(missingAfterDelete.body.code).toBe(ErrorCode.NotFound);
+    });
   });
 });

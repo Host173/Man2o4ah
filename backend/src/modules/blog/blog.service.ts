@@ -612,8 +612,10 @@ export class BlogService {
 
   /**
    * BLG-04 / BLG-10: deletes the authenticated owner's post along with its
-   * comments and likes in one transaction, then deletes stored image files
-   * after commit; throws 404 if missing or owned by someone else.
+   * comments and likes in one transaction, then attempts to delete every
+   * associated image file after commit; logs any storage deletion failures and
+   * returns normally because the database deletion already committed. Throws 404
+   * if missing or owned by someone else.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
@@ -638,9 +640,22 @@ export class BlogService {
       await session.endSession();
     }
 
-    for (const key of imageKeys) {
-      await this.storageService.delete(key);
-    }
+    if (imageKeys.length === 0) return;
+
+    const results = await Promise.allSettled(
+      imageKeys.map((key) => this.storageService.delete(key)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const message =
+          result.reason instanceof Error
+            ? result.reason.message
+            : 'unknown error';
+        this.logger.error(
+          `Could not delete post ${id.toHexString()} image file ${imageKeys[index]}: ${message}`,
+        );
+      }
+    });
   }
 
   /**
@@ -704,8 +719,9 @@ export class BlogService {
   }
 
   /**
-   * BLG-10 / GEN-08: removes one image reference from the authenticated owner's
-   * post and deletes the file from storage only when something was removed.
+   * BLG-10 / GEN-08: keeps the image reference until storage confirms deletion
+   * (matching `HotelsService.removePhoto`). If the database removal then fails,
+   * retrying is safe because `storage.delete` is idempotent.
    */
   async removeImage(
     postId: string,
@@ -716,22 +732,23 @@ export class BlogService {
     const imageObjectId = this.parseId(imageId, 'imageId');
     const authorId = this.parseId(userId, 'userId');
 
-    const before = await this.postModel
-      .findOneAndUpdate(
-        { _id: id, authorId, 'images._id': imageObjectId },
-        { $pull: { images: { _id: imageObjectId } } },
-        { returnDocument: 'before' },
-      )
+    const post = await this.postModel
+      .findOne({ _id: id, authorId })
+      .select({ images: 1 })
       .lean()
       .exec();
-    if (!before) throw this.notFound();
+    const image = post?.images.find((item) => item._id.equals(imageObjectId));
+    if (!image) throw this.notFound();
 
-    const removed = before.images.find((image) =>
-      image._id.equals(imageObjectId),
-    );
-    if (removed) {
-      await this.storageService.delete(removed.key);
-    }
+    await this.storageService.delete(image.key);
+    const result = await this.postModel
+      .updateOne(
+        { _id: id, authorId, 'images._id': imageObjectId },
+        { $pull: { images: { _id: imageObjectId } } },
+        { runValidators: true },
+      )
+      .exec();
+    if (!result.matchedCount) throw this.notFound();
   }
 
   /** ACC-12: hides all posts of a deactivated author on future reads (idempotent). */

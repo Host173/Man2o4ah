@@ -2967,5 +2967,110 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(fakeStorage.has(bystanderWithImg.images[0]!.key)).toBe(true);
       expect(fakeStorage.keys()).toEqual([bystanderWithImg.images[0]!.key]);
     });
+
+    it('attempts every image file deletion during post delete even when an individual storage.delete fails', async () => {
+      const post = await service.create(
+        {
+          title: 'Partial Storage Delete Failure',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.addImage(post._id, sampleImage('p1.png'), ownerId);
+      await service.addImage(
+        post._id,
+        sampleImage('p2.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      const postWithImages = await service.addImage(
+        post._id,
+        sampleImage('p3.png'),
+        ownerId,
+      );
+      const [img1, img2, img3] = postWithImages.images;
+      expect(img1 && img2 && img3).toBeTruthy();
+
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      const deleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockImplementation(async (key) => {
+          if (key === img1!.key) {
+            throw new Error('storage unlink failure');
+          }
+          return realDelete(key);
+        });
+
+      await expect(service.delete(post._id, ownerId)).resolves.toBeUndefined();
+
+      expect(deleteSpy).toHaveBeenCalledTimes(3);
+      expect(deleteSpy).toHaveBeenCalledWith(img1!.key);
+      expect(deleteSpy).toHaveBeenCalledWith(img2!.key);
+      expect(deleteSpy).toHaveBeenCalledWith(img3!.key);
+      expect(fakeStorage.has(img1!.key)).toBe(true);
+      expect(fakeStorage.has(img2!.key)).toBe(false);
+      expect(fakeStorage.has(img3!.key)).toBe(false);
+      expect(await postModel.findById(post._id).lean().exec()).toBeNull();
+    });
+
+    it('keeps the image reference in removeImage when storage.delete fails and succeeds cleanly on retry', async () => {
+      const post = await service.create(
+        {
+          title: 'Remove Image Storage Failure',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.addImage(post._id, sampleImage('keep-1.png'), ownerId);
+      const updated = await service.addImage(
+        post._id,
+        sampleImage('keep-2.png'),
+        ownerId,
+      );
+      const [img1, img2] = updated.images;
+      expect(img1 && img2).toBeTruthy();
+
+      const deleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockRejectedValueOnce(new Error('disk busy'));
+
+      await expect(
+        service.removeImage(post._id, img1!._id, ownerId),
+      ).rejects.toThrow('disk busy');
+      expect(deleteSpy).toHaveBeenCalledWith(img1!.key);
+
+      // Reference and stored file remain intact when file deletion fails.
+      const afterFailedRemoveDoc = await postModel
+        .findById(post._id)
+        .lean()
+        .exec();
+      expect(afterFailedRemoveDoc?.images.map((item) => item.key)).toEqual([
+        img1!.key,
+        img2!.key,
+      ]);
+      const afterFailedRemoveView = await service.getById(post._id);
+      expect(afterFailedRemoveView.images.map((item) => item._id)).toEqual([
+        img1!._id,
+        img2!._id,
+      ]);
+      expect(fakeStorage.has(img1!.key)).toBe(true);
+      expect(fakeStorage.has(img2!.key)).toBe(true);
+
+      // Retrying once storage recovers removes both file and reference.
+      await expect(
+        service.removeImage(post._id, img1!._id, ownerId),
+      ).resolves.toBeUndefined();
+      const afterRetryDoc = await postModel.findById(post._id).lean().exec();
+      expect(afterRetryDoc?.images.map((item) => item.key)).toEqual([
+        img2!.key,
+      ]);
+      const afterRetryView = await service.getById(post._id);
+      expect(afterRetryView.images.map((item) => item._id)).toEqual([
+        img2!._id,
+      ]);
+      expect(fakeStorage.has(img1!.key)).toBe(false);
+      expect(fakeStorage.has(img2!.key)).toBe(true);
+    });
   });
 });

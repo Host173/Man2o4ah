@@ -328,3 +328,135 @@ How the output was used:
 Applied the fix to both PRs. On ITN-05 (branch `feature/ITN-05-days-city-groups`): merged latest `develop`; added red `Promise.allSettled` tests (`cd22e4e`) reproducing ten 201s with only six days stored; replaced the whole-array writes with atomic pipeline updates â€” `$push`-style `$concatArrays` guarded by `days.59` for adds and `$map`/`$mergeObjects` for edits, recomputing `dayCount`/`cityIds` in the same update (`3bc0daa`). `npm run verify` passed with 1231 tests and 98.07% lines. Attached a Swagger UI screenshot to PR #154 with `gh pr edit --attach`, updated its description with the concurrency fix and test results, and commented on #70 so ITN-14 adds `CityGroupView.subtotal` (ITN-09 not fully done until then).
 On ITN-07 (branch `feature/ITN-07-delete-reorder-days`): merged the updated ITN-05 branch (`513cb9b`, resolving test-file conflicts by keeping both sides), added red concurrency tests for overlapping delete/reorder and add (`dbf5618`), and made `deleteDay`/`reorderDays` atomic with pipelines that read `days`/`transportCosts` at write time (`19c6e99`). `npm run verify` passed with 1262 tests and 98.11% lines. Attached a Swagger screenshot to PR #155 and updated its description.
 ================================================
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+
+### 1. Fix `notes: null` and Pipeline Spread
+* **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
+* **Fix:** In the pipeline day construction, conditionally include `notes` only when it is provided (e.g., `...(notes !== undefined ? { notes: { $literal: notes } } : {})`) using a red test first[cite: 13].
+
+### 2. Add Missing Tests (Mandatory Red-First TDD)
+Write unit/API tests covering all previously requested items that are still missing[cite: 13]:
+* `POST` and `PATCH` with `"$100 for dinner"` and `"$$ROOT"` stored verbatim[cite: 13].
+* A day added without `notes` verifying the returned object has **no `notes` key**[cite: 13].
+* Fake service tests verifying the **61st day cap**, **unknown city rejection** on both add and edit, and proper error formatting[cite: 13].
+
+### 3. Fix Fake Service Error Shape & Validation Parity
+* **Issue:** The fake service's error structure doesn't match the real service (`copilot-instructions.md: fakes behave like the contract, including its errors`)[cite: 13]. Its `invalidField` throws `{ field, message }` instead of the service's shape (`{ code: "VALIDATION_FAILED", message, details: [{ field, message }] }`), and `PATCH` with a blank `cityId` (`" "`) returns `200` in the fake but `400` in the service[cite: 13].
+* **Fix:** Copy the service's exact error shape into the fake and reject blank `cityId` inputs when present[cite: 13].
+
+### 4. Close Smaller Fake Validation Gaps
+* Match the real service's validation order and behavior:
+  * Check the **day cap before the city validation** so the error matches the service[cite: 13].
+  * Enforce notes length limits (e.g., rejecting 2001-character notes)[cite: 13].
+  * Ensure an **empty PATCH body** does not incorrectly bump `updatedAt` (return early on an empty body)[cite: 13].
+
+### 5. Verification & Push to Update PR #154
+1. Run `npm run format` and the full verification pipeline (`npm run verify`) to ensure Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes with a clear commit message and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Applied conditional spread for notes in the addDay MongoDB pipeline, fixed the fake service invalidField error shape, added fake validation parity tests, added $-prefixed notes and omitted-notes tests, ran `npm run verify` (all green: 1236 tests), and committed to update PR #154.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the latest code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
+Align `FakeItinerariesService` behavior completely with the real service:
+* **Empty PATCH Body:** Ensure an empty `PATCH` body returns early without bumping `updatedAt` (the real service leaves the day untouched)[cite: 14].
+* **Atomic Validation on PATCH:** When updating with invalid data (e.g., `PATCH { cityId: "dubai", notes: 2001 chars }`), the fake currently updates the city even though notes validation fails. Fix it so that the fake **validates both city and notes before making any changes**, leaving the day completely unchanged if validation fails[cite: 14].
+* **Validation Order Parity:** Ensure the fake checks the **city before the day cap** (matching the real service, where a 61st day with an unknown city triggers the city error first rather than the day-cap error)[cite: 14].
+
+### 2. Add Missing PATCH `$`-Prefixed Notes Test
+* **Issue:** The `POST` test for `$`-prefixed notes (like `"$100 for dinner"`) exists, but the corresponding `PATCH` test is still missing[cite: 14].
+* **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
+
+### 3. Git Workflow Reminder (Red Test Commit Rule)
+* Note the reviewer's tip: *“push the red test as its own commit first next time”*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+
+### 4. Format, Verify, and Push to Update PR #154
+1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes cleanly and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Fixed fake service updateDay (empty-body early return, atomic validation, notes-before-mutation), reordered addDay validation (city before day cap), added PATCH $-prefixed notes test, ran `npm run verify` (all green: 1237 tests), logged the prompt, and will commit/push to update PR #154.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Validation Order Fix in `itineraries.fake.ts`
+* **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
+* **What to understand & fix:** In `FakeItinerariesService.addDay`, validate `notes` (length/code-point limit) **before** checking the 60-day cap so the fake matches the real service's validation order and error response.
+
+### 2. Missing Tests to Pin Fake Behavior (`itineraries.fake.spec.ts`)
+Right now, if `f86cb72`'s `itineraries.fake.ts` changes are set aside, all itinerary/fake tests still pass because nothing pins those behaviors. Add dedicated fake-spec tests for:
+1. **Empty `PATCH`:** Calling `updateDay` with an empty patch does **not** bump `updatedAt` (leaves the day/timestamp unchanged).
+2. **Failed `PATCH` leaves city untouched:** Calling `updateDay` with `{ cityId: "dubai", notes: <2001 chars> }` fails with `400` / validation error **and** keeps the original `cityId` unchanged (no partial mutation).
+3. **61st day with an unknown city:** Calling `addDay` on a 61st day with an unknown city throws the **city error** (matching the service's validation order).
+4. **61st day with a valid city and 2001-char `notes`:** Calling `addDay` throws the **`notes` error** (not the 60-day cap error).
+
+### 3. Missing Boundary & Concurrency Tests
+Add tests verifying limits already enforced by the code:
+1. **57 days + 8 parallel `addDay` calls:** Stops cleanly at **60 days** total (not just the 10-parallel case).
+2. **Character / code-point notes boundary:** **2000 emoji characters** pass validation, while **2001 emoji characters** fail validation.
+
+### 4. Strict Commit Discipline ("Red Test First")
+* **Do NOT mix the red test and the fix into a single commit.**
+* First, add the new tests covering the gaps above, run the test suite to verify they fail ("red") for the expected reasons, and **commit and push the red test commit(s) first**.
+* Next, apply the `addDay` notes-before-60-day-cap fix in `itineraries.fake.ts` (and any needed test adjustments), verify everything turns **green**, and **commit and push the fix**.
+
+### 5. Final Verification & Prompt Logging
+* Run `npm run format` and the full verification suite (`npm run verify`) and confirm formatting, `oxlint`, TypeScript typechecking, the full test suite, and build all pass with **zero errors**.
+* Log the prompts used for this work into the repository's prompts file following project rules.
+* Push all commits to `feature/ITN-05-days-city-groups` and verify `gh pr checks` is green.
+
+How the output was used:
+Fixed the fake itineraries day validation order (notes before the 60-day cap) after pinning it with red tests and committed the red test then the fix.
+
+=============================================
+
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the final "Changes needed ITN-05" code review feedback on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6].
+
+Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Move Race and Emoji Coverage into the Real API Test Suite
+The 60-day cap under parallel adds and the emoji character count were only tested on the in-memory fake, which cannot race. Fix: put the 57 + 8 Promise.allSettled test and the 2000/2001 emoji test in `src/modules/itineraries/itineraries.api.spec.ts`.
+
+### 2. Deterministic Empty-PATCH Fake Test
+The fake's empty-PATCH test could not fail: with the fake fix set aside it still passed, because `updatedAt = new Date()` landed in the same millisecond. Fix: `vi.useFakeTimers()` and `vi.setSystemTime` before the PATCH.
+
+### 3. Fake Typing Parity
+The fake threw a TypeError for `addDay(id, {cityId: 'cairo', notes: null})` where the service gives 400 VALIDATION_FAILED. Fix: type-check notes and cityId in the fake before `.trim()`.
+
+### 4. Unify the Over-Limit Notes Message
+The over-limit notes message differed between the DTO and the service; one message would be cleaner.
+
+How the output was used:
+Moved the parallel-cap and emoji tests into the API spec, made the fake empty-patch test deterministic, typed the fake before trimming, unified the notes message, ran `npm run verify` (all green: 1245 tests), and committed and pushed the fixes.

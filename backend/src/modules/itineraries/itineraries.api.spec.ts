@@ -845,6 +845,32 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(errorDetails(response.body)).toContain('notes');
     });
 
+    it('accepts 2000 emoji characters and rejects 2001 as notes', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+
+      const accepted = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: '\u{1F525}'.repeat(2000) });
+
+      expect(accepted.status).toBe(201);
+      expect(accepted.body).toMatchObject({
+        cityId: 'cairo',
+        notes: '\u{1F525}'.repeat(2000),
+      });
+
+      const rejected = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: '\u{1F525}'.repeat(2001) });
+
+      expect(rejected.status).toBe(400);
+      expect(errorDetails(rejected.body)).toContain('notes');
+    });
+
     it('returns 404 for another user’s itinerary and 400 for a malformed ID', async () => {
       const owner = await loginAs(testApp.connection, UserRole.USER);
       const intruder = await loginAs(testApp.connection, UserRole.USER);
@@ -1319,6 +1345,39 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(stored?.days).toHaveLength(successes);
       expect(stored?.dayCount).toBe(successes);
       expect(new Set(stored?.days.map((day) => day.notes)).size).toBe(10);
+    });
+
+    it('stops cleanly at the 60-day cap when more adds race past it', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      await seedDays(itineraryId, 57);
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_, index) =>
+          testApp
+            .http()
+            .post(`/api/itineraries/${itineraryId}/days`)
+            .set('Cookie', owner.cookie)
+            .send({ cityId: 'cairo', notes: `day-${index}` }),
+        ),
+      );
+
+      let successes = 0;
+      let failures = 0;
+      for (const result of results) {
+        expect(result.status).toBe('fulfilled');
+        if (result.status === 'fulfilled' && result.value.status === 201) {
+          successes += 1;
+        } else {
+          failures += 1;
+        }
+      }
+      expect(successes).toBe(3);
+      expect(failures).toBe(5);
+
+      const stored = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(stored?.days).toHaveLength(60);
+      expect(stored?.dayCount).toBe(60);
     });
 
     it('keeps both an add and a day edit when they overlap', async () => {

@@ -30,3 +30,39 @@ export interface HotelReservationAdminView {
   status: HotelReservationStatus;
   createdAt: Date;
 }
+
+/** One room of a hold, as saved (snapshot at hold time). */
+export interface HeldRoom {
+  roomId: string;
+  roomName: string;
+  roomType: string;
+  pricePerNightMinor: number;
+  adults: number;
+  childAges: number[];
+  /** nights × pricePerNightMinor. */
+  subtotalMinor: number;
+}
+
+/** A room hold (HTL-16, HTL-18): the saved `pending_payment` reservation. */
+export interface HotelHold {
+  reservationId: string;
+  status: 'pending_payment';
+  hotelId: string;
+  hotelName: string;
+  /** `YYYY-MM-DD`. */
+  checkInDate: string;
+  /** `YYYY-MM-DD`; not charged. */
+  checkOutDate: string;
+  nights: number;
+  rooms: HeldRoom[];
+  totalMinor: number;
+  currency: string;
+  /** The hotel's policy as it was at hold time (PAY-02, HTL-21). */
+  policy: {
+    cancellationTiers: { daysBefore: number; refundPercent: number }[];
+    checkInTime: string;
+    checkOutTime: string;
+  };
+  /** When the hold ends if unpaid: 10 minutes after the reservation was created. */
+  holdExpiresAt: Date;
+}

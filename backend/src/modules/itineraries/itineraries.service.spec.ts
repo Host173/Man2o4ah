@@ -720,6 +720,44 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       expect(errorDetails(error).details[0].field).toBe('notes');
     });
 
+    it('stores $-prefixed notes verbatim as literal values', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const withMoney = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: '$100 for dinner' }),
+        owner.id,
+      );
+      expect(withMoney.notes).toBe('$100 for dinner');
+
+      const withRoot = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai', notes: '$$ROOT' }),
+        owner.id,
+      );
+      expect(withRoot.notes).toBe('$$ROOT');
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
+      expect(stored?.days[1].notes).toBe('$$ROOT');
+    });
+
+    it('omits the notes key entirely when a day is added without notes', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      expect(day).not.toHaveProperty('notes');
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0]).not.toHaveProperty('notes');
+    });
+
     it('returns 404 for another user’s itinerary and for an unknown one', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const intruder = await loginAs(t.connection, UserRole.USER);
@@ -823,6 +861,27 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         owner.id,
       );
       expect(untouched).toEqual(notesOnly);
+    });
+
+    it('updates $-prefixed notes verbatim through the day edit', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.updateDay(
+        created._id,
+        day._id,
+        { notes: '$100 for dinner' },
+        owner.id,
+      );
+      expect(updated).toMatchObject({ notes: '$100 for dinner' });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
     });
 
     it('rejects an unknown city and over-long notes with 400', async () => {

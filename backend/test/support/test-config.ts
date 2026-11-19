@@ -6,4 +6,6 @@ export const TEST_CONFIG = {
   JWT_ACCESS_SECRET: TEST_JWT_ACCESS_SECRET,
   PLATFORM_CURRENCY: 'USD',
   FRONTEND_URL: 'http://localhost:3000',
+  // No app built by a test fetches exchange rates at start-up (ITN-18).
+  FX_AUTO_REFRESH: 'false',
 };

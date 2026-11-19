@@ -2293,4 +2293,264 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       });
     });
   });
+
+  describe('search via listPublished (BLG-09)', () => {
+    it('orders search results by interaction score (likes + comments) descending then publishedAt descending and updates ordering on new engagement', async () => {
+      const oldestMs = new Date('2026-11-10T10:00:00.000Z').getTime();
+
+      const lowScoreNewer = await service.create(
+        {
+          title: 'Desert Safari Guide A',
+          body: 'Dunes and oasis camp.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const tieOlder = await service.create(
+        {
+          title: 'Desert Safari Guide B',
+          body: 'Camel trek and sunset.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const tieNewer = await service.create(
+        {
+          title: 'Desert Safari Guide C',
+          body: 'Stargazing in White Desert.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        otherUserId,
+      );
+      const highestScore = await service.create(
+        {
+          title: 'Desert Safari Guide D',
+          body: 'Full 4x4 route map and tips.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        otherUserId,
+      );
+
+      // Excluded visibility posts sharing the keyword.
+      await service.create(
+        {
+          title: 'Desert Draft',
+          body: 'Unpublished.',
+          status: PostStatus.DRAFT,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      const hidden = await service.create(
+        {
+          title: 'Desert Hidden',
+          body: 'Moderated.',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+
+      await Promise.all([
+        postModel.updateOne(
+          { _id: new Types.ObjectId(lowScoreNewer._id) },
+          {
+            $set: {
+              likeCount: 1,
+              commentCount: 0,
+              publishedAt: new Date(oldestMs + 40_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(tieOlder._id) },
+          {
+            $set: {
+              likeCount: 2,
+              commentCount: 1,
+              publishedAt: new Date(oldestMs + 20_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(tieNewer._id) },
+          {
+            $set: {
+              likeCount: 1,
+              commentCount: 2,
+              publishedAt: new Date(oldestMs + 30_000),
+            },
+          },
+        ),
+        postModel.updateOne(
+          { _id: new Types.ObjectId(highestScore._id) },
+          {
+            $set: {
+              likeCount: 4,
+              commentCount: 1,
+              publishedAt: new Date(oldestMs + 10_000),
+            },
+          },
+        ),
+      ]);
+
+      // Expect scores: highestScore (5) > tieNewer (3, newer date) > tieOlder (3, older date) > lowScoreNewer (1).
+      const page1 = await service.listPublished({
+        q: '  safari ',
+        page: 1,
+        limit: 2,
+      });
+      expect(page1.total).toBe(4);
+      expect(page1.totalPages).toBe(2);
+      expect(page1.items.map((p) => p._id)).toEqual([
+        highestScore._id,
+        tieNewer._id,
+      ]);
+      expect(page1.items[0].excerpt).toBe('Full 4x4 route map and tips.');
+
+      const page2 = await service.listPublished({
+        q: 'SAFARI',
+        page: 2,
+        limit: 2,
+      });
+      expect(page2.items.map((p) => p._id)).toEqual([
+        tieOlder._id,
+        lowScoreNewer._id,
+      ]);
+
+      // Adding comments + likes on lowScoreNewer pushes it above highestScore (1 -> 7).
+      await service.createComment(
+        lowScoreNewer._id,
+        { body: 'Comment 1' },
+        activeCommenterId,
+      );
+      await service.createComment(
+        lowScoreNewer._id,
+        { body: 'Comment 2' },
+        otherUserId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(lowScoreNewer._id) },
+        { $inc: { likeCount: 4 } },
+      );
+
+      const reordered = await service.listPublished({
+        q: 'safari',
+        page: 1,
+        limit: 4,
+      });
+      expect(reordered.items.map((p) => p._id)).toEqual([
+        lowScoreNewer._id,
+        highestScore._id,
+        tieNewer._id,
+        tieOlder._id,
+      ]);
+    });
+
+    it('matches title, normalised tag, and active/suspended author name safely with special characters and rejects overlong q', async () => {
+      const longBody = `<h1>Heading</h1><p>${'A'.repeat(220)}</p>`;
+      const titleMatch = await service.create(
+        {
+          title: 'Hiking in C++ (South) Canyon',
+          body: longBody,
+          status: PostStatus.PUBLISHED,
+          tags: ['trekking'],
+        },
+        ownerId,
+      );
+      const tagMatch = await service.create(
+        {
+          title: 'Coastal Notes',
+          body: 'Beaches',
+          status: PostStatus.PUBLISHED,
+          tags: ['  Egypt-2026  '],
+        },
+        ownerId,
+      );
+      const suspendedAuthorMatch = await service.create(
+        {
+          title: 'Nomad Journal',
+          body: 'Journal entry.',
+          status: PostStatus.PUBLISHED,
+        },
+        suspendedUserId,
+      );
+      const deactivatedPost = await service.create(
+        {
+          title: 'Deactivated Author C++ Post',
+          body: 'Hidden author.',
+          status: PostStatus.PUBLISHED,
+        },
+        deactivatedAuthorId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(deactivatedPost._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      // Special regex characters in q must match literally without throwing.
+      const regexSafe = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'C++ (South)',
+      });
+      expect(regexSafe.items.map((p) => p._id)).toEqual([titleMatch._id]);
+      expect(regexSafe.items[0].excerpt).toBe(`Heading ${'A'.repeat(192)}...`);
+
+      // Tag partial match via q.
+      const byTagQuery = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '  EGYPT-20 ',
+      });
+      expect(byTagQuery.items.map((p) => p._id)).toEqual([tagMatch._id]);
+
+      // Author name match via FakeAccountsService.findUserIdsByName (suspended shown, deactivated excluded).
+      const byAuthor = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'suspended',
+      });
+      expect(byAuthor.items.map((p) => p._id)).toEqual([
+        suspendedAuthorMatch._id,
+      ]);
+      expect(byAuthor.items[0].authorName).toBe('Suspended Author');
+
+      const byDeactivatedAuthor = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: 'Deactivated Author',
+      });
+      expect(byDeactivatedAuthor.items).toEqual([]);
+
+      // Blank q acts as unfiltered browse; 150 emoji (300 UTF-16 units) are accepted cleanly.
+      const blankQ = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '   ',
+      });
+      expect(blankQ.total).toBe(3);
+
+      const emojiSearch = await service.listPublished({
+        page: 1,
+        limit: 10,
+        q: '😀'.repeat(150),
+      });
+      expect(emojiSearch).toMatchObject({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+  });
 });

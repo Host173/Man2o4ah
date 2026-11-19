@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
@@ -412,5 +412,248 @@ describe('FakeItinerariesService owner-only methods', () => {
     await expect(
       itineraries.reorderDays(created._id, { dayIds: order }, 'user-2'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('day validation parity (ITN-05)', () => {
+    it('rejects the 61st day with the same validation error as the real service', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+
+      // Fill up to the 60-day cap.
+      for (let i = 0; i < 60; i++) {
+        await itineraries.addDay(
+          created._id,
+          { cityId: 'cairo', notes: `Day ${i + 1}` },
+          'user-1',
+        );
+      }
+
+      const error = await itineraries
+        .addDay(created._id, { cityId: 'dubai' }, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.message).toBe('Validation failed');
+      expect(response.details).toEqual([
+        { field: 'days', message: 'an itinerary has at most 60 days' },
+      ]);
+    });
+
+    it('rejects an unknown city on add and edit with the same error shape', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+
+      const addError = await itineraries
+        .addDay(created._id, { cityId: 'atlantis' }, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(addError).toBeInstanceOf(BadRequestException);
+      const addResponse = (addError as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(addResponse.code).toBe(ErrorCode.ValidationFailed);
+      expect(addResponse.message).toBe('Validation failed');
+      expect(addResponse.details[0].field).toBe('cityId');
+      expect(addResponse.details[0].message).toBe('Unknown city: atlantis');
+
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+      const editError = await itineraries
+        .updateDay(created._id, day._id, { cityId: 'nowhere' }, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(editError).toBeInstanceOf(BadRequestException);
+      const editResponse = (editError as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(editResponse.code).toBe(ErrorCode.ValidationFailed);
+      expect(editResponse.message).toBe('Validation failed');
+      expect(editResponse.details[0].field).toBe('cityId');
+      expect(editResponse.details[0].message).toBe('Unknown city: nowhere');
+    });
+
+    it('rejects notes longer than MAX_NOTES_LENGTH with the same error shape', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+
+      const error = await itineraries
+        .addDay(
+          created._id,
+          { cityId: 'cairo', notes: 'n'.repeat(2001) },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('notes');
+      expect(response.message).toBe('Validation failed');
+    });
+    it('returns the day untouched and does not bump updatedAt for an empty patch', async () => {
+      vi.useFakeTimers({ now: new Date('2027-01-01T00:00:00.000Z') });
+      try {
+        const itineraries = new FakeItinerariesService();
+        const created = await itineraries.create(createDto(), 'user-1');
+        const day = await itineraries.addDay(
+          created._id,
+          { cityId: 'cairo', notes: 'Arrival' },
+          'user-1',
+        );
+        // Move the clock on, so a bump would show up as a different updatedAt.
+        vi.setSystemTime(new Date('2027-01-02T00:00:00.000Z'));
+        const before = await itineraries.getById(created._id, 'user-1');
+
+        const untouched = await itineraries.updateDay(
+          created._id,
+          day._id,
+          {},
+          'user-1',
+        );
+        expect(untouched).toMatchObject({ cityId: 'cairo', notes: 'Arrival' });
+
+        const after = await itineraries.getById(created._id, 'user-1');
+        expect(after.updatedAt).toEqual(before.updatedAt);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects a non-string notes value with 400 VALIDATION_FAILED', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+
+      const error = await itineraries
+        .addDay(
+          created._id,
+          { cityId: 'cairo', notes: null as unknown as string },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('notes');
+    });
+
+    it('rejects a non-string cityId on patch with 400 VALIDATION_FAILED', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+
+      const error = await itineraries
+        .updateDay(
+          created._id,
+          day._id,
+          { cityId: null as unknown as string },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('cityId');
+      expect(response.details[0].message).toBe('cityId must be a string');
+    });
+
+    it('leaves the day unchanged when a patch fails validation (no partial mutation)', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+
+      const error = await itineraries
+        .updateDay(
+          created._id,
+          day._id,
+          { cityId: 'dubai', notes: 'n'.repeat(2001) },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('notes');
+
+      const detail = await itineraries.getById(created._id, 'user-1');
+      expect(detail.days).toHaveLength(1);
+      expect(detail.days[0].cityId).toBe('cairo');
+      expect(detail.days[0].notes).toBeUndefined();
+    });
+
+    it('checks the city before the day cap for a 61st day with an unknown city', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      for (let i = 0; i < 60; i++) {
+        await itineraries.addDay(created._id, { cityId: 'cairo' }, 'user-1');
+      }
+
+      const error = await itineraries
+        .addDay(created._id, { cityId: 'atlantis' }, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.details[0].field).toBe('cityId');
+      expect(response.details[0].message).toBe('Unknown city: atlantis');
+    });
+
+    it('validates notes before the day cap for a 61st day', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      for (let i = 0; i < 60; i++) {
+        await itineraries.addDay(created._id, { cityId: 'cairo' }, 'user-1');
+      }
+
+      const error = await itineraries
+        .addDay(
+          created._id,
+          { cityId: 'dubai', notes: 'n'.repeat(2001) },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.details[0].field).toBe('notes');
+    });
   });
 });

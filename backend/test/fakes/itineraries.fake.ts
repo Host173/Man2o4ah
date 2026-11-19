@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -11,6 +12,10 @@ import {
   orderDaysById,
   withoutTransportCostsOf,
 } from '../../src/modules/itineraries/days.js';
+import {
+  MAX_DAYS,
+  MAX_NOTES_LENGTH,
+} from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
@@ -26,6 +31,34 @@ import type {
 } from '../../src/modules/itineraries/itineraries.types.js';
 import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { PublicApi } from './public-api.js';
+
+function validateNotes(notes: string): string {
+  if (typeof notes !== 'string') {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'notes',
+          message: 'notes must be a string',
+        },
+      ],
+    });
+  }
+  if (Array.from(notes).length > MAX_NOTES_LENGTH) {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'notes',
+          message: `notes must have at most ${MAX_NOTES_LENGTH} characters`,
+        },
+      ],
+    });
+  }
+  return notes;
+}
 
 /**
  * A working `ItinerariesService` for other modules' tests: seeded public
@@ -43,9 +76,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   private readonly owned = new Map<string, ItineraryDetailView>();
   private nextId = 1;
 
-  constructor(itineraries: PublicItinerarySummary[] = []) {
+  private readonly referenceData: FakeReferenceDataService;
+
+  constructor(
+    itineraries: PublicItinerarySummary[] = [],
+    referenceData: FakeReferenceDataService = new FakeReferenceDataService(),
+  ) {
     // A deep copy, so a test that changes its fixtures can't affect another test.
     this.itineraries = structuredClone(itineraries);
+    this.referenceData = referenceData;
   }
 
   listPublicByAuthor(
@@ -147,13 +186,34 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDayView> {
     const itinerary = this.findOwned(itineraryId, userId);
+    // City existence/reference validation (GEN-12 / ITN-05)
+    if (typeof dto.cityId !== 'string') {
+      throw this.invalidField('cityId', 'cityId must be a string');
+    }
+    const cityId = dto.cityId.trim();
+    if (cityId.length === 0) {
+      throw this.invalidField('cityId', 'cityId must not be blank');
+    }
+    const knownCities = await this.referenceData.getCities([cityId]);
+    if (!knownCities.has(cityId)) {
+      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    }
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    // 60-day cap (ITN-05), after the city and notes checks like the real service.
+    if (itinerary.days.length >= MAX_DAYS) {
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
     const index = itinerary.days.length;
     const day: ItineraryDayView = {
       _id: (this.nextId++).toString(16).padStart(24, '0'),
       dayNumber: dayNumber(index),
       date: dayDate(toDateOnly(itinerary.startDate), index),
-      cityId: dto.cityId.trim(),
-      ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+      cityId,
+      ...(notes !== undefined ? { notes } : {}),
       activities: [],
       budgetEntries: [],
     };
@@ -174,13 +234,36 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (index === -1) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
-        message: 'Itinerary day not found',
+        message: 'Itinerary not found',
       });
     }
 
     const day = itinerary.days[index];
-    if (dto.cityId !== undefined) day.cityId = dto.cityId.trim();
-    if (dto.notes !== undefined) day.notes = dto.notes;
+    // An empty body returns the day untouched (like the real service).
+    if (dto.cityId === undefined && dto.notes === undefined) {
+      return structuredClone(this.toDetail(itinerary).days[index]);
+    }
+    // City existence/reference validation (GEN-12 / ITN-05)
+    let nextCityId: string | undefined;
+    if (dto.cityId !== undefined) {
+      if (typeof dto.cityId !== 'string') {
+        throw this.invalidField('cityId', 'cityId must be a string');
+      }
+      const cityId = dto.cityId.trim();
+      if (cityId.length === 0) {
+        throw this.invalidField('cityId', 'cityId must not be blank');
+      }
+      const knownCities = await this.referenceData.getCities([cityId]);
+      if (!knownCities.has(cityId)) {
+        throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+      }
+      nextCityId = cityId;
+    }
+    // Validate notes before mutating, so a failure leaves the day unchanged.
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    if (nextCityId !== undefined) day.cityId = nextCityId;
+    if (dto.notes !== undefined) day.notes = notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
   }
@@ -225,6 +308,14 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       itinerary.updatedAt = new Date();
     }
     return this.toDetail(itinerary);
+  }
+
+  invalidField(field: string, message: string): never {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [{ field, message }],
+    });
   }
 
   private findOwned(itineraryId: string, userId: string): ItineraryDetailView {

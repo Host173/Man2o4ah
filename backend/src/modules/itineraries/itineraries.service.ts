@@ -223,12 +223,33 @@ export class ItinerariesService {
 
     // Append inside the database: both the 60-day guard and `$concatArrays`
     // re-read `days` at write time, so overlapping adds cannot overwrite each
-    // other (review of ITN-05).
+    // other (review of ITN-05). Wrap user-supplied values in `$literal` so
+    // strings starting with `$` are stored verbatim and not evaluated as
+    // MongoDB expressions (e.g. `"$100 for dinner"`, `"$$ROOT"`).
     const updated = await this.itineraryModel
       .findOneAndUpdate(
         { _id: id, ownerId, [`days.${MAX_DAYS - 1}`]: { $exists: false } },
         [
-          { $set: { days: { $concatArrays: ['$days', [day]] } } },
+          {
+            $set: {
+              days: {
+                $concatArrays: [
+                  '$days',
+                  [
+                    {
+                      _id: day._id,
+                      cityId: { $literal: cityId },
+                      ...(notes !== undefined
+                        ? { notes: { $literal: notes } }
+                        : {}),
+                      activities: day.activities,
+                      budgetEntries: day.budgetEntries,
+                    },
+                  ],
+                ],
+              },
+            },
+          },
           ...this.recomputeDayFields(),
         ],
         { returnDocument: 'after', runValidators: true, updatePipeline: true },
@@ -290,8 +311,8 @@ export class ItinerariesService {
     const notes = this.normalizeNotes(dto.notes);
 
     const changes: Record<string, unknown> = {};
-    if (cityId !== undefined) changes.cityId = cityId;
-    if (notes !== undefined) changes.notes = notes;
+    if (cityId !== undefined) changes.cityId = { $literal: cityId };
+    if (notes !== undefined) changes.notes = { $literal: notes };
 
     // Edit only the target day, using the array as it exists at write time.
     // Rewriting a read copy of the whole array lost overlapping adds (review

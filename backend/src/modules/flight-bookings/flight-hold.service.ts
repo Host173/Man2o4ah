@@ -5,6 +5,7 @@ import { toDateOnly } from '../../common/dates/date-only.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
 import type { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import type { FlightHold, FlightQuote } from './flight-bookings.types.js';
+import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightQuoteService, HOLD_MINUTES } from './flight-quote.service.js';
 import {
   FlightBooking,
@@ -25,6 +26,7 @@ export class FlightHoldService {
     private readonly bookingModel: Model<FlightBooking>,
     private readonly quotes: FlightQuoteService,
     private readonly seatInventory: SeatInventory,
+    private readonly expiry: FlightHoldExpiryJob,
   ) {}
 
   async hold(
@@ -35,6 +37,12 @@ export class FlightHoldService {
     // least HOLD_MINUTES from now" against the same moment the hold starts, so
     // the hold can't end after departure (review #147).
     const createdAt = new Date();
+    // backend.md §10: never assume the expiry job already ran. Free the
+    // overdue holds on these flights first, before the quote's seat check,
+    // so their seats count as free.
+    await this.expiry.expireDueHolds(createdAt, {
+      'segments.flightId': { $in: request.segments.map((s) => s.flightId) },
+    });
     // The same checks and prices as the quote (FLT-19): one set of rules.
     const quote = await this.quotes.quote(request, createdAt);
 

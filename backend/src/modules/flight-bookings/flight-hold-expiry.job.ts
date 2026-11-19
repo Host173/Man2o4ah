@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Interval } from '@nestjs/schedule';
-import type { Connection, Model, Types } from 'mongoose';
+import type { Connection, Model, QueryFilter, Types } from 'mongoose';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
@@ -47,8 +47,15 @@ export class FlightHoldExpiryJob {
     await this.expireDueHolds(new Date());
   }
 
-  /** Expires every hold due at `now`; returns how many were expired. */
-  async expireDueHolds(now: Date): Promise<number> {
+  /**
+   * Expires every hold due at `now`; returns how many were expired. `only`
+   * narrows it further: the hold service uses it to free just the overdue holds
+   * on the flights it is about to hold seats on (backend.md §10).
+   */
+  async expireDueHolds(
+    now: Date,
+    only: QueryFilter<FlightBooking> = {},
+  ): Promise<number> {
     let expired = 0;
     // Holds that couldn't be expired in this run. They're skipped by the next
     // batches, so they can't hide the holds behind them; the next run retries them.
@@ -57,6 +64,7 @@ export class FlightHoldExpiryJob {
       const batch = await this.bookingModel
         .find(
           {
+            ...only,
             _id: { $nin: failed },
             status: FlightBookingStatus.PENDING_PAYMENT,
             holdExpiresAt: { $lte: now },

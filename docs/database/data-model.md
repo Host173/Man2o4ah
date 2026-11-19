@@ -858,10 +858,12 @@ Sessions need no job (TTL index).
 ## 8. Decisions to confirm in team review
 These are the calls this design makes where the requirements are silent or ambiguous. Each module owner confirms or challenges the ones in their area.
 
-1. Platform currency is **USD**.
+**Status (17 Nov):** confirmed by the team leader, except the two parts marked *open* below, which wait on the TAs. Build to the confirmed call until a TA answer changes it.
+
+1. Platform currency is **USD**: all flight and hotel prices, payments and refunds (PAY-04). *Confirmed.* *Open (TAs):* may booking prices also be *displayed* converted to the user's preferred currency, as an approximation, while charging in USD? ITN-18 says booking prices are not converted, so not built unless the TAs allow it.
 2. "Today" for date-only rules is the **UTC** date.
 3. Refunds use the **policy snapshot taken at hold time**, not the provider's current policy (the user accepted that version, PAY-02).
-4. Extra baggage is chosen once per passenger and applies to **every segment**, charged per segment at that segment's airline price.
+4. Extra baggage is chosen once per passenger and applies to **every segment**. *Confirmed.* Charged per segment at that segment's airline price, as built. *Open (TAs):* charge the airline's price once per booking instead (with two airlines, each charges its price once)?
 5. A flight booking is **completed** when its last segment has departed.
 6. Pending bookings on a cancelled flight become **expired** (the only legal exit from `pending_payment`).
 7. A cancelled flight **keeps its flight number** for that date (no re-creating the same number that day).

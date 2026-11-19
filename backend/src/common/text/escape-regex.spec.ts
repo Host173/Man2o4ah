@@ -24,4 +24,11 @@ describe('escapeRegex and keywordRegex', () => {
     const special = '.*+?^${}()|[]\\';
     expect(new RegExp(`^${escapeRegex(special)}$`).test(special)).toBe(true);
   });
+
+  it('escapes a NUL character, which MongoDB rejects inside a pattern', () => {
+    expect(escapeRegex('a\0b')).toBe('a\\x00b');
+    expect(escapeRegex('a\0b')).not.toContain('\0');
+    expect(keywordRegex('a\0b').test('xa\0bx')).toBe(true);
+    expect(keywordRegex('a\0b').test('ab')).toBe(false);
+  });
 });

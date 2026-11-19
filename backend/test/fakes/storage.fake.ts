@@ -12,7 +12,10 @@ import type {
 } from '../../src/modules/storage/storage.service.js';
 import type { PublicApi } from './public-api.js';
 
-/** A working `StorageService` that keeps the files in memory and applies the real image rules. */
+/**
+ * A working `StorageService` that keeps the files in memory and applies the real image rules.
+ * It does not check the file's real content (magic bytes), so tests may use any bytes.
+ */
 export class FakeStorageService implements PublicApi<StorageService> {
   private readonly files = new Map<string, Buffer>();
 

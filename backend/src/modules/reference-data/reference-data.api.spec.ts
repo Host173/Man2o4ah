@@ -161,6 +161,11 @@ describe('Reference data HTTP API (GEN-12, FLT-02, GEN-05)', () => {
         .expect(200);
       expect(res.body.total).toBe(0);
     }
+    // MongoDB rejects a raw NUL in a regex; it must be escaped, not crash (500).
+    for (const path of ['countries', 'cities', 'airports', 'attractions']) {
+      const nul = await t.http().get(`/api/${path}?q=a%00b`).expect(200);
+      expect(nul.body.total).toBe(0);
+    }
     const blank = await t.http().get('/api/countries?q=%20%20').expect(200);
     expect(blank.body.total).toBe(8); // blank q = no filter
   });

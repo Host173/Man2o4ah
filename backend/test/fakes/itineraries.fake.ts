@@ -298,7 +298,31 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDetailView> {
     const itinerary = this.findOwned(itineraryId, userId);
-    const ordered = orderDaysById(itinerary.days, dto.dayIds, (day) => day._id);
+    const days = itinerary.days;
+    // Mirror the service's permutation check: the fake must fail with the
+    // same 400 VALIDATION_FAILED shape, never a TypeError or a partial write.
+    const value = dto?.dayIds;
+    if (!Array.isArray(value)) {
+      throw this.invalidField('dayIds', 'dayIds must be an array');
+    }
+    if (value.some((id) => typeof id !== 'string')) {
+      throw this.invalidField('dayIds', 'dayIds must contain day IDs');
+    }
+    const ids = (value as string[]).map((id) => id.toLowerCase());
+    if (ids.length !== days.length) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
+    }
+    const known = new Set(days.map((day) => day._id.toLowerCase()));
+    if (ids.some((id) => !/^[0-9a-f]{24}$/.test(id) || !known.has(id))) {
+      throw this.invalidField('dayIds', 'dayIds must be current day IDs');
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
+    }
+    const ordered = orderDaysById(days, ids, (day) => day._id.toLowerCase());
     const unchanged = itinerary.days.every(
       (day, index) => day._id === ordered[index]._id,
     );

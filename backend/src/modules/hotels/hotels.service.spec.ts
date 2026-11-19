@@ -222,7 +222,68 @@ describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
       expect((await service.search(query)).total).toBe(0);
     });
 
-    it('filters inclusively on the cheapest free whole-stay room, not room sums or stay totals', async () => {
+    it.each([
+      { occupancies: [1, 2], guests: 2, count: 1, price: 20000 },
+      { occupancies: [1, 2, 4], guests: 6, count: 2, price: 20000 },
+      { occupancies: [1, 2, 4], guests: 5, count: 2, price: 10000 },
+      { occupancies: [2, 2, 4], guests: 6, count: 2, price: 10000 },
+      { occupancies: [1, 2, 4], guests: 7, count: 3, price: 10000 },
+    ])(
+      'prices only rooms that fit $guests guests with $count rooms of capacities $occupancies',
+      async ({ occupancies, guests, count, price }) => {
+        await seedHotel(
+          {},
+          occupancies.map((maxOccupancy, index) => ({
+            maxOccupancy,
+            pricePerNightMinor: (index + 1) * 10000,
+          })),
+        );
+        const search = { ...query, guests, rooms: count };
+        const result = await service.search(search);
+        expect(result.items[0]?.pricePerNightMinor).toBe(price);
+        expect(
+          (await service.search({ ...search, maxPriceMinor: price - 1 })).total,
+        ).toBe(0);
+        expect(
+          (
+            await service.search({
+              ...search,
+              minPriceMinor: price,
+              maxPriceMinor: price,
+            })
+          ).total,
+        ).toBe(1);
+      },
+    );
+
+    it('sorts and paginates using the capacity-qualified nightly price', async () => {
+      const misleading = await seedHotel({}, [
+        { maxOccupancy: 1, pricePerNightMinor: 100 },
+        { maxOccupancy: 2, pricePerNightMinor: 20000 },
+      ]);
+      const cheaper = await seedHotel({}, [{ pricePerNightMinor: 10000 }]);
+      const result = await service.search({
+        ...query,
+        sortBy: 'price',
+        limit: 1,
+      });
+      expect(result.items.map((hotel) => hotel.id)).toEqual([
+        cheaper.hotel._id.toHexString(),
+      ]);
+      expect(result.total).toBe(2);
+      expect(
+        (
+          await service.search({
+            ...query,
+            sortBy: 'price',
+            page: 2,
+            limit: 1,
+          })
+        ).items.map((hotel) => hotel.id),
+      ).toEqual([misleading.hotel._id.toHexString()]);
+    });
+
+    it('filters inclusively on the cheapest qualifying whole-stay room, not room sums or stay totals', async () => {
       const { hotel, seededRooms } = await seedHotel({}, [
         { maxOccupancy: 4, pricePerNightMinor: 10000 },
         { pricePerNightMinor: 20000 },

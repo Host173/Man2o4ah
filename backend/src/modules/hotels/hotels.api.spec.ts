@@ -155,6 +155,42 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
       });
     });
 
+    it('does not advertise or filter on a cheaper room that cannot accommodate the requested group', async () => {
+      const hotel = await fixture();
+      await rooms.create({
+        hotelId: hotel.id,
+        name: 'single',
+        type: 'Single',
+        beds: 1,
+        maxOccupancy: 1,
+        pricePerNightMinor: 100,
+        availability: [
+          {
+            fromDate: toDateOnly(query.checkIn),
+            toDate: toDateOnly('2099-12-03'),
+          },
+        ],
+      });
+      const result = await t
+        .http()
+        .get('/api/hotels/search')
+        .query(query)
+        .expect(200);
+      expect(result.body.items[0]?.pricePerNightMinor).toBe(12345);
+      const filtered = await t
+        .http()
+        .get('/api/hotels/search')
+        .query({ ...query, maxPrice: 100 })
+        .expect(200);
+      expect(filtered.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
     it('returns a successful empty page when availability or rating filters do not match', async () => {
       await fixture();
       for (const filter of [{ rooms: 2 }, { minRating: 1 }]) {

@@ -343,6 +343,48 @@ describe('POST /api/auth/login (API, ACC-04, ACC-19)', () => {
     });
   });
 
+  describe('lockout (ACC-05)', () => {
+    const fail = () =>
+      t.http().post(URL).send({ email: EMAIL, password: 'wrongpass1' });
+
+    it('the 5th consecutive wrong password → 401 ACCOUNT_LOCKED with the minutes left', async () => {
+      await createUser();
+      for (let i = 0; i < 4; i++) {
+        expectError(await fail(), 401, ErrorCode.InvalidCredentials);
+      }
+
+      const res = await fail();
+
+      expectError(res, 401, ErrorCode.AccountLocked);
+      expect(res.body.message).toMatch(/\b15 minutes\b/);
+      expect(res.body).not.toHaveProperty('details');
+    });
+
+    it('a locked account gets 401 ACCOUNT_LOCKED with the right password, and no cookies', async () => {
+      await createUser();
+      for (let i = 0; i < 5; i++) await fail();
+
+      const res = await t
+        .http()
+        .post(URL)
+        .send({ email: EMAIL, password: PASSWORD });
+
+      expectError(res, 401, ErrorCode.AccountLocked);
+      expect(res.headers['set-cookie']).toBeUndefined();
+      expect(await sessions.countDocuments()).toBe(0);
+    });
+
+    it('an unknown email is never locked, only INVALID_CREDENTIALS', async () => {
+      for (let i = 0; i < 6; i++) {
+        const res = await t
+          .http()
+          .post(URL)
+          .send({ email: 'nobody@example.com', password: 'wrongpass1' });
+        expectError(res, 401, ErrorCode.InvalidCredentials);
+      }
+    });
+  });
+
   describe('validation (400 VALIDATION_FAILED)', () => {
     it.each([
       ['a missing email', { password: PASSWORD }, 'email'],

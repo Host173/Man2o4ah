@@ -2,25 +2,39 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { BookingType } from '../../common/database/booking-type.js';
 import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import { ProviderType } from '../accounts/schemas/user.schema.js';
+import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
+import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import type { AdminBookingView } from './admin.types.js';
 import {
   ListAdminBookingsQueryDto,
   MAX_ADMIN_BOOKINGS_DEPTH,
 } from './dto/list-admin-bookings-query.dto.js';
 
+const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
+const VALID_PROVIDER_TYPES = new Set<string>(Object.values(ProviderType));
+
 /**
- * Admin read-only booking list and platform administration workflows (`ACC-17`).
- * Reads booking data solely through the exported `CTR-04` contracts.
+ * Admin read-only booking list and provider moderation workflows (`ACC-15`, `ACC-17`).
+ * Reads and mutates cross-module data solely through exported module contracts (`CTR-01`..`CTR-04`).
  */
 @Injectable()
 export class AdminService {
   constructor(
     private readonly flightBookingsService: FlightBookingsService,
     private readonly hotelBookingsService: HotelBookingsService,
+    private readonly accountsService: AccountsService,
+    private readonly flightsService: FlightsService,
+    private readonly hotelsService: HotelsService,
+    private readonly events: AppEvents,
   ) {}
 
   /**
@@ -133,6 +147,83 @@ export class AdminService {
       ...pageResult,
       totalPages: Math.min(pageResult.totalPages, maxMergedPages),
     };
+  }
+
+  /**
+   * ACC-15: deactivates an airline or hotel via its owning service, resolves
+   * its moderators through `AccountsService.getModeratorIds`, and emits
+   * `provider.deactivated` and `admin.action` (`PROVIDER_DEACTIVATED`).
+   */
+  async deactivateProvider(
+    type: ProviderType,
+    providerId: string,
+    adminId: string,
+  ): Promise<void> {
+    await this.setProviderActive(type, providerId, false, adminId);
+  }
+
+  /**
+   * ACC-15: reactivates an airline or hotel via its owning service, resolves
+   * its moderators through `AccountsService.getModeratorIds`, and emits
+   * `provider.reactivated` and `admin.action` (`PROVIDER_REACTIVATED`).
+   */
+  async reactivateProvider(
+    type: ProviderType,
+    providerId: string,
+    adminId: string,
+  ): Promise<void> {
+    await this.setProviderActive(type, providerId, true, adminId);
+  }
+
+  private async setProviderActive(
+    type: ProviderType,
+    providerId: string,
+    isActive: boolean,
+    adminId: string,
+  ): Promise<void> {
+    if (!VALID_PROVIDER_TYPES.has(type)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field: 'type', message: 'type must be airline or hotel' }],
+      });
+    }
+    if (typeof providerId !== 'string' || !OBJECT_ID_HEX_RE.test(providerId)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field: 'id', message: 'id must be a valid ObjectId' }],
+      });
+    }
+
+    // Look up recipients before mutating so lookup failures leave provider state untouched.
+    const moderatorIds = await this.accountsService.getModeratorIds(
+      type,
+      providerId,
+    );
+
+    if (type === ProviderType.AIRLINE) {
+      await this.flightsService.setAirlineActive(providerId, isActive);
+    } else {
+      await this.hotelsService.setActive(providerId, isActive);
+    }
+
+    this.events.emit(
+      isActive ? Events.ProviderReactivated : Events.ProviderDeactivated,
+      {
+        providerType: type,
+        providerId,
+        moderatorIds,
+      },
+    );
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: isActive
+        ? AuditAction.PROVIDER_REACTIVATED
+        : AuditAction.PROVIDER_DEACTIVATED,
+      target: { type, id: providerId },
+    });
   }
 
   private parseDate(value: string, field: 'from' | 'to'): Date {

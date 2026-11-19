@@ -29,13 +29,17 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser } from '../accounts/auth/decorators.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import { CreateDayDto } from './dto/create-day.dto.js';
 import {
+  ItineraryDayResponseDto,
   ItineraryDetailResponseDto,
   PaginatedItinerariesResponseDto,
 } from './dto/itinerary.response.dto.js';
+import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
 import type {
+  ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
 } from './itineraries.types.js';
@@ -120,5 +124,50 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.itinerariesService.delete(id.toHexString(), user.id);
+  }
+
+  @Post(':id/days')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'ITN-05 Add a day to my itinerary' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: ItineraryDayResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid itinerary ID, city or notes',
+  })
+  @ApiNotFoundResponse({
+    description: 'Itinerary not found or owned by another user',
+  })
+  addDay(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: CreateDayDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDayView> {
+    return this.itinerariesService.addDay(id.toHexString(), dto, user.id);
+  }
+
+  @Patch(':id/days/:dayId')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: "ITN-05 Edit a day's city and notes" })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'dayId', type: String })
+  @ApiOkResponse({ type: ItineraryDayResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid itinerary or day ID, city or notes',
+  })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or day not found, or owned by another user',
+  })
+  updateDay(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('dayId', ParseObjectIdPipe) dayId: Types.ObjectId,
+    @Body() dto: UpdateDayDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDayView> {
+    return this.itinerariesService.updateDay(
+      id.toHexString(),
+      dayId.toHexString(),
+      dto,
+      user.id,
+    );
   }
 }

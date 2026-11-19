@@ -563,3 +563,87 @@ push and make the replies
 How the output was used:
 Pushed feature/FLT-22-flight-seat-hold and feature/HTL-16-hotel-room-hold; posted the follow-up replies on PR #147 and #148 with gh
 ================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+HTL 17 AND FLT 19 opened up, make some plans for them and then inform me , ensure the plans are maximum 4 steps each
+
+How the output was used:
+Answer only, no files changed (plans for #165 FLT-19 bag price once per airline and #59 HTL-17 hotel confirmation)
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+lets do htl 17 first
+
+How the output was used:
+Created feature/HTL-17-hotel-confirmation from develop; added booking-reference.spec.ts (failing TDD tests); no commit yet
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i ran it but one test failed
+
+How the output was used:
+Answer only, no files changed (explained the failing run: booking-reference.ts does not exist yet)
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+how can i create a file from terminal
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i created it and the tests pass now
+
+How the output was used:
+Answer only, no files changed (review of booking-reference.ts)
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i commited it now move on to step 2
+
+How the output was used:
+Added hotel-confirmation.service.spec.ts (failing TDD tests for the payment.succeeded handler); no commit yet
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+commit and do service
+
+How the output was used:
+Committed 7be29f4 (confirmation tests); added hotel-confirmation.service.ts, moved the lost-race check into booking-lifecycle.ts (isInvalidTransition) and registered the service; no commit yet
+================================================

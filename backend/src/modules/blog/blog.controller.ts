@@ -103,7 +103,7 @@ export class BlogController {
   @Public()
   @Get('posts/:id')
   @ApiOperation({
-    summary: 'BLG-02 Read a published post page with author',
+    summary: 'BLG-02 / GEN-10 Read a published post page with author',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostDetailResponseDto })
@@ -113,8 +113,9 @@ export class BlogController {
   })
   getById(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user?: AuthUser,
   ): Promise<PostDetailView> {
-    return this.blogService.getById(id.toHexString());
+    return this.blogService.getById(id.toHexString(), user);
   }
 
   @Patch('posts/:id')
@@ -157,7 +158,7 @@ export class BlogController {
   @Get('posts/:id/comments')
   @ApiOperation({
     summary:
-      'BLG-05 / GEN-05 List paginated comments on a published post in chronological order',
+      'BLG-05 / GEN-05 / GEN-10 List paginated comments on a published post in chronological order',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PaginatedCommentsResponseDto })
@@ -168,8 +169,9 @@ export class BlogController {
   listComments(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Query() query: PaginationQueryDto,
+    @CurrentUser() user?: AuthUser,
   ): Promise<Paginated<CommentView>> {
-    return this.blogService.listComments(id.toHexString(), query);
+    return this.blogService.listComments(id.toHexString(), query, user);
   }
 
   @Post('posts/:id/comments')

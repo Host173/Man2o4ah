@@ -17,8 +17,10 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
+import { Role, type AuthUser } from '../accounts/auth/auth.types.js';
 import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import {
   buildExcerpt,
   MAX_TAG_LENGTH,
@@ -71,6 +73,7 @@ export class BlogService {
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
     private readonly accountsService: AccountsService,
     private readonly itinerariesService: ItinerariesService,
+    private readonly storageService: StorageService,
   ) {}
 
   /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
@@ -285,32 +288,48 @@ export class BlogService {
   }
 
   /**
-   * BLG-02: loads a publicly visible published post with its resolved author
-   * name. Throws 404 for missing, draft, hidden, or deactivated-author posts.
+   * BLG-02 / GEN-10: loads a published post with its resolved author name.
+   * Hidden posts remain visible only to their author and admins; drafts,
+   * missing posts, and deactivated-author posts return 404.
    */
-  async getById(postId: string): Promise<PostDetailView> {
+  async getById(postId: string, viewer?: AuthUser): Promise<PostDetailView> {
     const id = this.parseId(postId, 'postId');
-    const { post, postAuthor } = await this.loadVisiblePublishedPost(id);
+    const { post, postAuthor } = await this.loadReadablePost(id, viewer);
     return this.toPublishedView(post, postAuthor);
   }
 
   /**
-   * BLG-05 / GEN-05: lists paginated visible comments on a published post in
-   * chronological order (oldest first, `_id` as tie-breaker). Throws 404 for
-   * missing, draft, hidden, or deactivated-author posts.
+   * BLG-05 / GEN-05 / GEN-10: lists paginated visible comments on a published
+   * post in chronological order (oldest first, `_id` as tie-breaker). Hidden
+   * comments are returned only to their author and admins; hidden posts are
+   * accessible only to their author and admins.
    */
   async listComments(
     postId: string,
     query: PaginationQueryDto = new PaginationQueryDto(),
+    viewer?: AuthUser,
   ): Promise<Paginated<CommentView>> {
     const id = this.parseId(postId, 'postId');
-    await this.loadVisiblePublishedPost(id);
+    await this.loadReadablePost(id, viewer);
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
+    const commentFilter: QueryFilter<StoredComment> =
+      viewer?.role === Role.ADMIN
+        ? { postId: id }
+        : viewer && OBJECT_ID_HEX_RE.test(viewer.id)
+          ? {
+              postId: id,
+              $or: [
+                { isHidden: false },
+                { authorId: new Types.ObjectId(viewer.id) },
+              ],
+            }
+          : { postId: id, isHidden: false };
+
     const result = await paginate(
       this.commentModel,
-      { postId: id, isHidden: false },
+      commentFilter,
       { page, limit },
       { sort: { createdAt: 1, _id: 1 } },
     );
@@ -412,29 +431,7 @@ export class BlogService {
   async deleteComment(commentId: string, userId: string): Promise<void> {
     const id = this.parseId(commentId, 'commentId');
     const authorId = this.parseId(userId, 'userId');
-
-    const session = await this.connection.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const deleted = await this.commentModel
-          .findOneAndDelete({ _id: id, authorId }, { session })
-          .lean()
-          .exec();
-        if (!deleted) throw this.commentNotFound();
-
-        if (!deleted.isHidden) {
-          await this.postModel
-            .updateOne(
-              { _id: deleted.postId, commentCount: { $gt: 0 } },
-              { $inc: { commentCount: -1 } },
-              { session },
-            )
-            .exec();
-        }
-      });
-    } finally {
-      await session.endSession();
-    }
+    await this.deleteCommentMatching({ _id: id, authorId });
   }
 
   /**
@@ -604,28 +601,95 @@ export class BlogService {
 
   /**
    * BLG-04: deletes the authenticated owner's post along with its comments and
-   * likes in one transaction; throws 404 if missing or owned by someone else.
+   * likes in one transaction, then cleans up stored image files; throws 404 if
+   * missing or owned by someone else.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
+    await this.deletePostMatching({ _id: id, authorId });
+  }
 
+  /** GEN-09 / GEN-10: returns whether a post exists for moderation reporting. */
+  async postExists(postId: string): Promise<boolean> {
+    const id = this.parseId(postId, 'postId');
+    return (await this.postModel.exists({ _id: id }).exec()) !== null;
+  }
+
+  /** GEN-10: hides a post (`isHidden: true`); throws 404 if missing. */
+  async hidePost(postId: string): Promise<void> {
+    const id = this.parseId(postId, 'postId');
+    const updated = await this.postModel
+      .findByIdAndUpdate(
+        id,
+        { $set: { isHidden: true } },
+        { returnDocument: 'after' },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+  }
+
+  /**
+   * GEN-10: permanently deletes a post along with its comments, likes, and
+   * stored image files on behalf of admin moderation; throws 404 if missing.
+   */
+  async deletePostByAdmin(postId: string): Promise<void> {
+    const id = this.parseId(postId, 'postId');
+    await this.deletePostMatching({ _id: id });
+  }
+
+  /** GEN-09 / GEN-10: returns whether a comment exists for moderation reporting. */
+  async commentExists(commentId: string): Promise<boolean> {
+    const id = this.parseId(commentId, 'commentId');
+    return (await this.commentModel.exists({ _id: id }).exec()) !== null;
+  }
+
+  /**
+   * GEN-10: hides a comment and decrements the parent post's `commentCount`
+   * once atomically in a transaction; throws 404 if missing.
+   */
+  async hideComment(commentId: string): Promise<void> {
+    const id = this.parseId(commentId, 'commentId');
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
-        const deleted = await this.postModel
-          .findOneAndDelete({ _id: id, authorId }, { session })
+        const existing = await this.commentModel
+          .findById(id, null, { session })
           .lean()
           .exec();
-        if (!deleted) throw this.notFound();
+        if (!existing) throw this.commentNotFound();
 
-        await this.commentModel.deleteMany({ postId: id }, { session }).exec();
-        await this.likeModel.deleteMany({ postId: id }, { session }).exec();
+        const newlyHidden = await this.commentModel
+          .findOneAndUpdate(
+            { _id: id, isHidden: false },
+            { $set: { isHidden: true } },
+            { session, returnDocument: 'after' },
+          )
+          .lean()
+          .exec();
+        if (newlyHidden) {
+          await this.postModel
+            .updateOne(
+              { _id: existing.postId, commentCount: { $gt: 0 } },
+              { $inc: { commentCount: -1 } },
+              { session },
+            )
+            .exec();
+        }
       });
-      // BLG-10 will delete stored post image files after the transaction commits.
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * GEN-10: permanently deletes a comment on behalf of admin moderation and
+   * decrements `commentCount` when the comment was visible; throws 404 if missing.
+   */
+  async deleteCommentByAdmin(commentId: string): Promise<void> {
+    const id = this.parseId(commentId, 'commentId');
+    await this.deleteCommentMatching({ _id: id });
   }
 
   /** ACC-12: hides all posts of a deactivated author on future reads (idempotent). */
@@ -670,6 +734,101 @@ export class BlogService {
 
     const profiles = await this.accountsService.getProfiles(uniqueIds);
     return new Map(profiles.map((profile) => [profile.id, profile]));
+  }
+
+  private async deletePostMatching(
+    filter: QueryFilter<StoredPost>,
+  ): Promise<void> {
+    let imageKeys: string[] = [];
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const deleted = await this.postModel
+          .findOneAndDelete(filter, { session })
+          .lean()
+          .exec();
+        if (!deleted) throw this.notFound();
+
+        imageKeys = (deleted.images ?? []).map((image) => image.key);
+        await this.commentModel
+          .deleteMany({ postId: deleted._id }, { session })
+          .exec();
+        await this.likeModel
+          .deleteMany({ postId: deleted._id }, { session })
+          .exec();
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    for (const key of imageKeys) {
+      await this.storageService.delete(key);
+    }
+  }
+
+  private async deleteCommentMatching(
+    filter: QueryFilter<StoredComment>,
+  ): Promise<void> {
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const deleted = await this.commentModel
+          .findOneAndDelete(filter, { session })
+          .lean()
+          .exec();
+        if (!deleted) throw this.commentNotFound();
+
+        if (!deleted.isHidden) {
+          await this.postModel
+            .updateOne(
+              { _id: deleted.postId, commentCount: { $gt: 0 } },
+              { $inc: { commentCount: -1 } },
+              { session },
+            )
+            .exec();
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private async loadReadablePost(
+    id: Types.ObjectId,
+    viewer?: AuthUser,
+  ): Promise<{
+    post: PostRecord;
+    postAuthor: AccountProfile | undefined;
+  }> {
+    const post = await this.postModel
+      .findOne({
+        _id: id,
+        status: PostStatus.PUBLISHED,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!post) throw this.notFound();
+
+    if (post.isHidden) {
+      const isAdmin = viewer?.role === Role.ADMIN;
+      const isAuthor =
+        viewer !== undefined && post.authorId.toHexString() === viewer.id;
+      if (!isAdmin && !isAuthor) {
+        throw this.notFound();
+      }
+    }
+
+    const profiles = await this.resolveProfiles([post.authorId.toHexString()]);
+    const postAuthor = profiles.get(post.authorId.toHexString());
+    if (postAuthor?.status === UserStatus.DEACTIVATED) {
+      throw this.notFound();
+    }
+
+    return {
+      post: post as PostRecord,
+      postAuthor,
+    };
   }
 
   private async loadVisiblePublishedPost(id: Types.ObjectId): Promise<{

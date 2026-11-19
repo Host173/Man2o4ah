@@ -117,6 +117,7 @@ export class FlightQuoteService {
 
     const price = priceFlightBooking(
       legs.map(({ airline, cabin }) => ({
+        airlineId: airline.id,
         fareMinor: cabin.priceMinor,
         extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor ?? 0,
       })),

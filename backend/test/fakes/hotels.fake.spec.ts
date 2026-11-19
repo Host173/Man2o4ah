@@ -78,10 +78,489 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('FakeHotelsService', () => {
+  describe('room management (HTL-06)', () => {
+    const block = {
+      op: 'BLOCK' as const,
+      fromDate: '2026-11-15',
+      toDate: '2026-11-17',
+    };
+
+    it('blocks/unblocks through the same dataset and deletes never-reserved rooms with their blocks', async () => {
+      const created = await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room1,
+        block,
+        ids.hotel1,
+      );
+      expect(hotels.data.roomNights).toHaveLength(3);
+      await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room1,
+        { op: 'UNBLOCK', blockId: created.blockId.toUpperCase() },
+        ids.hotel1,
+      );
+      expect(hotels.data.roomNights).toHaveLength(0);
+      await hotels.manageRoomBlock(ids.hotel1, ids.room1, block, ids.hotel1);
+      await hotels.deleteRoom(ids.hotel1, ids.room1, ids.hotel1);
+      expect(hotels.data.rooms.map((item) => item.id)).toEqual([ids.room2]);
+      expect(hotels.data.roomNights).toHaveLength(0);
+    });
+
+    it('preserves reservation conflicts, permanent reservation history and detached inactive views', async () => {
+      await inventory.reserve(
+        ids.hotel1,
+        [ids.room1],
+        checkIn,
+        checkOut,
+        ids.reservation1,
+      );
+      await expect(
+        hotels.manageRoomBlock(ids.hotel1, ids.room1, block, ids.hotel1),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.OverlapsReservationOrBlock },
+      });
+      for (const action of ['deactivateRoom', 'deleteRoom'] as const) {
+        await expect(
+          hotels[action](ids.hotel1, ids.room1, ids.hotel1),
+        ).rejects.toMatchObject({
+          response: { code: ErrorCode.RoomHasReservations },
+        });
+      }
+      await inventory.release(ids.reservation1);
+      await expect(
+        hotels.deleteRoom(ids.hotel1, ids.room1, ids.hotel1),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.RoomWasReserved },
+      });
+      const room = await hotels.deactivateRoom(
+        ids.hotel1,
+        ids.room1,
+        ids.hotel1,
+      );
+      expect(room.isActive).toBe(false);
+      room.isActive = true;
+      expect(hotels.data.rooms[0].isActive).toBe(false);
+    });
+
+    it('scopes rooms and blocks to the assigned hotel and validates operation fields', async () => {
+      const created = await hotels.manageRoomBlock(
+        ids.hotel1,
+        ids.room2,
+        block,
+        ids.hotel1,
+      );
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { op: 'UNBLOCK', blockId: created.blockId },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { op: 'UNBLOCK', blockId: ids.missing },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      await expect(
+        hotels.manageRoomBlock(
+          ids.hotel1,
+          ids.room1,
+          { ...block, blockId: created.blockId },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      for (const action of ['deactivateRoom', 'deleteRoom'] as const) {
+        await expect(
+          hotels[action](ids.hotel1, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+        await expect(
+          hotels[action](ids.hotel1, ids.missing, ids.hotel1),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      expect(hotels.data.roomNights).toHaveLength(3);
+    });
+  });
+  describe('room edits and availability (HTL-04 / HTL-05)', () => {
+    it('edits only numeric fields and keeps earlier room views detached', async () => {
+      const quoted = (await hotels.getRooms(ids.hotel1))[0];
+      const supplied = {
+        beds: 2,
+        pricePerNightMinor: 12000,
+        isActive: false,
+        availability: [],
+      };
+      const updated = await hotels.updateRoom(
+        ids.hotel1,
+        ids.room1,
+        supplied,
+        ids.hotel1,
+      );
+      expect(updated).toEqual({
+        ...quoted,
+        beds: 2,
+        pricePerNightMinor: 12000,
+      });
+      expect(quoted.pricePerNightMinor).toBe(10000);
+      await expect(
+        hotels.updateRoom(
+          ids.hotel1,
+          ids.room1,
+          { beds: 3, maxOccupancy: 0 },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({ name: 'ValidationError' });
+      expect((await hotels.getRooms(ids.hotel1))[0]).toEqual(updated);
+    });
+
+    it('reuses inclusive normalization and protects pending reservation nights', async () => {
+      await inventory.reserve(
+        ids.hotel1,
+        [ids.room1],
+        checkIn,
+        checkOut,
+        ids.reservation1,
+      );
+      const added = await hotels.addRoomAvailability(
+        ids.hotel1,
+        ids.room1,
+        { fromDate: '2026-12-01', toDate: '2026-12-01' },
+        ids.hotel1,
+      );
+      expect(added.availability).toEqual([
+        {
+          fromDate: toDateOnly('2026-11-12'),
+          toDate: toDateOnly('2026-12-01'),
+        },
+      ]);
+      await expect(
+        hotels.setRoomAvailability(
+          ids.hotel1,
+          ids.room1,
+          { op: 'SET_RANGES', ranges: [] },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.AvailabilityHasReservations },
+      });
+      await expect(
+        hotels.addRoomAvailability(
+          ids.hotel1,
+          ids.room1,
+          { fromDate: '2026-12-01', toDate: '2026-12-02' },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      const replaced = await hotels.setRoomAvailability(
+        ids.hotel1,
+        ids.room2,
+        {
+          op: 'SET_RANGES',
+          ranges: [{ fromDate: '2026-12-01', toDate: '2026-12-01' }],
+        },
+        ids.hotel1,
+      );
+      expect(replaced.availability).toEqual([
+        {
+          fromDate: toDateOnly('2026-12-01'),
+          toDate: toDateOnly('2026-12-01'),
+        },
+      ]);
+      replaced.availability.length = 0;
+      expect((await hotels.getRooms(ids.hotel1))[1].availability).toHaveLength(
+        1,
+      );
+    });
+
+    it('enforces the assigned hotel and room membership on every mutation', async () => {
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      for (const change of [
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.updateRoom(hotelId, roomId, { beds: 2 }, assigned),
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.addRoomAvailability(
+            hotelId,
+            roomId,
+            { fromDate: '2026-12-01', toDate: '2026-12-01' },
+            assigned,
+          ),
+        (hotelId: string, roomId: string, assigned: string) =>
+          hotels.setRoomAvailability(
+            hotelId,
+            roomId,
+            { op: 'SET_RANGES', ranges: [] },
+            assigned,
+          ),
+      ]) {
+        await expect(
+          change(ids.hotel1, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel2, ids.room1, ids.hotel2),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel1, ids.missing, ids.hotel1),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          change(ids.hotel1, 'invalid', ids.hotel1),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    });
+  });
+
+  describe('room creation and listing (HTL-03)', () => {
+    const input = {
+      name: ' Room A ',
+      type: ' Deluxe King ',
+      beds: 1,
+      maxOccupancy: 2,
+      pricePerNightMinor: 10000,
+    };
+
+    it('creates detached room views, preserves safe defaults, and lists only assigned rooms', async () => {
+      const supplied = {
+        ...input,
+        hotelId: ids.hotel2,
+        isActive: false,
+        availability: [],
+        hasEverBeenReserved: true,
+      };
+      const created = await hotels.createRoom(
+        ids.hotel1.toUpperCase(),
+        supplied,
+        ids.hotel1,
+      );
+      expect(created).toEqual({
+        ...input,
+        name: 'room a',
+        type: 'Deluxe King',
+        id: expect.stringMatching(/^[a-f0-9]{24}$/),
+        hotelId: ids.hotel1,
+        isActive: true,
+        availability: [],
+        hasEverBeenReserved: false,
+      });
+      created.name = 'Changed response';
+      const all = await hotels.getRooms(ids.hotel1);
+      expect(all.find((item) => item.id === created.id)?.name).toBe('room a');
+      expect(
+        await hotels.listRooms(ids.hotel1, { page: 2, limit: 2 }, ids.hotel1),
+      ).toEqual({
+        items: all.slice(2, 4),
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      expect(
+        await hotels.listRooms(ids.hotel2, { page: 1, limit: 10 }, ids.hotel2),
+      ).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('rejects case-variant trimmed names under concurrency but permits the same name in another hotel', async () => {
+      const outcomes = await Promise.allSettled(
+        ['Room A', ' ROOM a ', 'room A'].map((name) =>
+          hotels.createRoom(ids.hotel1, { ...input, name }, ids.hotel1),
+        ),
+      );
+      expect(
+        outcomes.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      for (const result of outcomes) {
+        if (result.status === 'rejected')
+          expect(result.reason).toMatchObject({
+            status: 409,
+            response: { code: ErrorCode.Conflict },
+          });
+      }
+      hotels.data.hotels.push(hotel(ids.hotel2));
+      expect(
+        await hotels.createRoom(ids.hotel2, input, ids.hotel2),
+      ).toMatchObject({
+        name: 'room a',
+        hotelId: ids.hotel2,
+      });
+    });
+
+    it('matches legacy mixed-case name collisions literally without rewriting inactive fixtures', async () => {
+      hotels.data.rooms.push(
+        room(ids.room3, {
+          name: 'Suite [A].* (East)?$',
+          isActive: false,
+        }),
+      );
+      await expect(
+        hotels.createRoom(
+          ids.hotel1,
+          { ...input, name: ' suite [a].* (east)?$ ' },
+          ids.hotel1,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+      expect(hotels.data.rooms).toHaveLength(3);
+      expect(
+        hotels.data.rooms.find((item) => item.id === ids.room3)?.name,
+      ).toBe('Suite [A].* (East)?$');
+      for (const name of [
+        'Suite A East',
+        'Prefix Suite [A].* (East)?$ Suffix',
+      ]) {
+        expect(
+          await hotels.createRoom(ids.hotel1, { ...input, name }, ids.hotel1),
+        ).toMatchObject({ name: name.toLowerCase() });
+      }
+    });
+
+    it('matches assignment, missing-hotel and schema-validation failures without inserting rooms', async () => {
+      for (const assignment of [undefined, 'invalid', ids.hotel2]) {
+        await expect(
+          hotels.createRoom(ids.hotel1, input, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+        await expect(
+          hotels.listRooms(ids.hotel1, { page: 1, limit: 10 }, assignment),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+      await expect(
+        hotels.createRoom(ids.missing, input, ids.missing),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.NotFound },
+      });
+      for (const invalid of [
+        { name: ' ' },
+        { type: 'x'.repeat(51) },
+        { beds: 0 },
+        { maxOccupancy: 0 },
+        { pricePerNightMinor: 1.5 },
+      ]) {
+        await expect(
+          hotels.createRoom(ids.hotel1, { ...input, ...invalid }, ids.hotel1),
+        ).rejects.toMatchObject({
+          name: 'ValidationError',
+        });
+      }
+      expect(hotels.data.rooms).toHaveLength(2);
+    });
+  });
+
+  const policies = {
+    checkInTime: '15:30',
+    checkOutTime: '11:00',
+    cancellationPolicy: { tiers: [{ daysBefore: 2, refundPercent: 50 }] },
+  };
+
+  it('replaces policies with detached input and output and permits clearing tiers', async () => {
+    const before = (await hotels.getHotel(ids.hotel1))!;
+    const input = structuredClone(policies);
+    const updated = await hotels.updatePolicies(ids.hotel1, input, ids.hotel1);
+    expect(updated).toEqual({ ...before, ...policies });
+    input.cancellationPolicy.tiers.length = 0;
+    updated.cancellationPolicy.tiers.length = 0;
+    expect(await hotels.getHotel(ids.hotel1)).toEqual({
+      ...before,
+      ...policies,
+    });
+    const cleared = { ...policies, cancellationPolicy: { tiers: [] } };
+    expect(
+      await hotels.updatePolicies(ids.hotel1, cleared, ids.hotel1),
+    ).toEqual({ ...before, ...cleared });
+  });
+
+  it('enforces policy scope and validation without partially updating stored fields', async () => {
+    const before = await hotels.getHotel(ids.hotel1);
+    for (const assignment of [undefined, ids.hotel2, 'invalid']) {
+      await expect(
+        hotels.updatePolicies(ids.hotel1, policies, assignment),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+    for (const input of [policies, { ...policies, checkInTime: '24:00' }]) {
+      await expect(
+        hotels.updatePolicies(ids.missing, input, ids.missing),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+    for (const input of [
+      { ...policies, checkInTime: '24:00' },
+      {
+        ...policies,
+        cancellationPolicy: {
+          tiers: [
+            { daysBefore: 2, refundPercent: 50 },
+            { daysBefore: 2, refundPercent: 100 },
+          ],
+        },
+      },
+    ]) {
+      await expect(
+        hotels.updatePolicies(ids.hotel1, input, ids.hotel1),
+      ).rejects.toMatchObject({ name: 'ValidationError' });
+      expect(await hotels.getHotel(ids.hotel1)).toEqual(before);
+    }
+  });
+
   it('rejects malformed hotel IDs with the same validation errors as the real service', async () => {
     const calls = [
       () => hotels.getHotel('invalid'),
+      () => hotels.getRooms('invalid'),
+      () =>
+        hotels.createRoom(
+          'invalid',
+          {
+            name: '101',
+            type: 'Single',
+            beds: 1,
+            maxOccupancy: 1,
+            pricePerNightMinor: 1,
+          },
+          'invalid',
+        ),
+      () => hotels.listRooms('invalid', { page: 1, limit: 10 }, 'invalid'),
       () => hotels.update('invalid', {}, 'invalid'),
+      () => hotels.updatePolicies('invalid', policies, 'invalid'),
       () => hotels.addPhoto('invalid', undefined, 'invalid'),
       () => hotels.removePhoto('invalid', 'invalid', 'invalid'),
       () => hotels.setActive('invalid', false),
@@ -368,7 +847,7 @@ describe('FakeHotelsService', () => {
       expect.objectContaining({ id: ids.room1, isActive: false }),
       expect.objectContaining({ id: ids.room2, isActive: true }),
     ]);
-    expect(await hotels.getRooms('missing')).toEqual([]);
+    expect(await hotels.getRooms(ids.missing)).toEqual([]);
   });
 
   it('exposes reservations and blocks over inclusive dates without exposing other hotels', async () => {

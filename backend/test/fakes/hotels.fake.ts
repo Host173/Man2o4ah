@@ -1,11 +1,29 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Error as MongooseError, Mongoose, Types } from 'mongoose';
 import { addDays } from '../../src/common/dates/date-only.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
+import type { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
+import { escapeRegex } from '../../src/common/text/escape-regex.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
+import type { CreateRoomDto } from '../../src/modules/hotels/dto/create-room.dto.js';
+import type {
+  RoomBlockOperationDto,
+  RoomBlockResponseDto,
+} from '../../src/modules/hotels/dto/room-block-operation.dto.js';
+import { parseRoomBlockOperation } from '../../src/modules/hotels/room-block-operation.js';
+import type {
+  RoomAvailabilityDto,
+  SetRoomAvailabilityDto,
+} from '../../src/modules/hotels/dto/room-availability.dto.js';
+import type { UpdateRoomDto } from '../../src/modules/hotels/dto/update-room.dto.js';
+import type { UpdateHotelPoliciesDto } from '../../src/modules/hotels/dto/update-hotel-policies.dto.js';
 import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.dto.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
@@ -21,6 +39,10 @@ import {
   HotelSchema,
 } from '../../src/modules/hotels/schemas/hotel.schema.js';
 import type { RatingSummary } from '../../src/modules/hotels/schemas/hotel.schema.js';
+import {
+  Room,
+  RoomSchema,
+} from '../../src/modules/hotels/schemas/room.schema.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import type { StorageService } from '../../src/modules/storage/storage.service.js';
@@ -28,12 +50,15 @@ import type { PublicApi } from './public-api.js';
 import {
   assertDateRange,
   assertStayDates,
+  parseAvailabilityRange,
 } from '../../src/modules/hotels/room-date-ranges.js';
+import { FakeRoomNightInventory } from './room-night-inventory.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
 
 // Disconnected: share production validators without opening a database connection.
 const HotelValidationModel = new Mongoose().model(Hotel.name, HotelSchema);
+const RoomValidationModel = new Mongoose().model(Room.name, RoomSchema);
 
 export interface HotelDataset {
   hotels: HotelView[];
@@ -115,6 +140,22 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     return structuredClone(hotel);
   }
 
+  async updatePolicies(
+    hotelId: string,
+    input: UpdateHotelPoliciesDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<HotelView> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const fields = {
+      checkInTime: input.checkInTime,
+      checkOutTime: input.checkOutTime,
+      cancellationPolicy: structuredClone(input.cancellationPolicy),
+    };
+    await this.validate(fields, Object.keys(fields));
+    Object.assign(hotel, fields);
+    return structuredClone(hotel);
+  }
+
   async addPhoto(
     hotelId: string,
     file: UploadedImage | undefined,
@@ -187,16 +228,194 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
     );
   }
 
-  getRooms(
+  async createRoom(
+    hotelId: string,
+    input: CreateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const document = new RoomValidationModel({
+      hotelId: hotel.id,
+      name: input.name.trim().toLowerCase(),
+      type: input.type,
+      beds: input.beds,
+      maxOccupancy: input.maxOccupancy,
+      pricePerNightMinor: input.pricePerNightMinor,
+    });
+    await document.validate();
+    const sameName = new RegExp(`^${escapeRegex(document.name)}$`, 'i');
+    if (
+      this.data.rooms.some(
+        (room) => room.hotelId === hotel.id && sameName.test(room.name),
+      )
+    ) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'A room with this name already exists in this hotel',
+      });
+    }
+    const room: RoomView = {
+      id: document._id.toHexString(),
+      hotelId: hotel.id,
+      name: document.name,
+      type: document.type,
+      beds: document.beds,
+      maxOccupancy: document.maxOccupancy,
+      pricePerNightMinor: document.pricePerNightMinor,
+      isActive: document.isActive,
+      availability: [],
+      hasEverBeenReserved: document.hasEverBeenReserved,
+    };
+    this.data.rooms.push(room);
+    return structuredClone(room);
+  }
+
+  async updateRoom(
+    hotelId: string,
+    roomId: string,
+    input: UpdateRoomDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    const fields: UpdateRoomDto = {};
+    if (input.beds !== undefined) fields.beds = input.beds;
+    if (input.maxOccupancy !== undefined)
+      fields.maxOccupancy = input.maxOccupancy;
+    if (input.pricePerNightMinor !== undefined)
+      fields.pricePerNightMinor = input.pricePerNightMinor;
+    const document = new RoomValidationModel(room);
+    document.set(fields);
+    await document.validate(Object.keys(fields));
+    Object.assign(room, fields);
+    return structuredClone(room);
+  }
+
+  async addRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: RoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const range = parseAvailabilityRange(input);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).setAvailability(room.id, [
+      ...room.availability,
+      range,
+    ]);
+    return structuredClone(room);
+  }
+
+  async setRoomAvailability(
+    hotelId: string,
+    roomId: string,
+    input: SetRoomAvailabilityDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const ranges = input.ranges.map(parseAvailabilityRange);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).setAvailability(room.id, ranges);
+    return structuredClone(room);
+  }
+
+  private assignedRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): RoomView {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const id = this.parseId(roomId, 'roomId');
+    const room = this.data.rooms.find(
+      (item) => item.id === id && item.hotelId === hotel.id,
+    );
+    if (!room) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Room not found',
+      });
+    }
+    return room;
+  }
+
+  async listRooms(
+    hotelId: string,
+    { page, limit }: PaginationQueryDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<Paginated<RoomView>> {
+    const hotel = this.assignedHotel(hotelId, moderatorHotelId);
+    const rooms = await this.getRooms(hotel.id);
+    return toPage(
+      rooms.slice((page - 1) * limit, page * limit),
+      rooms.length,
+      page,
+      limit,
+    );
+  }
+
+  async getRooms(
     hotelId: string,
     options?: HotelTransactionOptions,
   ): Promise<RoomView[]> {
     void options;
-    return Promise.resolve(
-      structuredClone(
-        this.data.rooms.filter((room) => room.hotelId === hotelId),
-      ),
+    const id = this.parseId(hotelId);
+    return structuredClone(
+      this.data.rooms
+        .filter((room) => room.hotelId === id)
+        .sort((left, right) => left.id.localeCompare(right.id)),
     );
+  }
+
+  async manageRoomBlock(
+    hotelId: string,
+    roomId: string,
+    input: RoomBlockOperationDto,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomBlockResponseDto> {
+    const operation = parseRoomBlockOperation(input);
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    const inventory = new FakeRoomNightInventory(this);
+    if (operation.op === 'BLOCK') {
+      return {
+        blockId: await inventory.block(
+          room.id,
+          operation.fromDate,
+          operation.toDate,
+        ),
+      };
+    }
+    if (
+      !this.data.roomNights.some(
+        (night) =>
+          night.roomId === room.id &&
+          night.kind === 'blocked' &&
+          night.blockId === operation.blockId,
+      )
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Block not found',
+      });
+    }
+    await inventory.unblock(operation.blockId);
+    return { blockId: operation.blockId };
+  }
+
+  async deactivateRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<RoomView> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).deactivate(room.id);
+    return structuredClone(room);
+  }
+
+  async deleteRoom(
+    hotelId: string,
+    roomId: string,
+    moderatorHotelId: string | undefined,
+  ): Promise<void> {
+    const room = this.assignedRoom(hotelId, roomId, moderatorHotelId);
+    await new FakeRoomNightInventory(this).delete(room.id);
   }
 
   async getRoomNights(

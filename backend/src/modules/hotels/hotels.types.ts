@@ -32,6 +32,7 @@ export interface HotelView {
 export interface RoomView {
   id: string;
   hotelId: string;
+  /** New rooms use trimmed lowercase names; legacy reads retain their stored names. */
   name: string;
   type: string;
   beds: number;

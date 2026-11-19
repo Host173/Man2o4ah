@@ -58,9 +58,9 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
   it('stores a new salted bcrypt hash (cost 12) of the new password only', async () => {
     const user = await createUser();
-    const current = await createSession(user._id);
+    await createSession(user._id);
 
-    await auth.changePassword(user._id.toString(), current._id.toString(), {
+    await auth.changePassword(user._id.toString(), {
       currentPassword: CURRENT,
       newPassword: NEW,
     });
@@ -73,9 +73,9 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
   it('clears mustChangePassword (the forced change, ACC-07a)', async () => {
     const user = await createUser(true);
-    const current = await createSession(user._id);
+    await createSession(user._id);
 
-    await auth.changePassword(user._id.toString(), current._id.toString(), {
+    await auth.changePassword(user._id.toString(), {
       currentPassword: CURRENT,
       newPassword: NEW,
     });
@@ -87,12 +87,12 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
   it("deletes all of the user's sessions, including the current one, but keeps other users' sessions", async () => {
     const user = await createUser();
     const other = await createUser();
-    const current = await createSession(user._id);
+    await createSession(user._id);
     await createSession(user._id);
     await createSession(user._id);
     const othersSession = await createSession(other._id);
 
-    await auth.changePassword(user._id.toString(), current._id.toString(), {
+    await auth.changePassword(user._id.toString(), {
       currentPassword: CURRENT,
       newPassword: NEW,
     });
@@ -105,12 +105,12 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
   it('wrong current password → 400 VALIDATION_FAILED on currentPassword; nothing changes', async () => {
     const user = await createUser(true);
-    const current = await createSession(user._id);
+    await createSession(user._id);
     await createSession(user._id);
     const before = await storedHash(user._id);
 
     await expect(
-      auth.changePassword(user._id.toString(), current._id.toString(), {
+      auth.changePassword(user._id.toString(), {
         currentPassword: 'wrongpass1',
         newPassword: NEW,
       }),
@@ -132,12 +132,12 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
   describe('new password equal to the current one', () => {
     it('forced change (ACC-07a) → 400 VALIDATION_FAILED on newPassword; nothing changes', async () => {
       const user = await createUser(true);
-      const current = await createSession(user._id);
+      await createSession(user._id);
       await createSession(user._id);
       const before = await storedHash(user._id);
 
       await expect(
-        auth.changePassword(user._id.toString(), current._id.toString(), {
+        auth.changePassword(user._id.toString(), {
           currentPassword: CURRENT,
           newPassword: CURRENT,
         }),
@@ -165,10 +165,10 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
         { _id: user._id },
         { $set: { passwordHash: await bcrypt.hash(temporary, 4) } },
       );
-      const current = await createSession(user._id);
+      await createSession(user._id);
 
       await expect(
-        auth.changePassword(user._id.toString(), current._id.toString(), {
+        auth.changePassword(user._id.toString(), {
           currentPassword: temporary,
           newPassword: lookalike,
         }),
@@ -183,9 +183,9 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
     it('normal change (no forced change) is still allowed', async () => {
       const user = await createUser(false);
-      const current = await createSession(user._id);
+      await createSession(user._id);
 
-      await auth.changePassword(user._id.toString(), current._id.toString(), {
+      await auth.changePassword(user._id.toString(), {
         currentPassword: CURRENT,
         newPassword: CURRENT,
       });
@@ -198,15 +198,15 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
   it('lets exactly one of two parallel changes with the same current password win', async () => {
     const user = await createUser();
-    const current = await createSession(user._id);
-    const args = [user._id.toString(), current._id.toString()] as const;
+    await createSession(user._id);
+    const userId = user._id.toString();
 
     const results = await Promise.allSettled([
-      auth.changePassword(...args, {
+      auth.changePassword(userId, {
         currentPassword: CURRENT,
         newPassword: 'first123',
       }),
-      auth.changePassword(...args, {
+      auth.changePassword(userId, {
         currentPassword: CURRENT,
         newPassword: 'second123',
       }),
@@ -221,9 +221,9 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
     expect(matches.filter(Boolean)).toHaveLength(1);
   });
 
-  it('if logging out the other sessions fails, the password is not changed either (one transaction)', async () => {
+  it('if logging out the sessions fails, the password is not changed either (one transaction)', async () => {
     const user = await createUser(true);
-    const current = await createSession(user._id);
+    await createSession(user._id);
     await createSession(user._id);
     const before = await storedHash(user._id);
     const failing = vi
@@ -232,7 +232,7 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
     try {
       await expect(
-        auth.changePassword(user._id.toString(), current._id.toString(), {
+        auth.changePassword(user._id.toString(), {
           currentPassword: CURRENT,
           newPassword: NEW,
         }),
@@ -250,11 +250,10 @@ describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
 
   it('an account deleted after the guard ran → 401 SESSION_EXPIRED', async () => {
     await expect(
-      auth.changePassword(
-        new Types.ObjectId().toString(),
-        new Types.ObjectId().toString(),
-        { currentPassword: CURRENT, newPassword: NEW },
-      ),
+      auth.changePassword(new Types.ObjectId().toString(), {
+        currentPassword: CURRENT,
+        newPassword: NEW,
+      }),
     ).rejects.toMatchObject({
       status: 401,
       response: { code: ErrorCode.SessionExpired },

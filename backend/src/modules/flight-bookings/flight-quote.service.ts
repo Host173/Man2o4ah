@@ -70,10 +70,18 @@ function maxExtraBags(airline: AirlineView): number {
 export class FlightQuoteService {
   constructor(private readonly flights: FlightsService) {}
 
-  async quote(request: FlightQuoteRequestDto): Promise<FlightQuote> {
+  /**
+   * `now` is the moment the 10-minute rule is checked against. The hold passes
+   * its own `now` and uses the same one for `holdExpiresAt`, so the database
+   * time spent here can't push a hold past departure (review #147).
+   */
+  async quote(
+    request: FlightQuoteRequestDto,
+    now: Date = new Date(),
+  ): Promise<FlightQuote> {
     const legs = await this.loadLegs(request);
     const errors = [
-      ...this.checkDepartureTime(legs),
+      ...this.checkDepartureTime(legs, now),
       ...this.checkRoute(legs),
       ...this.checkPassengerDetails(request, legs),
     ];
@@ -177,10 +185,13 @@ export class FlightQuoteService {
     return legs;
   }
 
-  /** The outbound must leave at least HOLD_MINUTES from now, so a hold fits before it. */
-  private checkDepartureTime(legs: Leg[]): ErrorDetail[] {
-    const latestHoldEnd = Date.now() + HOLD_MINUTES * 60 * 1000;
-    if (legs[0].flight.departureAt.getTime() >= latestHoldEnd) return [];
+  /** The outbound must leave at least HOLD_MINUTES after `now`, so a hold fits before it. */
+  private checkDepartureTime(legs: Leg[], now: Date): ErrorDetail[] {
+    const departure = legs[0].flight.departureAt.getTime();
+    // Already gone: checkBookable reports "already departed"; one message is enough.
+    if (departure <= now.getTime()) return [];
+    const latestHoldEnd = now.getTime() + HOLD_MINUTES * 60 * 1000;
+    if (departure >= latestHoldEnd) return [];
     return [
       {
         field: 'segments[0]',

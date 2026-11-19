@@ -31,11 +31,13 @@ export class FlightHoldService {
     request: FlightQuoteRequestDto,
     userId: string,
   ): Promise<FlightHold> {
-    // The same checks and prices as the quote (FLT-19): one set of rules,
-    // including "the flight must leave at least HOLD_MINUTES from now".
-    const quote = await this.quotes.quote(request);
-
+    // One clock reading for everything: the quote checks "the flight leaves at
+    // least HOLD_MINUTES from now" against the same moment the hold starts, so
+    // the hold can't end after departure (review #147).
     const createdAt = new Date();
+    // The same checks and prices as the quote (FLT-19): one set of rules.
+    const quote = await this.quotes.quote(request, createdAt);
+
     const holdExpiresAt = new Date(
       createdAt.getTime() + HOLD_MINUTES * 60 * 1000,
     );

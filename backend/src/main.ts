@@ -4,9 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { configureApp, setupSwagger } from './app.setup.js';
-import dns from 'node:dns';
 
-dns.setServers(['8.8.8.8', '1.1.1.1']);
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,

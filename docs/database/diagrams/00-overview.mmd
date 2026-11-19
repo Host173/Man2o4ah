@@ -78,6 +78,7 @@ classDiagram
   policy_acceptances ..> flight_bookings_
   policy_acceptances ..> hotel_reservations
   itineraries_ ..> cities
+  posts ..> itineraries_ : itineraryId (optional, BLG-13)
   comments --> posts
   likes --> posts
   reports ..> posts : target (post, comment, review, itinerary)

@@ -24,6 +24,12 @@ export const REFRESH_TOKEN_BYTES = 48;
 /** A session dies after 30 minutes without an authenticated request (ACC-06). */
 export const SESSION_IDLE_MS = 30 * MINUTE_MS;
 
+/** Consecutive wrong passwords that lock an account (ACC-05). */
+export const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+
+/** How long a lockout lasts (ACC-05). */
+export const LOCKOUT_MS = 15 * MINUTE_MS;
+
 /** The guard slides a session's activity at most once per minute (auth.md §3). */
 export const SESSION_SLIDE_INTERVAL_MS = MINUTE_MS;
 

@@ -171,14 +171,6 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDayView> {
     const itinerary = this.findOwned(itineraryId, userId);
-    // 60-day cap (ITN-05)
-    if (itinerary.days.length >= MAX_DAYS) {
-      throw this.invalidField(
-        'days',
-        `an itinerary has at most ${MAX_DAYS} days`,
-      );
-    }
-    const index = itinerary.days.length;
     // City existence/reference validation (GEN-12 / ITN-05)
     const cityId = dto.cityId?.trim();
     if (!cityId) {
@@ -188,6 +180,14 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (!knownCities.has(cityId)) {
       throw this.invalidField('cityId', `Unknown city: ${cityId}`);
     }
+    // 60-day cap (ITN-05)
+    if (itinerary.days.length >= MAX_DAYS) {
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
+    const index = itinerary.days.length;
     const day: ItineraryDayView = {
       _id: (this.nextId++).toString(16).padStart(24, '0'),
       dayNumber: dayNumber(index),
@@ -219,8 +219,13 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     }
 
     const day = itinerary.days[index];
+    // An empty body returns the day untouched (like the real service).
+    if (dto.cityId === undefined && dto.notes === undefined) {
+      return structuredClone(this.toDetail(itinerary).days[index]);
+    }
     // City existence/reference validation (GEN-12 / ITN-05)
     const cityId = dto.cityId?.trim();
+    let nextCityId: string | undefined;
     if (dto.cityId !== undefined) {
       if (!cityId) {
         throw this.invalidField('cityId', 'cityId must not be blank');
@@ -229,9 +234,13 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       if (!knownCities.has(cityId)) {
         throw this.invalidField('cityId', `Unknown city: ${cityId}`);
       }
-      day.cityId = cityId;
+      nextCityId = cityId;
     }
-    if (dto.notes !== undefined) day.notes = validateNotes(dto.notes);
+    // Validate notes before mutating, so a failure leaves the day unchanged.
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    if (nextCityId !== undefined) day.cityId = nextCityId;
+    if (dto.notes !== undefined) day.notes = notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
   }

@@ -293,3 +293,33 @@ Write unit/API tests covering all previously requested items that are still miss
 How the output was used:
 Applied conditional spread for notes in the addDay MongoDB pipeline, fixed the fake service invalidField error shape, added fake validation parity tests, added $-prefixed notes and omitted-notes tests, ran `npm run verify` (all green: 1236 tests), and committed to update PR #154.
 
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the latest code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
+Align `FakeItinerariesService` behavior completely with the real service:
+* **Empty PATCH Body:** Ensure an empty `PATCH` body returns early without bumping `updatedAt` (the real service leaves the day untouched)[cite: 14].
+* **Atomic Validation on PATCH:** When updating with invalid data (e.g., `PATCH { cityId: "dubai", notes: 2001 chars }`), the fake currently updates the city even though notes validation fails. Fix it so that the fake **validates both city and notes before making any changes**, leaving the day completely unchanged if validation fails[cite: 14].
+* **Validation Order Parity:** Ensure the fake checks the **city before the day cap** (matching the real service, where a 61st day with an unknown city triggers the city error first rather than the day-cap error)[cite: 14].
+
+### 2. Add Missing PATCH `$`-Prefixed Notes Test
+* **Issue:** The `POST` test for `$`-prefixed notes (like `"$100 for dinner"`) exists, but the corresponding `PATCH` test is still missing[cite: 14].
+* **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
+
+### 3. Git Workflow Reminder (Red Test Commit Rule)
+* Note the reviewer's tip: *“push the red test as its own commit first next time”*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+
+### 4. Format, Verify, and Push to Update PR #154
+1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes cleanly and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Fixed fake service updateDay (empty-body early return, atomic validation, notes-before-mutation), reordered addDay validation (city before day cap), added PATCH $-prefixed notes test, ran `npm run verify` (all green: 1237 tests), logged the prompt, and will commit/push to update PR #154.
+

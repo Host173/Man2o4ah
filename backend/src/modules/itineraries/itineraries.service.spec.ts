@@ -803,6 +803,27 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       expect(untouched).toEqual(notesOnly);
     });
 
+    it('updates $-prefixed notes verbatim through the day edit', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.updateDay(
+        created._id,
+        day._id,
+        { notes: '$100 for dinner' },
+        owner.id,
+      );
+      expect(updated).toMatchObject({ notes: '$100 for dinner' });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
+    });
+
     it('rejects an unknown city and over-long notes with 400', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const created = await itineraries.create(createDto(), owner.id);

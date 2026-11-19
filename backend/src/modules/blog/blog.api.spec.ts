@@ -3211,7 +3211,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(fakeStorage.keys()).toEqual([imageKey]);
     });
 
-    it('keeps the image reference if storage.delete fails on DELETE image and still returns 204 if storage.delete fails during DELETE post', async () => {
+    it('retains failed image removal references and durably queues failed post cleanup before returning 204', async () => {
       const owner = await loginAs(testApp!.connection, UserRole.USER);
       const sampleBytes = Buffer.from('api-failure-image-bytes');
 
@@ -3290,6 +3290,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
       expect(fakeStorage.has(img1.key)).toBe(true);
       expect(fakeStorage.has(img2.key)).toBe(false);
+      const pending = await testApp!.connection
+        .collection<{ postId: Types.ObjectId; key: string }>(
+          'post_image_cleanups',
+        )
+        .find({ postId: new Types.ObjectId(postId) })
+        .toArray();
+      expect(pending.map((item) => item.key)).toEqual([img1.key]);
 
       const missingAfterDelete = await testApp!
         .http()

@@ -2968,7 +2968,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(fakeStorage.keys()).toEqual([bystanderWithImg.images[0]!.key]);
     });
 
-    it('attempts every image file deletion during post delete even when an individual storage.delete fails', async () => {
+    it('persists failed image cleanup during post delete while still attempting every file', async () => {
       const post = await service.create(
         {
           title: 'Partial Storage Delete Failure',
@@ -3011,6 +3011,13 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(fakeStorage.has(img2!.key)).toBe(false);
       expect(fakeStorage.has(img3!.key)).toBe(false);
       expect(await postModel.findById(post._id).lean().exec()).toBeNull();
+      const pending = await testApp!.connection
+        .collection<{ postId: Types.ObjectId; key: string }>(
+          'post_image_cleanups',
+        )
+        .find({ postId: new Types.ObjectId(post._id) })
+        .toArray();
+      expect(pending.map((item) => item.key)).toEqual([img1!.key]);
     });
 
     it('keeps the image reference in removeImage when storage.delete fails and succeeds cleanly on retry', async () => {

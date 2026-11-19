@@ -21,6 +21,7 @@ import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
 import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
@@ -3297,6 +3298,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .find({ postId: new Types.ObjectId(postId) })
         .toArray();
       expect(pending.map((item) => item.key)).toEqual([img1.key]);
+      await testApp!.moduleRef.get(PostImageCleanupJob).run();
+      expect(fakeStorage.keys()).toEqual([]);
+      expect(
+        await testApp!.connection
+          .collection('post_image_cleanups')
+          .countDocuments(),
+      ).toBe(0);
 
       const missingAfterDelete = await testApp!
         .http()

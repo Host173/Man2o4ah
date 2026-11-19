@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -34,9 +34,11 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
+import { PostImageCleanup } from './schemas/post-image-cleanup.schema.js';
 import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
 
 describe('BlogService (skeleton)', () => {
@@ -56,6 +58,8 @@ describe('BlogService (skeleton)', () => {
       .overrideProvider(getModelToken(Comment.name))
       .useValue({})
       .overrideProvider(getModelToken(Like.name))
+      .useValue({})
+      .overrideProvider(getModelToken(PostImageCleanup.name))
       .useValue({})
       .overrideProvider(getModelToken(User.name))
       .useValue({})
@@ -91,6 +95,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
   let likeModel: Model<LikeDocument>;
+  let cleanupModel: Model<PostImageCleanup>;
 
   const ownerId = new Types.ObjectId().toHexString();
   const otherUserId = new Types.ObjectId().toHexString();
@@ -122,6 +127,9 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     );
     likeModel = testApp.moduleRef.get<Model<LikeDocument>>(
       getModelToken(Like.name),
+    );
+    cleanupModel = testApp.moduleRef.get<Model<PostImageCleanup>>(
+      getModelToken(PostImageCleanup.name),
     );
     await Promise.all([
       postModel.init(),
@@ -2951,21 +2959,31 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
               exec: () => Promise.reject(new Error('rollback delete')),
             }) as never,
         );
+      const deleteFile = vi.spyOn(fakeStorage, 'delete');
       await expect(service.delete(target._id, ownerId)).rejects.toThrow(
         'rollback delete',
       );
       deleteLikesSpy.mockRestore();
+      expect(deleteFile).not.toHaveBeenCalled();
+      expect(await cleanupModel.countDocuments()).toBe(0);
       for (const img of targetWithImgs.images) {
         expect(fakeStorage.has(img.key)).toBe(true);
       }
 
       // Successful post deletion removes all target files and keeps bystander's file.
+      const realDelete = FakeStorageService.prototype.delete.bind(fakeStorage);
+      deleteFile.mockImplementation(async (key) => {
+        expect(await postModel.exists({ _id: target._id })).toBeNull();
+        expect(await cleanupModel.exists({ key })).not.toBeNull();
+        await realDelete(key);
+      });
       await service.delete(target._id, ownerId);
       for (const img of targetWithImgs.images) {
         expect(fakeStorage.has(img.key)).toBe(false);
       }
       expect(fakeStorage.has(bystanderWithImg.images[0]!.key)).toBe(true);
       expect(fakeStorage.keys()).toEqual([bystanderWithImg.images[0]!.key]);
+      expect(await cleanupModel.countDocuments()).toBe(0);
     });
 
     it('persists failed image cleanup during post delete while still attempting every file', async () => {
@@ -3018,6 +3036,119 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         .find({ postId: new Types.ObjectId(post._id) })
         .toArray();
       expect(pending.map((item) => item.key)).toEqual([img1!.key]);
+
+      deleteSpy.mockRestore();
+      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      const settled = await Promise.allSettled([
+        restarted.run(),
+        testApp!.moduleRef.get(PostImageCleanupJob).run(),
+      ]);
+      expect(settled.map((result) => result.status)).toEqual([
+        'fulfilled',
+        'fulfilled',
+      ]);
+      expect(fakeStorage.keys()).toEqual([]);
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      await restarted.run();
+      expect(await cleanupModel.countDocuments()).toBe(0);
+    });
+
+    it('rolls back post, comments and likes without deleting files when cleanup cannot be persisted', async () => {
+      const post = await service.create(
+        { title: 'Queue Failure', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const withImage = await service.addImage(
+        post._id,
+        sampleImage('queue-failure.png'),
+        ownerId,
+      );
+      const postId = new Types.ObjectId(post._id);
+      await commentModel.create({
+        postId,
+        authorId: new Types.ObjectId(otherUserId),
+        body: 'Keep this comment',
+      });
+      await likeModel.create({
+        postId,
+        userId: new Types.ObjectId(otherUserId),
+      });
+      vi.spyOn(cleanupModel, 'create').mockRejectedValueOnce(
+        new Error('cleanup queue unavailable'),
+      );
+      const deleteFile = vi.spyOn(fakeStorage, 'delete');
+
+      await expect(service.delete(post._id, ownerId)).rejects.toThrow(
+        'cleanup queue unavailable',
+      );
+
+      expect(await postModel.exists({ _id: postId })).not.toBeNull();
+      expect(await commentModel.countDocuments({ postId })).toBe(1);
+      expect(await likeModel.countDocuments({ postId })).toBe(1);
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      expect(fakeStorage.has(withImage.images[0]!.key)).toBe(true);
+      expect(deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('recovers persisted cleanup after a worker restart and retries an acknowledgement failure idempotently', async () => {
+      const post = await service.create(
+        { title: 'Worker Restart', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const withImage = await service.addImage(
+        post._id,
+        sampleImage('restart.png'),
+        ownerId,
+      );
+      const key = withImage.images[0]!.key;
+      vi.spyOn(
+        testApp!.moduleRef.get(PostImageCleanupJob),
+        'deletePending',
+      ).mockRejectedValueOnce(new Error('worker unavailable after commit'));
+
+      await expect(service.delete(post._id, ownerId)).resolves.toBeUndefined();
+      expect(await postModel.exists({ _id: post._id })).toBeNull();
+      expect(await cleanupModel.countDocuments({ key })).toBe(1);
+      expect(fakeStorage.has(key)).toBe(true);
+
+      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      vi.spyOn(cleanupModel, 'deleteOne').mockReturnValueOnce({
+        exec: () => Promise.reject(new Error('acknowledgement unavailable')),
+      } as never);
+      await restarted.run();
+      expect(fakeStorage.has(key)).toBe(false);
+      expect(await cleanupModel.countDocuments({ key })).toBe(1);
+
+      await restarted.run();
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('does not starve later files behind a full batch of failed cleanup records', async () => {
+      const log = vi
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const postId = new Types.ObjectId();
+      const files = await Promise.all(
+        Array.from({ length: 101 }, () =>
+          fakeStorage.save(sampleImage('backlog.png')),
+        ),
+      );
+      await cleanupModel.create(files.map(({ key }) => ({ postId, key })));
+      const failingKeys = new Set(files.slice(0, 100).map((file) => file.key));
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      vi.spyOn(fakeStorage, 'delete').mockImplementation(async (key) => {
+        if (failingKeys.has(key)) throw new Error('file busy');
+        await realDelete(key);
+      });
+
+      await testApp!.moduleRef.get(PostImageCleanupJob).run();
+
+      expect(new Set(fakeStorage.keys())).toEqual(failingKeys);
+      expect(
+        new Set((await cleanupModel.find().lean()).map((item) => item.key)),
+      ).toEqual(failingKeys);
+      expect(log).toHaveBeenCalledTimes(100);
     });
 
     it('keeps the image reference in removeImage when storage.delete fails and succeeds cleanly on retry', async () => {

@@ -46,8 +46,10 @@ import type { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import type { UpdateCommentDto } from './dto/update-comment.dto.js';
 import type { UpdatePostDto } from './dto/update-post.dto.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { Comment } from './schemas/comment.schema.js';
 import { Like } from './schemas/like.schema.js';
+import { PostImageCleanup } from './schemas/post-image-cleanup.schema.js';
 import { Post, PostStatus } from './schemas/post.schema.js';
 
 type StoredPost = Omit<Post, 'images'> & {
@@ -76,9 +78,12 @@ export class BlogService {
     @InjectModel(Comment.name)
     private readonly commentModel: Model<StoredComment>,
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
+    @InjectModel(PostImageCleanup.name)
+    private readonly imageCleanupModel: Model<PostImageCleanup>,
     private readonly accountsService: AccountsService,
     private readonly itinerariesService: ItinerariesService,
     private readonly storageService: StorageService,
+    private readonly imageCleanup: PostImageCleanupJob,
   ) {}
 
   /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
@@ -612,27 +617,31 @@ export class BlogService {
 
   /**
    * BLG-04 / BLG-10: deletes the authenticated owner's post along with its
-   * comments and likes in one transaction, then attempts to delete every
-   * associated image file after commit; logs any storage deletion failures and
-   * returns normally because the database deletion already committed. Throws 404
-   * if missing or owned by someone else.
+   * comments and likes in one transaction, durably queuing its image keys.
+   * Attempts file cleanup after commit; failures stay queued for the 30-second
+   * retry job, including across restarts. Throws 404 if missing or not owned.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
 
-    let imageKeys: string[] = [];
+    let hasImages = false;
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
-        imageKeys = [];
         const deleted = await this.postModel
           .findOneAndDelete({ _id: id, authorId }, { session })
           .lean()
           .exec();
         if (!deleted) throw this.notFound();
 
-        imageKeys = deleted.images.map((image) => image.key);
+        hasImages = deleted.images.length > 0;
+        if (hasImages) {
+          await this.imageCleanupModel.create(
+            deleted.images.map((image) => ({ postId: id, key: image.key })),
+            { session, ordered: true },
+          );
+        }
         await this.commentModel.deleteMany({ postId: id }, { session }).exec();
         await this.likeModel.deleteMany({ postId: id }, { session }).exec();
       });
@@ -640,22 +649,16 @@ export class BlogService {
       await session.endSession();
     }
 
-    if (imageKeys.length === 0) return;
-
-    const results = await Promise.allSettled(
-      imageKeys.map((key) => this.storageService.delete(key)),
-    );
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        const message =
-          result.reason instanceof Error
-            ? result.reason.message
-            : 'unknown error';
+    if (hasImages) {
+      try {
+        await this.imageCleanup.deletePending(id.toHexString());
+      } catch (error) {
         this.logger.error(
-          `Could not delete post ${id.toHexString()} image file ${imageKeys[index]}: ${message}`,
+          `Image cleanup deferred for deleted post ${id.toHexString()}; keys remain queued`,
+          error instanceof Error ? error.stack : undefined,
         );
       }
-    });
+    }
   }
 
   /**

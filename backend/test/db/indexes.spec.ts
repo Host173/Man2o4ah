@@ -136,6 +136,10 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { postId: 1, userId: 1 }, unique: true },
     { key: { userId: 1 } },
   ],
+  post_image_cleanups: [
+    { key: { key: 1 }, unique: true },
+    { key: { postId: 1, _id: 1 } },
+  ],
   // 3.11 moderation
   reports: [
     { key: { reporterId: 1, targetType: 1, targetId: 1 }, unique: true },
@@ -180,11 +184,11 @@ describe('indexes match docs/database/data-model.md', () => {
     await db.stop();
   }, HOOK_TIMEOUT);
 
-  it('covers exactly the 27 collections of the data model', () => {
+  it('covers exactly the 28 collections of the data model', () => {
     expect(Object.keys(ALL_SCHEMAS).sort()).toEqual(
       Object.keys(EXPECTED).sort(),
     );
-    expect(Object.keys(EXPECTED)).toHaveLength(27);
+    expect(Object.keys(EXPECTED)).toHaveLength(28);
   });
 
   it.each(Object.keys(EXPECTED))(

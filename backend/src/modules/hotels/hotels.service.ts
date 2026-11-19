@@ -49,6 +49,7 @@ import type { RatingSummary } from './schemas/hotel.schema.js';
 import { Room } from './schemas/room.schema.js';
 import { RoomNight, RoomNightKind } from './schemas/room-night.schema.js';
 import { parseRoomBlockOperation } from './room-block-operation.js';
+import { cheapestQualifyingRoomPrice } from './hotel-search-pricing.js';
 
 type StoredHotel = Omit<Hotel, 'photos'> & {
   photos: (Hotel['photos'][number] & { _id: Types.ObjectId })[];
@@ -483,17 +484,12 @@ export class HotelsService {
     const matches: HotelSearchResult[] = [];
     for (const hotel of hotels) {
       const free = freeByHotel.get(hotel._id.toHexString()) ?? [];
-      if (free.length < rooms) continue;
-      const capacity = free
-        .map((room) => room.maxOccupancy)
-        .sort((a, b) => b - a)
-        .slice(0, rooms)
-        .reduce((sum, occupancy) => sum + occupancy, 0);
-      if (capacity < query.guests) continue;
-      const pricePerNightMinor = free.reduce(
-        (price, room) => Math.min(price, room.pricePerNightMinor),
-        Infinity,
+      const pricePerNightMinor = cheapestQualifyingRoomPrice(
+        free,
+        query.guests,
+        rooms,
       );
+      if (pricePerNightMinor === null) continue;
       if (
         (query.minPriceMinor !== undefined &&
           pricePerNightMinor < query.minPriceMinor) ||

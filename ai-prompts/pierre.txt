@@ -914,3 +914,118 @@ ik start implening it the make a pr
 How the output was used:
 Implemented HTL-11/12 in backend/src/modules/hotels/hotels.service.ts and hotels.controller.ts, added search request/response DTOs, added integration/API tests, replaced the implemented search stub assertion and improved stay-date validation details; backend npm run verify passed with 1705 tests across 115 files; prepared feature/HTL-11-hotel-search for commit and a pull request into develop, preserving the original working tree.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+Review my pull requests in host173/man2o4ah: this pr
+
+REVIEW ONLY
+Do not implement fixes, commit, push, merge, approve, or post comments unless I explicitly ask. Preserve my working tree and unrelated changes.
+
+1. ESTABLISH THE REQUIREMENTS
+- Fetch each PR's metadata, diff, commits, linked ticket, CI results, and previous reviews.
+- Identify the ticket key from its branch and title. Read its acceptance criteria, required test levels, dependencies, and TDD requirements.
+- Read:
+  - README.md: "Team rules".
+  - docs\ai\skills\travel-platform\SKILL.md and its relevant references.
+  - .github\copilot-instructions.md.
+- Check against these sources, in order:
+  1. docs\ai\skills\travel-platform\references\requirements.md.
+  2. docs\DECISIONS.md.
+  3. docs\database\data-model.md.
+  4. The project skill and its references.
+- State conflicts. Never invent project rules.
+
+2. CHECK DEPENDENCIES BEFORE TESTING
+- Distinguish missing implementation prerequisites from integration-only dependencies.
+- An unavailable import, export, schema field, decorator, or required unmerged ticket is a hard blocker. Report "Waiting", identify the dependency, and stop testing that PR.
+- An existing contract whose implementation still throws NotImplementedException is not automatically a blocker when the feature can be tested against the prescribed fake.
+- Inspect current base-branch code and linked PRs. Do not assume a closed issue proves implementation has merged.
+- List integration-only dependencies as "End to end after: ...".
+- Do not report expected placeholder 501 responses as feature bugs; test those paths using the prescribed fake.
+
+3. CHECK CORRECTNESS AND PROJECT RULES
+Report only concrete problems introduced by the PR or required work it omits:
+- Module ownership and collection boundaries. No cross-module schema/model imports, populate, or schema ref.
+- Cross-module access through exported services, ports, or events.
+- Plain-view contracts with string IDs, valid stub requirement/ticket references, contract-compatible fakes, and registry wiring.
+- Events through Events.X and AppEvents, emitted after commit; idempotent handlers.
+- Inventory changes only through SeatInventory or RoomNightInventory, with required caller sessions.
+- Atomic conditional status changes with checked update results.
+- Integer money, booking snapshots, UTC instants, validated calendar dates, and schema/index agreement.
+- DTO validation, documented roles, ownership, error codes, pagination, response shapes, and escaped user-supplied regex input.
+- Ticket-required tests, per-service 80% line coverage, TDD commit order, append-only prompt logs, and truthful documentation.
+- No contract or feature descriptions added to README files.
+- For UI changes, follow DESIGN.md. If it is missing, report that rather than inventing a design.
+
+Skip formatting issues already enforced by tooling and unrelated pre-existing defects. Never reproduce secrets or .env values.
+
+4. VERIFY BEHAVIOR
+- Use a separate disposable worktree at the exact PR head.
+- Run npm run verify in each affected app. Restore dependencies only when required by manifest changes or missing-dependency failures.
+- Map every acceptance criterion to implementation and tests. Identify missing required coverage.
+- Exercise at least 15 distinct, relevant edge cases: boundaries, malformed input, impossible dates, duplicate requests, error paths, and applicable 401/403/404 checks.
+- Inventory and hold changes require concurrent requests using Promise.allSettled, asserting invariants rather than which request wins.
+- Use repository test helpers, in-memory MongoDB, and appropriate fakes. Never access Atlas or real payment services.
+- Recheck earlier findings against the current code. Where feasible, prove regression tests fail without the fix in isolation.
+- Remove temporary probes and worktrees. Never weaken existing tests.
+- Report exact commands and actual outcomes. If validation is blocked, explain why. Never claim an unexecuted check passed.
+
+5. RETURN A CONCISE REVIEW
+For each PR:
+- Status: Changes needed / Waiting / No findings / Validation blocked.
+- Up to five findings, highest impact first.
+- Start each finding with Bug, Rule, Test, or Docs.
+- Include the changed file and line, what is wrong, its impact, the violated requirement or rule, and the smallest appropriate fix.
+- Summarize validation results, missing required tests, and integration dependencies.
+- Put genuinely undecided matters under "For Kareem" rather than presenting assumptions as defects.
+
+"No findings" is not merge approval: CI must be green and the team leader must approve.
+
+How the output was used:
+Reviewed PR #172 at 2f797a0 in a disposable exact-head worktree; confirmed HTL-04/06 merge ancestry and green CI, ran backend npm run verify (1705 tests, 217/218 hotel service lines) and 34 additional passing in-memory probes, mapped acceptance criteria and identified a cheapest-qualifying-room interpretation for Kareem; no application fixes, commits or GitHub writes; appended this log only in the HTL-11 worktree, preserving the original workspace.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+comment on the pr
+
+How the output was used:
+Posted and verified review comment https://github.com/Host173/Man2o4ah/pull/172#issuecomment-7018295854 with validation results, integration dependency and the pricing clarification for Kareem; appended this prompt log only; no application changes, commit, push or approval.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+check the last cooment on the pr
+
+How the output was used:
+Read Aya's latest review on PR #172 and rechecked HTL-11/12/16, domain search rules and current real/fake price calculations; explained the occupancy-qualified pricing correction and missing regression test, correcting the earlier ambiguity assessment; appended this log only, with no application fixes, commit, push or GitHub reply.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+fix it and push
+
+How the output was used:
+Committed failing occupancy-qualified price regressions first as 47f5cc8 (six demonstrated failures); shared capacity-qualified nightly pricing between HotelsService and FakeHotelsService, clarified Swagger/type comments and covered one/multiple-room capacity boundaries, inclusive filters, sorting and pagination; targeted tests passed 360 cases and backend npm run verify passed 1717 tests across 115 files plus build; independently matched 99517 exhaustive combinations against brute-force selections; prepared the verified fix and prompt logs for commit/push to PR #172.
+================================================

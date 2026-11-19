@@ -8,7 +8,7 @@ export class HotelSearchResponseDto extends HotelProfileResponseDto {
     type: 'integer',
     minimum: 1,
     description:
-      'Cheapest qualifying room per night in USD cents, not the combined rooms or total stay price',
+      'Cheapest room that can join a selection of the requested number of rooms covering all guests; per night in USD cents, not the combined rooms or total stay price',
   })
   pricePerNightMinor!: number;
 

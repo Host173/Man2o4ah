@@ -89,7 +89,7 @@ export class HotelsController {
     summary:
       'HTL-11 / HTL-12 Search available hotels with price and rating filters',
     description:
-      'Rooms must be active and free for the entire stay, excluding checkout. The requested number of rooms must cover all guests. Prices use the cheapest qualifying room, not the total stay. Search does not hold inventory.',
+      'Rooms must be active and free for the entire stay, excluding checkout. The requested number of rooms must cover all guests. Prices use the cheapest room that can join such a selection, not the total stay. Search does not hold inventory.',
     security: [],
   })
   @ApiOkResponse({ type: PaginatedHotelSearchResponseDto })

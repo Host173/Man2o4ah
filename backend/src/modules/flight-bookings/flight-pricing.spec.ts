@@ -14,10 +14,16 @@ const infant = (extraBagCount = 0): PricedPassenger => ({
   extraBagCount,
 });
 
-const segment = (fareMinor: number, extraBagPriceMinor = 0): PricedSegment => ({
-  fareMinor,
-  extraBagPriceMinor,
-});
+const segment = (
+  fareMinor: number,
+  extraBagPriceMinor = 0,
+  airlineId = 'airline-A',
+): PricedSegment =>
+  ({
+    fareMinor,
+    extraBagPriceMinor,
+    airlineId,
+  }) as unknown as PricedSegment;
 
 describe('priceFlightBooking (FLT-12, FLT-19)', () => {
   it('charges one adult the cabin fare on a one-way trip', () => {
@@ -53,10 +59,13 @@ describe('priceFlightBooking (FLT-12, FLT-19)', () => {
     expect(price.seatCount).toBe(2); // the same seats on each segment
   });
 
-  it('charges extra bags on every segment at that segment airline’s price', () => {
-    // 3 extra bags in total: 3 × 3 000 outbound + 3 × 2 500 return
+  it('charges each airline’s extra-bag price once when both airlines differ', () => {
+    // 3 extra bags in total: 3 × 3 000 outbound (A) + 3 × 2 500 return (B)
     const price = priceFlightBooking(
-      [segment(20_000, 3_000), segment(15_000, 2_500)],
+      [
+        segment(20_000, 3_000, 'airline-A'),
+        segment(15_000, 2_500, 'airline-B'),
+      ],
       [adult(2), child(1)],
     );
     expect(price.baggageTotalMinor).toBe(3 * 3_000 + 3 * 2_500);
@@ -72,7 +81,10 @@ describe('priceFlightBooking (FLT-12, FLT-19)', () => {
 
   it('adds fares and baggage into the total', () => {
     const price = priceFlightBooking(
-      [segment(20_000, 3_000), segment(15_000, 2_500)],
+      [
+        segment(20_000, 3_000, 'airline-A'),
+        segment(15_000, 2_500, 'airline-B'),
+      ],
       [adult(1), infant()],
     );
     const fares = 20_000 + 2_000 + 15_000 + 1_500;
@@ -82,6 +94,118 @@ describe('priceFlightBooking (FLT-12, FLT-19)', () => {
       fareTotalMinor: fares,
       baggageTotalMinor: baggage,
       totalMinor: fares + baggage,
+    });
+  });
+
+  describe('decision table: extra-bag pricing once per airline (FLT-19)', () => {
+    it('charges extra bags once for a one-way trip on one airline', () => {
+      // 1 adult, 1 bag, airline A ($30)
+      const price = priceFlightBooking(
+        [segment(20_000, 3_000, 'airline-A')],
+        [adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(3_000);
+    });
+
+    it('charges extra bags once for a round trip on the same airline', () => {
+      // 2 adults with 1 extra bag each (2 bags): airline A ($30) both ways
+      // Expected: 2 × $30 = $60 (bug previously charged $120)
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 3_000, 'airline-A'),
+        ],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(2 * 3_000);
+    });
+
+    it('charges each airline once for a round trip on two different airlines', () => {
+      // 2 adults with 1 extra bag each (2 bags): airline A ($30) out, airline B ($25) back
+      // Expected: 2 × $30 + 2 × $25 = $110
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 2_500, 'airline-B'),
+        ],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(2 * 3_000 + 2 * 2_500);
+    });
+
+    it('charges zero baggage when no passengers have extra bags', () => {
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 3_000, 'airline-A'),
+        ],
+        [adult(0), adult(0)],
+      );
+      expect(price.baggageTotalMinor).toBe(0);
+    });
+
+    it('charges zero baggage when the airline does not sell extra bags (price is 0)', () => {
+      const price = priceFlightBooking(
+        [segment(20_000, 0, 'airline-A'), segment(15_000, 0, 'airline-A')],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(0);
+    });
+  });
+
+  describe('decision table: extra-bag pricing once per airline (FLT-19)', () => {
+    it('charges extra bags once for a one-way trip on one airline', () => {
+      // 1 adult, 1 bag, airline A ($30)
+      const price = priceFlightBooking(
+        [segment(20_000, 3_000, 'airline-A')],
+        [adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(3_000);
+    });
+
+    it('charges extra bags once for a round trip on the same airline', () => {
+      // 2 adults with 1 extra bag each (2 bags): airline A ($30) both ways
+      // Expected: 2 × $30 = $60 (bug previously charged $120)
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 3_000, 'airline-A'),
+        ],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(2 * 3_000);
+    });
+
+    it('charges each airline once for a round trip on two different airlines', () => {
+      // 2 adults with 1 extra bag each (2 bags): airline A ($30) out, airline B ($25) back
+      // Expected: 2 × $30 + 2 × $25 = $110
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 2_500, 'airline-B'),
+        ],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(2 * 3_000 + 2 * 2_500);
+    });
+
+    it('charges zero baggage when no passengers have extra bags', () => {
+      const price = priceFlightBooking(
+        [
+          segment(20_000, 3_000, 'airline-A'),
+          segment(15_000, 3_000, 'airline-A'),
+        ],
+        [adult(0), adult(0)],
+      );
+      expect(price.baggageTotalMinor).toBe(0);
+    });
+
+    it('charges zero baggage when the airline does not sell extra bags (price is 0)', () => {
+      const price = priceFlightBooking(
+        [segment(20_000, 0, 'airline-A'), segment(15_000, 0, 'airline-A')],
+        [adult(1), adult(1)],
+      );
+      expect(price.baggageTotalMinor).toBe(0);
     });
   });
 });

@@ -1098,6 +1098,10 @@ Implemented hotel details and free-room endpoints, shared stay validation and in
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+ok start making itn-28 then run this self review on the pr and insure that it has no issues and attach the report of it in comments
 Related Requirement: BLG-13
 
 Prompt:
@@ -1147,12 +1151,20 @@ Open questions: <a choice the docs don't settle, with your suggestion, or "none"
 List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
 
 How the output was used:
+Implemented the owner-only PDF endpoint, bundled fonts, API tests, dependency/runtime setup and CI wiring on the ITN-28 branch; prepared its PR and requested self-review.
 Prepared the separate BLG-13 schema prerequisite: optional post itinerary reference, coordinated data-model/class diagrams/SVGs and schema regressions; feature API deferred until this prerequisite merges.
 ================================================
 ================================================
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Mokhtar/Kareem has approved me implementing ITN-28; proceed
+
+How the output was used:
+Confirmed cross-package approval and created the isolated ITN-28 worktree from origin/develop.
 Related Requirement: BLG-13
 
 Prompt:
@@ -1165,6 +1177,43 @@ Recorded cross-package approval for Pierre to prepare the blog schema prerequisi
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfmake and its TypeScript types; proceed
+
+How the output was used:
+Evaluated pdfmake with real PDF tests; replaced it after discovering Arabic shaping limitations.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfjs-dist for PDF validation; proceed
+
+How the output was used:
+Added the development-only PDF parser and verified actual output text and page counts in the API tests.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Approve bundled fallback fonts for Arabic, CJK and emoji; preserve unsupported characters explicitly
+
+How the output was used:
+Bundled open-licensed Noto fonts and glyph validation; unsupported graphemes are printed as explicit Unicode code points.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves switching to Playwright/Chromium, including browser setup and CI wiring; proceed
+
+How the output was used:
+Switched PDF generation to isolated Chromium rendering with blocked scripts/network, added runtime setup instructions and CI provisioning.
 Related Requirement: BLG-13
 
 Prompt:

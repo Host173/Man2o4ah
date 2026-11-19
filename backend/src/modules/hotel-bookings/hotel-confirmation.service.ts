@@ -1,0 +1,102 @@
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { InjectModel } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
+import type { Model } from 'mongoose';
+import { BookingType } from '../../common/database/booking-type.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import type { PayloadOf } from '../../common/events/event-payloads.js';
+import { Events } from '../../common/events/events.js';
+import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
+import {
+  HotelReservation,
+  HotelReservationStatus,
+} from './schemas/hotel-reservation.schema.js';
+
+/**
+ * The injection token for the reference maker (`newReservationReference` in
+ * the app). Injected, so tests can choose the references, e.g. to force a clash.
+ */
+export const RESERVATION_REFERENCE = Symbol('RESERVATION_REFERENCE');
+
+/** A clash between random references is rare; a few tries are plenty. */
+const MAX_REFERENCE_TRIES = 5;
+
+/** MongoDB's duplicate-key error: here, the reference is already used. */
+function isDuplicateKey(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 11000;
+}
+
+/**
+ * Confirms hotel reservations when their payment succeeds (HTL-17). Payments
+ * emits `payment.succeeded` only after verifying the Stripe webhook (PAY-01);
+ * this module never trusts the frontend. Idempotent: an event that arrives
+ * twice confirms once.
+ */
+@Injectable()
+export class HotelConfirmationService {
+  private readonly logger = new Logger(HotelConfirmationService.name);
+
+  constructor(
+    @InjectModel(HotelReservation.name)
+    private readonly reservationModel: Model<HotelReservation>,
+    private readonly events: AppEvents,
+    @Inject(RESERVATION_REFERENCE)
+    private readonly newReference: () => string,
+  ) {}
+
+  @OnEvent(Events.PaymentSucceeded)
+  async onPaymentSucceeded(
+    payload: PayloadOf<typeof Events.PaymentSucceeded>,
+  ): Promise<void> {
+    // Both booking modules listen to this event; flights are not ours.
+    if (payload.bookingType !== BookingType.HOTEL) return;
+    try {
+      await this.confirm(payload.bookingId, new Date());
+    } catch (error) {
+      // A listener must not throw: log it so the payment can be followed up.
+      this.logger.error(
+        `Could not confirm hotel reservation ${payload.bookingId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  /** pending_payment → confirmed with a new reference; nothing if it isn't pending. */
+  private async confirm(reservationId: string, now: Date): Promise<void> {
+    if (!Types.ObjectId.isValid(reservationId)) return;
+
+    for (let attempt = 1; attempt <= MAX_REFERENCE_TRIES; attempt += 1) {
+      const reference = this.newReference();
+      try {
+        // One document changes and its nights simply stay reserved, so one
+        // conditional update is enough: no transaction needed.
+        await transitionStatus(
+          this.reservationModel,
+          reservationId,
+          HotelReservationStatus.PENDING_PAYMENT,
+          HotelReservationStatus.CONFIRMED,
+          { confirmedAt: now, reference },
+        );
+      } catch (error) {
+        if (isDuplicateKey(error)) continue; // reference taken: try another
+        if (isInvalidTransition(error)) return; // already confirmed, or unknown
+        throw error;
+      }
+
+      const confirmed = await this.reservationModel
+        .findById(reservationId, { userId: 1 })
+        .lean();
+      // After the change: an event can't be rolled back.
+      this.events.emit(Events.HotelReservationConfirmed, {
+        bookingId: reservationId,
+        userId: confirmed!.userId.toString(),
+        reference,
+      });
+      return;
+    }
+    throw new Error(
+      `No free reference after ${MAX_REFERENCE_TRIES} tries for ${reservationId}`,
+    );
+  }
+}

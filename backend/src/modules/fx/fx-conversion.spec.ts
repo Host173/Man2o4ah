@@ -35,6 +35,32 @@ describe('buildConverter (ITN-18)', () => {
     expect(half.convert(3, 'USD', 'XXX')).toBe(2);
   });
 
+  it.each([
+    [45, 32, '45 × 0.7 = 31.5'],
+    [85, 60, '85 × 0.7 = 59.5'],
+    [165, 116, '165 × 0.7 = 115.5'],
+    [175, 123, '175 × 0.7 = 122.5'],
+  ])(
+    'rounds an exact .5 half up with a non-integer rate: %i → %i (%s)',
+    (amount, expected) => {
+      const seventy = buildConverter({
+        rateDate: '2026-11-01',
+        rates: { USD: 1, XXX: 0.7 },
+        minorUnits: { USD: 2, XXX: 2 },
+      });
+      expect(seventy.convert(amount, 'USD', 'XXX')).toBe(expected);
+    },
+  );
+
+  it('throws a plain Error when the result is not a safe integer', () => {
+    expect(() =>
+      converter.convert(Number.MAX_SAFE_INTEGER, 'USD', 'EGP'),
+    ).toThrow(Error);
+    expect(() =>
+      converter.convert(Number.MAX_SAFE_INTEGER, 'USD', 'EGP'),
+    ).not.toThrow(BadRequestException);
+  });
+
   it('passes the rate date through unchanged', () => {
     expect(converter.rateDate).toBe('2026-11-01');
   });

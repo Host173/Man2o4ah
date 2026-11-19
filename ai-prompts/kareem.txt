@@ -1785,3 +1785,14 @@ git grep -nE "updateOne|updateMany|findOneAndUpdate|findByIdAndUpdate|replaceOne
 How the output was used:
 Built the audit log on feature/GEN-07-audit-log: an admin.action listener (append-only, secrets stripped from details), calendar-day date filters, AuditService.list, GET /api/admin/audit-logs, and integration and API tests; commits: feat(audit) x3, feat(admin), test(audit), chore(ai).
 ================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-07
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review points 1-4 on PR #170 (nested secret stripping and whole-word key matching in audit.listener.ts, ISO-only date bounds in audit.types.ts, id tie-break in test/fakes/audit.fake.ts) with tests committed first, pushed to feature/GEN-07-audit-log.
+================================================

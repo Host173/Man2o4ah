@@ -100,7 +100,7 @@ export class NotificationsService {
       .findOneAndUpdate(
         { _id: id, userId: owner, readAt: null },
         { $set: { readAt: new Date() } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .lean();
     if (updated) return this.toView(updated);

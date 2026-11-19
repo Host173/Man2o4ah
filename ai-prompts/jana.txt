@@ -231,6 +231,11 @@ How the output was used:
 Implemented atomic SeatInventory operations, unit and integration coverage (including the concurrency invariant), and matching fake validation; no commit.
 ================================================
 
+
+================================================
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-08
 **Expected output**
 Moderator sets extra-bag price and maximum, and cancellation tiers with unique days-before values.
 

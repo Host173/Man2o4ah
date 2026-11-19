@@ -434,6 +434,34 @@ describe('FakeItinerariesService owner-only methods', () => {
       expect(response.details[0].field).toBe('notes');
     });
 
+    it('rejects a non-string cityId on patch with 400 VALIDATION_FAILED', async () => {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+
+      const error = await itineraries
+        .updateDay(
+          created._id,
+          day._id,
+          { cityId: null as unknown as string },
+          'user-1',
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe('cityId');
+      expect(response.details[0].message).toBe('cityId must be a string');
+    });
+
     it('leaves the day unchanged when a patch fails validation (no partial mutation)', async () => {
       const itineraries = new FakeItinerariesService();
       const created = await itineraries.create(createDto(), 'user-1');

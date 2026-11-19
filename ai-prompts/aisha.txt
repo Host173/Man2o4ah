@@ -9231,3 +9231,22 @@ Please resolve this by following DECISIONS §18.3 and checklist §2 strictly:
 How the output was used:
 Merged origin/develop into feature/ACC-05-login-lockout with merge commit 430866d (no conflicts); npm run verify passed (126 files, 1921 tests); not pushed
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-05
+
+Prompt:
+Proceed with pushing `feature/ACC-05-login-lockout` to update the ACC-05 PR, and ensure all actions stay strictly within the scope of ACC-05:
+
+1. Verify you are on `feature/ACC-05-login-lockout` (`git status`) and that `feature/ACC-08-change-password-forced-change` remains untouched at `4513dbc`.
+2. Do NOT modify `hotels.service.ts` or any other module outside ACC-05 (leave the Mongoose deprecation warnings in `hotels` as-is).
+3. Run a normal `git push` on `feature/ACC-05-login-lockout` (no force push).
+4. Once pushed, re-run the ACC-05 self-review / checklist verification so all previously blocked checks (`npm run verify`, test counts, service coverage, code and ticket-completeness review, and probes) complete cleanly.
+5. Report the push confirmation and the full ACC-05 self-review results.
+
+How the output was used:
+Pushed c41a74c (normal push); develop moved again, so merged it locally as 6d031f5 (no conflicts); verify passed (128 files, 1954 tests), auth.service.ts 100% lines, 15/15 live probes passed; merge not yet pushed
+================================================

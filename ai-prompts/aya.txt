@@ -1149,3 +1149,16 @@ Yes when i make flt-17 ill make sure getflightsforbooking includes the timezones
 How the output was used:
 Updated the flight-e-ticket.ts comment to record that FLT-17 will supply airport zones; continuing FLT-23
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: OpenCode
+Related Requirement: FLT-23
+
+Prompt:
+fix the template issue
+
+How the output was used:
+Updated the gitignored root CLAUDE.md from AGENTS.example.md to template 2026-11-15, keeping About me and My preferences; no commit
+================================================

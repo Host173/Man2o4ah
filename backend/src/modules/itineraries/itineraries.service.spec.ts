@@ -3,6 +3,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
+import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
@@ -13,6 +15,8 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
+import { FlightsService } from '../flights/flights.service.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
@@ -54,6 +58,8 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   let eventEmitter: EventEmitter2;
   const referenceData = new FakeReferenceDataService();
   const storage = new FakeStorageService();
+  const fakeFlights = new FakeFlightsService();
+  const fakeHotels = new FakeHotelsService();
 
   beforeAll(async () => {
     t = await createTestApp({
@@ -63,7 +69,11 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
           .overrideProvider(ReferenceDataService)
           .useValue(referenceData)
           .overrideProvider(StorageService)
-          .useValue(storage),
+          .useValue(storage)
+          .overrideProvider(FlightsService)
+          .useValue(fakeFlights)
+          .overrideProvider(HotelsService)
+          .useValue(fakeHotels),
     });
     itineraries = t.moduleRef.get(ItinerariesService);
     eventEmitter = t.moduleRef.get(EventEmitter2);
@@ -1981,6 +1991,252 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       await expect(
         eventEmitter.emitAsync(Events.UserReactivated, { userId: 'bad-id' }),
       ).resolves.toBeDefined();
+    });
+  });
+
+  describe('getHotelsForCityGroup (ITN-25)', () => {
+    it('derives check-in/check-out from the chosen city group and delegates to hotels search', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+
+      const spy = vi.spyOn(fakeHotels, 'search').mockResolvedValue({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const result = await itineraries.getHotelsForCityGroup(
+        created._id,
+        {
+          groupIndex: 0,
+          guests: 2,
+          rooms: 1,
+          page: 1,
+          limit: 10,
+        } as never,
+        owner.id,
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cityId: 'cairo',
+          guests: 2,
+          rooms: 1,
+          checkIn: new Date('2027-04-01T00:00:00.000Z'),
+          checkOut: new Date('2027-04-03T00:00:00.000Z'),
+        }),
+      );
+      expect(result).toMatchObject({ total: 0, page: 1, limit: 10 });
+
+      // Single-day group uses the following day as check-out.
+      await itineraries.getHotelsForCityGroup(
+        created._id,
+        { groupIndex: 1, guests: 1 } as never,
+        owner.id,
+      );
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          cityId: 'dubai',
+          checkIn: new Date('2027-04-03T00:00:00.000Z'),
+          checkOut: new Date('2027-04-04T00:00:00.000Z'),
+        }),
+      );
+    });
+
+    it('returns 404 for a foreign or missing itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await expect(
+        itineraries.getHotelsForCityGroup(
+          created._id,
+          { groupIndex: 0, guests: 1 } as never,
+          other.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        itineraries.getHotelsForCityGroup(
+          new Types.ObjectId().toHexString(),
+          { groupIndex: 0, guests: 1 } as never,
+          owner.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('returns 404 for a non-existent city group index', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await expect(
+        itineraries.getHotelsForCityGroup(
+          created._id,
+          { groupIndex: 5, guests: 1 } as never,
+          owner.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects a malformed itinerary id with 400', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      await expect(
+        itineraries.getHotelsForCityGroup(
+          'not-an-id',
+          { groupIndex: 0, guests: 1 } as never,
+          owner.id,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('getFlightsForItinerary (ITN-26)', () => {
+    it('searches one-way flights from the origin to the first day city and date', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      const spy = vi.spyOn(fakeFlights, 'search').mockResolvedValue({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const result = await itineraries.getFlightsForItinerary(
+        created._id,
+        { origin: 'dxb', tripType: 'one_way', adults: 2 } as never,
+        owner.id,
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'DXB',
+          to: 'CAI',
+          date: '2027-04-01',
+          adults: 2,
+          children: 0,
+          infants: 0,
+        }),
+      );
+      expect(result).toMatchObject({ total: 0 });
+    });
+
+    it('searches round-trip flights using the last day as the return date', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      const spy = vi.spyOn(fakeFlights, 'search').mockResolvedValue({
+        outbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+        inbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+
+      await itineraries.getFlightsForItinerary(
+        created._id,
+        { origin: 'DXB', tripType: 'round_trip' } as never,
+        owner.id,
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: 'DXB',
+          to: 'CAI',
+          date: '2027-04-01',
+          returnDate: '2027-04-02',
+        }),
+      );
+    });
+
+    it('returns 404 for a foreign or missing itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await expect(
+        itineraries.getFlightsForItinerary(
+          created._id,
+          { origin: 'DXB' } as never,
+          other.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        itineraries.getFlightsForItinerary(
+          new Types.ObjectId().toHexString(),
+          { origin: 'DXB' } as never,
+          owner.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('returns 400 for an itinerary without days or a missing origin', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await expect(
+        itineraries.getFlightsForItinerary(
+          created._id,
+          { origin: 'DXB' } as never,
+          owner.id,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      await expect(
+        itineraries.getFlightsForItinerary(
+          created._id,
+          { origin: '   ' } as never,
+          owner.id,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+
+    it('rejects a malformed itinerary id with 400', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      await expect(
+        itineraries.getFlightsForItinerary(
+          'not-an-id',
+          { origin: 'DXB' } as never,
+          owner.id,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
     });
   });
 });

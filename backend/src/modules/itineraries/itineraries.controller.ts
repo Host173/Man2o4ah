@@ -27,6 +27,10 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import type {
+  FlightSearchItem,
+  RoundTripSearchResult,
+} from '../flights/flights.types.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
@@ -34,6 +38,8 @@ import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BudgetSummaryResponseDto } from './dto/budget-summary.response.dto.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
+import { ItineraryFlightsQueryDto } from './dto/itinerary-flights-query.dto.js';
+import { ItineraryHotelsQueryDto } from './dto/itinerary-hotels-query.dto.js';
 import { CreateBudgetEntryDto } from './dto/create-budget-entry.dto.js';
 import { AddActivityDto } from './dto/add-activity.dto.js';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
@@ -52,6 +58,10 @@ import {
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
+import {
+  HotelSearchResponseDto,
+  PaginatedHotelSearchResponseDto,
+} from '../hotels/dto/hotel-search.response.dto.js';
 import { ItineraryPdf } from './itinerary-pdf.js';
 import type {
   BudgetEntryView,
@@ -180,6 +190,57 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDetailView> {
     return this.itinerariesService.getById(id.toHexString(), user.id);
+  }
+
+  @Get(':id/flights')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary:
+      'ITN-26 One-way or round-trip flights from an origin to the first day city',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Flight search results' })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID or query' })
+  @ApiNotFoundResponse({ description: 'Itinerary not found' })
+  getFlightsForItinerary(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: ItineraryFlightsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
+    return this.itinerariesService.getFlightsForItinerary(
+      id.toHexString(),
+      query,
+      user.id,
+    );
+  }
+
+  @Get(':id/hotels')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary: 'ITN-25 Hotels available for a city group of my itinerary',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PaginatedHotelSearchResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID or query' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or city group not found',
+  })
+  async getHotelsForCityGroup(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: ItineraryHotelsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PaginatedHotelSearchResponseDto> {
+    const result = await this.itinerariesService.getHotelsForCityGroup(
+      id.toHexString(),
+      query,
+      user.id,
+    );
+    return {
+      ...result,
+      items: result.items.map((hotel) =>
+        HotelSearchResponseDto.fromResult(hotel),
+      ),
+    };
   }
 
   @Get(':id/pdf')

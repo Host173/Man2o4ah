@@ -124,6 +124,36 @@ function createDto(
 }
 
 describe('FakeItinerariesService owner-only methods', () => {
+  it('adds an owned activity instead of throwing an unimplemented stub', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const updated = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: '  Museum  ' },
+      'user-1',
+    );
+    expect(updated.activities).toEqual([
+      { _id: expect.any(String), name: 'Museum', images: [] },
+    ]);
+    updated.activities[0].name = 'Changed outside the fake';
+    const stored = await itineraries.getById(created._id, 'user-1');
+    expect(stored.days[0].activities[0].name).toBe('Museum');
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        day._id,
+        { name: 'Foreign' },
+        'user-2',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
   it('creates a private itinerary and lists it for its owner only', async () => {
     const itineraries = new FakeItinerariesService();
 

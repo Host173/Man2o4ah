@@ -65,6 +65,34 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
     await clearCollections(t.connection);
   });
 
+  describe('activity writes (ITN-10)', () => {
+    it('keeps every valid concurrent addition on the target day', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(created._id, dayDto(), owner.id);
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, index) =>
+          itineraries.addActivity(
+            created._id,
+            day._id,
+            { name: `Activity ${index}` },
+            owner.id,
+          ),
+        ),
+      );
+      expect(results.map((result) => result.status)).toEqual(
+        Array(10).fill('fulfilled'),
+      );
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].activities).toHaveLength(10);
+      expect(
+        new Set(stored?.days[0].activities.map((activity) => activity.name))
+          .size,
+      ).toBe(10);
+      expect(stored).toMatchObject({ dayCount: 1, cityIds: ['cairo'] });
+    });
+  });
+
   afterAll(async () => {
     await t.close();
   }, HOOK_TIMEOUT);

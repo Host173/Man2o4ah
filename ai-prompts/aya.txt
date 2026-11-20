@@ -1495,3 +1495,27 @@ push log commit and tell me if the self review fixes were done
 How the output was used:
 Committed the pending prompt-log entries as chore(ai): log the seed script and Swagger prompts (FLT-25) and pushed the branch; answered which self-review items are done
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+add that as a to do for kareem in the pr
+
+How the output was used:
+Edited the description of PR #210: replaced the one-line to-do with a "To do for Kareem" checklist item for the DECISIONS.md grouping rule; no files changed in the repo besides this log; not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+can you add the decisions md thing
+
+How the output was used:
+Added the FLT-25 "my flight bookings" groups decision to docs/DECISIONS.md §3; commit docs(decisions): record the FLT-25 booking groups (FLT-25) and chore(ai): log the DECISIONS prompt (FLT-25), not pushed
+================================================

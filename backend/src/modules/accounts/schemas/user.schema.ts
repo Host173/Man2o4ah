@@ -31,8 +31,8 @@ const PROVIDER_TYPE_BY_ROLE: Partial<Record<UserRole, ProviderType>> = {
   [UserRole.HOTEL_MODERATOR]: ProviderType.HOTEL,
 };
 
-/** Simple strict email shape: local@domain.tld (checked after lowercasing). */
-const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
+/** Simple strict email shape: local@domain.tld (checked after lowercasing; also checked by the ACC-18 admin seed before it writes). */
+export const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 
 /** Lenient phone format: optional '+', a digit, then 5-19 digits/spaces/().- (also checked by UpdateProfileDto). */
 export const PHONE = /^\+?[0-9][0-9\s().-]{5,19}$/;

@@ -3,6 +3,7 @@ import {
   PASSWORD_RULE_MESSAGE,
   isValidPassword,
 } from '../auth/password-rule.js';
+import { EMAIL } from '../schemas/user.schema.js';
 
 /** What the admin seed needs (ACC-18). */
 export interface AdminSeedInput {
@@ -13,8 +14,9 @@ export interface AdminSeedInput {
 
 /**
  * ACC-18: reads SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD and checks them
- * before anything is written. The email is trimmed and lowercased; the
- * password must follow the shared password rule (ACC-01). Errors name the
+ * before anything is written. The email is trimmed and lowercased and must
+ * pass both `isEmail` and the `users.email` schema rule; the password must
+ * follow the shared password rule (ACC-01). Errors name the
  * variable but never repeat the password.
  */
 export function parseAdminSeedInput(
@@ -26,7 +28,9 @@ export function parseAdminSeedInput(
       'SEED_ADMIN_EMAIL is not set. Add it to backend/.env (see .env.example).',
     );
   }
-  if (!isEmail(email)) {
+  // isEmail is the RegisterDto check; EMAIL is the stricter users.email
+  // schema rule, so an address the insert would refuse fails here instead.
+  if (!isEmail(email) || !EMAIL.test(email)) {
     throw new Error('SEED_ADMIN_EMAIL must be a valid email address.');
   }
 

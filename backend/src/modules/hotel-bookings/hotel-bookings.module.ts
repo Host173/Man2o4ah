@@ -15,6 +15,8 @@ import {
 import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelPayableBooking } from './hotel-payable-booking.js';
+import { HotelModeratorController } from './hotel-moderator.controller.js';
+import { HotelModeratorService } from './hotel-moderator.service.js';
 import { HotelReservationsService } from './hotel-reservations.service.js';
 import { HotelStayCompletionJob } from './hotel-stay-completion.job.js';
 import {
@@ -35,9 +37,10 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
     PaymentsModule,
     AccountsModule,
   ],
-  controllers: [HotelBookingsController],
+  controllers: [HotelBookingsController, HotelModeratorController],
   providers: [
     HotelBookingsService,
+    HotelModeratorService,
     HotelCancellationService,
     HotelActiveBookings,
     HotelHoldService,

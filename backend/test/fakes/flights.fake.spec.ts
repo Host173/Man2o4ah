@@ -290,6 +290,21 @@ describe('FakeFlightsService', () => {
     });
   });
 
+  describe('markFlightsDeparted', () => {
+    it('uses the exact boundary, leaves cancelled flights unchanged, and is idempotent', async () => {
+      const { data, flights } = setup();
+      vi.setSystemTime(new Date('2026-11-20T09:00:00.000Z'));
+
+      await expect(flights.markFlightsDeparted()).resolves.toBe(3);
+      await expect(flights.markFlightsDeparted()).resolves.toBe(0);
+      expect(data.flight('f2')?.status).toBe('departed');
+      expect(data.flight('f1')?.status).toBe('departed');
+      expect(data.flight('f3')?.status).toBe('scheduled');
+      expect(data.flight('f6')?.status).toBe('departed');
+      expect(data.flight('f5')?.status).toBe('cancelled');
+    });
+  });
+
   describe('checkBookable', () => {
     it('says yes for a scheduled, future flight of an active airline with enough seats', async () => {
       const { flights } = setup();

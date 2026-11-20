@@ -5,6 +5,7 @@ import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/creat
 import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
 import {
+  BudgetCategory,
   ItineraryVisibility,
   TransportMode,
 } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
@@ -129,6 +130,133 @@ describe('FakeItinerariesService transport contract (ITN-16)', () => {
     expect((await service.getById(trip._id, 'user-1')).transportCosts).toEqual([
       cost,
     ]);
+  });
+});
+
+describe('FakeItinerariesService budget contract (ITN-14)', () => {
+  async function setup() {
+    const service = new FakeItinerariesService();
+    const trip = await service.create(
+      { title: 'Budget trip', countryCodes: ['EG'], startDate: '2027-04-01' },
+      'user-1',
+    );
+    const day = await service.addDay(trip._id, { cityId: 'cairo' }, 'user-1');
+    const body = {
+      category: BudgetCategory.FOOD,
+      amountMinor: 1000,
+      currency: 'EGP',
+    };
+    return { service, trip, day, body };
+  }
+
+  it('mirrors partial edits, deletion, independent views and day cascades', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    entry.amountMinor = 999;
+    const edited = await service.updateBudgetEntry(
+      entry._id,
+      { amountMinor: 0, currency: 'JPY' },
+      'user-1',
+    );
+    expect(edited).toEqual({
+      _id: entry._id,
+      category: BudgetCategory.FOOD,
+      amountMinor: 0,
+      currency: 'JPY',
+    });
+    await service.updateBudgetEntry(entry._id, {}, 'user-1');
+    await service.deleteBudgetEntry(entry._id, 'user-1');
+    await expect(
+      service.deleteBudgetEntry(entry._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    const restored = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([restored]);
+    await service.deleteDay(trip._id, day._id, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).days).toEqual([]);
+  });
+
+  it('mirrors ownership, unknown days and validation errors', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    for (const promise of [
+      service.addBudgetEntry(trip._id, day._id, body, 'user-2'),
+      service.updateBudgetEntry(entry._id, { amountMinor: 0 }, 'user-2'),
+      service.deleteBudgetEntry(entry._id, 'user-2'),
+      service.addBudgetEntry(
+        trip._id,
+        'ffffffffffffffffffffffff',
+        body,
+        'user-1',
+      ),
+    ]) {
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+    }
+    for (const [field, value] of [
+      ['category', 'shopping'],
+      ['amountMinor', -1],
+      ['currency', 'XXX'],
+      ['note', 'x'.repeat(201)],
+    ] as const) {
+      for (const promise of [
+        service.addBudgetEntry(
+          trip._id,
+          day._id,
+          { ...body, [field]: value },
+          'user-1',
+        ),
+        service.updateBudgetEntry(entry._id, { [field]: value }, 'user-1'),
+      ]) {
+        await expect(promise).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    }
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([entry]);
+  });
+
+  it('computes the same converted summary as the real service', async () => {
+    const { service, trip, day, body } = await setup();
+    await service.addBudgetEntry(trip._id, day._id, body, 'user-1');
+    const summary = await service.getBudgetSummary(trip._id, 'user-1');
+    expect(summary).toMatchObject({
+      displayCurrency: 'USD',
+      rateDate: '2026-11-01',
+      total: { amountMinor: 20, currency: 'USD' },
+      byCategory: { food: { amountMinor: 20, currency: 'USD' } },
+      byDay: [
+        {
+          dayNumber: 1,
+          date: '2027-04-01',
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+      byCityGroup: [
+        {
+          cityId: 'cairo',
+          dayCount: 1,
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+    });
   });
 });
 

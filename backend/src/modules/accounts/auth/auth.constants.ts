@@ -29,6 +29,9 @@ export function getSessionMaxAgeMs(role: UserRole): number {
     : REFRESH_TOKEN_COOKIE_MAX_AGE_MS;
 }
 
+/** bcrypt cost factor (auth.md §4). bcrypt adds a random salt to every hash. */
+export const BCRYPT_ROUNDS = 12;
+
 /** Random bytes in a refresh token (base64url in the cookie, auth.md §2). */
 export const REFRESH_TOKEN_BYTES = 48;
 

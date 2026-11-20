@@ -41,6 +41,7 @@ export interface FakeFlightSeed {
   /** The fake has no time zones: defaults to the UTC date of `departureAt`. */
   departureLocalDate?: string;
   status?: FlightStatus;
+  hasBookings?: boolean;
   cabins: FakeCabinSeed[];
   departureTimeZone?: string;
   arrivalTimeZone?: string;
@@ -111,7 +112,7 @@ export class FakeFlightsData {
         (seed.arrivalAt.getTime() - seed.departureAt.getTime()) / 60000,
       ),
       status: seed.status ?? 'scheduled',
-      hasBookings: false,
+      hasBookings: seed.hasBookings ?? false,
       cabins: seed.cabins.map(toCabin),
       departureTimeZone:
         seed.departureTimeZone ??

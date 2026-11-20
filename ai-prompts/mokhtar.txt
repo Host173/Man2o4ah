@@ -1171,3 +1171,15 @@ I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #75: "
 How the output was used:
 Branched from origin/develop, added ItineraryFlightsQueryDto, ItinerariesService.getFlightsForItinerary deriving origin/destination/dates and delegating to FlightsService.search, added the authenticated GET /api/itineraries/:id/flights route, added FakeItinerariesService stub, added reference-data getAirportsByCity, and added service/API tests (401, 404, 400, one-way empty result, Swagger). Overrode FlightsService with FakeFlightsService in specs, ran npm run format and npm run verify (2786 tests, all green).
 ================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-21
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "ITN-21: Public search and clone" (Package 6 · Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-21-public-search-clone from develop (ITN-20, ITN-12, ITN-14 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (public search filters, visibility, days, activities, budgets, storage copy, ownerId scoping), and fakes. Wire the clone route POST /api/itineraries/:id/clone to the existing ItinerariesService.clone deep-copy implementation, apply the public search query DTO at the controller, keep FakeItinerariesService parity, and run npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-21: Public search and clone" referencing #73 with the Self-Review Report, and confirm CI green.
+
+How the output was used:
+Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3191 tests, all green), pushed, opened PR #214, resolved repeated merge conflicts by merging develop, restored prompt-log bytes, pushed again.
+================================================

@@ -1628,3 +1628,142 @@ you decide on the open question, make the the new fixes a comment instead and th
 How the output was used:
 Decided the refund-after-commit gap stays consistent with HTL-21 and is recorded as code comments (flight-cancellation.service.ts, flight-provider-cancellation.service.ts) instead of a fix; committed docs(flight-bookings): note the refund gap after a committed cancellation (FLT-26) and chore(ai): log the refund gap decision prompt (FLT-26); pushed the branch and posted a comment on PR #213 describing the new commits
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+give me steps to try it in swagger
+
+How the output was used:
+Answer only, no files changed (Swagger steps for the FLT-26 routes and what can't be tried yet); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+Prompt:
+[Attached: 10.png (screenshot of Swagger UI: GET /api/flight-bookings/FBSD262/refund-preview answered 404 NOT_FOUND; image, no text content)]
+
+How the output was used:
+Answer only, no files changed (explained the URL needs the 24-character booking id printed by the seed script, not the FBSD26x reference); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-29
+
+Prompt:
+okay now i want to work on htl 23 and flt 29
+
+How the output was used:
+Read issues #57 (FLT-29) and #63 (HTL-23) and the docs; created branch feature/FLT-29-airline-moderator-booking-views from develop; plan for both tickets; no other files changed; not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-29
+
+Prompt:
+give me handoff to give to copilot as i will stop this chat with context needed
+
+How the output was used:
+Answer only, no files changed (handoff text for GitHub Copilot covering FLT-29 and HTL-23); not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+choose your own recomended decision
+
+How the output was used:
+Recommended including completed bookings in FLT-29 views, but paused implementation pending Kareem's decision; appended this prompt to ai-prompts/aya.txt
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+review flt 29
+
+How the output was used:
+Completed a read-only FLT-29 branch review; reviewed the issue, requirement, diff, tests, coverage, branch status, and prompt log; no files changed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+now open the pr and push
+
+How the output was used:
+Appended the FLT-29 prompt-log entry; pushed the branch and opened a pull request against develop
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+**Self-review** · FLT-29
+Checks: npm run verify passed (3111 tests, 98.43% overall lines) | backend
+Branch: 12 commits behind develop (merge develop before the PR is merged)
+Problems:
+
+1. Completed bookings are included, but FLT-29 requires only Confirmed or Cancelled. Fix: remove `completed` from `BOOKING_STATUSES`.
+Missing tests: none
+Probes: 0 tried, 0 found problems
+Open questions: none fix
+
+How the output was used:
+Merged origin/develop into the FLT-29 branch, removed completed bookings from the moderator list, CSV export and Swagger status set, and added a regression assertion; verification and PR update pending
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+can i test on swagger
+
+How the output was used:
+Answered with Swagger instructions; appended this prompt to ai-prompts/aya.txt
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+[Attached: Pasted Image.png (screenshot of Swagger GET /api/airlines/{id}/flights with the required id field blank and a validation error; image, no text content)]
+
+How the output was used:
+Explained how to supply the moderator's providerId, retrieve a flight _id, and use it to test the FLT-29 endpoints
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-29
+
+Prompt:
+how do i test flt 29 on swagger
+
+How the output was used:
+Answer only, no files changed (prompt log appended)
+================================================

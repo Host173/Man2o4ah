@@ -5,6 +5,8 @@ import { PaymentsModule } from '../payments/payments.module.js';
 import { AccountsModule } from '../accounts/accounts.module.js';
 import { FlightActiveBookings } from './flight-active-bookings.js';
 import { FlightBookingsController } from './flight-bookings.controller.js';
+import { FlightModeratorBookingsController } from './flight-moderator-bookings.controller.js';
+import { FlightModeratorBookingsService } from './flight-moderator-bookings.service.js';
 import { newBookingReference } from './booking-reference.js';
 import { FlightBookingsService } from './flight-bookings.service.js';
 import {
@@ -37,7 +39,7 @@ import {
     PaymentsModule,
     AccountsModule,
   ],
-  controllers: [FlightBookingsController],
+  controllers: [FlightBookingsController, FlightModeratorBookingsController],
   providers: [
     FlightBookingsService,
     FlightActiveBookings,
@@ -52,6 +54,7 @@ import {
     FlightProviderCancellationService,
     FlightRescheduleSyncService,
     MyFlightBookingsService,
+    FlightModeratorBookingsService,
     // The real reference maker; tests swap it to choose the references.
     { provide: BOOKING_REFERENCE, useValue: newBookingReference },
   ],

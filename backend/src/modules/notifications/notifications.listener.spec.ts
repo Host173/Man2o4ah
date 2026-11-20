@@ -134,6 +134,7 @@ describe('NotificationsListener (GEN-01)', () => {
 
   it('stores a notification for flight-booking.rescheduled', async () => {
     await emitter.emitAsync(Events.FlightBookingRescheduled, {
+      eventId: 'reschedule-1',
       bookingId: BOOKING,
       userId: USER,
     });
@@ -147,7 +148,10 @@ describe('NotificationsListener (GEN-01)', () => {
   });
 
   it('stores a notification without an entity for account.suspended', async () => {
-    await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
+    await emitter.emitAsync(Events.AccountSuspended, {
+      userId: USER,
+      eventId: 'account-change-1',
+    });
     await expectStored([USER], {
       type: 'account_suspended',
       title: 'Account suspended',
@@ -156,7 +160,10 @@ describe('NotificationsListener (GEN-01)', () => {
   });
 
   it('stores a notification without an entity for account.reactivated', async () => {
-    await emitter.emitAsync(Events.AccountReactivated, { userId: USER });
+    await emitter.emitAsync(Events.AccountReactivated, {
+      userId: USER,
+      eventId: 'account-change-1',
+    });
     await expectStored([USER], {
       type: 'account_reactivated',
       title: 'Account reactivated',
@@ -166,6 +173,7 @@ describe('NotificationsListener (GEN-01)', () => {
 
   it('stores one notification per moderator for provider.deactivated', async () => {
     await emitter.emitAsync(Events.ProviderDeactivated, {
+      eventId: 'provider-change-1',
       providerType: 'airline',
       providerId: PROVIDER,
       moderatorIds: MODERATORS,
@@ -180,6 +188,7 @@ describe('NotificationsListener (GEN-01)', () => {
 
   it('stores one notification per moderator for provider.reactivated', async () => {
     await emitter.emitAsync(Events.ProviderReactivated, {
+      eventId: 'provider-change-1',
       providerType: 'hotel',
       providerId: PROVIDER,
       moderatorIds: MODERATORS,
@@ -194,6 +203,7 @@ describe('NotificationsListener (GEN-01)', () => {
 
   it('stores nothing for a provider event without moderators', async () => {
     await emitter.emitAsync(Events.ProviderDeactivated, {
+      eventId: 'provider-change-1',
       providerType: 'airline',
       providerId: PROVIDER,
       moderatorIds: [],
@@ -203,13 +213,17 @@ describe('NotificationsListener (GEN-01)', () => {
 
   it('stores nothing and does not throw for an invalid user id', async () => {
     await expect(
-      emitter.emitAsync(Events.AccountSuspended, { userId: 'not-an-id' }),
+      emitter.emitAsync(Events.AccountSuspended, {
+        userId: 'not-an-id',
+        eventId: 'account-change-1',
+      }),
     ).resolves.toBeDefined();
     expect(await model.countDocuments()).toBe(0);
   });
 
   it('skips an invalid moderator id and stores the other two', async () => {
     await emitter.emitAsync(Events.ProviderReactivated, {
+      eventId: 'provider-change-1',
       providerType: 'airline',
       providerId: PROVIDER,
       moderatorIds: [MODERATORS[0] ?? '', 'not-an-id', MODERATORS[2] ?? ''],
@@ -223,6 +237,7 @@ describe('NotificationsListener (GEN-01)', () => {
 
   describe('duplicate delivery (handlers are idempotent)', () => {
     const provider = {
+      eventId: 'provider-change-1',
       providerType: 'airline' as const,
       providerId: PROVIDER,
       moderatorIds: MODERATORS,
@@ -263,6 +278,7 @@ describe('NotificationsListener (GEN-01)', () => {
         Events.FlightBookingRescheduled,
         () =>
           emitter.emitAsync(Events.FlightBookingRescheduled, {
+            eventId: 'reschedule-1',
             bookingId: BOOKING,
             userId: USER,
           }),
@@ -270,12 +286,20 @@ describe('NotificationsListener (GEN-01)', () => {
       ],
       [
         Events.AccountSuspended,
-        () => emitter.emitAsync(Events.AccountSuspended, { userId: USER }),
+        () =>
+          emitter.emitAsync(Events.AccountSuspended, {
+            userId: USER,
+            eventId: 'account-change-1',
+          }),
         1,
       ],
       [
         Events.AccountReactivated,
-        () => emitter.emitAsync(Events.AccountReactivated, { userId: USER }),
+        () =>
+          emitter.emitAsync(Events.AccountReactivated, {
+            userId: USER,
+            eventId: 'account-change-1',
+          }),
         1,
       ],
       [
@@ -342,9 +366,18 @@ describe('NotificationsListener (GEN-01)', () => {
     });
 
     it('notifies again when an account is suspended a second time after a reactivation', async () => {
-      await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
-      await emitter.emitAsync(Events.AccountReactivated, { userId: USER });
-      await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
+      await emitter.emitAsync(Events.AccountSuspended, {
+        userId: USER,
+        eventId: 'account-change-1',
+      });
+      await emitter.emitAsync(Events.AccountReactivated, {
+        userId: USER,
+        eventId: 'account-change-2',
+      });
+      await emitter.emitAsync(Events.AccountSuspended, {
+        userId: USER,
+        eventId: 'account-change-3',
+      });
       const docs = await stored();
       expect(docs.map((doc) => doc.type)).toEqual([
         'account_suspended',
@@ -356,8 +389,14 @@ describe('NotificationsListener (GEN-01)', () => {
     it('notifies again when a provider is deactivated a second time after a reactivation', async () => {
       const one = { ...provider, moderatorIds: [MODERATORS[0] ?? ''] };
       await emitter.emitAsync(Events.ProviderDeactivated, one);
-      await emitter.emitAsync(Events.ProviderReactivated, one);
-      await emitter.emitAsync(Events.ProviderDeactivated, one);
+      await emitter.emitAsync(Events.ProviderReactivated, {
+        ...one,
+        eventId: 'provider-change-2',
+      });
+      await emitter.emitAsync(Events.ProviderDeactivated, {
+        ...one,
+        eventId: 'provider-change-3',
+      });
       const docs = await stored();
       expect(docs.map((doc) => doc.type)).toEqual([
         'provider_deactivated',
@@ -371,8 +410,14 @@ describe('NotificationsListener (GEN-01)', () => {
       vi.setSystemTime(new Date('2026-11-19T20:00:00.000Z'));
       try {
         for (let cycle = 0; cycle < 3; cycle += 1) {
-          await emitter.emitAsync(Events.AccountSuspended, { userId: USER });
-          await emitter.emitAsync(Events.AccountReactivated, { userId: USER });
+          await emitter.emitAsync(Events.AccountSuspended, {
+            userId: USER,
+            eventId: `suspension-${cycle}`,
+          });
+          await emitter.emitAsync(Events.AccountReactivated, {
+            userId: USER,
+            eventId: `reactivation-${cycle}`,
+          });
         }
         const docs = await stored();
         expect(docs.map((doc) => doc.type)).toEqual([
@@ -447,8 +492,15 @@ describe('NotificationsListener (GEN-01)', () => {
     });
 
     it('notifies about a new reschedule once the earlier one was read', async () => {
-      const rescheduled = { bookingId: BOOKING, userId: USER };
-      await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);
+      const rescheduled = {
+        bookingId: BOOKING,
+        userId: USER,
+        eventId: 'reschedule-1',
+      };
+      await emitter.emitAsync(Events.FlightBookingRescheduled, {
+        ...rescheduled,
+        eventId: 'reschedule-2',
+      });
       await model.updateMany({}, { $set: { readAt: new Date() } });
       await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);
       expect(await model.countDocuments()).toBe(2);
@@ -461,7 +513,10 @@ describe('NotificationsListener (GEN-01)', () => {
       .spyOn(model, 'updateOne')
       .mockRejectedValueOnce(new Error('database is down'));
     await expect(
-      emitter.emitAsync(Events.AccountReactivated, { userId: USER }),
+      emitter.emitAsync(Events.AccountReactivated, {
+        userId: USER,
+        eventId: 'account-change-1',
+      }),
     ).resolves.toBeDefined();
     expect(updateOne).toHaveBeenCalledTimes(1);
     updateOne.mockRestore();

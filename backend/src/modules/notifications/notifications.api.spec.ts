@@ -12,6 +12,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import { NotificationsModule } from './notifications.module.js';
+import { NotificationsService } from './notifications.service.js';
 import { Notification } from './schemas/notification.schema.js';
 import type { NotificationView } from './notifications.types.js';
 
@@ -229,6 +230,11 @@ describe('NotificationsController HTTP API (GEN-01)', () => {
         .set('Cookie', user.cookie);
       expect(response.status).toBe(400);
       expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      await expect(
+        t.moduleRef.get(NotificationsService).markRead(user.id, 'abc'),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
     });
 
     it('returns the same readAt for 5 parallel requests', async () => {

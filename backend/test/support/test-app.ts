@@ -62,7 +62,7 @@ export async function createTestApp(
         ConfigModule.forRoot({
           isGlobal: true,
           ignoreEnvFile: true,
-          load: [() => TEST_CONFIG],
+          load: [() => ({ ...TEST_CONFIG, UPLOAD_DIR: uploadDir })],
         }),
         MongooseModule.forRoot(mongo.uri, { dbName: 'test' }),
         EventEmitterModule.forRoot(),

@@ -7,6 +7,7 @@ import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js'
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -3011,7 +3012,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   });
 
   describe('Post images (BLG-10)', () => {
-    const sampleBytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const sampleBytes = imageBytes('png');
 
     it('lets the author attach JPG/PNG up to 5, rejects the 6th with 400 LIMIT_EXCEEDED, and keeps url computed only', async () => {
       const author = await loginAs(testApp!.connection, UserRole.USER);
@@ -3043,7 +3044,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .http()
         .post(`/api/posts/${postId}/images`)
         .set('Cookie', author.cookie)
-        .attach('file', sampleBytes, {
+        .attach('file', imageBytes('jpg'), {
           filename: 'sinai.jpg',
           contentType: 'image/jpeg',
         });
@@ -3131,7 +3132,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .http()
         .post(`/api/posts/${postId}/images`)
         .set('Cookie', author.cookie)
-        .attach('file', sampleBytes, {
+        .attach('file', imageBytes('jpg'), {
           filename: 'aswan-2.jpg',
           contentType: 'image/jpeg',
         });
@@ -3337,7 +3338,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
 
     it('retains failed image removal references and durably queues failed post cleanup before returning 204', async () => {
       const owner = await loginAs(testApp!.connection, UserRole.USER);
-      const sampleBytes = Buffer.from('api-failure-image-bytes');
+      const sampleBytes = imageBytes('png');
 
       const created = await testApp!
         .http()
@@ -3362,7 +3363,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .http()
         .post(`/api/posts/${postId}/images`)
         .set('Cookie', owner.cookie)
-        .attach('file', sampleBytes, {
+        .attach('file', imageBytes('jpg'), {
           filename: 'two.jpg',
           contentType: 'image/jpeg',
         });

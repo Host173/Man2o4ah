@@ -12,11 +12,13 @@ import {
   FlightConfirmationService,
 } from './flight-confirmation.service.js';
 import { FlightCancellationService } from './flight-cancellation.service.js';
+import { FlightCompletionJob } from './flight-completion.job.js';
 import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightPayableBooking } from './flight-payable-booking.js';
 import { FlightQuoteService } from './flight-quote.service.js';
+import { MyFlightBookingsService } from './my-flight-bookings.service.js';
 import {
   FlightBooking,
   FlightBookingSchema,
@@ -41,9 +43,11 @@ import {
     FlightHoldService,
     FlightPayableBooking,
     FlightHoldExpiryJob,
+    FlightCompletionJob,
     FlightConfirmationService,
     FlightETicket,
     FlightCancellationService,
+    MyFlightBookingsService,
     // The real reference maker; tests swap it to choose the references.
     { provide: BOOKING_REFERENCE, useValue: newBookingReference },
   ],

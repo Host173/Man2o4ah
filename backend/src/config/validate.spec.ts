@@ -26,6 +26,29 @@ describe('validate', () => {
     );
   });
 
+  it.each([undefined, '', 'any-key-123'])(
+    'accepts FXRATES_API_KEY %j (optional, any string)',
+    (key) => {
+      expect(() => validate({ ...base, FXRATES_API_KEY: key })).not.toThrow();
+    },
+  );
+
+  it.each([undefined, 'true', 'false'])(
+    'accepts FX_AUTO_REFRESH %j',
+    (value) => {
+      expect(() => validate({ ...base, FX_AUTO_REFRESH: value })).not.toThrow();
+    },
+  );
+
+  it.each(['yes', 'TRUE', '1', ''])(
+    'rejects FX_AUTO_REFRESH %j and names the variable',
+    (value) => {
+      expect(() => validate({ ...base, FX_AUTO_REFRESH: value })).toThrow(
+        /FX_AUTO_REFRESH/,
+      );
+    },
+  );
+
   it('still rejects a missing MONGODB_URI', () => {
     expect(() => validate({})).toThrow(/MONGODB_URI/);
   });

@@ -91,6 +91,7 @@ classDiagram
   policy_acceptances ..> flight_bookings_
   policy_acceptances ..> hotel_reservations
   itineraries_ ..> cities
+  posts ..> itineraries_ : itineraryId (optional, BLG-13)
   comments --> posts
   likes --> posts
   reports ..> posts : target (post, comment, review, itinerary)
@@ -155,6 +156,7 @@ classDiagram
       refreshTokenHash : string
       lastActivityAt : Date
       expiresAt : Date (TTL)
+      absoluteExpiresAt : Date (immutable)
     }
   }
   City --> Country : countryCode
@@ -487,6 +489,7 @@ classDiagram
   namespace blog {
     class Post {
       authorId : ObjectId
+      itineraryId : ObjectId?
       title : string
       body : string
       tags : string[0..5]
@@ -539,7 +542,11 @@ classDiagram
       createdAt : Date
     }
   }
+  namespace itineraries {
+    class Itinerary
+  }
   Comment "*" --> "1" Post : postId
+  Post "*" ..> "0..1" Itinerary : itineraryId (BLG-13)
   Like "*" --> "1" Post : postId (unique postId+userId)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId

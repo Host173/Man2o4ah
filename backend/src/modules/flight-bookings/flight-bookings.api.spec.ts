@@ -15,6 +15,8 @@ const FLIGHT = '6553a1f0c2b4e8a9d0f1a202';
 const CABIN = '6553a1f0c2b4e8a9d0f1a203';
 const FULL_FLIGHT = '6553a1f0c2b4e8a9d0f1a204';
 const FULL_CABIN = '6553a1f0c2b4e8a9d0f1a205';
+const RETURN_FLIGHT = '6553a1f0c2b4e8a9d0f1a206';
+const RETURN_CABIN = '6553a1f0c2b4e8a9d0f1a207';
 
 function seedFlights(): FakeFlightsData {
   const data = new FakeFlightsData();
@@ -46,6 +48,25 @@ function seedFlights(): FakeFlightsData {
     });
   flight(FLIGHT, CABIN, 50);
   flight(FULL_FLIGHT, FULL_CABIN, 0);
+  data.addFlight({
+    id: RETURN_FLIGHT,
+    airlineId: AIRLINE,
+    flightNumber: 'MS101',
+    departureAirportId: 'DXB',
+    arrivalAirportId: 'CAI',
+    departureAt: new Date('2027-03-15T08:00:00.000Z'),
+    arrivalAt: new Date('2027-03-15T12:00:00.000Z'),
+    cabins: [
+      {
+        id: RETURN_CABIN,
+        cabinClass: 'economy',
+        totalSeats: 50,
+        availableSeats: 50,
+        heldSeats: 0,
+        priceMinor: 15_000,
+      },
+    ],
+  });
   return data;
 }
 
@@ -102,6 +123,45 @@ describe('POST /api/flight-bookings (FLT-19, FLT-21)', () => {
       flightId: FLIGHT,
       direction: 'outbound',
       departureAt: '2027-03-10T08:00:00.000Z', // instants travel as ISO-8601 UTC
+    });
+  });
+
+  it('charges the extra-bag fee once per airline on a same-airline round trip', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const roundTripBody = {
+      tripType: 'round_trip',
+      segments: [
+        { flightId: FLIGHT, cabinId: CABIN },
+        { flightId: RETURN_FLIGHT, cabinId: RETURN_CABIN },
+      ],
+      passengers: [
+        {
+          type: 'adult',
+          fullName: 'Aya Amr',
+          dateOfBirth: '1990-01-01',
+          documentNumber: 'A12345678',
+          extraBagCount: 2,
+          extraBagWeightKg: 20,
+        },
+      ],
+    };
+
+    const res = await t
+      .http()
+      .post('/api/flight-bookings')
+      .set('Cookie', user.cookie)
+      .send(roundTripBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      tripType: 'round_trip',
+      seatCount: 1,
+      pricing: {
+        fareTotalMinor: 35_000,
+        baggageTotalMinor: 6_000, // 2 extra bags × 3 000 once per airline
+        totalMinor: 41_000,
+        currency: 'USD',
+      },
     });
   });
 

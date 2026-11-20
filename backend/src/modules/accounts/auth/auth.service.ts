@@ -16,7 +16,13 @@ import type { RegisterDto } from '../dto/register.dto.js';
 import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
-import { REFRESH_TOKEN_BYTES, SESSION_IDLE_MS } from './auth.constants.js';
+import {
+  getSessionMaxAgeMs,
+  LOCKOUT_MS,
+  MAX_FAILED_LOGIN_ATTEMPTS,
+  REFRESH_TOKEN_BYTES,
+  SESSION_IDLE_MS,
+} from './auth.constants.js';
 import type { AccessTokenPayload } from './auth.types.js';
 
 /** bcrypt cost factor (auth.md §4). bcrypt adds a random salt to every hash. */
@@ -41,6 +47,28 @@ function invalidCredentials() {
   return new UnauthorizedException({
     code: ErrorCode.InvalidCredentials,
     message: 'Invalid email or password',
+  });
+}
+
+/** The session is gone, idle-expired or revoked: log in again (ACC-06). */
+function sessionExpired() {
+  return new UnauthorizedException({
+    code: ErrorCode.SessionExpired,
+    message: 'Your session has expired. Please log in again.',
+  });
+}
+
+/** Whole minutes left in a lockout, rounded up so it never says 0 (ACC-05). */
+export function lockoutMinutesLeft(lockedUntil: Date, now: number): number {
+  return Math.ceil((lockedUntil.getTime() - now) / 60_000);
+}
+
+/** 401 ACCOUNT_LOCKED with the minutes left in the message (ACC-05). */
+function accountLocked(lockedUntil: Date, now: number) {
+  const minutes = lockoutMinutesLeft(lockedUntil, now);
+  return new UnauthorizedException({
+    code: ErrorCode.AccountLocked,
+    message: `Too many failed login attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
   });
 }
 
@@ -76,17 +104,26 @@ export class AuthService {
   ) {}
 
   /**
-   * ACC-04, ACC-19 (auth.md §4). Unknown email, wrong password or a
-   * deactivated account → 401 INVALID_CREDENTIALS; right password on a
-   * suspended account → 403 ACCOUNT_SUSPENDED. Otherwise creates a session
+   * ACC-04, ACC-05, ACC-19 (auth.md §4), in this order: unknown email or a
+   * deactivated account → 401 INVALID_CREDENTIALS; a lock still running →
+   * 401 ACCOUNT_LOCKED (even with the right password); a wrong password →
+   * counted, and the 5th in a row locks for 15 minutes (ACCOUNT_LOCKED),
+   * otherwise INVALID_CREDENTIALS; right password on a suspended account →
+   * 403 ACCOUNT_SUSPENDED. Otherwise resets the counter, creates a session
    * holding only the refresh token's hash and signs a 15-minute access token.
    * The tokens are for the cookies only, never a JSON body.
    */
   async login(dto: LoginDto): Promise<LoginResult> {
-    const user = await this.userModel
+    const found = await this.userModel
       .findOne({ email: dto.email })
       .select('+passwordHash')
       .lean();
+    // A deactivated account is treated exactly like an unknown email (ACC-12).
+    const user = found?.status === UserStatus.DEACTIVATED ? null : found;
+
+    if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      throw accountLocked(user.lockedUntil, Date.now());
+    }
 
     // Compare even when there's no user, so timing reveals nothing.
     this.dummyHash ??= bcrypt.hash(
@@ -96,7 +133,11 @@ export class AuthService {
     const hash = user?.passwordHash ?? (await this.dummyHash);
     const passwordMatches = await bcrypt.compare(dto.password, hash);
 
-    if (!user || user.status === UserStatus.DEACTIVATED || !passwordMatches) {
+    if (!user) {
+      throw invalidCredentials();
+    }
+    if (!passwordMatches) {
+      await this.countFailedLogin(user._id);
       throw invalidCredentials();
     }
     // Only after the right password: a stranger can't learn the account is suspended.
@@ -107,6 +148,12 @@ export class AuthService {
       });
     }
 
+    // A successful login resets the counter and any expired lock (ACC-05).
+    await this.userModel.updateOne(
+      { _id: user._id },
+      { $set: { failedLoginAttempts: 0, lockedUntil: null } },
+    );
+
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
     const now = Date.now();
     const session = await this.sessionModel.create({
@@ -114,18 +161,143 @@ export class AuthService {
       refreshTokenHash: hashRefreshToken(refreshToken),
       lastActivityAt: new Date(now),
       expiresAt: new Date(now + SESSION_IDLE_MS),
+      absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(user.role)),
     });
 
+    const accessToken = await this.signAccessToken(user, session._id);
+
+    return { user: toMe(user), accessToken, refreshToken };
+  }
+
+  /**
+   * ACC-06, ACC-19 (auth.md §2, §3): `POST /api/auth/refresh`. Finds the live
+   * session (`expiresAt > now`, `absoluteExpiresAt > now`) holding this
+   * refresh token's hash, slides its activity without passing the deadline
+   * fixed at login, and returns a new access token. The refresh
+   * token is not rotated, so parallel refreshes all succeed. A missing,
+   * unknown, idle-expired or revoked token, or an account that is gone or no
+   * longer active → 401 SESSION_EXPIRED.
+   */
+  async refresh(refreshToken: string | undefined): Promise<string> {
+    if (!refreshToken) throw sessionExpired();
+    const now = Date.now();
+
+    const session = await this.sessionModel
+      .findOne(
+        {
+          refreshTokenHash: hashRefreshToken(refreshToken),
+          expiresAt: { $gt: new Date(now) },
+          absoluteExpiresAt: { $gt: new Date(now) },
+        },
+        { userId: 1, absoluteExpiresAt: 1 },
+      )
+      .lean();
+    if (!session) throw sessionExpired();
+
+    const user = await this.userModel
+      .findById(session.userId, { role: 1, status: 1, moderatorOf: 1 })
+      .lean();
+    // Suspension and deactivation delete sessions; this also covers a leftover one.
+    if (!user || user.status !== UserStatus.ACTIVE) throw sessionExpired();
+
+    // Refresh counts as activity. The expiresAt filter stops it from reviving
+    // a session that expired or was revoked a moment ago.
+    const slid = await this.sessionModel.updateOne(
+      {
+        _id: session._id,
+        expiresAt: { $gt: new Date(now) },
+        absoluteExpiresAt: { $gt: new Date(now) },
+      },
+      {
+        $set: {
+          lastActivityAt: new Date(now),
+          expiresAt: new Date(
+            Math.min(
+              now + SESSION_IDLE_MS,
+              session.absoluteExpiresAt.getTime(),
+            ),
+          ),
+        },
+      },
+    );
+    if (slid.matchedCount === 0) throw sessionExpired();
+
+    return this.signAccessToken(user, session._id);
+  }
+
+  /**
+   * ACC-06 (auth.md §3): `POST /api/auth/logout`. Deletes the authenticated
+   * session, or falls back to the refresh cookie when the access cookie has
+   * expired. Other sessions stay logged in. Missing or already-revoked
+   * credentials are harmless: the endpoint still clears the browser cookies.
+   */
+  async logout(sid: string | undefined, refreshToken?: string): Promise<void> {
+    if (sid) {
+      await this.sessionModel.deleteOne({ _id: sid });
+    } else if (refreshToken) {
+      await this.sessionModel.deleteOne({
+        refreshTokenHash: hashRefreshToken(refreshToken),
+      });
+    }
+  }
+
+  /** Signs the 15-minute access token `{ sub, role, sid, providerId? }` (auth.md §2). */
+  private signAccessToken(
+    user: Pick<User, 'role' | 'moderatorOf'> & { _id: Types.ObjectId },
+    sid: Types.ObjectId,
+  ): Promise<string> {
     const providerId = user.moderatorOf?.providerId.toString();
     const payload: AccessTokenPayload = {
       sub: user._id.toString(),
       role: user.role,
-      sid: session._id.toString(),
+      sid: sid.toString(),
       ...(providerId ? { providerId } : {}),
     };
-    const accessToken = await this.jwt.signAsync(payload);
+    return this.jwt.signAsync(payload);
+  }
 
-    return { user: toMe(user), accessToken, refreshToken };
+  /**
+   * ACC-05: counts one wrong password and, on the 5th in a row, locks the
+   * account for 15 minutes and resets the counter; then throws
+   * 401 ACCOUNT_LOCKED. Returns normally below the limit (the caller throws
+   * INVALID_CREDENTIALS).
+   *
+   * Every step is a single atomic update, never read-then-write, so parallel
+   * wrong passwords can't slip past the limit:
+   * - `$inc` only matches while the account isn't locked, so an attempt that
+   *   finishes after another one locked the account isn't counted towards
+   *   the next round;
+   * - only the attempt(s) that see a count of 5 or more lock the account.
+   */
+  private async countFailedLogin(userId: Types.ObjectId): Promise<void> {
+    const now = Date.now();
+    const notLocked = {
+      $or: [{ lockedUntil: null }, { lockedUntil: { $lte: new Date(now) } }],
+    };
+
+    const counted = await this.userModel
+      .findOneAndUpdate(
+        { _id: userId, ...notLocked },
+        { $inc: { failedLoginAttempts: 1 } },
+        { returnDocument: 'after', projection: { failedLoginAttempts: 1 } },
+      )
+      .lean();
+
+    if (!counted) {
+      // Another attempt locked the account while this one was checking the password.
+      throw accountLocked(new Date(now + LOCKOUT_MS), now);
+    }
+    if (counted.failedLoginAttempts < MAX_FAILED_LOGIN_ATTEMPTS) return;
+
+    const lockedUntil = new Date(now + LOCKOUT_MS);
+    await this.userModel.updateOne(
+      {
+        _id: userId,
+        failedLoginAttempts: { $gte: MAX_FAILED_LOGIN_ATTEMPTS },
+      },
+      { $set: { lockedUntil, failedLoginAttempts: 0 } },
+    );
+    throw accountLocked(lockedUntil, now);
   }
 
   /**
@@ -134,12 +306,7 @@ export class AuthService {
    */
   async me(userId: string): Promise<MeDto> {
     const user = await this.userModel.findById(userId).lean();
-    if (!user) {
-      throw new UnauthorizedException({
-        code: ErrorCode.SessionExpired,
-        message: 'Your session has expired. Please log in again.',
-      });
-    }
+    if (!user) throw sessionExpired();
     return toMe(user);
   }
 

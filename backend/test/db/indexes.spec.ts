@@ -34,6 +34,7 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { role: 1, status: 1, createdAt: -1 } },
     { key: { 'moderatorOf.providerId': 1 } },
   ],
+  // expiresAt is capped at absoluteExpiresAt, so one TTL index still suffices.
   sessions: [{ key: { userId: 1 } }, { key: { expiresAt: 1 }, ttl: 0 }],
   // 3.3 flights
   airlines: [{ key: { code: 1 }, unique: true }, { key: { isActive: 1 } }],

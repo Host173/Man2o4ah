@@ -67,3 +67,18 @@ export async function transitionStatus<T extends { status: BookingStatus }>(
     throw invalidTransition(from, to);
   }
 }
+
+/**
+ * True when `transitionStatus` refused because the reservation wasn't in the
+ * expected status any more (409 INVALID_STATUS_TRANSITION): it lost a race
+ * (e.g. confirmed vs expired) or the move was already made. Any other error is
+ * a real failure.
+ */
+export function isInvalidTransition(error: unknown): boolean {
+  if (!(error instanceof ConflictException)) return false;
+  const response = error.getResponse();
+  return (
+    typeof response === 'object' &&
+    (response as { code?: unknown }).code === ErrorCode.InvalidStatusTransition
+  );
+}

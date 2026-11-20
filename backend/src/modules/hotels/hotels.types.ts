@@ -44,6 +44,20 @@ export interface RoomView {
   hasEverBeenReserved: boolean;
 }
 
+export interface AvailableRoomView extends Pick<
+  RoomView,
+  | 'id'
+  | 'hotelId'
+  | 'name'
+  | 'type'
+  | 'beds'
+  | 'maxOccupancy'
+  | 'pricePerNightMinor'
+> {
+  /** HTL-15: nightly price times the stay's nights, in USD cents; not a held price. */
+  totalMinor: number;
+}
+
 export type RoomNightView = {
   roomId: string;
   hotelId: string;
@@ -71,6 +85,6 @@ export interface HotelSearchQuery {
 }
 
 export interface HotelSearchResult extends HotelView {
-  /** The cheapest qualifying room's price, not the total stay price. */
+  /** Cheapest room that can join a capacity-valid selection of the requested room count; not the total stay price. */
   pricePerNightMinor: number;
 }

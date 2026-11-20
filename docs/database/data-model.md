@@ -213,13 +213,16 @@ One document per logged-in device. Implements refresh-token revocation and the 3
 | `userId` | ObjectId → users | ✓ | |
 | `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
 | `lastActivityAt` | Date | ✓ | |
-| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+| `expiresAt` | Date | ✓ | `min(lastActivityAt + 30 min, absoluteExpiresAt)` |
+| `absoluteExpiresAt` | Date | ✓ | immutable; login + 8 hours for admins, login + 7 days for other roles (ACC-06, ticket #27) |
 
 Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
 
 Rules
-- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
-- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Every authenticated request checks the session exists, `expiresAt > now` and `absoluteExpiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session), never beyond `absoluteExpiresAt`.
+- The absolute deadline is fixed from the role at login, including the refresh cookie's max age; refresh and role changes never extend it. Existing sessions without this field require a new login; no Atlas data migration is needed.
+- Logout is public and idempotent: delete the authenticated session, or use the refresh token's hash if the access cookie cannot authenticate, then clear both cookies and return 204. Missing or already-revoked credentials still clear the cookies. Other sessions are unaffected.
+- Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
 - Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
 
 ---
@@ -613,6 +616,7 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `authorId` | ObjectId → users | ✓ | |
+| `itineraryId` | ObjectId → itineraries | | optional reference to one of the author's public or private itineraries (BLG-13); no embedded copy |
 | `title` | string | ✓ | 1–150 chars |
 | `body` | string | ✓ | 1–20000 chars |
 | `tags` | string[] | ✓ | 0–5; trimmed, lowercased, 1–30 chars, unique (BLG-08) |
@@ -627,6 +631,8 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 Indexes: `{ status: 1, isHidden: 1, authorDeactivated: 1, publishedAt: -1 }` · `{ authorId: 1, updatedAt: -1 }` · `{ tags: 1, status: 1 }`
 
 Search (BLG-09) orders by `likeCount + commentCount` descending, then `publishedAt` descending (computed in the aggregation, not stored). Deleting a post deletes its comments, likes and image files.
+
+BLG-13 schema prerequisite: existing posts need no migration and the indexes stay unchanged. The attachment API ships separately and must verify ownership through `ItinerariesService.getById(itineraryId, authorId)` before storing the reference. Attaching an itinerary does not publish it, copy its contents, or bypass its visibility and ownership checks.
 
 #### `comments`
 | Field | Type | Req | Rules |

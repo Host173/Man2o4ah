@@ -3555,3 +3555,208 @@ develop is green now
 How the output was used:
 Built StorageService on disk (random keys, JPG/PNG type, size and magic-byte checks, safe delete and copy) on feature/GEN-08-image-uploads; test app passes its upload folder to the config; real-folder and HTTP upload tests; commits: test(support), feat(storage) x2, test(storage) x2, chore(ai).
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-07
+
+Prompt:
+do this now in a new branch from develop
+[Attached: GEN07_EXECUTION.md]
+# Execution — GEN-07: Audit log
+
+Issue #20. Lane C of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+The audit module stores every admin action (append-only) and the admin can read them, newest first, filtered by action and date. Today `AuditService.list` throws `NotImplementedException('list: implemented in GEN-07')` and nothing listens to `admin.action`.
+
+Done means:
+1. A listener for `admin.action` that stores one `audit_logs` document per event.
+2. `AuditService.list(query)` implemented (paginated, filters, newest first).
+3. `GET /api/admin/audit-logs` (admin only) in the **admin** module.
+4. Integration and API tests.
+
+**Out of scope:** emitting `admin.action` (admin and moderation emit it in ACC-13, ACC-15, ACC-16, GEN-10 and ACC-07a), any update or delete of audit entries, the frontend, CI.
+
+## Context you need
+
+**Requirement GEN-07 (verbatim):** "The system shall keep an audit log of admin actions (suspensions, deletions)."
+
+**Rules from the docs:**
+- `domain-rules.md` §7: admin and moderation emit `admin.action { actorId, action, target, details }` after each suspend, reactivate, moderator creation, password reset, provider (de)activation, report resolution, hide or delete. The audit module stores it (append-only). `GET /api/admin/audit-logs` is paginated and filterable by action and date.
+- `data-model.md` §3.13 `audit_logs`: **append-only, no update or delete anywhere in the code**. Fields `actorId` (ObjectId, the admin), `action` (enum), `target { type, id }`, `details?` (small, **no secrets, never passwords**), `createdAt` only. The schema already exists (`backend/src/modules/audit/schemas/audit-log.schema.ts`, with `AuditAction`); don't change it.
+- `endpoints.md`: `GET /api/admin/audit-logs | GEN-07 | Adm | module admin`. The URL's module is **admin**: the route goes in `AdminController` (`backend/src/modules/admin/admin.controller.ts`), which calls `AuditService`. `data-model.md` §6.1 allows admin → audit.
+- Event: `Events.AdminAction` (`backend/src/common/events/events.ts`), payload `AdminActionEvent { actorId: string; action: AuditAction; target: { type: string; id: string }; details?: Record<string, unknown> }` (`event-payloads.ts`). Listen with `@OnEvent(Events.AdminAction)`; never a string literal.
+- JSON: IDs keep the field name `_id` (24-hex string), instants are ISO strings (`api-contract.md` §3). Lists: `{ items, page, limit, total, totalPages }`, page size 10 by default, max 50 (`backend/src/common/pagination/`).
+
+**The contract (`audit.service.ts`, `audit.types.ts`) stays:**
+```ts
+list(query: AuditLogQueryDto): Promise<Paginated<AuditLogView>>
+interface AuditLogView { id: string; actorId: string; action: AuditAction; target: { type: string; id: string }; details?: Record<string, unknown>; createdAt: Date }
+```
+`FakeAuditService` (`backend/test/fakes/audit.fake.ts`) `implements PublicApi<AuditService>`: don't add public methods to `AuditService` (the listener is a separate class). The HTTP response maps `id` → `_id` (step 4).
+
+**`AuditLogQueryDto` today** (`audit.types.ts`): `page`, `limit`, `action?` (enum), `from?` and `to?` as `Date` via `@Type(() => Date)` + `@IsDate()`, both inclusive. Problem: `to=2026-11-19` becomes `2026-11-19T00:00:00Z`, which **drops the rest of that day**, and JS turns `2026-02-30` into 2 March instead of rejecting it. Step 2 fixes both without changing the field names or types.
+
+**Existing code to reuse:**
+- `backend/src/common/dates/date-only.ts`: `toDateOnly('YYYY-MM-DD')` (strict: throws on `2026-02-30`), `addDays`.
+- `backend/src/common/pagination/paginate.ts`: `paginate(model, filter, { page, limit }, { sort })`.
+- Errors: `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Validation failed', details: [{ field, message }] })` (`backend/src/common/errors/error-codes.ts`).
+- Auth: `@Roles(Role.ADMIN)` is already on `AdminController` (class level), so the new route is admin-only.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages.
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files. Run the full `npm run verify` once, at the end (G1).
+
+**Merge note:** Mostafa's open admin PRs also edit `admin.controller.ts` and `admin.module.ts`. Keep your changes there small (one import, one constructor parameter, one route) so the later merge is easy.
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. `git worktree add ../man2o4ah-GEN-07 -b feature/GEN-07-audit-log origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/modules/audit` must pass. If the admin test "provides and exports AdminService from AdminModule" fails, PR #166 isn't merged yet: stop and report.
+
+## Step 1: the listener (append-only writes)
+
+New file `backend/src/modules/audit/audit.listener.ts`, class `AuditListener` (a provider of `AuditModule`, injects the `AuditLog` model, has a `Logger`).
+
+`@OnEvent(Events.AdminAction) async onAdminAction(payload: PayloadOf<typeof Events.AdminAction>): Promise<void>`:
+1. **Validate** (events come from our own code, but a bad one must not crash anything): `actorId` is a 24-hex ObjectId string; `action` is one of `Object.values(AuditAction)`; `target.type` and `target.id` are non-empty strings. Any failure → `logger.warn('Ignored an invalid admin.action event: <which field>')` and return. Never log `details`.
+2. **Sanitize `details`:** if it is a plain object, keep a shallow copy **without** any key matching `/pass(word)?|token|secret|hash/i`; if it isn't a plain object (array, string, null), store no `details`. If nothing is left, store no `details`.
+3. `await this.model.create({ actorId: new Types.ObjectId(actorId), action, target: { type, id }, details })` (omit `details` when there is none).
+4. Wrap 1–3 in `try/catch`; log `Failed to store an audit entry: <error message>`; never rethrow.
+
+No deduplication: an audit log is append-only and every emit is one admin action.
+
+Add `AuditListener` to `AuditModule` providers (keep `AuditService` exported).
+
+**Commit:** `feat(audit): store every admin action from the admin.action event (GEN-07)`
+
+## Step 2: the query DTO accepts calendar days
+
+In `audit.types.ts`, keep the names `from`/`to` and their type `Date`, but replace `@Type(() => Date)` on each with a `@Transform` (class-transformer) that:
+- for a string matching `/^\d{4}-\d{2}-\d{2}$/` (a calendar day): `from` → `toDateOnly(value)` (00:00:00.000Z of that day); `to` → `new Date(addDays(toDateOnly(value), 1).getTime() - 1)` (23:59:59.999Z of that day). If `toDateOnly` throws (`2026-02-30`), return `new Date(NaN)` so `@IsDate()` rejects it;
+- for any other string: `new Date(value)` (the current behaviour, ISO date-times);
+- anything else: unchanged.
+Keep `@IsOptional()` and `@IsDate()`. Update the `@ApiPropertyOptional` descriptions: "`YYYY-MM-DD` (that whole UTC day, inclusive) or an ISO date-time (inclusive)".
+
+Update `audit.types.spec.ts`: keep every existing test (they use date-times and still pass), and add: `from=2026-11-01` → `2026-11-01T00:00:00.000Z`; `to=2026-11-30` → `2026-11-30T23:59:59.999Z`; `from=2026-02-30` → error on `from`; `to=2026-13-01` → error on `to`.
+
+**Commit:** `feat(audit): accept calendar days in the audit date filter (GEN-07)`
+
+## Step 3: AuditService.list
+
+Implement in `audit.service.ts` (inject the `AuditLog` model; update the JSDoc, removing "Implemented in GEN-07"):
+1. If both `from` and `to` are set and `from > to` → 400 `VALIDATION_FAILED`, `details: [{ field: 'from', message: 'from must be on or before to' }]`.
+2. Filter: `action` if set; `createdAt: { $gte: from, $lte: to }` with only the bounds that are set.
+3. `paginate(model, filter, query, { sort: { createdAt: -1, _id: -1 } })` (the `_id` tie-break keeps pages stable when two entries share a millisecond).
+4. Map each document to `AuditLogView`: `id: _id.toString()`, `actorId: actorId.toString()`, `action`, `target: { type, id }`, `details` only when present, `createdAt`.
+
+Make `FakeAuditService.list` (`backend/test/fakes/audit.fake.ts`) throw the same 400 for `from > to`, and add that case to `test/fakes/audit.fake.spec.ts`, so the fake keeps matching the real service.
+
+**Commit:** `feat(audit): list audit entries newest first with filters (GEN-07)`
+
+## Step 4: the admin endpoint
+
+New `backend/src/modules/admin/dto/audit-log.response.dto.ts`: `AuditLogTargetDto { type; id }`, `AuditLogResponseDto { _id; actorId; action (enum: Object.values(AuditAction)); target; details? (type: 'object', additionalProperties: true); createdAt (date-time) }` with a `static fromView(view: AuditLogView): AuditLogResponseDto`, and `PaginatedAuditLogsResponseDto` (`items` + page fields).
+
+In `admin.module.ts` import `AuditModule`. In `admin.controller.ts` inject `AuditService` and add:
+```ts
+@Get('audit-logs')
+@ApiOperation({ summary: 'GEN-07 List admin actions (newest first, by action and date)' })
+@ApiOkResponse({ type: PaginatedAuditLogsResponseDto })
+@ApiBadRequestResponse({ description: 'Invalid action, date or pagination, or from after to' })
+// + the 401 / 403 responses the existing route documents
+async listAuditLogs(@Query() query: AuditLogQueryDto): Promise<Paginated<AuditLogResponseDto>> {
+  const page = await this.audit.list(query);
+  return { ...page, items: page.items.map((item) => AuditLogResponseDto.fromView(item)) };
+}
+```
+Nothing else in the admin module changes.
+
+**Commit:** `feat(admin): add the audit log endpoint (GEN-07)`
+
+## Step 5: tests
+
+Replace `backend/src/modules/audit/audit.service.spec.ts` (its only test asserts the stub throws; that behaviour is gone).
+
+**`audit.listener.spec.ts` (integration)** with `t = await createTestApp({ imports: [AuditModule] })`, `emitter = t.moduleRef.get(EventEmitter2)`, emit with `await emitter.emitAsync(Events.AdminAction, payload)`, `beforeEach(() => clearCollections(t.connection))`:
+- a valid event → exactly 1 document: `actorId` an ObjectId equal to the id, `action`, `target`, `createdAt` set, no `updatedAt`;
+- `details: { reason: 'spam', password: 'x', resetToken: 'y', passwordHash: 'z', note: 'ok' }` → stored `details` is `{ reason: 'spam', note: 'ok' }`;
+- `details: { password: 'x' }` → no `details` field; `details: ['a']` → no `details`;
+- invalid `actorId` (`'nope'`), unknown `action` (`'made_coffee'`), empty `target.id` → no document, and `emitAsync` resolves;
+- the same event emitted twice → 2 documents (append-only, no dedupe).
+
+**`audit.service.spec.ts` (integration)** with the same app. Insert entries with known times through `model.collection.insertMany([...])` (it bypasses Mongoose timestamps, so `createdAt` is exactly what you set; use `new Types.ObjectId()` for `_id` and `actorId`). Build queries with `plainToInstance(AuditLogQueryDto, {...})` so the transforms run.
+- newest first; two entries with the same `createdAt` come out in `_id` descending order;
+- `action` filter;
+- date-time bounds are inclusive: an entry exactly at `from` and one exactly at `to` are included; 1 ms outside each is excluded;
+- calendar days: `to=2026-11-19` includes `2026-11-19T23:59:59.999Z` and excludes `2026-11-20T00:00:00.000Z`; `from=2026-11-19` includes `2026-11-19T00:00:00.000Z` and excludes `2026-11-18T23:59:59.999Z`;
+- `from` after `to` → `BadRequestException` with `code: 'VALIDATION_FAILED'`;
+- 11 entries → page 1 has 10, page 2 has 1, `total` 11, `totalPages` 2; page 3 → `items: []`;
+- view mapping: `id` and `actorId` are 24-hex strings; no `details` key when the document has none.
+
+**`backend/src/modules/admin/admin.audit-logs.api.spec.ts` (API)** with `t = await createTestApp({ imports: [AdminModule] })`, logging in with `loginAs(t.connection, Role.X)` **after** each `clearCollections`:
+- no cookie → 401; `user`, `airline_moderator`, `hotel_moderator` → 403 each; `admin` → 200;
+- an entry inserted through the listener (emit `AdminAction`) appears with `_id` (24-hex), `actorId`, `action`, `target`, ISO `createdAt`, and no `id` field;
+- `?action=account_suspended` filters; `?from=2026-11-19&to=2026-11-19` returns only that day's entries;
+- 400 `VALIDATION_FAILED` for `?action=nope`, `?from=2026-02-30`, `?limit=51`, `?from=2026-11-20&to=2026-11-19`;
+- Swagger (`SwaggerModule.createDocument(t.app, new DocumentBuilder().build())`): `/api/admin/audit-logs` has a `get` whose summary contains `GEN-07`, tag `admin`, and `PaginatedAuditLogsResponseDto` in the schemas.
+
+**Commit:** `test(audit): cover the listener, the filters and the admin endpoint (GEN-07)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-07`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN07_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-07 prompt (GEN-07)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/audit src/modules/admin test/fakes/audit.fake.spec.ts` | 0 failed; at least 40 tests passed |
+| G3 | `git grep -n "implemented in GEN-07" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/audit/` (not `schemas/`), `backend/src/modules/admin/admin.controller.ts`, `backend/src/modules/admin/admin.module.ts`, `backend/src/modules/admin/dto/audit-log.response.dto.ts`, `backend/src/modules/admin/admin.audit-logs.api.spec.ts`, `backend/test/fakes/audit.fake.ts`, `backend/test/fakes/audit.fake.spec.ts`, `ai-prompts/kareem.txt` |
+| G5 | append-only: the command below the table | no output |
+| G6 | Negative gate: in the DTO, make the calendar-day `to` return `toDateOnly(value)` (start of day); run `npx vitest run src/modules/audit` | the calendar-day `to` tests fail; restore and they pass |
+| G7 | coverage line for `audit.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-07)` |
+| G9 | `git status --porcelain` | empty |
+
+G5, from the repository root:
+```bash
+git grep -nE "updateOne|updateMany|findOneAndUpdate|findByIdAndUpdate|replaceOne|deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete" -- backend/src/modules/audit ':!*.spec.ts'
+```
+
+## Constraints
+
+- Don't change the audit schema, `common/` (events included), other modules beyond the three admin files in G4, CI, the frontend or docs. No new packages. Don't emit any event outside tests.
+- Never weaken, skip or delete a test to pass a gate (the stub test in step 5 is replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Contract changes to flag in the PR: `AuditLogQueryDto` now accepts calendar days; `FakeAuditService` rejects `from > to`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Built the audit log on feature/GEN-07-audit-log: an admin.action listener (append-only, secrets stripped from details), calendar-day date filters, AuditService.list, GET /api/admin/audit-logs, and integration and API tests; commits: feat(audit) x3, feat(admin), test(audit), chore(ai).
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-07
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review points 1-4 on PR #170 (nested secret stripping and whole-word key matching in audit.listener.ts, ISO-only date bounds in audit.types.ts, id tie-break in test/fakes/audit.fake.ts) with tests committed first, pushed to feature/GEN-07-audit-log.
+================================================

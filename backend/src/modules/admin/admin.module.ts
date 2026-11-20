@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AccountsModule } from '../accounts/accounts.module.js';
+import { AuditModule } from '../audit/audit.module.js';
 import { FlightBookingsModule } from '../flight-bookings/flight-bookings.module.js';
 import { FlightsModule } from '../flights/flights.module.js';
 import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module.js';
@@ -11,6 +12,7 @@ import { AdminService } from './admin.service.js';
 @Module({
   imports: [
     AccountsModule,
+    AuditModule,
     FlightsModule,
     HotelsModule,
     FlightBookingsModule,

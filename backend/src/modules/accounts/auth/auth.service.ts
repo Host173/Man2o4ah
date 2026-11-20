@@ -449,7 +449,7 @@ export class AuthService {
 }
 
 /** The public view of an account; leaves out the hash and login counters. */
-function toMe(user: User & { _id: Types.ObjectId }): MeDto {
+export function toMe(user: User & { _id: Types.ObjectId }): MeDto {
   return {
     _id: user._id.toString(),
     name: user.name,

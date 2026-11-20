@@ -1098,6 +1098,13 @@ Implemented hotel details and free-room endpoints, shared stay validation and in
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+see the ticket of gen-01 and read its pr and comments on it and solve the problems and issues
+
+How the output was used:
+Read issue #19 and PR #168, merged origin/develop into isolated fix/GEN-01-review-issues, and added listener concurrency regressions plus an API read-state regression; reproduced duplicate notifications for all 10 events before changing production code.
 Related Requirement: ITN-28
 
 Prompt:
@@ -1158,6 +1165,13 @@ Prepared the separate BLG-13 schema prerequisite: optional post itinerary refere
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+Kareem approved these GEN-01 fixes
+
+How the output was used:
+With the notification owner's approval, fixed concurrent duplicate storage in backend/src/modules/notifications/notifications.service.ts and its listener/API regressions in an isolated worktree; restored two deleted separator lines in ai-prompts/kareem.txt without removing or changing any existing log line.
 Related Requirement: ITN-28
 
 Prompt:
@@ -1177,6 +1191,37 @@ Recorded cross-package approval for Pierre to prepare the blog schema prerequisi
 Date: 2026-11-19
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+Preserve existing behavior
+
+How the output was used:
+Preserved unread reschedule coalescing and account/provider state cycles without changing schemas or event contracts; 73 notification tests and npm run verify passed (130 files, 2006 tests, notifications.service.ts line coverage 98.08%); append-only and develop freshness checks passed locally, no push or PR edit.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+the ci still gives error
+
+How the output was used:
+Confirmed PR #168 still tested old commit 17cdd09 and its Prompt log entry failure was the two already-restored separators; checked the remote branch has no incoming commits and reran backend formatting, lint, typecheck and build successfully before preparing the authorized PR update.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+true
+
+How the output was used:
+Authorized publishing the verified local GEN-01 commits to the existing feature/GEN-01-app-notifications branch for PR #168, updating its validation evidence, and checking the new CI results; no force-push or PR merge.
 Related Requirement: ITN-28
 
 Prompt:

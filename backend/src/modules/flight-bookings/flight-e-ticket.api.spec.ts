@@ -25,6 +25,9 @@ const AIRLINE = '6553a1f0c2b4e8a9d0f1e201';
 const FLIGHT = '6553a1f0c2b4e8a9d0f1e202';
 const CABIN = '6553a1f0c2b4e8a9d0f1e203';
 
+/** Chromium starts slowly when the whole suite shares the CPU (cf. HOOK_TIMEOUT). */
+const PDF_TIMEOUT = 60_000;
+
 /** 08:00 UTC from Cairo (UTC+2 in March) to Dubai (UTC+4), landing 12:00 UTC. */
 function seedFlights(withTimeZones: boolean): FakeFlightsData {
   const data = new FakeFlightsData();
@@ -142,54 +145,70 @@ describe('GET /api/flight-bookings/:id/e-ticket (FLT-23)', () => {
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
-  it('downloads a PDF named after the reference for the owner', async () => {
-    await reseed();
-    const { id, ref } = await booking();
+  it(
+    'downloads a PDF named after the reference for the owner',
+    async () => {
+      await reseed();
+      const { id, ref } = await booking();
 
-    const res = await eTicket(id).expect(200);
+      const res = await eTicket(id).expect(200);
 
-    expect(res.headers['content-type']).toBe('application/pdf');
-    expect(res.headers['content-disposition']).toBe(
-      `attachment; filename="${ref}.pdf"`,
-    );
-    const bytes = res.body as Buffer;
-    expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="${ref}.pdf"`,
+      );
+      const bytes = res.body as Buffer;
+      expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
 
-    const text = await pdfText(bytes);
-    for (const expected of [
-      ref!,
-      'Aya Amr',
-      'MS100',
-      'Nile Air',
-      'CAI',
-      'DXB',
-    ]) {
-      expect(text).toContain(expected);
-    }
-  });
+      const text = await pdfText(bytes);
+      for (const expected of [
+        ref!,
+        'Aya Amr',
+        'MS100',
+        'Nile Air',
+        'CAI',
+        'DXB',
+      ]) {
+        expect(text).toContain(expected);
+      }
+    },
+    PDF_TIMEOUT,
+  );
 
   // GEN-06: flight times in each airport's local time zone.
-  it('shows each time in its airport’s local time zone', async () => {
-    await reseed(true);
-    const { id } = await booking();
+  it(
+    'shows each time in its airport’s local time zone',
+    async () => {
+      await reseed(true);
+      const { id } = await booking();
 
-    const text = await pdfText((await eTicket(id).expect(200)).body as Buffer);
+      const text = await pdfText(
+        (await eTicket(id).expect(200)).body as Buffer,
+      );
 
-    expect(text).toContain('10:00'); // 08:00 UTC in Cairo
-    expect(text).toContain('Africa/Cairo');
-    expect(text).toContain('16:00'); // 12:00 UTC in Dubai
-    expect(text).toContain('Asia/Dubai');
-  });
+      expect(text).toContain('10:00'); // 08:00 UTC in Cairo
+      expect(text).toContain('Africa/Cairo');
+      expect(text).toContain('16:00'); // 12:00 UTC in Dubai
+      expect(text).toContain('Asia/Dubai');
+    },
+    PDF_TIMEOUT,
+  );
 
-  it('shows UTC, labelled, when the airport’s zone is not available', async () => {
-    await reseed(false);
-    const { id } = await booking();
+  it(
+    'shows UTC, labelled, when the airport’s zone is not available',
+    async () => {
+      await reseed(false);
+      const { id } = await booking();
 
-    const text = await pdfText((await eTicket(id).expect(200)).body as Buffer);
+      const text = await pdfText(
+        (await eTicket(id).expect(200)).body as Buffer,
+      );
 
-    expect(text).toContain('08:00');
-    expect(text).toContain('UTC');
-  });
+      expect(text).toContain('08:00');
+      expect(text).toContain('UTC');
+    },
+    PDF_TIMEOUT,
+  );
 
   it('answers 404 NOT_FOUND for another user’s booking (ACC-11)', async () => {
     await reseed();

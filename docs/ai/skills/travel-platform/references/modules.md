@@ -41,7 +41,7 @@ Needs that cross packages: use a fake of the other side until it's merged (`test
 | payments | Stripe payments, webhook, refunds, policy acceptance | payments, refunds, policy_acceptances, stripe_webhook_events |
 | itineraries | Days, cities, activities, images, budgets, transport, sharing, cloning | itineraries |
 | fx | Daily exchange rates and conversion | exchange_rates |
-| blog | Posts, tags, images, comments, likes, author page | posts, comments, likes |
+| blog | Posts, tags, images, comments, likes, author page, deleted-post file cleanup | posts, comments, likes, post_image_cleanups |
 | moderation | Reports on posts, comments, reviews, itineraries | reports |
 | notifications | In-app notifications (listens to events) | notifications |
 | audit | Append-only admin action log (listens to events) | audit_logs |
@@ -130,6 +130,7 @@ Each job lives in the module that owns the data and only uses conditional update
 | Expire hotel holds (+ `RoomNightInventory.release`) | hotel-bookings | 30 s |
 | Complete stays (check-out date passed) | hotel-bookings | 1 h |
 | Refresh exchange rates | fx | daily |
+| Retry post image cleanup | blog | 30 s |
 
 ## 8. Where an endpoint lives
 

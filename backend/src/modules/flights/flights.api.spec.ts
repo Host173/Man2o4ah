@@ -1,4 +1,5 @@
 import { getModelToken } from '@nestjs/mongoose';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -314,6 +315,25 @@ describe('Flights HTTP API (FLT-03, FLT-06)', () => {
       .expect(409);
     expect(repeated.body.code).toBe(ErrorCode.InvalidStatusTransition);
     expect(events.payloadsOf(Events.FlightCancelled)).toHaveLength(1);
+  });
+
+  it('documents the cancellation ID as a string path parameter', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().build(),
+    );
+    const operation = document.paths['/api/flights/{id}/cancel']?.post;
+
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'id',
+          in: 'path',
+          required: true,
+          schema: expect.objectContaining({ type: 'string' }),
+        }),
+      ]),
+    );
   });
 
   it('requires authentication and the airline moderator role to cancel', async () => {

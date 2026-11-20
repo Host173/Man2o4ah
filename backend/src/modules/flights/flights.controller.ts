@@ -71,6 +71,7 @@ export class FlightsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @Roles(Role.AIRLINE_MODERATOR)
   @ApiOperation({ summary: 'FLT-06 Cancel a scheduled flight' })
+  @ApiParam({ name: 'id', type: String, description: 'Flight ObjectId' })
   @ApiNoContentResponse({ description: 'Flight cancelled' })
   @ApiBadRequestResponse({ description: 'Invalid flight ID' })
   @ApiConflictResponse({

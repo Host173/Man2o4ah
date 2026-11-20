@@ -90,6 +90,12 @@ export class FakeReferenceDataService implements PublicApi<ReferenceDataService>
     return Promise.resolve(byKey(this.data.airports, (a) => a.code, codes));
   }
 
+  getAirportsByCity(cityId: string): Promise<AirportView[]> {
+    return Promise.resolve(
+      this.data.airports.filter((airport) => airport.cityId === cityId),
+    );
+  }
+
   getCity(id: string): Promise<CityView | null> {
     return Promise.resolve(this.data.cities.find((c) => c.id === id) ?? null);
   }

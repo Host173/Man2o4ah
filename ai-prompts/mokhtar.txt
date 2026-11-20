@@ -1158,3 +1158,16 @@ I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #74: "
 How the output was used:
 Branched from origin/develop, added ItineraryHotelsQueryDto, ItinerariesService.getHotelsForCityGroup deriving dates from cityGroups and delegating to HotelsService.search, added the authenticated GET /api/itineraries/:id/hotels route and Swagger response, added FakeItinerariesService stub, and added service/API tests (401, 404, 400, empty page, Swagger) plus hotels-fake-backed date derivation. Fixed the service-spec constructor-arity and city-group index mistakes, added Hotel/Room/RoomNight mocks to the blog skeleton test, ran npm run format and npm run verify (2786 tests, all green).
 ================================================
+
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-26
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #75: "ITN-26: Flights from an itinerary" (Package 6 · Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-26-flights-itinerary from develop (ITN-05 and CTR-02 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (days, first-day city, ownerId scoping), the flights contract (FlightsService.search, SearchFlightsBase/OneWay/RoundTrip types, FakeFlightsService), reference data airports, and fakes. Implement GET /api/itineraries/:id/flights?origin&tripType that resolves the itinerary, validates no-days/missing-origin, derives destination from the first day's city via reference data, departure date from the start date, return date from the last day for round trips, searches flights via FlightsService, handles 401/400/404, documents Swagger, keeps FakeItinerariesService parity, and runs self-review, npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-26: Flights from an itinerary" referencing #75 with the Self-Review Report, and confirm CI green.
+
+How the output was used:
+Branched from origin/develop, added ItineraryFlightsQueryDto, ItinerariesService.getFlightsForItinerary deriving origin/destination/dates and delegating to FlightsService.search, added the authenticated GET /api/itineraries/:id/flights route, added FakeItinerariesService stub, added reference-data getAirportsByCity, and added service/API tests (401, 404, 400, one-way empty result, Swagger). Overrode FlightsService with FakeFlightsService in specs, ran npm run format and npm run verify (2786 tests, all green).
+================================================

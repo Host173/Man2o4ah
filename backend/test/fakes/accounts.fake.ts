@@ -105,7 +105,10 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
         ? [
             {
               id: account.id,
-              name: account.name,
+              name:
+                account.status === UserStatus.DEACTIVATED
+                  ? 'Deleted user'
+                  : account.name,
               status: account.status,
               createdAt: new Date(account.createdAt),
             },

@@ -31,15 +31,24 @@ import {
   PaginatedMyFlightBookingsResponseDto,
 } from './dto/my-flight-booking.response.dto.js';
 import { MyFlightBookingsQueryDto } from './dto/my-flight-bookings-query.dto.js';
+import { CancelFlightBookingDto } from './dto/flight-cancellation.dto.js';
+import {
+  CancelledFlightBookingResponseDto,
+  FlightRefundPreviewResponseDto,
+} from './dto/flight-cancellation.response.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import type {
+  CancelledFlightBooking,
   FlightHold,
   FlightQuote,
+  FlightRefundPreview,
   MyFlightBooking,
   MyFlightBookingSummary,
 } from './flight-bookings.types.js';
+import { FlightCancellationBodyPipe } from './flight-cancellation-body.pipe.js';
+import { FlightCancellationService } from './flight-cancellation.service.js';
 import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightQuoteService } from './flight-quote.service.js';
@@ -54,6 +63,7 @@ export class FlightBookingsController {
     private readonly holds: FlightHoldService,
     private readonly eTickets: FlightETicket,
     private readonly mine: MyFlightBookingsService,
+    private readonly cancellations: FlightCancellationService,
   ) {}
 
   /** A quote saves nothing, so it answers 200, not 201. */
@@ -164,5 +174,61 @@ export class FlightBookingsController {
       type: 'application/pdf',
       disposition: `attachment; filename="${ticket.filename}"`,
     });
+  }
+
+  /** The owner's confirmed booking before the outbound flight departs; anyone else's answers 404 (ACC-11). */
+  @Get(':id/refund-preview')
+  @Roles(Role.USER)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-26 Preview the refund for cancelling my flight booking',
+    description:
+      'Uses the booking’s snapshot of the airline’s cancellation tiers and the full days until the outbound departure. Nothing is changed.',
+  })
+  @ApiOkResponse({ type: FlightRefundPreviewResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
+  })
+  refundPreview(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightRefundPreview> {
+    return this.cancellations.refundPreview(id, user.id);
+  }
+
+  /** Cancels the whole booking; the body is an empty object that confirms it. */
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'FLT-26 Cancel my confirmed flight booking before departure',
+    description:
+      'After viewing the refund preview, confirm with an empty body. The refund is recalculated at this moment. The status change and the seats returning to inventory happen in one transaction; a positive refund is then requested (PAY-03) and the user is notified.',
+  })
+  @ApiOkResponse({ type: CancelledFlightBookingResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: the body is not an empty object',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
+  })
+  cancel(
+    @Param('id') id: string,
+    @Body(FlightCancellationBodyPipe) _body: CancelFlightBookingDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CancelledFlightBooking> {
+    return this.cancellations.cancel(id, user.id);
   }
 }

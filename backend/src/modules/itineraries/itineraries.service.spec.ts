@@ -1535,15 +1535,13 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         owner.id,
       );
 
-      const spy = vi
-        .spyOn(fakeFlights, 'search')
-        .mockResolvedValue({
-          items: [],
-          page: 1,
-          limit: 10,
-          total: 0,
-          totalPages: 0,
-        });
+      const spy = vi.spyOn(fakeFlights, 'search').mockResolvedValue({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
 
       const result = await itineraries.getFlightsForItinerary(
         created._id,
@@ -1578,12 +1576,10 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         owner.id,
       );
 
-      const spy = vi
-        .spyOn(fakeFlights, 'search')
-        .mockResolvedValue({
-          outbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
-          inbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
-        });
+      const spy = vi.spyOn(fakeFlights, 'search').mockResolvedValue({
+        outbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+        inbound: { items: [], page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
 
       await itineraries.getFlightsForItinerary(
         created._id,

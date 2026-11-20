@@ -3,7 +3,7 @@
 Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
 If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
 
-Last updated: 2026-11-17 (booking rules per module; open items)
+Last updated: 2026-11-20 (durable blog image cleanup)
 
 ---
 
@@ -27,7 +27,7 @@ Last updated: 2026-11-17 (booking rules per module; open items)
 | payments | Stripe payments, refunds, policy acceptance for both booking types | payments, refunds, policy acceptances, stripe webhook events |
 | itineraries | Trip planning and budgeting | itineraries (with days, activities, budgets, transport costs) |
 | fx | FXRatesAPI integration and rate caching | cached exchange rates |
-| blog | Community content | posts (with tags), comments, likes |
+| blog | Community content | posts (with tags), comments, likes, post_image_cleanups |
 | moderation | Reports on any content type | reports |
 | notifications | In-app notifications, triggered by events | notifications |
 | audit | Logs of important admin and moderation actions, triggered by events | audit logs |
@@ -45,6 +45,7 @@ Infrastructure (not domain modules):
 - **No populate across modules.** Mongoose populate only within a module.
 - **Inventory belongs to the provider modules:** seats to flights, room-nights to hotels. Booking modules call their services (e.g. `holdSeats`, `reserveNights`).
 - **Background jobs live in the module that owns the data:** hold expiry and completion in flight-bookings and hotel-bookings (they own the pending bookings), marking flights departed in flights, rate refresh in fx. No separate jobs module.
+- **Blog image cleanup (BLG-10, 20 Nov):** post deletion transactionally retains image keys in blog-owned `post_image_cleanups`. Files are deleted after commit; failures are logged and retried every 30 seconds, including after restarts, while the committed deletion returns 204. Kareem and Mostafa's approval of this model/job change and its inclusion in PR #173 was confirmed by the requester.
 - **A hold is a pending booking.** There is no separate holds collection; the inventory counters/nights live in the provider modules.
 - **Modules talk through services, ports and events.** Lower modules never import higher ones; when they must, the lower module owns an interface (port) or emits an event. The allowed imports, ports and events are listed in `data-model.md` §6.
 - **Booking rules are implemented in each booking module.** The GEN-11 lifecycle (allowed status moves) and the FLT-09/HTL-10 refund tiers are needed by both flight-bookings and hotel-bookings. Each module has its own copy, with its own tests; neither imports the other, and they don't go in `common/` (no business logic there). The two copies must follow the same rule (HTL-10 uses FLT-09's selection rule); only the start date differs (flight: outbound departure; hotel: check-in at 00:00 UTC). Why: each module owns all of its logic, there's no coupling between the booking modules, and one owner (Bookings) keeps both copies in step. Decided 17 Nov (PR #130).

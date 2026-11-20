@@ -1227,6 +1227,13 @@ Split schema preparation from feature implementation as requested; documented th
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+and read also the last comment on the pr
+
+How the output was used:
+Read the latest comment on PR #173 and distinguished its reported cleanup bug from the current pinned merge conflict.
 Related Requirement: ACC-06
 
 Prompt:
@@ -1240,6 +1247,13 @@ Added test-first session-deadline and idempotent-logout fixes for PR #138, synch
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+ok fix all these and push then comment on the pr
+
+How the output was used:
+Merged pinned develop preserving both author-log histories (b1bc81c), committed failing cleanup regressions (0a97f9c), implemented transactional cleanup records and a retry job with model/diagram/index documentation, and passed backend verify (2049 tests) and production audit (0 vulnerabilities).
 Related Requirement: ACC-06
 
 Prompt:
@@ -1253,6 +1267,13 @@ Explained ticket #27 and requested approval for the frozen session-schema change
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+Kareem and Mostafa approve this approach and including it in #173
+
+How the output was used:
+Implemented the requester-approved blog-owned durable cleanup collection and scheduled job in PR #173, including the matching data-model, diagrams and index tests.
 Related Requirement: ACC-06
 
 Prompt:

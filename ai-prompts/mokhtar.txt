@@ -560,3 +560,17 @@ List only real problems (bugs, broken rules, missing required tests), most impor
 
 How the output was used:
 Switched to the existing `feature/ITN-10-activities` branch (PR #163), fetched and merged `origin/develop` without rebasing; resolved the only conflict in `backend/test/fakes/itineraries.fake.ts` by keeping all develop methods and replacing the ITN-10 stub with working add/edit/delete methods at contract parity. Diagnosed CI: Backend failed at Prettier `format:check` on the service and fake; `ci-ok` failed only because Backend failed. Fixed DTOs, service (atomic `$map`/`$concatArrays` writes, `$literal`, currency validation, minor units), added the three ITN-10 endpoints with Swagger, API/fake tests, removed committed verify-output artifacts, ran `npm run format` and `npm run verify` (2047 tests green; itineraries.service.ts 95.24% lines), ran review probes, and will commit, push to the existing branch and edit PR #163.
+
+================================================
+Date: 2026-11-20
+Student: Kareem (prompting on Mokhtar's PR #163)
+Tool: Claude Code
+Related Requirement: ITN-10
+
+Prompt:
+solve https://github.com/Host173/Man2o4ah/pull/163 problem ig it's just a format problem, and make sure to do lint also ,
+#163 still have a proplem with the pr naming or the prompt log i g
+
+How the output was used:
+On feature/ITN-10-activities: merged develop (resolved the conflict in backend/test/fakes/itineraries.fake.ts keeping both sides), ran npm run format, lint and typecheck, removed an unused import and prefixed unused fake stub params with underscores; the Prompt log entry check then failed because the branch had no new entry in ai-prompts/mokhtar.txt, so this entry was appended.
+================================================

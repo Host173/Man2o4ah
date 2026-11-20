@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { Types } from 'mongoose';
 import type { Connection } from 'mongoose';
+import { getSessionMaxAgeMs } from '../../src/modules/accounts/auth/auth.constants.js';
 import {
   Session,
   SessionSchema,
@@ -84,6 +85,7 @@ export async function loginAs(
       .update(randomBytes(48))
       .digest('hex'),
     lastActivityAt: new Date(now),
+    absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(role)),
     expiresAt: new Date(
       options.sessionExpired
         ? now - MINUTE_MS

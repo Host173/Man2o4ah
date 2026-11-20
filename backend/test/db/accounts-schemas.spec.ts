@@ -31,6 +31,7 @@ function sessionDoc(overrides: Record<string, unknown> = {}) {
     refreshTokenHash: 'a'.repeat(64),
     lastActivityAt: now,
     expiresAt: new Date(now.getTime() + 30 * 60_000),
+    absoluteExpiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60_000),
     ...overrides,
   };
 }
@@ -267,6 +268,7 @@ describe('accounts schemas', () => {
         'refreshTokenHash',
         'lastActivityAt',
         'expiresAt',
+        'absoluteExpiresAt',
       ]) {
         await expect(
           new sessions(sessionDoc({ [field]: undefined })).validate(),

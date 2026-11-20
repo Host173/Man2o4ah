@@ -16,9 +16,13 @@ export class Session {
   @Prop({ type: Date, required: true })
   lastActivityAt!: Date;
 
-  /** lastActivityAt + 30 min (set by the service). TTL-deleted once passed. */
+  /** min(lastActivityAt + 30 min, absoluteExpiresAt). TTL-deleted once passed. */
   @Prop({ type: Date, required: true })
   expiresAt!: Date;
+
+  /** Login + 8 hours for admins, 7 days for other roles (ACC-06, #27). */
+  @Prop({ type: Date, required: true, immutable: true })
+  absoluteExpiresAt!: Date;
 }
 
 export type SessionDocument = HydratedDocument<Session>;

@@ -8,11 +8,13 @@
   "type": "module",
   "scripts": {
     "build": "nest build",
+    "postinstall": "playwright install chromium",
     "deploy": "nest deploy",
     "format": "prettier --ignore-path ../.prettierignore --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --ignore-path ../.prettierignore --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "dev:stripe": "node scripts/dev-stripe.mjs",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "oxlint --type-aware src/ test/",
@@ -45,7 +47,8 @@
     "mongoose": "^9.12.1",
     "playwright": "^1.65.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "stripe": "23.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",

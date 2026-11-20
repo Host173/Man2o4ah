@@ -8,7 +8,12 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { PASSWORD_RULE, PASSWORD_RULE_MESSAGE } from '../auth/password-rule.js';
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE,
+  PASSWORD_RULE_MESSAGE,
+} from '../auth/password-rule.js';
 
 /** Trims strings and leaves anything else for the validators to reject. */
 const trim = ({ value }: { value: unknown }) =>
@@ -39,8 +44,9 @@ export class RegisterDto {
   @ApiProperty({
     example: 'travel2026',
     description:
-      'At least 8 characters, including at least one letter and one digit.',
-    minLength: 8,
+      '8 to 72 characters, including at least one letter and one digit.',
+    minLength: PASSWORD_MIN_LENGTH,
+    maxLength: PASSWORD_MAX_LENGTH,
   })
   @IsString()
   @Matches(PASSWORD_RULE, { message: PASSWORD_RULE_MESSAGE })

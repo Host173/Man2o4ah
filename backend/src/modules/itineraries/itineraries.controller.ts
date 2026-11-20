@@ -16,6 +16,7 @@ import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -150,6 +151,10 @@ export class ItinerariesController {
   @ApiOperation({ summary: 'ITN-01 Delete my itinerary' })
   @ApiParam({ name: 'id', type: String })
   @ApiNoContentResponse({ description: 'Itinerary deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: days changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary not found or owned by another user',
@@ -171,6 +176,10 @@ export class ItinerariesController {
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'dayId', type: String })
   @ApiNoContentResponse({ description: 'Day deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: day changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary or day ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary or day not found, or owned by another user',

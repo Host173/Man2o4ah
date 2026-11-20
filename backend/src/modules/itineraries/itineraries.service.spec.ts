@@ -425,7 +425,13 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
               description: 'Guided tour',
               time: '09:30',
               cost: { amountMinor: 2000, currency: 'EGP' },
-              images: [{ _id: imageId.toHexString(), key: 'pyramids.jpg' }],
+              images: [
+                {
+                  _id: imageId.toHexString(),
+                  key: 'pyramids.jpg',
+                  url: '/uploads/pyramids.jpg',
+                },
+              ],
               attractionId: 'att-1',
             },
           ],

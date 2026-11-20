@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
@@ -187,7 +192,12 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
 
   async delete(itineraryId: string, userId: string): Promise<void> {
     const itinerary = this.findOwned(itineraryId, userId);
-    await this.deleteImageFiles(this.imageKeysOf(itinerary.days));
+    const days = structuredClone(itinerary.days);
+    await this.deleteImageFiles(this.imageKeysOf(days));
+    const current = this.findOwned(itineraryId, userId);
+    if (!isDeepStrictEqual(current.days, days)) {
+      throw this.imageCleanupConflict();
+    }
     this.owned.delete(itineraryId);
   }
 
@@ -318,15 +328,31 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       found.itinerary.days[found.dayIndex].activities[found.activityIndex]
         .images;
     if (images.length >= MAX_IMAGES_PER_ITEM) {
-      throw new BadRequestException({
-        code: ErrorCode.LimitExceeded,
-        message: `An activity can have at most ${MAX_IMAGES_PER_ITEM} images`,
-      });
+      throw this.imageLimitExceeded();
     }
     const stored = await this.storage.save(file);
-    images.push({ _id: stored._id.toHexString(), key: stored.key });
-    found.itinerary.updatedAt = new Date();
-    return structuredClone(this.toDetail(found.itinerary).days[found.dayIndex]);
+    try {
+      const current = this.findActivity(activityId, userId);
+      const activity =
+        current.itinerary.days[current.dayIndex].activities[
+          current.activityIndex
+        ];
+      if (activity.images.length >= MAX_IMAGES_PER_ITEM) {
+        throw this.imageLimitExceeded();
+      }
+      activity.images.push({
+        _id: stored._id.toHexString(),
+        key: stored.key,
+        url: this.storage.urlOf(stored.key),
+      });
+      current.itinerary.updatedAt = new Date();
+      return structuredClone(
+        this.toDetail(current.itinerary).days[current.dayIndex],
+      );
+    } catch (error) {
+      await this.storage.delete(stored.key);
+      throw error;
+    }
   }
 
   /** ITN-12/GEN-08: removes one image from the owner's activity. */
@@ -378,6 +404,20 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     });
   }
 
+  private imageLimitExceeded(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.LimitExceeded,
+      message: `An activity can have at most ${MAX_IMAGES_PER_ITEM} images`,
+    });
+  }
+
+  private imageCleanupConflict(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.ConcurrentChange,
+      message: 'Itinerary changed during image cleanup. Please retry deletion.',
+    });
+  }
+
   private imageKeysOf(
     days: readonly { activities: ActivityView[] }[],
   ): string[] {
@@ -405,10 +445,17 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
         message: 'Itinerary day not found',
       });
     }
-    await this.deleteImageFiles(this.imageKeysOf([itinerary.days[index]]));
+    const removed = structuredClone(itinerary.days[index]);
+    await this.deleteImageFiles(this.imageKeysOf([removed]));
+    const current = this.findOwned(itineraryId, userId);
+    const currentIndex = current.days.findIndex((day) => day._id === dayId);
+    if (currentIndex === -1) throw this.activityNotFound();
+    if (!isDeepStrictEqual(current.days[currentIndex], removed)) {
+      throw this.imageCleanupConflict();
+    }
     // The day's activities and budget entries are embedded in it; transport
     // costs live in a separate array and must be filtered (ITN-07).
-    itinerary.days.splice(index, 1);
+    itinerary.days.splice(currentIndex, 1);
     itinerary.transportCosts = withoutTransportCostsOf(
       itinerary.transportCosts,
       dayId,

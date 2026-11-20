@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -182,19 +183,33 @@ export class ItinerariesService {
 
   /**
    * ITN-01/12: deletes the owner's itinerary and the files of every activity
-   * image it contained (data-model.md §3.8). The document goes first so a
-   * storage failure cannot leave references to a deleted itinerary; files are
-   * then removed idempotently.
+   * image it contained (data-model.md §3.8). References remain retryable until
+   * storage cleanup succeeds. A concurrent day change returns 409 rather than
+   * deleting files that were not in the cleanup snapshot.
    */
   async delete(itineraryId: string, userId: string): Promise<void> {
     const id = this.parseId(itineraryId, 'itineraryId');
     const ownerId = this.parseId(userId, 'userId');
-    const deleted = await this.itineraryModel
-      .findOneAndDelete({ _id: id, ownerId })
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
       .lean()
       .exec();
-    if (!deleted) throw this.notFound();
-    await this.deleteImageFiles(this.imageKeysOf(deleted.days ?? []));
+    if (!itinerary) throw this.notFound();
+    await this.deleteImageFiles(this.imageKeysOf(itinerary.days ?? []));
+    const deleted = await this.itineraryModel
+      .findOneAndDelete({
+        _id: id,
+        ownerId,
+        $expr: { $eq: ['$days', { $literal: itinerary.days }] },
+      })
+      .lean()
+      .exec();
+    if (!deleted) {
+      if (!(await this.itineraryModel.exists({ _id: id, ownerId }).exec())) {
+        throw this.notFound();
+      }
+      throw this.imageCleanupConflict();
+    }
   }
 
   /**
@@ -571,6 +586,13 @@ export class ItinerariesService {
     });
   }
 
+  private imageCleanupConflict(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.ConcurrentChange,
+      message: 'Itinerary changed during image cleanup. Please retry deletion.',
+    });
+  }
+
   private activityNotFound(): NotFoundException {
     return new NotFoundException({
       code: ErrorCode.NotFound,
@@ -638,6 +660,7 @@ export class ItinerariesService {
 
     const itinerary = await this.itineraryModel
       .findOne({ _id: id, ownerId })
+      .lean()
       .exec();
     if (!itinerary) throw this.notFound();
 
@@ -646,12 +669,28 @@ export class ItinerariesService {
     const removed = days.find((day) => day._id.toHexString() === target);
     if (!removed) throw this.notFound();
     const imageKeys = this.imageKeysOf([removed]);
+    await this.deleteImageFiles(imageKeys);
     // The schema checks that every transportCosts.dayId is one of `days`, so
     // both arrays must be rewritten in the same update. The pipeline re-reads
-    // them at write time: an add/edit landing at the same time is preserved.
+    // them at write time: an overlapping add/edit to another day is preserved.
     const updated = await this.itineraryModel
       .findOneAndUpdate(
-        { _id: id, ownerId, 'days._id': targetDayId },
+        {
+          _id: id,
+          ownerId,
+          $expr: {
+            $eq: [
+              {
+                $filter: {
+                  input: '$days',
+                  as: 'day',
+                  cond: { $eq: ['$$day._id', targetDayId] },
+                },
+              },
+              { $literal: [removed] },
+            ],
+          },
+        },
         [
           {
             $set: {
@@ -681,8 +720,13 @@ export class ItinerariesService {
       )
       .lean()
       .exec();
-    if (!updated) throw this.notFound();
-    await this.deleteImageFiles(imageKeys);
+    if (!updated) {
+      const exists = await this.itineraryModel
+        .exists({ _id: id, ownerId, 'days._id': targetDayId })
+        .exec();
+      if (!exists) throw this.notFound();
+      throw this.imageCleanupConflict();
+    }
   }
 
   /**
@@ -1015,6 +1059,7 @@ export class ItinerariesService {
       images: (activity.images ?? []).map((image) => ({
         _id: image._id.toHexString(),
         key: image.key,
+        url: this.storage.urlOf(image.key),
       })),
       ...(activity.attractionId !== undefined
         ? { attractionId: activity.attractionId }

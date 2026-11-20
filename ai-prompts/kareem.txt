@@ -3246,3 +3246,81 @@ Related Requirement: GEN-01
 Historical attribution correction:
 The GEN-01 implementation and review-fix prompt blocks interleaved with ITN-18 records earlier in this merged log belong to in-app notification listeners and endpoints, not ITN-18. Their complete, separately attributed original records were reconstructed in commit 50a5518. After PR #168 merged, its historical content is retained verbatim for append-only integrity; this note corrects the attribution without changing an existing line.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile validation boundary tests and aligned the DTO with the frozen UTF-16 schema limit; integrated develop and concurrent PR updates, verified 2412 tests, and pushed 4addb1a before discovering that PR #140 had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Preserved the frozen schema and ModuleRef lookup, clarified Swagger, and merged develop without losing incoming changes or prompt-log content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+Attempted gh pr reopen 140; GitHub rejected reopening because the PR was already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created fix/ACC-09-profile-followup-d103853d from the merged develop head and cherry-picked the reproducing test commit before the validation fix.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Appended these request and approval entries to ai-prompts/kareem.txt without changing its existing content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Attribution correction: the preceding five ACC-09 entries were recorded as Kareem because the assistant incorrectly assumed the GitHub account was Host173. The actual PR #192 author is pierreofficial (Pierre); correctly attributed request entries are appended to ai-prompts/pierre.txt, and the earlier kareem.txt entries remain unchanged.
+================================================

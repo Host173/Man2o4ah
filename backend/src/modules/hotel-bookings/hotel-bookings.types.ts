@@ -1,4 +1,27 @@
 import type { HotelReservationStatus } from './schemas/hotel-reservation.schema.js';
+import type { RefundView } from '../payments/payments.types.js';
+
+/** HTL-21: the snapshot tiers applied to the whole reservation total. */
+export interface HotelRefundPreview {
+  percent: number;
+  amountMinor: number;
+  currency: string;
+}
+
+/** HTL-21: a whole-reservation cancellation; PAY-03 supplies the refund status. */
+export interface CancelledHotelReservation {
+  _id: string;
+  reference: string;
+  status: 'cancelled';
+  cancellation: {
+    cancelledAt: Date;
+    cancelledBy: 'user';
+    refundPercent: number;
+    refundAmountMinor: number;
+  };
+  /** Null when no positive refund is due. A recorded gateway failure is `failed`. */
+  refund: RefundView | null;
+}
 
 /**
  * Internal service input for the admin booking list (ACC-17), not an HTTP DTO.

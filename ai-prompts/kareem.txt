@@ -2292,3 +2292,42 @@ ok test the real strip service
 How the output was used:
 Ran a throwaway live check (deleted afterwards) of the real StripeApiGateway against Stripe test mode with stripe listen; no code changed.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+did you run the review prompt, on the real stripe  ?,
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok do it, and as extra thing i want them to be installed when ever anyone use npm ci after pulling
+
+How the output was used:
+Installed the Playwright Chromium browser; added a postinstall script to backend/package.json (commit 4af7edc); ran the self-review checks and 8 throwaway probes (deleted afterwards).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+and report this in the same pr as extras
+
+How the output was used:
+Answer only: the postinstall change stays on this branch and is listed as an extra in the report.
+================================================

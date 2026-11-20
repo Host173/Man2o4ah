@@ -387,6 +387,18 @@ describe('FakeFlightsService', () => {
       expect((await flights.getAirline('a1'))!.name).toBe('EgyptAir');
     });
 
+    it('returns baggage and cancellation policy fields using the airline contract view', async () => {
+      const { flights } = setup();
+
+      expect(await flights.getAirline('a2')).toMatchObject({
+        baggagePolicy: {
+          extraBagPriceMinor: 5000,
+          maxExtraBagsPerPassenger: 2,
+        },
+        cancellationTiers: [{ daysBefore: 7, refundPercent: 100 }],
+      });
+    });
+
     it('setAirlineActive switches the flag, returns the airline and can repeat', async () => {
       const { flights } = setup();
       expect(await flights.setAirlineActive('a1', false)).toMatchObject({

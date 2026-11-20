@@ -336,7 +336,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
 
 ### 1. Fix `notes: null` and Pipeline Spread
 * **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
@@ -373,7 +373,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received the latest code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received the latest code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
 Align `FakeItinerariesService` behavior completely with the real service:
@@ -386,7 +386,7 @@ Align `FakeItinerariesService` behavior completely with the real service:
 * **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
 
 ### 3. Git Workflow Reminder (Red Test Commit Rule)
-* Note the reviewer's tip: *ï¿½push the red test as its own commit first next timeï¿½*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+* Note the reviewer's tip: *“push the red test as its own commit first next time”*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
 
 ### 4. Format, Verify, and Push to Update PR #154
 1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
@@ -403,7 +403,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Validation Order Fix in `itineraries.fake.ts`
 * **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
@@ -486,28 +486,6 @@ solve https://github.com/Host173/Man2o4ah/pull/163 problem ig it's just a format
 
 How the output was used:
 On feature/ITN-10-activities: merged develop (resolved the conflict in backend/test/fakes/itineraries.fake.ts keeping both sides), ran npm run format, lint and typecheck, removed an unused import and prefixed unused fake stub params with underscores; the Prompt log entry check then failed because the branch had no new entry in ai-prompts/mokhtar.txt, so this entry was appended.
-================================================
-Date: 2026-11-20
-Student: Mokhtar (owner-approved work via Pierre)
-Tool: Copilot SDK in VS Code
-Related Requirement: ITN-16
-
-Prompt:
-implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
-
-How the output was used:
-Implemented transport-cost CRUD, validated DTOs, shared reference validation, API tests and itinerary fake contract tests; full backend verification passed with VITEST_MAX_WORKERS=2.
-================================================
-Date: 2026-11-20
-Student: Mokhtar (owner-approved work via Pierre)
-Tool: Copilot SDK in VS Code
-Related Requirement: ITN-16
-
-Prompt:
-Approved; proceed as Mokhtar and use mokhtar.txt
-
-How the output was used:
-Authorized itinerary-package changes and the Mokhtar prompt log; GitHub publishing uses the authenticated pierreofficial account, whose log is also appended for CI.
 ================================================
 ================================================
 Date: 2026-11-20

@@ -14,6 +14,7 @@ import { AuthService, hashRefreshToken } from './auth.service.js';
 const MINUTE = 60_000;
 const IDLE = 30 * MINUTE;
 const WEEK = 7 * 24 * 60 * MINUTE;
+const SHIFT = 8 * 60 * MINUTE;
 const T0 = new Date('2026-11-20T10:00:00.000Z').getTime();
 
 /** The error code a rejected promise carries. */
@@ -53,12 +54,15 @@ describe('AuthService refresh and logout (integration, ACC-06, ACC-19)', () => {
 
   afterEach(() => vi.useRealTimers());
 
-  async function loginAt(email = 'aisha@example.com') {
+  async function loginAt(
+    email = 'aisha@example.com',
+    role: UserRole = UserRole.USER,
+  ) {
     await users.create({
       name: 'Aisha',
       email,
       passwordHash: await bcrypt.hash('abcdefg1', 4),
-      role: UserRole.USER,
+      role,
     });
     return auth.login({ email, password: 'abcdefg1' });
   }
@@ -101,7 +105,7 @@ describe('AuthService refresh and logout (integration, ACC-06, ACC-19)', () => {
     });
   });
 
-  describe('refresh: 7-day absolute lifetime (auth.md §2)', () => {
+  describe('refresh: absolute lifetimes (auth.md §2)', () => {
     /** Keeps the idle window open so only the absolute limit is tested. */
     const keepIdleWindowOpen = (at: number) =>
       sessions.updateMany({}, { $set: { expiresAt: new Date(at + IDLE) } });
@@ -120,6 +124,85 @@ describe('AuthService refresh and logout (integration, ACC-06, ACC-19)', () => {
       expect(await codeOf(auth.refresh(refreshToken))).toBe(
         ErrorCode.SessionExpired,
       );
+    });
+
+    describe('absolute lifetime fixed at login (ACC-06, #27)', () => {
+      it.each([
+        [UserRole.ADMIN, SHIFT],
+        [UserRole.USER, WEEK],
+      ])('stores the %s deadline at login', async (role, lifetime) => {
+        await loginAt(undefined, role);
+
+        expect(await sessions.findOne().lean()).toMatchObject({
+          absoluteExpiresAt: new Date(T0 + lifetime),
+        });
+      });
+
+      it.each([
+        [SHIFT - 1, true],
+        [SHIFT, false],
+        [SHIFT + 1, false],
+      ])('admin refresh at %i ms has success=%s', async (age, succeeds) => {
+        const { refreshToken } = await loginAt(undefined, UserRole.ADMIN);
+        vi.setSystemTime(T0 + age);
+        await sessions.updateMany(
+          {},
+          { $set: { expiresAt: new Date(T0 + age + IDLE) } },
+        );
+
+        if (succeeds) {
+          await expect(auth.refresh(refreshToken)).resolves.toEqual(
+            expect.any(String),
+          );
+          expect(await sessions.findOne().lean()).toMatchObject({
+            absoluteExpiresAt: new Date(T0 + SHIFT),
+            expiresAt: new Date(T0 + SHIFT),
+          });
+        } else {
+          expect(await codeOf(auth.refresh(refreshToken))).toBe(
+            ErrorCode.SessionExpired,
+          );
+        }
+      });
+
+      it('a regular user can still refresh after eight hours', async () => {
+        const { refreshToken } = await loginAt();
+        vi.setSystemTime(T0 + SHIFT + MINUTE);
+        await sessions.updateMany(
+          {},
+          { $set: { expiresAt: new Date(T0 + SHIFT + MINUTE + IDLE) } },
+        );
+
+        await expect(auth.refresh(refreshToken)).resolves.toEqual(
+          expect.any(String),
+        );
+      });
+
+      it('changing an admin role does not extend an existing session deadline', async () => {
+        const { refreshToken } = await loginAt(undefined, UserRole.ADMIN);
+        await users.updateOne({}, { $set: { role: UserRole.USER } });
+        vi.setSystemTime(T0 + SHIFT);
+        await sessions.updateMany(
+          {},
+          { $set: { expiresAt: new Date(T0 + SHIFT + IDLE) } },
+        );
+
+        expect(await codeOf(auth.refresh(refreshToken))).toBe(
+          ErrorCode.SessionExpired,
+        );
+      });
+
+      it('requires a new login for a legacy session without an absolute deadline', async () => {
+        const { refreshToken } = await loginAt();
+        await sessions.collection.updateOne(
+          {},
+          { $unset: { absoluteExpiresAt: '' } },
+        );
+
+        expect(await codeOf(auth.refresh(refreshToken))).toBe(
+          ErrorCode.SessionExpired,
+        );
+      });
     });
 
     it('cannot be stretched past 7 days by refreshing every 29 minutes', async () => {

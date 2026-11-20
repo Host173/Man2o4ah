@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
+import { loginAs } from '../../../../test/support/auth.js';
 import { clearCollections } from '../../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../../test/support/test-app.js';
@@ -52,12 +53,12 @@ describe('POST /api/auth/logout and /api/auth/refresh (API, ACC-06, ACC-19)', ()
   beforeEach(() => clearCollections(t.connection));
 
   /** Logs in through the real endpoint; returns both cookie pairs. */
-  async function login() {
+  async function login(role: UserRole = UserRole.USER) {
     await users.create({
       name: 'Aisha',
       email: EMAIL,
       passwordHash: await bcrypt.hash(PASSWORD, 4),
-      role: UserRole.USER,
+      role,
     });
     const res = await t
       .http()
@@ -107,9 +108,62 @@ describe('POST /api/auth/logout and /api/auth/refresh (API, ACC-06, ACC-19)', ()
       expectError(refresh, 401, ErrorCode.SessionExpired);
     });
 
-    it('401 NOT_AUTHENTICATED without a cookie', async () => {
+    it('204 and both cookies cleared without a cookie', async () => {
       const res = await t.http().post('/api/auth/logout');
-      expectError(res, 401, ErrorCode.NotAuthenticated);
+      expect(res.status).toBe(204);
+      const cookies = setCookies(res.headers);
+      expectCleared(cookies.get('access_token'), 'access_token');
+      expectCleared(cookies.get('refresh_token'), 'refresh_token');
+    });
+
+    it('revokes the live session when only the refresh cookie remains', async () => {
+      const c = await login();
+      const res = await t
+        .http()
+        .post('/api/auth/logout')
+        .set('Cookie', c.refresh)
+        .expect(204);
+
+      expect(await sessions.countDocuments()).toBe(0);
+      const cookies = setCookies(res.headers);
+      expectCleared(cookies.get('access_token'), 'access_token');
+      expectCleared(cookies.get('refresh_token'), 'refresh_token');
+      const refresh = await t
+        .http()
+        .post('/api/auth/refresh')
+        .set('Cookie', c.refresh);
+      expectError(refresh, 401, ErrorCode.SessionExpired);
+    });
+
+    it('accepts an access-only session without revoking another session', async () => {
+      const u = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+
+      await t
+        .http()
+        .post('/api/auth/logout')
+        .set('Cookie', u.cookie)
+        .expect(204);
+
+      expect(await sessions.findById(u.sid)).toBeNull();
+      expect(await sessions.findById(other.sid)).not.toBeNull();
+    });
+
+    it('is idempotent after logout and after idle expiry', async () => {
+      const c = await login();
+      await sessions.updateOne({}, { $set: { expiresAt: new Date() } });
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await t
+          .http()
+          .post('/api/auth/logout')
+          .set('Cookie', c.both)
+          .expect(204);
+        const cookies = setCookies(res.headers);
+        expectCleared(cookies.get('access_token'), 'access_token');
+        expectCleared(cookies.get('refresh_token'), 'refresh_token');
+      }
+      expect(await sessions.countDocuments()).toBe(0);
     });
   });
 
@@ -249,6 +303,65 @@ describe('POST /api/auth/logout and /api/auth/refresh (API, ACC-06, ACC-19)', ()
       const res = await t.http().get('/api/auth/me').set('Cookie', c.access);
 
       expectError(res, 401, ErrorCode.SessionExpired);
+    });
+
+    describe('absolute expiry on authenticated requests (ACC-06, #27)', () => {
+      const t0 = new Date('2026-11-20T10:00:00.000Z').getTime();
+      const week = 7 * 24 * 60 * MINUTE;
+      const shift = 8 * 60 * MINUTE;
+
+      afterEach(() => vi.useRealTimers());
+
+      it.each([
+        [UserRole.ADMIN, shift - 1, 204],
+        [UserRole.ADMIN, shift, 401],
+        [UserRole.ADMIN, shift + 1, 401],
+        [UserRole.USER, shift + MINUTE, 204],
+      ])('refresh for %s at %i ms returns %i', async (role, age, status) => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(t0);
+        const c = await login(role);
+        vi.setSystemTime(t0 + age);
+        await sessions.updateOne(
+          {},
+          { $set: { expiresAt: new Date(t0 + age + 30 * MINUTE) } },
+        );
+
+        const res = await t
+          .http()
+          .post('/api/auth/refresh')
+          .set('Cookie', c.refresh);
+
+        expect(res.status).toBe(status);
+        if (status === 401) {
+          expectError(res, 401, ErrorCode.SessionExpired);
+          const cookies = setCookies(res.headers);
+          expectCleared(cookies.get('access_token'), 'access_token');
+          expectCleared(cookies.get('refresh_token'), 'refresh_token');
+        }
+      });
+
+      it('rejects a still-valid access token at the seven-day session deadline', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(t0);
+        const c = await login();
+        vi.setSystemTime(t0 + week - 1);
+        await sessions.updateOne(
+          {},
+          { $set: { expiresAt: new Date(t0 + week + 30 * MINUTE) } },
+        );
+        const refreshed = await t
+          .http()
+          .post('/api/auth/refresh')
+          .set('Cookie', c.refresh)
+          .expect(204);
+        const access = pair(setCookies(refreshed.headers).get('access_token'));
+
+        vi.setSystemTime(t0 + week);
+        const res = await t.http().get('/api/auth/me').set('Cookie', access);
+
+        expectError(res, 401, ErrorCode.SessionExpired);
+      });
     });
   });
 });

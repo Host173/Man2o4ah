@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { PaymentExpiryListener } from './payment-expiry.listener.js';
+import { PaymentIntentsService } from './payment-intents.service.js';
 import { PaymentsService } from './payments.service.js';
 import { PayableBookingRegistry } from './ports/payable-booking.registry.js';
 import { Payment, PaymentSchema } from './schemas/payment.schema.js';
@@ -31,6 +33,8 @@ import { STRIPE_GATEWAY } from './stripe/stripe-gateway.js';
   ],
   providers: [
     PaymentsService,
+    PaymentIntentsService,
+    PaymentExpiryListener,
     PayableBookingRegistry,
     {
       provide: STRIPE_CLIENT,

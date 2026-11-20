@@ -147,6 +147,66 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return this.findPublic(undefined, query);
   }
 
+  async clone(sourceId: string, userId: string): Promise<ItineraryDetailView> {
+    const source = this.owned.get(sourceId);
+    if (
+      !source ||
+      source.visibility !== ItineraryVisibility.PUBLIC ||
+      source.isHidden ||
+      source.authorDeactivated
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary not found',
+      });
+    }
+
+    const now = new Date();
+    const dayIdMap = new Map<string, string>();
+    const clonedDays = source.days.map((day) => {
+      const newDayId = (this.nextId++).toString(16).padStart(24, '0');
+      dayIdMap.set(day._id, newDayId);
+      return {
+        ...structuredClone(day),
+        _id: newDayId,
+        activities: day.activities.map((activity) => ({
+          ...structuredClone(activity),
+          _id: (this.nextId++).toString(16).padStart(24, '0'),
+          images: activity.images.map((image) => ({
+            ...structuredClone(image),
+            _id: (this.nextId++).toString(16).padStart(24, '0'),
+          })),
+        })),
+        budgetEntries: day.budgetEntries.map((entry) => ({
+          ...structuredClone(entry),
+          _id: (this.nextId++).toString(16).padStart(24, '0'),
+        })),
+      };
+    });
+
+    const cloned: ItineraryDetailView = {
+      ...structuredClone(source),
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      ownerId: userId,
+      visibility: ItineraryVisibility.PRIVATE,
+      isHidden: false,
+      authorDeactivated: false,
+      clonedFrom: { itineraryId: source._id, authorId: source.ownerId },
+      createdAt: now,
+      updatedAt: now,
+      days: clonedDays,
+      transportCosts: source.transportCosts.map((cost) => ({
+        ...structuredClone(cost),
+        _id: (this.nextId++).toString(16).padStart(24, '0'),
+        dayId: dayIdMap.get(cost.dayId) ?? cost.dayId,
+      })),
+      dayCount: clonedDays.length,
+    };
+
+    this.owned.set(cloned._id, cloned);
+    return this.toDetail(cloned);
+  }
+
   async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},

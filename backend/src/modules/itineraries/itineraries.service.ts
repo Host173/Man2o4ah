@@ -12,6 +12,7 @@ import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { escapeRegex } from '../../common/text/escape-regex.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
@@ -168,6 +169,110 @@ export class ItinerariesService {
       .exec();
     if (!itinerary) throw this.notFound();
     return this.toDetailView(itinerary as ItineraryRecord);
+  }
+
+  /** ITN-21: deep-clones a visible public itinerary into a private copy. */
+  async clone(sourceId: string, userId: string): Promise<ItineraryDetailView> {
+    const sourceObjectId = this.parseId(sourceId, 'sourceId');
+    const ownerObjectId = this.parseId(userId, 'userId');
+
+    const source = await this.itineraryModel
+      .findOne({
+        _id: sourceObjectId,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!source) throw this.notFound();
+
+    const src = source as ItineraryRecord;
+    const newItineraryId = new Types.ObjectId();
+    const newDayIds = src.days.map(() => new Types.ObjectId());
+    const copiedKeys: string[] = [];
+
+    try {
+      const clonedDays = await Promise.all(
+        (src.days ?? []).map(async (day, dayIndex) => {
+          const clonedActivities = await Promise.all(
+            (day.activities ?? []).map(async (activity) => {
+              const clonedImages = await Promise.all(
+                (activity.images ?? []).map(async (image) => {
+                  const copied = await this.storage.copy(image.key);
+                  copiedKeys.push(copied.key);
+                  return { _id: copied._id, key: copied.key };
+                }),
+              );
+              return {
+                _id: new Types.ObjectId(),
+                name: activity.name,
+                description: activity.description,
+                time: activity.time,
+                cost: activity.cost
+                  ? {
+                      amountMinor: activity.cost.amountMinor,
+                      currency: activity.cost.currency,
+                    }
+                  : undefined,
+                images: clonedImages,
+                attractionId: activity.attractionId,
+              };
+            }),
+          );
+          return {
+            _id: newDayIds[dayIndex],
+            cityId: day.cityId,
+            notes: day.notes,
+            activities: clonedActivities,
+            budgetEntries: (day.budgetEntries ?? []).map((entry) => ({
+              _id: new Types.ObjectId(),
+              category: entry.category,
+              amountMinor: entry.amountMinor,
+              currency: entry.currency,
+              note: entry.note,
+            })),
+          };
+        }),
+      );
+
+      const clonedTransportCosts = (src.transportCosts ?? []).map((cost) => {
+        const oldDayIndex = src.days.findIndex(
+          (day) => day._id.toHexString() === cost.dayId.toHexString(),
+        );
+        const newDayId = oldDayIndex >= 0 ? newDayIds[oldDayIndex] : cost.dayId;
+        return {
+          _id: new Types.ObjectId(),
+          dayId: newDayId,
+          mode: cost.mode,
+          fromCityId: cost.fromCityId,
+          toCityId: cost.toCityId,
+          amountMinor: cost.amountMinor,
+          currency: cost.currency,
+        };
+      });
+
+      const created = await this.itineraryModel.create({
+        _id: newItineraryId,
+        ownerId: ownerObjectId,
+        title: src.title,
+        countryCodes: [...src.countryCodes],
+        startDate: src.startDate,
+        visibility: ItineraryVisibility.PRIVATE,
+        isHidden: false,
+        authorDeactivated: false,
+        clonedFrom: { itineraryId: src._id, authorId: src.ownerId },
+        days: clonedDays,
+        transportCosts: clonedTransportCosts,
+        dayCount: clonedDays.length,
+        cityIds: [...new Set(clonedDays.map((day) => day.cityId))].sort(),
+      });
+
+      return this.toDetailView(created.toObject() as ItineraryRecord);
+    } catch (error) {
+      await Promise.all(copiedKeys.map((key) => this.storage.delete(key)));
+      throw error;
+    }
   }
 
   /** ITN-01/20: edits the owner's title, countries, start date or visibility. */
@@ -1351,7 +1456,20 @@ export class ItinerariesService {
   async searchPublic(
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
-    return this.findPublicPage({}, query);
+    const { page, limit } = this.parsePublicQuery(query);
+    const filter = await this.buildPublicFilter(query);
+    const result = await paginate(
+      this.itineraryModel,
+      filter,
+      { page, limit },
+      { sort: { updatedAt: -1, _id: -1 } },
+    );
+    return {
+      ...result,
+      items: result.items.map((itinerary) =>
+        this.toPublicSummary(itinerary as ItineraryRecord),
+      ),
+    };
   }
 
   /**
@@ -1365,22 +1483,11 @@ export class ItinerariesService {
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
     const owner = this.parseId(ownerId, 'ownerId');
-    return this.findPublicPage({ ownerId: owner }, query);
-  }
-
-  private async findPublicPage(
-    filter: { ownerId?: Types.ObjectId },
-    query: PublicItineraryQuery,
-  ): Promise<Paginated<PublicItinerarySummary>> {
     const { page, limit } = this.parsePublicQuery(query);
+    const filter = await this.buildPublicFilter(query, owner);
     const result = await paginate(
       this.itineraryModel,
-      {
-        ...filter,
-        visibility: ItineraryVisibility.PUBLIC,
-        isHidden: false,
-        authorDeactivated: false,
-      },
+      filter,
       { page, limit },
       { sort: { updatedAt: -1, _id: -1 } },
     );
@@ -1390,6 +1497,77 @@ export class ItinerariesService {
         this.toPublicSummary(itinerary as ItineraryRecord),
       ),
     };
+  }
+
+  private async buildPublicFilter(
+    query: PublicItineraryQuery,
+    ownerId?: Types.ObjectId,
+  ): Promise<Record<string, unknown>> {
+    const filter: Record<string, unknown> = {
+      visibility: ItineraryVisibility.PUBLIC,
+      isHidden: false,
+      authorDeactivated: false,
+    };
+    if (ownerId) filter.ownerId = ownerId;
+
+    if (query.minDays !== undefined) {
+      if (!Number.isInteger(query.minDays) || query.minDays < 1) {
+        throw this.invalidField(
+          'minDays',
+          'minDays must be an integer of at least 1',
+        );
+      }
+      filter.dayCount = { ...(filter.dayCount as object), $gte: query.minDays };
+    }
+    if (query.maxDays !== undefined) {
+      if (!Number.isInteger(query.maxDays) || query.maxDays < 1) {
+        throw this.invalidField(
+          'maxDays',
+          'maxDays must be an integer of at least 1',
+        );
+      }
+      filter.dayCount = { ...(filter.dayCount as object), $lte: query.maxDays };
+    }
+    if (
+      query.minDays !== undefined &&
+      query.maxDays !== undefined &&
+      query.minDays > query.maxDays
+    ) {
+      throw this.invalidField(
+        'maxDays',
+        'maxDays must not be less than minDays',
+      );
+    }
+
+    if (query.countryCode) {
+      if (!/^[A-Z]{2}$/.test(query.countryCode)) {
+        throw this.invalidField(
+          'countryCode',
+          'countryCode must be a 2-letter code',
+        );
+      }
+      filter.countryCodes = query.countryCode;
+    }
+    if (query.cityId) {
+      if (typeof query.cityId !== 'string' || query.cityId.trim() === '') {
+        throw this.invalidField('cityId', 'cityId must not be blank');
+      }
+      filter.cityIds = query.cityId.trim();
+    }
+
+    const keyword = query.q?.trim();
+    if (keyword) {
+      const regex = new RegExp(escapeRegex(keyword), 'i');
+      const countryCodes = await this.referenceData.findCountryCodes(keyword);
+      const cityIds = await this.referenceData.findCityIds(keyword);
+      filter.$or = [
+        { title: regex },
+        { countryCodes: { $in: countryCodes } },
+        { cityIds: { $in: cityIds } },
+      ];
+    }
+
+    return filter;
   }
 
   /**

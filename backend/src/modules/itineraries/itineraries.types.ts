@@ -210,4 +210,14 @@ export interface PublicItineraryQuery {
   page?: number;
   /** 1-50 (GEN-05). */
   limit?: number;
+  /** Case-insensitive keyword on title, country and city names (ITN-21). */
+  q?: string;
+  /** Inclusive minimum day count (ITN-21). */
+  minDays?: number;
+  /** Inclusive maximum day count (ITN-21). */
+  maxDays?: number;
+  /** Filter by country code (ITN-21). */
+  countryCode?: string;
+  /** Filter by city id (ITN-21). */
+  cityId?: string;
 }

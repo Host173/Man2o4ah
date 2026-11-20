@@ -10560,3 +10560,15 @@ resolve the problems stated
 How the output was used:
 Merged develop into the branch (7752166, no conflicts); the branch is now current and differs from develop only in ai-prompts/aisha.txt; not pushed
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+resolve the problem without any input from kareem so that the self review returns 100% passed
+
+How the output was used:
+New branch fix/ACC-16-admin-target-rule from develop: tests first (372774f), then suspend/resetPassword reject admin targets with 409 CONFLICT in accounts.service.ts and test/fakes/accounts.fake.ts (662f6cc); self-review passed (508 tests incl. 8 probes, 98.8%); not pushed
+================================================

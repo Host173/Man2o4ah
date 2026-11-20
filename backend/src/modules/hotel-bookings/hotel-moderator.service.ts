@@ -8,7 +8,11 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
-import { addDays, toDateOnly } from '../../common/dates/date-only.js';
+import {
+  addDays,
+  daysBetween,
+  toDateOnly,
+} from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import { toPage } from '../../common/pagination/paginated.js';
@@ -23,6 +27,9 @@ import type {
   RoomNightStatusDto,
 } from './dto/hotel-moderator.response.dto.js';
 import { HotelReservation } from './schemas/hotel-reservation.schema.js';
+
+/** Same inclusive-night limit as room blocks (HTL-06); bounds the per-room status grid. */
+const MAX_AVAILABILITY_NIGHTS = 365;
 
 @Injectable()
 export class HotelModeratorService {
@@ -94,6 +101,18 @@ export class HotelModeratorService {
         code: ErrorCode.ValidationFailed,
         message: 'Invalid date range',
         details: [{ field: 'to', message: 'must be on or after from' }],
+      });
+    }
+    if (daysBetween(from, to) + 1 > MAX_AVAILABILITY_NIGHTS) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid date range',
+        details: [
+          {
+            field: 'to',
+            message: `must be within ${MAX_AVAILABILITY_NIGHTS} inclusive nights of from`,
+          },
+        ],
       });
     }
     const rooms = await this.hotels.listRooms(

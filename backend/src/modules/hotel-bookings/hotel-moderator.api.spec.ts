@@ -516,6 +516,8 @@ describe('Hotel moderator views (HTL-22, HTL-08)', () => {
     { from: RANGE.from, to: '2027-02-30' },
     { from: '2027-03-10T00:00:00Z', to: RANGE.to },
     { from: RANGE.to, to: RANGE.from },
+    { from: '2027-01-01', to: '2028-01-01' },
+    { from: '0001-01-01', to: '9999-12-31' },
   ])(
     'rejects invalid calendar date range %j with field details',
     async (query) => {
@@ -529,6 +531,16 @@ describe('Hotel moderator views (HTL-22, HTL-08)', () => {
       expect(res.body.details.length).toBeGreaterThan(0);
     },
   );
+
+  it('accepts a range of exactly 365 inclusive nights', async () => {
+    const res = await t
+      .http()
+      .get(endpoint('availability'))
+      .query({ from: '2027-01-01', to: '2027-12-31', limit: 1 })
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].nights).toHaveLength(365);
+  });
 
   it('integration: refuses a missing moderator assignment before reading any reservations', async () => {
     await expect(

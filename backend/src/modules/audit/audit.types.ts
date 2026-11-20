@@ -5,6 +5,8 @@ import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AuditAction } from './schemas/audit-log.schema.js';
 
+export { AuditAction } from './schemas/audit-log.schema.js';
+
 const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** ISO 8601 date-time with `Z` or an offset, so the instant is never server-local. */
 const ISO_DATE_TIME =

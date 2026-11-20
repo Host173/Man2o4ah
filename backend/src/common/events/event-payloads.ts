@@ -1,5 +1,5 @@
 import type { BookingType } from '../database/booking-type.js';
-import type { AuditAction } from '../../modules/audit/schemas/audit-log.schema.js';
+import type { AuditAction } from '../../modules/audit/audit.types.js';
 import type { ProviderType } from '../../modules/accounts/schemas/user.schema.js';
 import type { RefundStatus } from '../../modules/payments/schemas/refund.schema.js';
 import type { EventName, Events } from './events.js';
@@ -75,6 +75,8 @@ export interface ProviderStatusEvent {
 
 /** Emitted by admin and moderation; handled by audit. */
 export interface AdminActionEvent {
+  /** Generated once per committed action; retained on redelivery. */
+  eventId: string;
   actorId: string;
   action: AuditAction;
   target: { type: string; id: string };

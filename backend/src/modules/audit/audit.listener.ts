@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, mongo, Types } from 'mongoose';
 import { Events } from '../../common/events/events.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { AuditAction, AuditLog } from './schemas/audit-log.schema.js';
@@ -28,7 +29,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** `value` without secret-looking keys, at every level and inside arrays (GEN-07). */
 function stripSecrets(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripSecrets);
-  if (!isPlainObject(value)) return value;
+  if (!isPlainObject(value)) {
+    return value === null ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+      ? value
+      : undefined;
+  }
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => !SECRET_KEY.test(key))
@@ -45,7 +53,7 @@ function sanitizeDetails(
   return Object.keys(kept).length > 0 ? kept : undefined;
 }
 
-/** Stores one append-only `audit_logs` document per `admin.action` event (GEN-07). */
+/** Stores one append-only entry per event identity, including concurrent replays (GEN-07). */
 @Injectable()
 export class AuditListener {
   private readonly logger = new Logger(AuditListener.name);
@@ -58,20 +66,34 @@ export class AuditListener {
   async onAdminAction(
     payload: PayloadOf<typeof Events.AdminAction>,
   ): Promise<void> {
+    let id: Types.ObjectId | undefined;
     try {
       const invalid = this.invalidField(payload);
       if (invalid) {
         this.logger.warn(`Ignored an invalid admin.action event: ${invalid}`);
         return;
       }
+      id = new Types.ObjectId(
+        createHash('sha256').update(payload.eventId).digest().subarray(0, 12),
+      );
       const details = sanitizeDetails(payload.details);
       await this.model.create({
+        _id: id,
         actorId: new Types.ObjectId(payload.actorId),
         action: payload.action,
         target: { type: payload.target.type, id: payload.target.id },
         ...(details ? { details } : {}),
       });
     } catch (error) {
+      if (
+        id &&
+        error instanceof mongo.MongoServerError &&
+        error.code === 11000 &&
+        error.keyValue?._id instanceof Types.ObjectId &&
+        error.keyValue._id.equals(id)
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to store an audit entry: ${message}`);
     }
@@ -82,6 +104,12 @@ export class AuditListener {
     payload: PayloadOf<typeof Events.AdminAction>,
   ): string | undefined {
     const event: Partial<PayloadOf<typeof Events.AdminAction>> | null = payload;
+    if (
+      typeof event?.eventId !== 'string' ||
+      event.eventId.trim().length === 0
+    ) {
+      return 'eventId';
+    }
     if (typeof event?.actorId !== 'string' || !OBJECT_ID.test(event.actorId)) {
       return 'actorId';
     }

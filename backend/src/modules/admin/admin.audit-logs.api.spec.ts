@@ -20,6 +20,7 @@ describe('GET /api/admin/audit-logs (GEN-07)', () => {
 
   const emit = (action: string, id = 'u-1') =>
     emitter.emitAsync(Events.AdminAction, {
+      eventId: new Types.ObjectId().toHexString(),
       actorId,
       action,
       target: { type: 'user', id },

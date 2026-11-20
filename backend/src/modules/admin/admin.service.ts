@@ -22,7 +22,7 @@ import {
   UserRole,
   UserStatus,
 } from '../accounts/schemas/user.schema.js';
-import { AuditAction } from '../audit/schemas/audit-log.schema.js';
+import { AuditAction } from '../audit/audit.types.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
@@ -307,6 +307,7 @@ export class AdminService {
         : ProviderType.HOTEL);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.MODERATOR_CREATED,
       target: { type: 'user', id: created.id },
@@ -335,6 +336,7 @@ export class AdminService {
     await this.accountsService.resetPassword(userId, dto.temporaryPassword);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.PASSWORD_RESET,
       target: { type: 'user', id: userId },
@@ -350,6 +352,7 @@ export class AdminService {
     await this.accountsService.suspend(userId);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.ACCOUNT_SUSPENDED,
       target: { type: 'user', id: userId },
@@ -365,6 +368,7 @@ export class AdminService {
     await this.accountsService.reactivate(userId);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.ACCOUNT_REACTIVATED,
       target: { type: 'user', id: userId },
@@ -435,6 +439,7 @@ export class AdminService {
     );
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: isActive
         ? AuditAction.PROVIDER_REACTIVATED

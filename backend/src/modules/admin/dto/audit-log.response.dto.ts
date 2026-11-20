@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
 import type { AuditLogView } from '../../audit/audit.types.js';
-import { AuditAction } from '../../audit/schemas/audit-log.schema.js';
+import { AuditAction } from '../../audit/audit.types.js';
 
 export class AuditLogTargetDto {
   @ApiProperty({ example: 'user' })

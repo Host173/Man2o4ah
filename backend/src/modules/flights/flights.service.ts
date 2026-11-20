@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -9,6 +10,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { CabinClass } from '../../common/database/cabin-class.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
@@ -17,6 +19,7 @@ import type { AirportView } from '../reference-data/reference-data.types.js';
 import { convertFlightTimes } from './flight-time.js';
 import { AirlinesService } from './airlines.service.js';
 import type {
+  AddCabinInput,
   AirlineView,
   BookabilityResult,
   CreateFlightInput,
@@ -31,7 +34,7 @@ import type {
 } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Cabin } from './schemas/flight.schema.js';
-import { Flight } from './schemas/flight.schema.js';
+import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
 type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
   _id: Types.ObjectId;
@@ -174,6 +177,101 @@ export class FlightsService {
   }
 
   /**
+   * Add one cabin to an assigned airline's scheduled flight (FLT-04).
+   * New cabins start with every seat available; the conditional update prevents
+   * duplicate cabin classes when moderators submit concurrently.
+   */
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    this.validateCabinInput(input);
+    const flightObjectId = this.flightObjectId(flightId);
+    if (
+      moderatorAirlineId === undefined ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+
+    const airlineObjectId = new Types.ObjectId(moderatorAirlineId);
+    const filter = { _id: flightObjectId, airlineId: airlineObjectId };
+    const flight = await this.flightModel
+      .findOne(filter)
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) throw this.flightNotFound();
+    if (flight.status !== FlightStatus.SCHEDULED) {
+      throw this.flightNotScheduled();
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw this.cabinAlreadyExists();
+    }
+
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+
+    const updated = await this.flightModel
+      .findOneAndUpdate(
+        {
+          ...filter,
+          status: FlightStatus.SCHEDULED,
+          'cabins.cabinClass': { $ne: input.cabinClass },
+        },
+        {
+          $push: {
+            cabins: {
+              cabinClass: input.cabinClass,
+              totalSeats: input.totalSeats,
+              availableSeats: input.totalSeats,
+              heldSeats: 0,
+              bookedSeats: 0,
+              priceMinor: input.priceMinor,
+              freeBags: input.freeBags,
+              maxBagWeightKg: input.maxBagWeightKg,
+            },
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean<FlightRecord>()
+      .exec();
+
+    if (!updated) {
+      const current = await this.flightModel
+        .findOne(filter)
+        .lean<FlightRecord>()
+        .exec();
+      if (!current) throw this.flightNotFound();
+      if (current.status !== FlightStatus.SCHEDULED) {
+        throw this.flightNotScheduled();
+      }
+      if (
+        current.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)
+      ) {
+        throw this.cabinAlreadyExists();
+      }
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'Flight changed before the cabin could be added',
+      });
+    }
+
+    return this.toManagementView(updated, departureAirport, arrivalAirport);
+  }
+
+  /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
    * ask `checkBookable` whether they can be booked. Implemented in FLT-17.
@@ -239,6 +337,36 @@ export class FlightsService {
     return new Types.ObjectId(id);
   }
 
+  private flightObjectId(id: string): Types.ObjectId {
+    if (!Types.ObjectId.isValid(id)) throw this.flightNotFound();
+    return new Types.ObjectId(id);
+  }
+
+  private validateCabinInput(input: AddCabinInput): void {
+    if (!Object.values(CabinClass).includes(input.cabinClass)) {
+      throw this.invalidField('cabinClass', 'is not a supported cabin class');
+    }
+    if (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1) {
+      throw this.invalidField('totalSeats', 'must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1) {
+      throw this.invalidField('priceMinor', 'must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(input.freeBags) || input.freeBags < 0) {
+      throw this.invalidField(
+        'freeBags',
+        'must be a non-negative safe integer',
+      );
+    }
+    if (
+      typeof input.maxBagWeightKg !== 'number' ||
+      !Number.isFinite(input.maxBagWeightKg) ||
+      input.maxBagWeightKg <= 0
+    ) {
+      throw this.invalidField('maxBagWeightKg', 'must be a positive number');
+    }
+  }
+
   private toManagementView(
     flight: FlightRecord,
     departureAirport: AirportView,
@@ -284,6 +412,27 @@ export class FlightsService {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Airline not found',
+    });
+  }
+
+  private flightNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Flight not found',
+    });
+  }
+
+  private flightNotScheduled(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.InvalidStatusTransition,
+      message: 'Only scheduled flights can be edited',
+    });
+  }
+
+  private cabinAlreadyExists(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.Conflict,
+      message: 'This flight already has that cabin class',
     });
   }
 }

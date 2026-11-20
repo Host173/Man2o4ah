@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { CabinClass } from '../../src/common/database/cabin-class.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -11,6 +12,7 @@ import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
 import type { FlightsService } from '../../src/modules/flights/flights.service.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
+  AddCabinInput,
   AirlineView,
   BookabilityResult,
   CabinView,
@@ -37,6 +39,7 @@ import type { PublicApi } from './public-api.js';
  */
 export class FakeFlightsService implements PublicApi<FlightsService> {
   private nextFlightId = 1;
+  private nextCabinId = 1;
 
   constructor(
     readonly data: FakeFlightsData = new FakeFlightsData(),
@@ -176,6 +179,73 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     return toPage(items, flights.length, query.page, query.limit);
   }
 
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    validateCabinInput(input);
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'This flight already has that cabin class',
+      });
+    }
+
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'This flight already has that cabin class',
+      });
+    }
+
+    flight.cabins.push({
+      id: this.newCabinId(),
+      cabinClass: input.cabinClass,
+      totalSeats: input.totalSeats,
+      availableSeats: input.totalSeats,
+      heldSeats: 0,
+      bookedSeats: 0,
+      priceMinor: input.priceMinor,
+      freeBags: input.freeBags,
+      maxBagWeightKg: input.maxBagWeightKg,
+    });
+    return {
+      ...structuredClone(flight),
+      departureTimeZone: departureAirport.timeZone,
+      arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
   getFlightsForBooking(
     flightIds: string[],
   ): Promise<Map<string, FlightWithAirline>> {
@@ -275,6 +345,18 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     return id;
   }
 
+  private newCabinId(): string {
+    let id = `created-cabin-${this.nextCabinId++}`;
+    while (
+      this.data
+        .flights()
+        .some((flight) => flight.cabins.some((cabin) => cabin.id === id))
+    ) {
+      id = `created-cabin-${this.nextCabinId++}`;
+    }
+    return id;
+  }
+
   /** One direction of a search: filter, sort, paginate. */
   private searchLeg(
     query: SearchFlightsBase,
@@ -319,6 +401,28 @@ function invalid(field: string, message: string): BadRequestException {
     message: 'Invalid flight',
     details: [{ field, message }],
   });
+}
+
+function validateCabinInput(input: AddCabinInput): void {
+  if (!Object.values(CabinClass).includes(input.cabinClass)) {
+    throw invalid('cabinClass', 'is not a supported cabin class');
+  }
+  if (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1) {
+    throw invalid('totalSeats', 'must be a positive safe integer');
+  }
+  if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1) {
+    throw invalid('priceMinor', 'must be a positive safe integer');
+  }
+  if (!Number.isSafeInteger(input.freeBags) || input.freeBags < 0) {
+    throw invalid('freeBags', 'must be a non-negative safe integer');
+  }
+  if (
+    typeof input.maxBagWeightKg !== 'number' ||
+    !Number.isFinite(input.maxBagWeightKg) ||
+    input.maxBagWeightKg <= 0
+  ) {
+    throw invalid('maxBagWeightKg', 'must be a positive number');
+  }
 }
 
 function no(reason: Extract<BookabilityResult, { bookable: false }>['reason']) {

@@ -336,7 +336,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
 
 ### 1. Fix `notes: null` and Pipeline Spread
 * **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
@@ -373,7 +373,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received the latest code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received the latest code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
 Align `FakeItinerariesService` behavior completely with the real service:
@@ -386,7 +386,7 @@ Align `FakeItinerariesService` behavior completely with the real service:
 * **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
 
 ### 3. Git Workflow Reminder (Red Test Commit Rule)
-* Note the reviewer's tip: *“push the red test as its own commit first next time”*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+* Note the reviewer's tip: *ï¿½push the red test as its own commit first next timeï¿½*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
 
 ### 4. Format, Verify, and Push to Update PR #154
 1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
@@ -403,7 +403,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Validation Order Fix in `itineraries.fake.ts`
 * **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
@@ -1157,4 +1157,13 @@ I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "
 
 How the output was used:
 Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3133 tests, all green), pushed, opened PR #214, fixed the prompt-log byte mismatch by restoring origin/develop bytes and re-appending this entry, pushed again.
+================================================
+
+Related Requirement: ITN-25
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #74: "ITN-25: Hotels for a city group" (Package 6 Â· Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-25-hotels-city-group from develop (ITN-05 and CTR-03 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (days, city groups, ownerId scoping), the hotel search contract (HotelsService.search, HotelSearchQuery/HotelSearchResult), hotels fake, and fakes. Implement GET /api/itineraries/:id/hotels?groupIndex&guests&rooms that resolves the itinerary and city group, derives check-in/check-out and cityId from cityGroups, searches hotels via HotelsService, validates inputs, handles 401/400/404, documents Swagger, keeps FakeItinerariesService parity, and runs self-review, npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-25: Hotels for a city group" referencing #74 with the Self-Review Report, and confirm CI green.
+
+How the output was used:
+Branched from origin/develop, added ItineraryHotelsQueryDto, ItinerariesService.getHotelsForCityGroup deriving dates from cityGroups and delegating to HotelsService.search, added the authenticated GET /api/itineraries/:id/hotels route and Swagger response, added FakeItinerariesService stub, and added service/API tests (401, 404, 400, empty page, Swagger) plus hotels-fake-backed date derivation. Fixed the service-spec constructor-arity and city-group index mistakes, added Hotel/Room/RoomNight mocks to the blog skeleton test, ran npm run format and npm run verify (2786 tests, all green).
 ================================================

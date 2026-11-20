@@ -57,6 +57,22 @@ describe('FakeAccountsService', () => {
         },
       ]);
     });
+
+    it('resolves a deactivated account as "Deleted user" (ACC-12)', async () => {
+      const accounts = new FakeAccountsService([
+        {
+          id: 'u-9',
+          name: 'Gone',
+          email: 'gone@example.com',
+          status: 'deactivated',
+        },
+      ]);
+      const [profile] = await accounts.getProfiles(['u-9']);
+      expect(profile).toMatchObject({
+        name: 'Deleted user',
+        status: 'deactivated',
+      });
+    });
   });
 
   describe('findUserIdsByName', () => {

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  NotImplementedException,
 } from '@nestjs/common';
 import { buildConverter } from '../../src/modules/fx/fx-conversion.js';
 import type { Converter } from '../../src/modules/fx/fx.types.js';
@@ -43,6 +44,7 @@ import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/creat
 import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
+import type { ItineraryHotelsQueryDto } from '../../src/modules/itineraries/dto/itinerary-hotels-query.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
   BudgetEntryView,
@@ -56,6 +58,7 @@ import type {
   PublicItinerarySummary,
   TransportCostView,
 } from '../../src/modules/itineraries/itineraries.types.js';
+import type { HotelSearchResult } from '../../src/modules/hotels/hotels.types.js';
 import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { PublicApi } from './public-api.js';
 
@@ -138,6 +141,16 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     this.itineraries = structuredClone(itineraries);
     this.referenceData = referenceData;
     this.storage = storage;
+  }
+
+  getHotelsForCityGroup(
+    _itineraryId: string,
+    _query: ItineraryHotelsQueryDto,
+    _userId: string,
+  ): Promise<Paginated<HotelSearchResult>> {
+    throw new NotImplementedException(
+      'getHotelsForCityGroup: implemented in ITN-25',
+    );
   }
 
   /** ITN-20: the shared public search, matching the real service's filters. */

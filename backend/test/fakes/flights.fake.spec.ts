@@ -121,6 +121,93 @@ describe('FakeFlightsService', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  describe('flight and cabin edits (FLT-05)', () => {
+    it('changes scheduled flight times and recomputes the UTC-derived fields', async () => {
+      const { data, flights } = setup();
+      vi.setSystemTime(new Date('2026-11-12T10:00:00.000Z'));
+      const result = await flights.updateFlight(
+        'f1',
+        {
+          departureLocal: '2026-11-20T10:00',
+          arrivalLocal: '2026-11-20T15:00',
+        },
+        'a1',
+      );
+      expect(result.departureAt.toISOString()).toBe('2026-11-20T08:00:00.000Z');
+      expect(result.arrivalAt.toISOString()).toBe('2026-11-20T11:00:00.000Z');
+      expect(result.departureLocalDate).toBe('2026-11-20');
+      expect(result.durationMinutes).toBe(180);
+      expect(data.flight('f1')?.departureAt).toEqual(result.departureAt);
+    });
+
+    it('locks airports once the flight has a hold or booking', async () => {
+      const { data, flights } = setup();
+      data.flight('f1')!.hasBookings = true;
+      await expect(
+        flights.updateFlight('f1', { departureAirportId: 'JFK' }, 'a1'),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+    });
+
+    it('rejects cancelled flights and missing ownership', async () => {
+      const { flights } = setup();
+      await expect(
+        flights.updateFlight(
+          'f5',
+          { departureLocal: '2026-11-20T10:00' },
+          'a1',
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+      await expect(
+        flights.updateFlight(
+          'f1',
+          { departureLocal: '2026-11-20T10:00' },
+          'a2',
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    });
+
+    it('updates cabin price and capacity through SeatInventory', async () => {
+      const { data, flights } = setup();
+      const result = await flights.updateCabin(
+        'f1',
+        'f1-eco',
+        { priceMinor: 33300, totalSeats: 12 },
+        'a1',
+      );
+      expect(result.cabins[0]).toMatchObject({
+        priceMinor: 33300,
+        totalSeats: 12,
+        availableSeats: 12,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(data.flight('f1')?.cabins[0]?.totalSeats).toBe(12);
+    });
+
+    it('never reduces capacity below held or booked seats', async () => {
+      const { data, flights, inventory } = setup();
+      await inventory.hold([{ flightId: 'f1', cabinId: 'f1-eco', seats: 3 }]);
+      data.flight('f1')!.cabins[0]!.bookedSeats = 2;
+      data.flight('f1')!.cabins[0]!.availableSeats = 5;
+      data.flight('f1')!.cabins[0]!.totalSeats = 10;
+      await expect(
+        flights.updateCabin('f1', 'f1-eco', { totalSeats: 4 }, 'a1'),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.CapacityBelowReserved },
+      });
+    });
+  });
+
   describe('addCabin', () => {
     const input = {
       cabinClass: 'business' as const,

@@ -74,6 +74,21 @@ export class AirlinesService {
     user: AuthUser,
   ): Promise<AirlineView> {
     await this.findOwned(airlineId, user.providerId);
+    if (
+      policy.maxExtraBagsPerPassenger > 0 &&
+      policy.extraBagPriceMinor === null
+    ) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'A price is required when extra bags are allowed',
+        details: [
+          {
+            field: 'extraBagPriceMinor',
+            message: 'must be a positive integer when extra bags are allowed',
+          },
+        ],
+      });
+    }
     const airline = await this.airlineModel
       .findByIdAndUpdate(
         airlineId,

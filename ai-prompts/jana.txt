@@ -340,3 +340,38 @@ TDD required: No
 How the output was used:
 Used the explanation to understand the baggage policy and cancellation-tier requirements, implement validation rules, and verify the required unit and API tests.
 ================================================
+
+Append-only metadata correction recorded by Pierre on 2026-11-20.
+This supplements Jana's existing FLT-08 entry committed in af0ea8e.
+The date comes from that implementation commit; the prompt and output-use
+text below are copied from the existing entry. This is not a new Jana prompt.
+
+================================================
+Date: 2026-11-19
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-08
+
+Prompt:
+**Expected output**
+Moderator sets extra-bag price and maximum, and cancellation tiers with unique days-before values.
+
+**Requirements:** FLT-08, FLT-09
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit (tier and baggage validation boundaries); API
+**TDD required:** No
+
+**Branch:** `feature/FLT-08-airline-baggage-cancellation-policies`
+**PR title:** `FLT-08: Airline baggage and cancellation policies`
+
+**Depends on:** [#33](https://github.com/Host173/Man2o4ah/issues/33) (FLT-01)
+**Blocks:** [#42](https://github.com/Host173/Man2o4ah/issues/42) (FLT-17)
+**Needed end to end by:** [#22](https://github.com/Host173/Man2o4ah/issues/22) (PAY-02), [#52](https://github.com/Host173/Man2o4ah/issues/52) (FLT-19), [#53](https://github.com/Host173/Man2o4ah/issues/53) (FLT-22)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure your tests cover all edge cases andthe implementation matchs the contract and the fake
+
+How the output was used:
+Added airline-moderator-only baggage and cancellation policy replacement endpoints with boundary validation, persistence, API and unit tests, plus a contract-shaped fake assertion and typed Swagger response tiers.
+================================================

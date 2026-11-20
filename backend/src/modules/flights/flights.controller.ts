@@ -26,9 +26,10 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
+import { SearchFlightsDto } from './dto/search-flights.dto.js';
 import {
   FlightResponseDto,
   PaginatedFlightsResponseDto,
@@ -44,6 +45,15 @@ import { FlightsService } from './flights.service.js';
 @Controller()
 export class FlightsController {
   constructor(private readonly flights: FlightsService) {}
+
+  @Get('flights/search')
+  @Public()
+  @ApiOperation({ summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights' })
+  @ApiOkResponse({ description: 'Paginated flight search results' })
+  @ApiBadRequestResponse({ description: 'Invalid search criteria' })
+  async search(@Query() query: SearchFlightsDto) {
+    return this.flights.search(query);
+  }
 
   @Post('flights')
   @Roles(Role.AIRLINE_MODERATOR)

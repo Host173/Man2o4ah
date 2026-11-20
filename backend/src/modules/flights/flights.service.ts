@@ -292,8 +292,247 @@ export class FlightsService {
   search(
     query: SearchFlightsQuery,
   ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
-    void query;
-    throw new NotImplementedException('search: implemented in FLT-11');
+    this.validateSearch(query);
+    if (query.returnDate !== undefined) {
+      return Promise.all([
+        this.searchLeg(query, query.from, query.to, query.date),
+        this.searchLeg(query, query.to, query.from, query.returnDate),
+      ]).then(([outbound, inbound]) => ({ outbound, inbound }));
+    }
+    return this.searchLeg(query, query.from, query.to, query.date);
+  }
+
+  private validateSearch(query: SearchFlightsQuery): void {
+    query.from = query.from.trim().toUpperCase();
+    query.to = query.to.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(query.from)) {
+      throw this.invalidField('from', 'must be a 3-letter airport code');
+    }
+    if (!/^[A-Z]{3}$/.test(query.to)) {
+      throw this.invalidField('to', 'must be a 3-letter airport code');
+    }
+    if (query.from === query.to) {
+      throw this.invalidField('to', 'must differ from from');
+    }
+    this.validateLocalDate(query.date, 'date');
+    if (!Number.isInteger(query.adults) || query.adults < 1) {
+      throw this.invalidField('adults', 'must be a positive integer');
+    }
+    if (
+      !Number.isInteger(query.children) ||
+      query.children < 0 ||
+      !Number.isInteger(query.infants) ||
+      query.infants < 0
+    ) {
+      throw this.invalidField(
+        'passengers',
+        'children and infants must be non-negative integers',
+      );
+    }
+    if (query.infants > query.adults) {
+      throw this.invalidField(
+        'infants',
+        'must not exceed the number of adults',
+      );
+    }
+    if (
+      query.minPriceMinor !== undefined &&
+      (!Number.isSafeInteger(query.minPriceMinor) || query.minPriceMinor < 0)
+    ) {
+      throw this.invalidField(
+        'minPriceMinor',
+        'must be a non-negative safe integer',
+      );
+    }
+    if (
+      query.maxPriceMinor !== undefined &&
+      (!Number.isSafeInteger(query.maxPriceMinor) || query.maxPriceMinor < 0)
+    ) {
+      throw this.invalidField(
+        'maxPriceMinor',
+        'must be a non-negative safe integer',
+      );
+    }
+    if (
+      query.minPriceMinor !== undefined &&
+      query.maxPriceMinor !== undefined &&
+      query.minPriceMinor > query.maxPriceMinor
+    ) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'minPriceMinor must not be greater than maxPriceMinor',
+        details: [
+          {
+            field: 'minPriceMinor',
+            message: 'must not be greater than maxPriceMinor',
+          },
+        ],
+      });
+    }
+    if (query.returnDate !== undefined) {
+      this.validateLocalDate(query.returnDate, 'returnDate');
+      if (query.returnDate < query.date) {
+        throw this.invalidField(
+          'returnDate',
+          'must not be before the outbound date',
+        );
+      }
+    }
+  }
+
+  private validateLocalDate(value: string, field: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw this.invalidField(field, 'must use YYYY-MM-DD');
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== value
+    ) {
+      throw this.invalidField(field, 'must be a valid calendar date');
+    }
+  }
+
+  private async searchLeg(
+    query: SearchFlightsQuery,
+    from: string,
+    to: string,
+    date: string,
+  ): Promise<Paginated<FlightSearchItem>> {
+    const now = new Date();
+    const seats = query.adults + query.children;
+    const airlines = await this.airlineModel
+      .find({ isActive: true })
+      .lean()
+      .exec();
+    const activeAirlines = new Map(
+      airlines.map((airline) => [
+        (airline as Airline & { _id: Types.ObjectId })._id.toHexString(),
+        airline as Airline & { _id: Types.ObjectId },
+      ]),
+    );
+    if (activeAirlines.size === 0) {
+      return toPage([], 0, query.page, query.limit);
+    }
+
+    const filter = {
+      departureAirportId: from,
+      arrivalAirportId: to,
+      departureLocalDate: date,
+      status: FlightStatus.SCHEDULED,
+      departureAt: { $gt: now },
+      airlineId: {
+        $in: [...activeAirlines.keys()].map((id) => new Types.ObjectId(id)),
+      },
+    };
+    const flights = await this.flightModel
+      .find(filter)
+      .lean<FlightRecord[]>()
+      .exec();
+    const items: FlightSearchItem[] = [];
+    for (const flight of flights) {
+      const airline = activeAirlines.get(flight.airlineId.toHexString());
+      if (!airline) continue;
+      const matchingCabins = flight.cabins
+        .filter(
+          (cabin) =>
+            cabin.availableSeats >= seats &&
+            (query.cabinClass === undefined ||
+              cabin.cabinClass === query.cabinClass) &&
+            (query.minPriceMinor === undefined ||
+              cabin.priceMinor >= query.minPriceMinor) &&
+            (query.maxPriceMinor === undefined ||
+              cabin.priceMinor <= query.maxPriceMinor),
+        )
+        .sort((a, b) => a.priceMinor - b.priceMinor)
+        .map((cabin) => ({
+          id: cabin._id.toString(),
+          cabinClass: cabin.cabinClass,
+          totalSeats: cabin.totalSeats,
+          availableSeats: cabin.availableSeats,
+          heldSeats: cabin.heldSeats,
+          bookedSeats: cabin.bookedSeats,
+          priceMinor: cabin.priceMinor,
+          freeBags: cabin.freeBags,
+          maxBagWeightKg: cabin.maxBagWeightKg,
+        }));
+      if (matchingCabins.length === 0) continue;
+      const cancellationTiers = airline.cancellationPolicy.tiers.map(
+        (tier) => ({
+          daysBefore: tier.daysBefore,
+          refundPercent: tier.refundPercent,
+        }),
+      );
+      items.push({
+        flight: this.toFlightView(flight),
+        airline: {
+          id: airline._id.toString(),
+          name: airline.name,
+          code: airline.code,
+          isActive: airline.isActive,
+          baggagePolicy: {
+            extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor,
+            maxExtraBagsPerPassenger:
+              airline.baggagePolicy.maxExtraBagsPerPassenger,
+          },
+          cancellationTiers,
+        },
+        matchingCabins,
+      });
+    }
+
+    items.sort((a, b) => {
+      let compared = 0;
+      if (query.sortBy === 'price') {
+        compared =
+          a.matchingCabins[0].priceMinor - b.matchingCabins[0].priceMinor;
+      } else if (query.sortBy === 'duration') {
+        compared = a.flight.durationMinutes - b.flight.durationMinutes;
+      } else {
+        compared =
+          a.flight.departureAt.getTime() - b.flight.departureAt.getTime();
+      }
+      return (
+        compared ||
+        a.flight.departureAt.getTime() - b.flight.departureAt.getTime() ||
+        a.flight.id.localeCompare(b.flight.id)
+      );
+    });
+    const start = (query.page - 1) * query.limit;
+    const found = items.length;
+    return toPage(
+      items.slice(start, start + query.limit),
+      found,
+      query.page,
+      query.limit,
+    );
+  }
+
+  private toFlightView(flight: FlightRecord): FlightSearchItem['flight'] {
+    return {
+      id: flight._id.toString(),
+      airlineId: flight.airlineId.toString(),
+      flightNumber: flight.flightNumber,
+      departureAirportId: flight.departureAirportId,
+      arrivalAirportId: flight.arrivalAirportId,
+      departureAt: new Date(flight.departureAt),
+      arrivalAt: new Date(flight.arrivalAt),
+      departureLocalDate: flight.departureLocalDate,
+      durationMinutes: flight.durationMinutes,
+      status: flight.status,
+      hasBookings: flight.hasBookings,
+      cabins: flight.cabins.map((cabin) => ({
+        id: cabin._id.toString(),
+        cabinClass: cabin.cabinClass,
+        totalSeats: cabin.totalSeats,
+        availableSeats: cabin.availableSeats,
+        heldSeats: cabin.heldSeats,
+        bookedSeats: cabin.bookedSeats,
+        priceMinor: cabin.priceMinor,
+        freeBags: cabin.freeBags,
+        maxBagWeightKg: cabin.maxBagWeightKg,
+      })),
+    };
   }
 
   /** One airline by ID, or `null` (FLT-01, ACC-13). */

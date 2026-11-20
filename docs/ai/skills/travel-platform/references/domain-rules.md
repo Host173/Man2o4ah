@@ -91,7 +91,7 @@ Always confirm with the exact requirement text (`grep -n "<ID>" references/requi
 - **Report (GEN-09), moderation:** `POST /api/reports { targetType, targetId, reason }`. The target must exist (`ReportableContent.exists`). A second report by the same user → `409 ALREADY_REPORTED`.
 - **Resolve (GEN-10), admin → moderation:** `GET /api/admin/reports?status=open`; `PATCH /api/admin/reports/:id { action: dismiss|hide|delete }` applies the action once through `ReportableContent` and closes **all** open reports on that target (`dismissed`, `content_hidden` or `content_deleted`). `DELETE /api/admin/content/:type/:id` and `PATCH …/hide` act directly.
 - Hidden content (`isHidden: true`) is visible only to its author and admins.
-- **Audit (GEN-07):** admin and moderation emit `admin.action { actorId, action, target, details }` after each suspend, reactivate, moderator creation, password reset, provider (de)activation, report resolution, hide or delete. The audit module stores it (append-only). `GET /api/admin/audit-logs` is paginated and filterable by action and date.
+- **Audit (GEN-07):** admin and moderation emit `admin.action { eventId, actorId, action, target, details }` after each suspend, reactivate, moderator creation, password reset, provider (de)activation, report resolution, hide or delete. Each committed action gets a new non-empty `eventId`, retained on redelivery. Audit stores one append-only entry per event identity, deriving `_id` from that identity so replays do not create duplicates. `GET /api/admin/audit-logs` is paginated and filterable by action and date.
 
 ## 8. Notifications (GEN-01)
 

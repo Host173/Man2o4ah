@@ -45,7 +45,8 @@ function invalidTransition(from: BookingStatus, to: BookingStatus) {
  * reservation doesn't exist or is no longer in `from`. The `set` fields are checked
  * against the schema (validators run; an unknown field throws), so a bad value
  * or a misspelt key fails instead of being saved or silently dropped.
- * Pass `{ session }` inside a transaction.
+ * Pass `{ session }` inside a transaction, or `{ where }` to enforce an extra
+ * conditional filter (e.g. `checkOutDate < today`) in the same atomic write.
  */
 export async function transitionStatus<T extends { status: BookingStatus }>(
   model: Model<T>,
@@ -53,13 +54,13 @@ export async function transitionStatus<T extends { status: BookingStatus }>(
   from: BookingStatus,
   to: BookingStatus,
   set: Record<string, unknown> = {},
-  options: { session?: ClientSession } = {},
+  options: { session?: ClientSession; where?: QueryFilter<T> } = {},
 ): Promise<void> {
   if (!canTransition(from, to)) {
     throw invalidTransition(from, to);
   }
   const result = await model.updateOne(
-    { _id: id, status: from } as QueryFilter<T>,
+    { ...options.where, _id: id, status: from } as QueryFilter<T>,
     { $set: { ...set, status: to } } as UpdateQuery<T>,
     { session: options.session, runValidators: true, strict: 'throw' },
   );

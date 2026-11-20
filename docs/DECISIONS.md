@@ -220,6 +220,13 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 - Tickets say **what** to build, the test levels, TDD, branch, PR title and dependencies; **how** is up to the owner. Dates are set by Kareem.
 - Frontend tickets (M2) come later, once `DESIGN.md` is decided.
 
+## 20. Audit event identity (GEN-07)
+
+- `admin.action` requires a non-empty `eventId`, generated once per committed action and retained on delivery retries. Separate actions always receive new IDs.
+- Audit derives its ObjectId `_id` from the first 12 bytes of SHA-256 of the event ID. The existing unique `_id` index deduplicates concurrent inserts without changing the frozen schema or indexes; an existing entry is never updated or deleted.
+- Audit details retain only plain objects, arrays and primitive JSON values, with secret-looking keys stripped recursively. Unsupported nested objects are omitted rather than handed to BSON serialization with potentially secret-bearing fields or serialization hooks.
+- This deduplication does not make in-process event delivery durable; an outbox or delivery retry mechanism is not introduced by GEN-07.
+
 ## Open items to discuss
 
 **Priority: answer these first** (raised in Aisha's ACC-01 PR #126, merged as is on 15 Nov):

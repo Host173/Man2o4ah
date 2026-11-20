@@ -1,4 +1,5 @@
 import type { CabinClass } from '../../common/database/cabin-class.js';
+import type { Paginated } from '../../common/pagination/paginated.js';
 import type { RefundView } from '../payments/payments.types.js';
 import type { Cancellation } from '../../common/database/cancellation.schema.js';
 import type {
@@ -37,6 +38,26 @@ export interface FlightBookingAdminView {
   currency: string;
   status: FlightBookingStatus;
   createdAt: Date;
+}
+
+/** One airline moderator's booking on a flight (FLT-29). */
+export interface FlightModeratorBookingView {
+  reference: string;
+  passengerNames: string[];
+  cabinClass: CabinClass;
+  seatCount: number;
+  status: FlightBookingStatus;
+}
+
+/** Availability copied from the owning FlightsService's cabin counters (FLT-29). */
+export interface FlightCabinAvailabilityView {
+  cabinClass: CabinClass;
+  availableSeats: number;
+}
+
+/** One page of a moderator's flight bookings plus current cabin availability. */
+export interface FlightModeratorBookingsPage extends Paginated<FlightModeratorBookingView> {
+  seatsRemainingPerCabin: FlightCabinAvailabilityView[];
 }
 
 /** The airline's policies a segment snapshots at quote/hold time (same fields as `SegmentPolicy`). */

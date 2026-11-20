@@ -31,6 +31,9 @@ import {
   UserStatus,
 } from './schemas/user.schema.js';
 
+/** The name shown for a deactivated account (ACC-12). */
+export const DELETED_USER_NAME = 'Deleted user';
+
 /** MongoDB's duplicate-key error code. */
 const DUPLICATE_KEY = 11000;
 
@@ -137,9 +140,8 @@ export class AccountsService {
 
   /**
    * Profiles of the given users, for author names, "Deleted user" (ACC-12) and
-   * the author page (BLG-12). The real name and status are returned; the
-   * reader shows "Deleted user" when `status` is `deactivated`
-   * (data-model.md §1.7). Unknown or malformed IDs are left out; order is
+   * the author page (BLG-12). A deactivated account's name is "Deleted user"
+   * (ACC-12); its `status` is still returned (data-model.md §1.7). Unknown or malformed IDs are left out; order is
    * not guaranteed.
    */
   async getProfiles(userIds: string[]): Promise<AccountProfile[]> {
@@ -158,7 +160,10 @@ export class AccountsService {
       >();
     return users.map((user) => ({
       id: user._id.toString(),
-      name: user.name,
+      // ACC-12: a deactivated author shows as "Deleted user"; the status is
+      // still returned so readers can tell (data-model.md §1.7).
+      name:
+        user.status === UserStatus.DEACTIVATED ? DELETED_USER_NAME : user.name,
       status: user.status,
       createdAt: user.createdAt,
     }));

@@ -117,7 +117,7 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       ]);
     });
 
-    it('reports deactivated and suspended authors by status, so readers show "Deleted user" for deactivated ones', async () => {
+    it('resolves a deactivated author as "Deleted user" and keeps the name of a suspended author', async () => {
       const gone = await createUser({
         name: 'Gone',
         status: UserStatus.DEACTIVATED,
@@ -130,7 +130,10 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       const profiles = await accounts.getProfiles([gone.id, paused.id]);
       const byId = new Map(profiles.map((p) => [p.id, p]));
 
-      expect(byId.get(gone.id)?.status).toBe(UserStatus.DEACTIVATED);
+      expect(byId.get(gone.id)).toMatchObject({
+        name: 'Deleted user',
+        status: UserStatus.DEACTIVATED,
+      });
       // ACC-16: a suspended author's content keeps their name.
       expect(byId.get(paused.id)).toMatchObject({
         name: 'Paused',

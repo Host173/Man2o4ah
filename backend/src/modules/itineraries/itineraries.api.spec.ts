@@ -1747,9 +1747,9 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         dayCount: 3,
         cityIds: ['cairo', 'dubai'],
       });
-      expect(
-        response.body.days.map((day: { _id: string }) => day._id),
-      ).toEqual(dayIds);
+      expect(response.body.days.map((day: { _id: string }) => day._id)).toEqual(
+        dayIds,
+      );
       expect(response.body.days[0]).toMatchObject({
         dayNumber: 1,
         date: '2027-04-01',

@@ -11,12 +11,13 @@ import {
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import { FakeItinerariesService } from './itineraries.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+import { imageBytes } from '../support/image-fixtures.js';
 
 const imageFile = (): UploadedImage => ({
-  buffer: Buffer.from('bytes'),
+  buffer: imageBytes('jpg'),
   originalname: 'pyramids.jpg',
   mimetype: 'image/jpeg',
-  size: 5,
+  size: 32,
 });
 
 function itinerary(

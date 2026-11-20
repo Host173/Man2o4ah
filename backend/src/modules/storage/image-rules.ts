@@ -21,7 +21,7 @@ export interface UploadedImage {
   size: number;
 }
 
-/** Throws 400 VALIDATION_FAILED (field `file`) unless the file is a non-empty JPG or PNG of at most 5 MB (GEN-08). */
+/** Throws 400 VALIDATION_FAILED (field `file`) unless the file is present and a non-empty JPG or PNG of at most 5 MB (GEN-08). */
 export function assertImageAllowed(file: UploadedImage): void {
   const fail = (message: string): never => {
     throw new BadRequestException({
@@ -30,6 +30,9 @@ export function assertImageAllowed(file: UploadedImage): void {
       details: [{ field: 'file', message }],
     });
   };
+  if (!file) {
+    fail('an image file is required');
+  }
   if (!Object.hasOwn(ALLOWED_IMAGE_TYPES, file.mimetype)) {
     fail('only JPG or PNG images are allowed');
   }
@@ -38,5 +41,47 @@ export function assertImageAllowed(file: UploadedImage): void {
   }
   if (file.size === 0) {
     fail('the file is empty');
+  }
+}
+
+const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
+const PNG_SIGNATURE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+
+/** The image type a file's first bytes show, or undefined if it is neither JPG nor PNG (GEN-08). */
+export function detectImageType(
+  bytes: Buffer,
+): keyof typeof ALLOWED_IMAGE_TYPES | undefined {
+  if (
+    bytes.length >= JPEG_SIGNATURE.length &&
+    bytes.subarray(0, JPEG_SIGNATURE.length).equals(JPEG_SIGNATURE)
+  ) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= PNG_SIGNATURE.length &&
+    bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+  ) {
+    return 'image/png';
+  }
+  return undefined;
+}
+
+/** Throws 400 VALIDATION_FAILED (field `file`) unless the bytes match the declared JPG or PNG type; shared by real and fake storage (GEN-08). */
+export function assertImageContent(file: UploadedImage): void {
+  const detected = detectImageType(file.buffer);
+  let message: string | undefined;
+  if (detected === undefined) {
+    message = 'the file is not a JPG or PNG image';
+  } else if (detected !== file.mimetype) {
+    message = 'the file content does not match its type';
+  }
+  if (message !== undefined) {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Invalid image',
+      details: [{ field: 'file', message }],
+    });
   }
 }

@@ -5,6 +5,7 @@ import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fak
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs, type LoggedInUser } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -15,7 +16,7 @@ import { StorageService } from '../storage/storage.service.js';
 import { ItinerariesModule } from './itineraries.module.js';
 import { Itinerary } from './schemas/itinerary.schema.js';
 
-const sampleBytes = Buffer.from('fake-jpeg-bytes');
+const sampleBytes = imageBytes('jpg');
 
 describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
   let testApp: TestApp;
@@ -85,7 +86,7 @@ describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
       .http()
       .post(`/api/activities/${activityId}/images`)
       .set('Cookie', cookie)
-      .attach('file', sampleBytes, {
+      .attach('file', imageBytes(fileName.endsWith('.png') ? 'png' : 'jpg'), {
         filename: fileName,
         contentType: fileName.endsWith('.png') ? 'image/png' : 'image/jpeg',
       });
@@ -229,7 +230,7 @@ describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
       .http()
       .post(`/api/activities/${activityId}/images`)
       .set('Cookie', user.cookie)
-      .attach('file', Buffer.alloc(MAX_IMAGE_BYTES), {
+      .attach('file', imageBytes('png', MAX_IMAGE_BYTES), {
         filename: 'boundary.png',
         contentType: 'image/png',
       });

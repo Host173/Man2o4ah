@@ -24,12 +24,7 @@ export class FlightModeratorBookingResponseDto implements FlightModeratorBooking
   seatCount!: number;
 
   @ApiProperty({
-    enum: [
-      FlightBookingStatus.CONFIRMED,
-      FlightBookingStatus.CANCELLED,
-      FlightBookingStatus.COMPLETED,
-    ],
-    description: 'Completed bookings remain visible for departed flights',
+    enum: [FlightBookingStatus.CONFIRMED, FlightBookingStatus.CANCELLED],
   })
   status!: FlightBookingStatus;
 }

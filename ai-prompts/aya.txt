@@ -1711,3 +1711,23 @@ now open the pr and push
 How the output was used:
 Appended the FLT-29 prompt-log entry; pushed the branch and opened a pull request against develop
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+**Self-review** · FLT-29
+Checks: npm run verify passed (3111 tests, 98.43% overall lines) | backend
+Branch: 12 commits behind develop (merge develop before the PR is merged)
+Problems:
+
+1. Completed bookings are included, but FLT-29 requires only Confirmed or Cancelled. Fix: remove `completed` from `BOOKING_STATUSES`.
+Missing tests: none
+Probes: 0 tried, 0 found problems
+Open questions: none fix
+
+How the output was used:
+Merged origin/develop into the FLT-29 branch, removed completed bookings from the moderator list, CSV export and Swagger status set, and added a regression assertion; verification and PR update pending
+================================================

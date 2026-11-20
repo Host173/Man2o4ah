@@ -36,7 +36,6 @@ interface LeanModeratorBooking {
 const BOOKING_STATUSES = [
   FlightBookingStatus.CONFIRMED,
   FlightBookingStatus.CANCELLED,
-  FlightBookingStatus.COMPLETED,
 ];
 
 const BOOKING_PROJECTION = {
@@ -58,7 +57,7 @@ export class FlightModeratorBookingsService {
     private readonly flights: FlightsService,
   ) {}
 
-  /** FLT-29: list confirmed, cancelled and completed bookings with live cabin counters. */
+  /** FLT-29: list confirmed and cancelled bookings with live cabin counters. */
   async listForFlight(
     flightId: string,
     query: PaginationQueryDto,

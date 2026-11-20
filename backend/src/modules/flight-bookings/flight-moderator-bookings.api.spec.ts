@@ -94,14 +94,14 @@ describe('airline moderator flight bookings (FLT-29)', () => {
       .get(`/api/flights/${flightId}/passengers/export`)
       .set('Cookie', user.cookie);
 
-  it('lists only confirmed, cancelled and completed bookings for the flight', async () => {
+  it('lists only confirmed and cancelled bookings for the flight', async () => {
     const confirmed = await seedBooking(bookings, seats, {
       status: 'confirmed',
     });
     const cancelled = await seedBooking(bookings, seats, {
       status: 'cancelled',
     });
-    const completed = await seedBooking(bookings, seats, {
+    await seedBooking(bookings, seats, {
       status: 'completed',
     });
     await seedBooking(bookings, seats, { status: 'pending_payment' });
@@ -111,11 +111,11 @@ describe('airline moderator flight bookings (FLT-29)', () => {
       outbound: OTHER_SAME_AIRLINE,
     });
 
-    const first = await list(FLIGHT).query({ page: 1, limit: 2 }).expect(200);
-    const second = await list(FLIGHT).query({ page: 2, limit: 2 }).expect(200);
+    const first = await list(FLIGHT).query({ page: 1, limit: 1 }).expect(200);
+    const second = await list(FLIGHT).query({ page: 2, limit: 1 }).expect(200);
     const items = [...first.body.items, ...second.body.items];
 
-    const expectedReferences = [confirmed, cancelled, completed]
+    const expectedReferences = [confirmed, cancelled]
       .map((booking) => booking.reference ?? '')
       .sort((a, b) => a.localeCompare(b));
     expect(
@@ -128,11 +128,11 @@ describe('airline moderator flight bookings (FLT-29)', () => {
     });
     expect(
       items.map((item) => item.status).sort((a, b) => a.localeCompare(b)),
-    ).toEqual(['cancelled', 'completed', 'confirmed']);
+    ).toEqual(['cancelled', 'confirmed']);
     expect(first.body).toMatchObject({
       page: 1,
-      limit: 2,
-      total: 3,
+      limit: 1,
+      total: 2,
       totalPages: 2,
       seatsRemainingPerCabin: [{ cabinClass: 'economy', availableSeats: 46 }],
     });
@@ -141,6 +141,9 @@ describe('airline moderator flight bookings (FLT-29)', () => {
   it('exports escaped passenger names as downloadable CSV', async () => {
     const booking = await seedBooking(bookings, seats, {
       status: 'confirmed',
+    });
+    const completed = await seedBooking(bookings, seats, {
+      status: 'completed',
     });
     const passengerName = '=1+1, "Ada"\nSecond line';
     await bookings.updateOne(
@@ -164,6 +167,7 @@ describe('airline moderator flight bookings (FLT-29)', () => {
     expect(response.text).toContain(
       `${booking.reference},Jana Test,economy,2,confirmed`,
     );
+    expect(response.text).not.toContain(completed.reference);
   });
 
   it('returns a header-only CSV when the flight has no reportable bookings', async () => {
@@ -236,6 +240,13 @@ describe('airline moderator flight bookings (FLT-29)', () => {
       ],
     ).toMatchObject({
       content: { 'text/csv': { schema: { type: 'string', format: 'binary' } } },
+    });
+    expect(
+      document.components?.schemas?.FlightModeratorBookingResponseDto,
+    ).toMatchObject({
+      properties: {
+        status: { enum: ['confirmed', 'cancelled'] },
+      },
     });
   });
 });

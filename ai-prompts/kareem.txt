@@ -3760,3 +3760,189 @@ you will find my 4 pr (host173 prs) the last review found some errers, fix them 
 How the output was used:
 Fixed review points 1-4 on PR #170 (nested secret stripping and whole-word key matching in audit.listener.ts, ISO-only date bounds in audit.types.ts, id tie-break in test/fakes/audit.fake.ts) with tests committed first, pushed to feature/GEN-07-audit-log.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-08
+
+Prompt:
+execute this
+[Attached: PLT08_EXECUTION.md]
+# Execution — PLT-08: Demo data seed
+
+Issue #89. Lane: integration (last). Package 1, owner Kareem. TDD not required.
+Run it **after every mandatory feature is merged** (it depends on FLT-04 #36, HTL-04 #47, ACC-18 #32, GEN-12 #16, and in practice on everything a grader will click).
+
+## Goal
+
+Graders evaluate Milestone 1 in Swagger UI. On an empty database every list is empty and every flow starts with ten setup calls. This ticket adds a **separate, re-runnable demo seed** that fills the database with a small, realistic world so a grader can log in and try any flow at once: airlines with moderators, future flights with cabins and policies, hotels with moderators, rooms, availability and policies, and a few regular users.
+
+Done means:
+1. `npm run seed:demo` (in `backend/`) creates the demo world, and running it again changes nothing (no duplicates, no errors).
+2. It **never touches reference data** (countries, cities, airports, attractions, currencies) and never creates the admin (ACC-18's `seed:admin` does that).
+3. It goes **through the public HTTP API**, so every rule, invariant and event of every module applies (see "Design §1").
+4. An integration test runs it twice against the in-memory app and proves the second run is a no-op.
+5. The README explains the order (`seed:reference` → `seed:admin` → `seed:demo`) and lists the demo accounts.
+
+**Out of scope:** bookings, payments, reviews, itineraries, posts (graders create those themselves while testing; creating them needs Stripe and would make the seed slow and fragile), bonus features, changing any module.
+
+## Context you need
+
+- `backend/src/seed/seed-reference-data.ts` and `seed.module.ts`: the existing standalone seed (reference data). `package.json` script `seed:reference`.
+- ACC-18 (`seed:admin`): creates the admin from environment variables if missing. Read its script and the variables it uses (`.env.example`); the demo seed logs in as that admin.
+- `docs/ai/skills/travel-platform/references/endpoints.md`: the routes used below (admin: `POST /api/airlines`, `POST /api/hotels`, `POST /api/admin/moderators`; airline moderator: `PUT /api/airlines/:id/baggage-policy`, `PUT /api/airlines/:id/cancellation-policy`, `POST /api/flights`, `POST /api/flights/:id/cabins`, `GET /api/airlines/:id/flights`; hotel moderator: `PUT /api/hotels/:id/policies`, `POST /api/hotels/:id/rooms`, `GET /api/hotels/:id/rooms`, `POST /api/hotels/:id/rooms/:roomId/availability`; everyone: `POST /api/auth/register`, `POST /api/auth/login`, `PATCH /api/auth/change-password`, `GET /api/airports`, `GET /api/cities`).
+- `references/auth.md`: cookies (`access_token`, `refresh_token`), the forced password change for new moderators (ACC-07a: a moderator created with a temporary password must change it at first login).
+- The DTOs of those routes (read the controllers): exact body shapes and validation rules.
+- `backend/seed-data/airports.csv` and `cities.csv`: the airports that exist (CAI, DXB, LHR, JFK, CDG, RUH, FRA, …) and their cities.
+- `backend/test/support/test-app.ts` (`createTestApp`), `backend/src/app.setup.ts` (`configureApp`).
+
+**Code rules:** ESM (relative imports end in `.js`), `import type` for type-only imports, no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments, Prettier style. **No new package** (Node 22's global `fetch` is enough). Never log a password, a cookie or a connection string.
+
+## Design (settled here; follow it exactly)
+
+1. **Through the HTTP API, not the models.** The seed boots the real app and calls its endpoints with `fetch`, exactly like a client. Why: the seed then can't break a module's invariants (seat inventory totals, room-night ranges, forced password change, events for notifications/audit), and it doesn't inject other modules' models (the ownership rule). It also proves the main setup flows work end to end.
+2. **Two layers:**
+   - `backend/src/seed/demo/demo-seed.ts`: `export async function runDemoSeed(api: DemoApi, plan: DemoPlan, log: (line: string) => void): Promise<DemoSeedResult>`. Pure orchestration over a tiny client; no Nest imports. `DemoSeedResult` counts `created` and `skipped` per kind (`airlines`, `airlineModerators`, `flights`, `cabins`, `hotels`, `hotelModerators`, `rooms`, `availabilityRanges`, `users`).
+   - `backend/src/seed/demo/demo-api.ts`: `DemoApi`, a small client over `fetch` with a cookie jar per actor: `login(email, password)`, `get/post/put/patch(path, body?)`, each returning `{ status, body }`. It reads `Set-Cookie` from login responses and sends `Cookie` on later calls. One `DemoApi` instance per actor (admin, each moderator, each user).
+   - `backend/src/seed/seed-demo-data.ts`: the script. Creates the app with `NestFactory.create(AppModule)`, applies `configureApp` exactly as `main.ts` does, `listen(0)` on `127.0.0.1`, builds `DemoApi`s for `http://127.0.0.1:<port>/api`, runs `runDemoSeed`, prints the counts, closes the app. Exit code 1 on failure with the failing step's method, path, status and error `code`/`message` (never the body of a login).
+3. **Idempotent by natural keys** (a re-run is a no-op):
+   | Kind | Key | How the seed checks before creating |
+   |---|---|---|
+   | airline | `code` (unique) | `POST /api/airlines`; a 409 duplicate → find it (the admin list or `GET /api/airlines/:id` via the moderator's `providerId`; pick whatever endpoint exists and note it) and reuse its id |
+   | moderator / user | `email` (unique) | try to log in with the demo password first; if that works, reuse; else create (moderator: `POST /api/admin/moderators`; user: `POST /api/auth/register`) |
+   | flight | airline + flight number + local departure date (FLT-03 rejects duplicates) | `GET /api/airlines/:id/flights` and skip numbers already on that date |
+   | cabin | flight + class (each class at most once per flight, FLT-04) | skip classes the flight already has (read them from the flight details) |
+   | hotel | name + city | admin creates with `POST /api/hotels`; to detect an existing one, log in as its moderator (email key) and read its `providerId` |
+   | room | hotel + room name | `GET /api/hotels/:id/rooms`, skip names that exist |
+   | availability range | room + range | skip when the room's ranges already cover it |
+   | policies | provider | `PUT` is already idempotent: always send it |
+4. **Dates are relative to the run day (UTC)**, so the seed stays useful whenever it's run: flights on each of the next 14 days; hotel availability from today to today + 90 days. A re-run on a later day adds only the new days' flights (and that's fine: idempotency is per date).
+5. **One shared demo password** from a new environment variable `DEMO_PASSWORD` (required by the demo seed only; validated with the project's password rule; the seed fails fast with a clear message if it's missing or too weak). Moderators are created with a temporary password and then the seed logs in and performs the forced change to `DEMO_PASSWORD` (ACC-07a), so their accounts are usable at once. Add `DEMO_PASSWORD=` (empty, with a comment) to `.env.example` under `# backend/.env`. Never commit a real value.
+6. **The plan** (`backend/src/seed/demo/demo-plan.ts`, a typed constant; emails on the reserved domain `example.com`):
+   - Airlines (3): `Nile Air` (`NA`), `Gulf Wings` (`GW`), `Euro Connect` (`EC`). One moderator each: `nile.mod@example.com`, `gulf.mod@example.com`, `euro.mod@example.com`.
+   - Each airline: baggage policy (1 free bag, 23 kg, extra bag price and max as the DTO allows) and cancellation policy (e.g. 30 days → 100%, 7 days → 50%, 1 day → 10%; unique `daysBefore`, FLT-09).
+   - Routes (both directions, so round trips work, FLT-12): CAI↔DXB (Nile Air, Gulf Wings), CAI↔LHR (Nile Air), DXB↔JFK (Gulf Wings), LHR↔CDG and CDG↔FRA (Euro Connect), RUH↔CAI (Gulf Wings). One flight per route per day for 14 days, departure at a fixed local time per route (e.g. 08:30, 14:00, 21:15), realistic durations. Use only airports that `GET /api/airports` returns; if an airport in this list is missing, skip its routes and log it.
+   - Each flight: cabins Economy (e.g. 120 seats) and Business (e.g. 20 seats); First on the long-haul DXB↔JFK only. Prices in minor units of the platform currency; Business ≈ 3× Economy.
+   - Hotels (4): `Nile View Hotel` (Cairo), `Marina Bay Suites` (Dubai), `Thames Court` (London), `Seine Garden` (Paris), using city ids from `GET /api/cities`. One moderator each: `nileview.mod@example.com`, `marina.mod@example.com`, `thames.mod@example.com`, `seine.mod@example.com`.
+   - Each hotel: policies (check-in `14:00`, check-out `12:00`, tiers like the airlines), rooms `Standard Double` (2 guests), `Deluxe King` (2), `Family Room` (4), `Suite` (3); each room available from today to today + 90 days.
+   - Users (3): `sara@example.com`, `omar@example.com`, `lina@example.com` (registered through ACC-01 with consent), one with preferred currency `EGP` if `PATCH /api/users/me` allows it.
+   Adjust field names and enums to the real DTOs; keep the shape of the world.
+7. **Logging:** one line per kind at the end (`flights: 196 created, 0 skipped`), and one line per skipped item only when `--verbose` is passed.
+
+## Before you start
+
+1. `git fetch origin`. Every issue without the `bonus` label is closed except PLT-08, TST-01, TST-02, TST-03, PLT-07 and PLT-02 (backlog): check with `gh issue list --state open --json number,title,labels`. If a dependency (#36, #47, #32, #16) is open, stop and report.
+2. `git worktree add ../man2o4ah-PLT-08 -b chore/PLT-08-demo-data-seed origin/develop`; work only there. If the branch exists, stop and report.
+3. `cd backend && npm ci && npm run verify` passes. If not, stop and report.
+4. Read the controllers and DTOs listed in "Context" and write down the exact body of each call before coding.
+
+## Step 1: the client and the plan
+
+`demo-api.ts` (with a unit spec `demo-api.spec.ts`: cookie capture from `Set-Cookie`, cookie sent on the next call, JSON body/headers, non-2xx returned not thrown, using a stubbed `fetch`) and `demo-plan.ts`.
+**Commit:** `chore(seed): add the demo API client and the demo world plan (PLT-08)`
+
+## Step 2: the seed
+
+`demo-seed.ts` (Design §2–§4, §7), `seed-demo-data.ts` (Design §2), `DEMO_PASSWORD` in `.env.example` and in `backend/src/config/validate.ts` as **optional** (the app doesn't need it; only the seed checks it), with a test per rule in `validate.spec.ts` if validate checks anything for it. `package.json`: `"seed:demo": "nest build && node dist/seed/seed-demo-data.js"`.
+Order of work inside `runDemoSeed`: admin login → airlines → airline moderators (+ forced change) → airline policies → flights → cabins → hotels → hotel moderators (+ forced change) → hotel policies → rooms → availability → users. A step that fails stops the seed with a clear error (don't continue with half a world).
+**Commit:** `chore(seed): seed a demo world through the API, re-runnable (PLT-08)`
+
+## Step 3: the test (runs twice)
+
+`backend/src/seed/demo/demo-seed.integration.spec.ts`:
+- Build the whole app on the in-memory database with `createTestApp({ imports: [<every feature module of app.module.ts that createTestApp doesn't add>], override })`, faking only external services (`STRIPE_GATEWAY` → `FakeStripeGateway`, the FX client → its fake). Seed reference data (`ReferenceDataSeedService.run()`) and create the admin as ACC-18's seed does (call its service, or `loginAs`-style insert if that's what ACC-18's own test does).
+- `await t.app.listen(0)` and point `DemoApi` at it.
+- **Run 1:** `runDemoSeed` → `created` counts equal the plan (e.g. 3 airlines, 3 + 4 moderators, the expected flight count for 14 days, …), `skipped` all 0.
+- **Run 2:** every `created` is 0; `skipped` equals run 1's `created`; the collection counts (`airlines`, `flights`, `hotels`, `rooms`, `users`, `room_nights`… whatever exists) are identical before and after.
+- **Reference data untouched:** the counts of `countries`, `cities`, `airports`, `attractions`, `currencies` are the same before run 1 and after run 2.
+- **Usable:** after run 1, logging in as `nile.mod@example.com` with `DEMO_PASSWORD` gives 200 and no forced change; `GET /api/flights/search` CAI→DXB for tomorrow returns ≥ 1 result; `GET /api/hotels/search` for Cairo returns `Nile View Hotel`.
+- **Fails clearly:** without `DEMO_PASSWORD` the seed throws a message naming the variable.
+Use a long hook timeout (the seed makes a few hundred calls).
+**Commit:** `test(seed): prove the demo seed is complete and re-runnable (PLT-08)`
+
+## Step 4: README
+
+In "Database" (or a new "Demo data" subsection): the three commands in order, what `seed:demo` creates, that it's re-runnable and never touches reference data, the `DEMO_PASSWORD` variable, and a table of demo accounts (email, role, provider). The password itself is **not** in the README; it says "the value of `DEMO_PASSWORD` in your `backend/.env`".
+**Commit:** `docs(readme): document the demo seed and the demo accounts (PLT-08)`
+
+## Step 5: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Related Requirement: PLT-08`; `Prompt` = Kareem's message copied exactly plus `[Attached: PLT08_EXECUTION.md]` and its full content). Never edit earlier entries.
+**Commit:** `chore(ai): log the PLT-08 prompt (PLT-08)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `npx vitest run src/seed` | 0 failed; the integration spec ran both runs |
+| G3 | `git diff --name-only origin/develop...HEAD` | only `backend/src/seed/**`, `backend/src/config/validate.ts` (+ spec, only if changed), `backend/package.json` (one script), `.env.example` (one block), `README.md`, `ai-prompts/kareem.txt` |
+| G4 | `git grep -n "getModelToken\|InjectModel" -- backend/src/seed/demo` | no output (the seed uses the API only) |
+| G5 | `git grep -nE "DEMO_PASSWORD=.+" -- . ':!*.md'` | no output (no real value committed) |
+| G6 | Negative gate: in `runDemoSeed`, remove the room-name check; run the integration spec | run 2 fails (rooms duplicated); restore |
+| G7 | `git log --format=%s origin/develop..HEAD` | 5 commits, each ending in `(PLT-08)` |
+| G8 | `git status --porcelain` | empty |
+
+## Optional manual check (Kareem, on your machine)
+
+With `MONGODB_URI` pointing at a **dev** database (never the one graders use, unless you mean to), `DEMO_PASSWORD` and the admin variables set: `npm run seed:reference && npm run seed:admin && npm run seed:demo`, then `npm run seed:demo` again → all "0 created". Open `/api/docs`, log in as a demo moderator, list your flights.
+
+## Constraints
+
+- Don't change any module under `backend/src/modules/`, `common/`, CI, or the fakes. If an endpoint the seed needs doesn't exist or doesn't behave as documented, **stop and report** (that's a bug for its owner), don't work around it with direct database writes.
+- Never write to Atlas from a test. The agent never runs the seed against a real database; that's Kareem's manual step.
+- No new package. Stage files by name. Don't push. Don't open a PR.
+
+## Report
+
+- Branch, worktree, commits; each gate in one line.
+- The created counts of run 1 and the time it took.
+- Every place the real API differed from this file's plan (field names, enums, an endpoint missing for idempotency) and what you did.
+
+How the output was used:
+Built the PLT-08 demo seed on chore/PLT-08-demo-data-seed: a fetch-based API client with a cookie jar, a typed demo world plan, an idempotent runDemoSeed over the public API, the seed:demo script and DEMO_PASSWORD in .env.example, an integration test that runs the seed twice, and a README section with the demo accounts; commits: chore(seed) x2, test(seed), docs(readme), chore(ai).
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-08
+
+Prompt:
+Two checks, then push and open the PR for PLT-08.
+
+1. The reused worktree. You reset an existing worktree to origin/develop instead of creating
+   ../man2o4ah-PLT-08. Tell me which branch it held before the reset, and whether anything was
+   lost. Check with `git reflog` in that worktree: list any commits that existed before the reset
+   and are not on any remote branch (`git branch -r --contains <sha>` is empty), and say whether
+   there were uncommitted changes. Don't recover or change anything; just report. If something
+   unpushed was lost, stop here and wait for me.
+
+2. Line endings. Run `git ls-files --eol .env.example backend/src/seed README.md`. Every file must
+   be `i/lf`. If any file you touched shows `i/crlf`, convert it back to LF (keep the content
+   identical), run `npm run format:check` in backend/, and commit it as
+   `chore(seed): restore LF line endings (PLT-08)`. Don't touch files you didn't change.
+
+3. If both checks are clean: push `chore/PLT-08-demo-data-seed` and open a PR into develop titled
+   `PLT-08: Demo data seed`. Fill the PR template. The description must include:
+   - What it adds: `npm run seed:demo`, a re-runnable demo world created through the HTTP API (no
+     direct model writes), never touching reference data or the admin.
+   - Run 1 counts: 3 airlines, 4 hotels, 7 moderators, 196 flights, 420 cabins, 16 rooms,
+     16 availability ranges, 3 users; about 14 s; run 2 creates nothing (the integration spec
+     proves it).
+   - The new optional variable `DEMO_PASSWORD` (`.env.example`); the seed fails fast without it.
+     The README lists the demo accounts but never the password.
+   - Deviations from the plan, one line each: flights start tomorrow (no past departures);
+     availability uses PATCH `SET_RANGES` because POST rejects overlaps; existing providers are
+     found by logging in as their moderator (no list endpoint), so `DEMO_PASSWORD` must stay the
+     same between runs; city slugs used directly; `DemoApi.fork()` for one cookie jar per actor.
+   - Gates: all pass; verify 205 files / 3,341 tests. Note that `itinerary-pdf.api.spec.ts` can
+     time out under full-suite load and passes alone (known, not caused by this PR).
+   - Run order for setup: `seed:reference` → `seed:admin` → `seed:demo`.
+   Add a prompt-log entry for this message to ai-prompts/kareem.txt first (course format,
+   append only) and commit it as `chore(ai): log the PLT-08 push prompt (PLT-08)` before pushing.
+
+Report: the worktree findings, the eol result, the PR link, and CI status once it starts.
+
+How the output was used:
+Checked the reused worktree (no unpushed work lost: the branch it held, claude/execute-this-1a6c9e, sits on origin/main) and the line endings (all files i/lf in the index), then pushed chore/PLT-08-demo-data-seed and opened the PLT-08 PR into develop.

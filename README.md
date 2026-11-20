@@ -148,3 +148,32 @@ These rules bind every change, by a person or an agent. The details are in the p
 - Seed the reference data (countries, cities, airports, attractions, currencies) from `backend/seed-data/*.csv`: with `MONGODB_URI` set in `backend/.env`, run `npm run seed:reference` in `backend/`. It validates every reference before writing and is safe to re-run.
 - Create the admin account (ACC-18; there is no admin registration): set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in `backend/.env`, then run `npm run seed:admin` in `backend/`. It creates the admin only if no account has that email, never changes an existing account, and is safe to re-run.
 - Tests use an in-memory MongoDB replica set and never touch Atlas. The first test run downloads a MongoDB binary, so it can take a few minutes.
+
+### Demo data
+
+Graders try the platform in Swagger UI, so an empty database is not much use. `seed:demo` (PLT-08) fills it with a small demo world. Run the three seeds in this order, in `backend/`:
+
+```bash
+npm run seed:reference
+npm run seed:admin
+npm run seed:demo
+```
+
+- Set `DEMO_PASSWORD` in `backend/.env` first (8-72 characters, a letter and a digit). It is the password of every demo account below; use the value of `DEMO_PASSWORD` in your `backend/.env`. The seed also needs the `SEED_ADMIN_*` variables, because it logs in as the admin.
+- It creates 3 airlines, 4 hotels and their moderators, flights on every route for the next 14 days (each with Economy and Business cabins, First on Dubai to New York) and rooms available for the next 90 days, plus three regular users.
+- It goes through the public HTTP API, so every rule of every module applies. It never touches the reference data and never creates the admin.
+- It is re-runnable: a second run creates nothing (a run on a later day only adds that day's new flights). `npm run seed:demo -- --verbose` lists every skipped item.
+- Bookings, payments, reviews, itineraries and posts are not seeded: create them while you test.
+
+| Account | Role | Provider |
+|---|---|---|
+| `nile.mod@example.com` | airline moderator | Nile Air (`NA`) |
+| `gulf.mod@example.com` | airline moderator | Gulf Wings (`GW`) |
+| `euro.mod@example.com` | airline moderator | Euro Connect (`EC`) |
+| `nileview.mod@example.com` | hotel moderator | Nile View Hotel (Cairo) |
+| `marina.mod@example.com` | hotel moderator | Marina Bay Suites (Dubai) |
+| `thames.mod@example.com` | hotel moderator | Thames Court (London) |
+| `seine.mod@example.com` | hotel moderator | Seine Garden (Paris) |
+| `sara@example.com` | user (preferred currency EGP) | none |
+| `omar@example.com` | user | none |
+| `lina@example.com` | user | none |

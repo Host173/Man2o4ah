@@ -2,9 +2,12 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HotelsModule } from '../hotels/hotels.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
+import { AccountsModule } from '../accounts/accounts.module.js';
+import { HotelActiveBookings } from './hotel-active-bookings.js';
 import { HotelBookingsController } from './hotel-bookings.controller.js';
 import { newReservationReference } from './booking-reference.js';
 import { HotelBookingsService } from './hotel-bookings.service.js';
+import { HotelCancellationService } from './hotel-cancellation.service.js';
 import {
   HotelConfirmationService,
   RESERVATION_REFERENCE,
@@ -28,10 +31,13 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
     HotelsModule,
     // Registers HotelPayableBooking with payments' registry (PAY-01).
     PaymentsModule,
+    AccountsModule,
   ],
   controllers: [HotelBookingsController],
   providers: [
     HotelBookingsService,
+    HotelCancellationService,
+    HotelActiveBookings,
     HotelHoldService,
     HotelPayableBooking,
     HotelHoldExpiryJob,

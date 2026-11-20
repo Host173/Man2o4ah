@@ -72,13 +72,13 @@ export interface FlightView {
   status: FlightStatus;
   hasBookings: boolean;
   cabins: CabinView[];
-}
-
-/** A flight-management response includes the airport zones needed to display its UTC instants locally. */
-export interface FlightManagementView extends FlightView {
+  /** IANA zones used to display the UTC instants locally. */
   departureTimeZone: string;
   arrivalTimeZone: string;
 }
+
+/** A flight-management response includes the airport zones needed to display its UTC instants locally. */
+export interface FlightManagementView extends FlightView {}
 
 /** Flight fields supplied by an airline moderator; the airline ID comes from authentication. */
 export interface CreateFlightInput {
@@ -87,6 +87,15 @@ export interface CreateFlightInput {
   arrivalAirportId: string;
   departureLocal: string;
   arrivalLocal: string;
+}
+
+/** Cabin fields supplied by an airline moderator when adding a cabin to a flight. */
+export interface AddCabinInput {
+  cabinClass: CabinClass;
+  totalSeats: number;
+  priceMinor: number;
+  freeBags: number;
+  maxBagWeightKg: number;
 }
 
 /** Pagination for a moderator's own-airline flight list. */

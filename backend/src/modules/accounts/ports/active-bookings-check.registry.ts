@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { BookingType } from '../../../common/database/booking-type.js';
-import type { ActiveBookingsCheck } from './active-bookings-check.port.js';
+import type {
+  ActiveBookingsCheck,
+  ActiveBookingsCheckOptions,
+} from './active-bookings-check.port.js';
 
 const BOOKING_TYPES: readonly BookingType[] = Object.values(BookingType);
 
@@ -40,18 +43,22 @@ export class ActiveBookingsCheckRegistry {
    * booking type must be registered: answering "no bookings" because one
    * module isn't wired would let a user with bookings deactivate.
    */
-  async hasUpcomingConfirmed(userId: string): Promise<boolean> {
+  async hasUpcomingConfirmed(
+    userId: string,
+    options?: ActiveBookingsCheckOptions,
+  ): Promise<boolean> {
     const missing = BOOKING_TYPES.filter((type) => !this.checks.has(type));
     if (missing.length > 0) {
       throw new Error(
         `No ActiveBookingsCheck is registered for: ${missing.join(', ')}.`,
       );
     }
-    const answers = await Promise.all(
-      [...this.checks.values()].map((check) =>
-        check.hasUpcomingConfirmed(userId),
-      ),
-    );
-    return answers.some(Boolean);
+    // MongoDB does not support parallel operations on one transaction session.
+    let upcoming = false;
+    for (const check of this.checks.values()) {
+      const answer = await check.hasUpcomingConfirmed(userId, options);
+      upcoming = upcoming || answer;
+    }
+    return upcoming;
   }
 }

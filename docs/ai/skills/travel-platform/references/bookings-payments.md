@@ -116,6 +116,7 @@ catch { throw new BadRequestException({ code: ErrorCode.BadSignature, message: '
 5. Return quickly; ignore other types.
 
 **The booking module confirms** on `payment.succeeded`, in one transaction:
+- call `AccountsService.tryLockForBookingConfirmation(userId, { session })` to serialize with self-deactivation (ACC-12). If the account is missing/deactivated, expire the pending hotel hold and release nights in that transaction, then request a full `late_payment` refund after commit. Suspended accounts keep existing bookings valid. Future flight confirmation must use this same fence and release held seats when expiry wins.
 - conditional `pending_payment → confirmed`, set `confirmedAt` and the reference (§8);
 - flight: `SeatInventory.confirm(segments)` (held → booked); hotel: nothing (the nights stay);
 - after commit: emit `…confirmed` (→ notifications).

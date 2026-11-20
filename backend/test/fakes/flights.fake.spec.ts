@@ -3,6 +3,9 @@ import type {
   OneWaySearchQuery,
   RoundTripSearchQuery,
 } from '../../src/modules/flights/flights.types.js';
+import { Events } from '../../src/common/events/events.js';
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeFlightsService } from './flights.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -118,7 +121,136 @@ describe('FakeFlightsService', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  describe('addCabin', () => {
+    const input = {
+      cabinClass: 'business' as const,
+      totalSeats: 7,
+      priceMinor: 75000,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    };
+
+    it('adds a cabin with all seats initially available and returns a copy', async () => {
+      const { data, flights } = setup();
+      const result = await flights.addCabin('f7', input, 'a1');
+
+      expect(result).toMatchObject({
+        id: 'f7',
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+      expect(result.cabins[1]).toMatchObject({
+        id: 'created-cabin-1',
+        cabinClass: 'business',
+        totalSeats: 7,
+        availableSeats: 7,
+        heldSeats: 0,
+        bookedSeats: 0,
+        priceMinor: 75000,
+        freeBags: 2,
+        maxBagWeightKg: 32,
+      });
+      result.cabins[1]!.priceMinor = 1;
+      expect(data.flight('f7')?.cabins[1]?.priceMinor).toBe(75000);
+    });
+
+    it('rejects unknown flights and flights belonging to another airline', async () => {
+      const { flights } = setup();
+
+      for (const [flightId, airlineId] of [
+        ['missing', 'a1'],
+        ['f7', 'a2'],
+      ]) {
+        await expect(
+          flights.addCabin(flightId!, input, airlineId),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+    });
+
+    it('rejects duplicate classes and non-scheduled flights', async () => {
+      const { flights } = setup();
+
+      await expect(
+        flights.addCabin('f7', { ...input, cabinClass: 'economy' }, 'a1'),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+      await expect(flights.addCabin('f5', input, 'a1')).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+    });
+
+    it('keeps only one cabin when the same class is requested concurrently', async () => {
+      const { data, flights } = setup();
+      const results = await Promise.allSettled([
+        flights.addCabin('f7', input, 'a1'),
+        flights.addCabin('f7', input, 'a1'),
+      ]);
+
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      expect(
+        data
+          .flight('f7')
+          ?.cabins.filter((cabin) => cabin.cabinClass === 'business'),
+      ).toHaveLength(1);
+    });
+
+    it('rejects a cancellation during the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.status = 'cancelled';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
+    });
+
+    it('rechecks ownership after the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.airlineId = 'a2';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
+    });
+  });
+
   describe('getFlightsForBooking', () => {
+    it('includes airport IANA zones in the booking-facing flight contract', async () => {
+      const { flights } = setup();
+      const result = await flights.getFlightsForBooking(['f1']);
+      expect(result.get('f1')?.flight).toMatchObject({
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+    });
+
     it('returns each flight with its airline and leaves unknown IDs out', async () => {
       const { flights } = setup();
       const result = await flights.getFlightsForBooking(['f2', 'nope']);
@@ -493,6 +625,34 @@ describe('FakeFlightsService', () => {
             code: 'VALIDATION_FAILED',
             details: [{ field: 'departureAirportId' }],
           },
+        });
+      });
+
+      it('cancels an owned scheduled flight and removes it from search', async () => {
+        const { flights, data } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a1')).resolves.toBeUndefined();
+        expect(data.flight('f1')?.status).toBe('cancelled');
+        expect(ids((await flights.search(query())).items)).toEqual([
+          'f2',
+          'f3',
+        ]);
+        expect(flights.events.payloadsOf(Events.FlightCancelled)).toEqual([
+          { flightId: 'f1' },
+        ]);
+      });
+
+      it('returns 404 for another airline and 409 for a non-scheduled flight', async () => {
+        const { flights } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a2')).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await flights.cancelFlight('f1', 'a1');
+        await expect(flights.cancelFlight('f1', 'a1')).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'INVALID_STATUS_TRANSITION' },
         });
       });
     });

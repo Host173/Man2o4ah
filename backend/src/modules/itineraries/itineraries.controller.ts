@@ -16,6 +16,7 @@ import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -34,6 +35,7 @@ import { BudgetSummaryResponseDto } from './dto/budget-summary.response.dto.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
 import { CreateBudgetEntryDto } from './dto/create-budget-entry.dto.js';
+import { AddActivityDto } from './dto/add-activity.dto.js';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import {
@@ -202,6 +204,10 @@ export class ItinerariesController {
   @ApiOperation({ summary: 'ITN-01 Delete my itinerary' })
   @ApiParam({ name: 'id', type: String })
   @ApiNoContentResponse({ description: 'Itinerary deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: days changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary not found or owned by another user',
@@ -223,6 +229,10 @@ export class ItinerariesController {
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'dayId', type: String })
   @ApiNoContentResponse({ description: 'Day deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: day changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary or day ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary or day not found, or owned by another user',
@@ -320,6 +330,32 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDayView> {
     return this.itinerariesService.updateDay(
+      id.toHexString(),
+      dayId.toHexString(),
+      dto,
+      user.id,
+    );
+  }
+
+  @Post(':id/days/:dayId/activities')
+  @ApiOperation({ summary: 'ITN-10 Add an activity to my itinerary day' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'dayId', type: String })
+  @ApiCreatedResponse({ type: ItineraryDayResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid itinerary/day ID or activity payload',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or day not found, or owned by another user',
+  })
+  addActivity(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('dayId', ParseObjectIdPipe) dayId: Types.ObjectId,
+    @Body() dto: AddActivityDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDayView> {
+    return this.itinerariesService.addActivity(
       id.toHexString(),
       dayId.toHexString(),
       dto,

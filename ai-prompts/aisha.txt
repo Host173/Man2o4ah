@@ -10512,3 +10512,26 @@ why is this taking so long please fix it so that the checks dont take this long
 How the output was used:
 Answer only, no files changed (explained the check duration; no test config changed)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+please optimize and check without doing the tedious things i need the checks to be a few min max i need the report now
+
+How the output was used:
+Answer only, no files changed (ran a fast self-review: no reinstall, format/lint/typecheck/build plus the accounts tests with coverage and 8 probes, about 3 minutes)
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+skip the reinstalling of everything and just run the self review prompt like you did for every other ACC
+
+How the output was used:
+Answer only, no files changed (self-review report given; not pushed)
+================================================

@@ -3,6 +3,9 @@ import type {
   OneWaySearchQuery,
   RoundTripSearchQuery,
 } from '../../src/modules/flights/flights.types.js';
+import { Events } from '../../src/common/events/events.js';
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeFlightsService } from './flights.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -117,6 +120,126 @@ describe('FakeFlightsService', () => {
     vi.setSystemTime(NOW);
   });
   afterEach(() => vi.useRealTimers());
+
+  describe('addCabin', () => {
+    const input = {
+      cabinClass: 'business' as const,
+      totalSeats: 7,
+      priceMinor: 75000,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    };
+
+    it('adds a cabin with all seats initially available and returns a copy', async () => {
+      const { data, flights } = setup();
+      const result = await flights.addCabin('f7', input, 'a1');
+
+      expect(result).toMatchObject({
+        id: 'f7',
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+      expect(result.cabins[1]).toMatchObject({
+        id: 'created-cabin-1',
+        cabinClass: 'business',
+        totalSeats: 7,
+        availableSeats: 7,
+        heldSeats: 0,
+        bookedSeats: 0,
+        priceMinor: 75000,
+        freeBags: 2,
+        maxBagWeightKg: 32,
+      });
+      result.cabins[1]!.priceMinor = 1;
+      expect(data.flight('f7')?.cabins[1]?.priceMinor).toBe(75000);
+    });
+
+    it('rejects unknown flights and flights belonging to another airline', async () => {
+      const { flights } = setup();
+
+      for (const [flightId, airlineId] of [
+        ['missing', 'a1'],
+        ['f7', 'a2'],
+      ]) {
+        await expect(
+          flights.addCabin(flightId!, input, airlineId),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: ErrorCode.NotFound },
+        });
+      }
+    });
+
+    it('rejects duplicate classes and non-scheduled flights', async () => {
+      const { flights } = setup();
+
+      await expect(
+        flights.addCabin('f7', { ...input, cabinClass: 'economy' }, 'a1'),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.Conflict },
+      });
+      await expect(flights.addCabin('f5', input, 'a1')).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+    });
+
+    it('keeps only one cabin when the same class is requested concurrently', async () => {
+      const { data, flights } = setup();
+      const results = await Promise.allSettled([
+        flights.addCabin('f7', input, 'a1'),
+        flights.addCabin('f7', input, 'a1'),
+      ]);
+
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      expect(
+        data
+          .flight('f7')
+          ?.cabins.filter((cabin) => cabin.cabinClass === 'business'),
+      ).toHaveLength(1);
+    });
+
+    it('rejects a cancellation during the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.status = 'cancelled';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
+    });
+
+    it('rechecks ownership after the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.airlineId = 'a2';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
+    });
+  });
 
   describe('getFlightsForBooking', () => {
     it('returns each flight with its airline and leaves unknown IDs out', async () => {
@@ -387,6 +510,18 @@ describe('FakeFlightsService', () => {
       expect((await flights.getAirline('a1'))!.name).toBe('EgyptAir');
     });
 
+    it('returns baggage and cancellation policy fields using the airline contract view', async () => {
+      const { flights } = setup();
+
+      expect(await flights.getAirline('a2')).toMatchObject({
+        baggagePolicy: {
+          extraBagPriceMinor: 5000,
+          maxExtraBagsPerPassenger: 2,
+        },
+        cancellationTiers: [{ daysBefore: 7, refundPercent: 100 }],
+      });
+    });
+
     it('setAirlineActive switches the flag, returns the airline and can repeat', async () => {
       const { flights } = setup();
       expect(await flights.setAirlineActive('a1', false)).toMatchObject({
@@ -408,6 +543,108 @@ describe('FakeFlightsService', () => {
       ).rejects.toMatchObject({
         status: 404,
         response: { code: 'NOT_FOUND' },
+      });
+    });
+
+    describe('flight management', () => {
+      const input = {
+        flightNumber: 'ms 123',
+        departureAirportId: 'JFK',
+        arrivalAirportId: 'CAI',
+        departureLocal: '2027-03-14T03:30',
+        arrivalLocal: '2027-03-14T10:00',
+      };
+
+      it('creates a normalized flight and returns it in the own-airline page with zones', async () => {
+        const { flights } = setup();
+        const created = await flights.createFlight(input, 'a1');
+
+        expect(created).toMatchObject({
+          airlineId: 'a1',
+          flightNumber: 'MS 123',
+          departureAt: new Date('2027-03-14T07:30:00.000Z'),
+          arrivalAt: new Date('2027-03-14T08:00:00.000Z'),
+          departureTimeZone: 'America/New_York',
+          arrivalTimeZone: 'Africa/Cairo',
+        });
+
+        const page = await flights.listAirlineFlights('a1', 'a1', {
+          page: 1,
+          limit: 10,
+        });
+        expect(page.items).toContainEqual(created);
+        expect(page.total).toBe(6);
+        expect(page.items.every((flight) => flight.airlineId === 'a1')).toBe(
+          true,
+        );
+      });
+
+      it('does not list another airline without its assigned moderator ID', async () => {
+        const { flights } = setup();
+        await expect(
+          flights.listAirlineFlights('a2', 'a1', { page: 1, limit: 10 }),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+      });
+
+      it('rejects duplicate numbers for the same airline and local date', async () => {
+        const { flights } = setup();
+        await flights.createFlight(input, 'a1');
+        await expect(
+          flights.createFlight({ ...input, flightNumber: 'MS 123' }, 'a1'),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'CONFLICT' },
+        });
+      });
+
+      it('returns 404 for an unknown airline and 400 for an unknown airport', async () => {
+        const { flights } = setup();
+        await expect(
+          flights.createFlight(input, 'unknown'),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await expect(
+          flights.createFlight({ ...input, departureAirportId: 'ZZZ' }, 'a1'),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: 'VALIDATION_FAILED',
+            details: [{ field: 'departureAirportId' }],
+          },
+        });
+      });
+
+      it('cancels an owned scheduled flight and removes it from search', async () => {
+        const { flights, data } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a1')).resolves.toBeUndefined();
+        expect(data.flight('f1')?.status).toBe('cancelled');
+        expect(ids((await flights.search(query())).items)).toEqual([
+          'f2',
+          'f3',
+        ]);
+        expect(flights.events.payloadsOf(Events.FlightCancelled)).toEqual([
+          { flightId: 'f1' },
+        ]);
+      });
+
+      it('returns 404 for another airline and 409 for a non-scheduled flight', async () => {
+        const { flights } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a2')).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await flights.cancelFlight('f1', 'a1');
+        await expect(flights.cancelFlight('f1', 'a1')).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'INVALID_STATUS_TRANSITION' },
+        });
       });
     });
   });

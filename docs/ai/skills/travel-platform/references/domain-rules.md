@@ -84,7 +84,7 @@ Always confirm with the exact requirement text (`grep -n "<ID>" references/requi
 - **Comments (BLG-05/07):** 1–500 characters, chronological; authors edit and delete their own. `commentCount` counts visible comments (hiding one decrements it).
 - **Author names** are fetched from accounts when reading, never stored. A deactivated author shows as "Deleted user" on comments.
 - **Author page (BLG-12):** name, join date, published posts, public itineraries (through `ItinerariesService`).
-- Deleting a post deletes its comments, likes and image files.
+- Deleting a post deletes its comments and likes and transactionally queues its image keys in `post_image_cleanups`. Files are deleted after commit; failures are logged and retried every 30 seconds, including across restarts. The committed post deletion returns 204 (data-model §1.6, §3.10, §7).
 
 ## 7. Reports, moderation, audit
 
@@ -96,6 +96,7 @@ Always confirm with the exact requirement text (`grep -n "<ID>" references/requi
 ## 8. Notifications (GEN-01)
 
 The notifications module **listens to events** (`modules.md` §6); no module calls it to notify. Types: `booking_confirmed`, `booking_cancelled`, `refund_updated`, `flight_schedule_changed`, `flight_cancelled`, `account_suspended`, `account_reactivated`, `provider_deactivated`, `provider_reactivated`.
+Repeatable changes use the stable `eventId` in data-model §6.3. Retries never create another alert or make a read alert unread; each distinct reschedule or account/provider change notifies, even while an earlier alert is unread.
 Endpoints: `GET /api/notifications` (paginated), `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`.
 
 ## 9. Accounts and providers, admin side

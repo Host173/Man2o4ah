@@ -1,4 +1,6 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import type { ClientSession, Model } from 'mongoose';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import type {
   AccountListItem,
@@ -7,15 +9,43 @@ import type {
   CreateModeratorInput,
 } from './accounts.types.js';
 import type { ProviderType } from './schemas/user.schema.js';
+import { User, UserStatus } from './schemas/user.schema.js';
 
 /**
  * What other modules may ask accounts (CTR-01). Exported by `AccountsModule`;
- * the models stay private. Sprint 1 stubs: each method throws
- * `NotImplementedException` until its ticket ships. Tests use
+ * the models stay private. Unimplemented methods throw
+ * `NotImplementedException` until their ticket ships. Tests use
  * `FakeAccountsService` from `test/fakes`.
  */
 @Injectable()
 export class AccountsService {
+  constructor(@InjectModel(User.name) private readonly users: Model<User>) {}
+
+  /**
+   * ACC-12: serialize booking confirmation with self-deactivation using the
+   * caller's transaction. Increments the existing Mongoose version key to
+   * acquire a write fence; false means the account is missing or deactivated.
+   * Suspension does not invalidate existing bookings (data-model §3.2).
+   * Confirmation and its inventory writes must use this same session.
+   */
+  async tryLockForBookingConfirmation(
+    userId: string,
+    { session }: { session: ClientSession },
+  ): Promise<boolean> {
+    if (!session.inTransaction()) {
+      throw new Error('Booking confirmation requires an active transaction');
+    }
+    const result = await this.users.updateOne(
+      {
+        _id: userId,
+        status: { $in: [UserStatus.ACTIVE, UserStatus.SUSPENDED] },
+      },
+      { $inc: { __v: 1 } },
+      { session },
+    );
+    return result.matchedCount === 1;
+  }
+
   /**
    * Profiles of the given users, for author names, "Deleted user" (ACC-12) and
    * the author page (BLG-12). Unknown or malformed IDs are left out; order is

@@ -8,8 +8,8 @@ import { FxService } from './fx/fx.service.js';
 import { PayableBookingRegistry } from './payments/ports/payable-booking.registry.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { PaymentsService } from './payments/payments.service.js';
+import { StripeApiGateway } from './payments/stripe/stripe-api.gateway.js';
 import { STRIPE_GATEWAY } from './payments/stripe/stripe-gateway.js';
-import { StripeGatewayStub } from './payments/stripe/stripe-gateway.stub.js';
 import { ReferenceDataModule } from './reference-data/reference-data.module.js';
 import { ReferenceDataService } from './reference-data/reference-data.service.js';
 import { StorageModule } from './storage/storage.module.js';
@@ -43,9 +43,9 @@ describe('platform contracts (wiring)', () => {
     expect(t.moduleRef.get(token, { strict: false })).toBeInstanceOf(token);
   });
 
-  it('binds STRIPE_GATEWAY to the stub', () => {
+  it('binds STRIPE_GATEWAY to StripeApiGateway', () => {
     expect(t.moduleRef.get(STRIPE_GATEWAY, { strict: false })).toBeInstanceOf(
-      StripeGatewayStub,
+      StripeApiGateway,
     );
   });
 });

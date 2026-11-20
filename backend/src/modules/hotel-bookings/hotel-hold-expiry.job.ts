@@ -1,12 +1,11 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Interval } from '@nestjs/schedule';
 import type { Connection, Model, QueryFilter, Types } from 'mongoose';
-import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
-import { transitionStatus } from './booking-lifecycle.js';
+import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
 import {
   HotelReservation,
   HotelReservationStatus,
@@ -105,7 +104,7 @@ export class HotelHoldExpiryJob {
     } catch (error) {
       // Lost the race: the reservation was confirmed or expired by someone else.
       // Only that is expected; any other error (even a 409 from release) is logged.
-      if (isLostRace(error)) return false;
+      if (isInvalidTransition(error)) return false;
       this.logger.error(
         `Could not expire hotel reservation ${reservationId}`,
         error instanceof Error ? error.stack : undefined,
@@ -122,14 +121,4 @@ export class HotelHoldExpiryJob {
     });
     return true;
   }
-}
-
-/** True when `transitionStatus` found the reservation no longer pending. */
-function isLostRace(error: unknown): boolean {
-  if (!(error instanceof ConflictException)) return false;
-  const response = error.getResponse();
-  return (
-    typeof response === 'object' &&
-    (response as { code?: unknown }).code === ErrorCode.InvalidStatusTransition
-  );
 }

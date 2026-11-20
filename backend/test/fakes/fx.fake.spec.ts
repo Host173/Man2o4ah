@@ -61,4 +61,17 @@ describe('FakeFxService', () => {
       rateDate: '2026-12-01',
     });
   });
+
+  it('rounds an exact .5 half up with a non-integer rate, like the real converter', async () => {
+    const fx = new FakeFxService({ rates: { USD: 1, XXX: 0.7 } });
+    await expect(fx.convert(45, 'USD', 'XXX')).resolves.toMatchObject({
+      amountMinor: 32,
+    });
+  });
+
+  it('throws when the result is not a safe integer, like the real converter', async () => {
+    await expect(
+      new FakeFxService().convert(Number.MAX_SAFE_INTEGER, 'USD', 'EGP'),
+    ).rejects.toThrow(Error);
+  });
 });

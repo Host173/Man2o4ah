@@ -8,6 +8,7 @@ Team rules, setup and the `.env` values are in the [root README](../README.md). 
 
 ```bash
 npm install                # once
+npx playwright install chromium # once, and after Playwright upgrades
 npm run start:dev          # run with watch mode (port 4000)
 npm run seed:reference     # load the reference data (countries, cities, airports, attractions, currencies)
 npm test                   # all tests (in-memory MongoDB, never Atlas)
@@ -15,6 +16,10 @@ npm run test:cov           # tests with coverage
 npm run verify             # what CI runs: format check, lint, typecheck, tests with coverage, build
 npm run format             # fix formatting
 ```
+
+On Linux servers, provision Chromium and its system libraries with
+`npx playwright install --with-deps chromium` as the service user before starting
+the app. CI provisions the same runtime before running tests.
 
 ## Where contracts are documented
 

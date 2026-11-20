@@ -1827,3 +1827,34 @@ continue htl 23 now
 How the output was used:
 Fast-forwarded the HTL-23 branch to latest develop and implemented hotel review create, edit, delete, listing, moderation registration, and tests
 ================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: HTL-23
+
+Prompt:
+review htl 23
+
+How the output was used:
+Completed a read-only HTL-23 branch review; checked the issue, requirement, diff, tests, coverage, branch status, and prompt log; no files changed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: HTL-23
+
+Prompt:
+**Self-review** · HTL-23
+Checks: npm run verify failed: 3240 passed, 5 skipped; admin moderation suite crashes on duplicate review registration
+Branch: up to date with develop
+Problems:
+
+1. AdminModule real `HotelReviewReportableContent` conflicts with `reviewsFake` because both register `review`; fix: override the real provider or avoid manual fake registration.
+Missing tests: none
+Probes: 0 tried, 0 found problems
+Open questions: none do this fixxxxx
+
+How the output was used:
+Added the approved provider override in `backend/src/modules/admin/admin.api.spec.ts`; the focused admin API suite and `npm run verify` pass. Committed as `test(admin): isolate HTL-23 review registration in admin API test (HTL-23)`.
+================================================

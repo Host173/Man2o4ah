@@ -588,6 +588,7 @@ describe('ModerationService integration (GEN-09)', () => {
       const auditEvents = fakeEvents.payloadsOf(Events.AdminAction);
       expect(auditEvents).toEqual([
         {
+          eventId: expect.any(String),
           actorId: adminId,
           action: AuditAction.REPORT_RESOLVED,
           target: { type: 'report', id: r1._id },
@@ -639,6 +640,7 @@ describe('ModerationService integration (GEN-09)', () => {
         );
         expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
           {
+            eventId: expect.any(String),
             actorId: adminId,
             action: AuditAction.REPORT_RESOLVED,
             target: { type: 'report', id: rHide1._id },
@@ -651,6 +653,7 @@ describe('ModerationService integration (GEN-09)', () => {
             },
           },
           {
+            eventId: expect.any(String),
             actorId: adminId,
             action: AuditAction.CONTENT_HIDDEN,
             target: { type: targetType, id: hideId },
@@ -672,6 +675,7 @@ describe('ModerationService integration (GEN-09)', () => {
         expect(fake.has(deleteId)).toBe(false);
         expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
           {
+            eventId: expect.any(String),
             actorId: adminId,
             action: AuditAction.REPORT_RESOLVED,
             target: { type: 'report', id: rDelete._id },
@@ -684,6 +688,7 @@ describe('ModerationService integration (GEN-09)', () => {
             },
           },
           {
+            eventId: expect.any(String),
             actorId: adminId,
             action: AuditAction.CONTENT_DELETED,
             target: { type: targetType, id: deleteId },
@@ -932,6 +937,7 @@ describe('ModerationService integration (GEN-09)', () => {
       );
       expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
         {
+          eventId: expect.any(String),
           actorId: adminId,
           action: AuditAction.CONTENT_HIDDEN,
           target: { type: ReportTargetType.POST, id: postId },
@@ -955,6 +961,7 @@ describe('ModerationService integration (GEN-09)', () => {
       ).toBe(ReportStatus.CONTENT_DELETED);
       expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
         {
+          eventId: expect.any(String),
           actorId: adminId,
           action: AuditAction.CONTENT_DELETED,
           target: { type: ReportTargetType.REVIEW, id: reviewId },

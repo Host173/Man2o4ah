@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -12,7 +13,7 @@ import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
-import { AuditAction } from '../audit/schemas/audit-log.schema.js';
+import { AuditAction } from '../audit/audit.types.js';
 import { CreateReportDto } from './dto/create-report.dto.js';
 import { ListReportsQueryDto } from './dto/list-reports-query.dto.js';
 import {
@@ -242,6 +243,7 @@ export class ModerationService {
 
     const adminHexId = adminObjectId.toHexString();
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminHexId,
       action: AuditAction.REPORT_RESOLVED,
       target: { type: 'report', id: reportObjectId.toHexString() },
@@ -256,6 +258,7 @@ export class ModerationService {
 
     if (dto.action === ReportResolutionAction.HIDE) {
       this.events.emit(Events.AdminAction, {
+        eventId: randomUUID(),
         actorId: adminHexId,
         action: AuditAction.CONTENT_HIDDEN,
         target: { type: existing.targetType, id: targetHexId },
@@ -263,6 +266,7 @@ export class ModerationService {
       });
     } else if (dto.action === ReportResolutionAction.DELETE) {
       this.events.emit(Events.AdminAction, {
+        eventId: randomUUID(),
         actorId: adminHexId,
         action: AuditAction.CONTENT_DELETED,
         target: { type: existing.targetType, id: targetHexId },
@@ -360,6 +364,7 @@ export class ModerationService {
       .exec();
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminObjectId.toHexString(),
       action: auditAction,
       target: { type: targetType, id: targetHexId },

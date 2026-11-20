@@ -1,4 +1,6 @@
 import type { CabinClass } from '../../common/database/cabin-class.js';
+import type { RefundView } from '../payments/payments.types.js';
+import type { Cancellation } from '../../common/database/cancellation.schema.js';
 import type {
   FlightBookingStatus,
   PassengerType,
@@ -97,4 +99,80 @@ export interface FlightHold extends FlightQuote {
   status: 'pending_payment';
   /** When the hold ends if unpaid: 10 minutes after the booking was created. */
   holdExpiresAt: Date;
+}
+
+/** FLT-26: what cancelling would refund right now. Nothing is saved. */
+export interface FlightRefundPreview {
+  percent: number;
+  amountMinor: number;
+  currency: string;
+}
+
+/** FLT-26: a whole-booking cancellation; PAY-03 supplies the refund status. */
+export interface CancelledFlightBooking {
+  _id: string;
+  reference: string;
+  status: 'cancelled';
+  cancellation: {
+    cancelledAt: Date;
+    cancelledBy: 'user';
+    refundPercent: number;
+    refundAmountMinor: number;
+  };
+  /** Null when no positive refund is due. A recorded gateway failure is `failed`. */
+  refund: RefundView | null;
+}
+
+/** One flight of a booking in the "my bookings" list (FLT-25). */
+export interface MyFlightBookingSegmentSummary {
+  direction: SegmentDirection;
+  flightNumber: string;
+  departureAirportId: string;
+  arrivalAirportId: string;
+  /** UTC instants. */
+  departureAt: Date;
+  arrivalAt: Date;
+  cabinClass: CabinClass;
+}
+
+/** One row of the "my bookings" list (FLT-25): reference, flight, date, passengers, cabin, status. */
+export interface MyFlightBookingSummary {
+  _id: string;
+  /** Set only once the booking is confirmed (FLT-23). */
+  reference?: string;
+  status: FlightBookingStatus;
+  tripType: TripType;
+  /** Outbound departure, UTC. */
+  firstDepartureAt: Date;
+  segments: MyFlightBookingSegmentSummary[];
+  passengers: { type: PassengerType; fullName: string }[];
+  seatCount: number;
+  pricing: { totalMinor: number; currency: string };
+}
+
+/** One flight of a booking with its price and policy snapshots (FLT-25 details). */
+export interface MyFlightBookingSegment extends MyFlightBookingSegmentSummary {
+  flightId: string;
+  airlineId: string;
+  fareMinor: number;
+  policy: QuotedSegmentPolicy;
+}
+
+/** The full booking for its owner (FLT-25 details). Any status, including pending and expired. */
+export interface MyFlightBooking {
+  _id: string;
+  reference?: string;
+  status: FlightBookingStatus;
+  tripType: TripType;
+  segments: MyFlightBookingSegment[];
+  /** `dateOfBirth` is `YYYY-MM-DD`. */
+  passengers: QuotedPassenger[];
+  seatCount: number;
+  pricing: FlightQuote['pricing'];
+  holdExpiresAt: Date;
+  confirmedAt?: Date;
+  expiredAt?: Date;
+  completedAt?: Date;
+  cancellation?: Cancellation;
+  createdAt: Date;
 }

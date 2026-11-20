@@ -34,24 +34,33 @@ import type {
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public } from '../accounts/auth/decorators.js';
+import { BudgetSummaryResponseDto } from './dto/budget-summary.response.dto.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
 import { ItineraryFlightsQueryDto } from './dto/itinerary-flights-query.dto.js';
+import { CreateBudgetEntryDto } from './dto/create-budget-entry.dto.js';
 import { AddActivityDto } from './dto/add-activity.dto.js';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import {
+  BudgetEntryResponseDto,
   ItineraryDayResponseDto,
   ItineraryDetailResponseDto,
   PaginatedItinerariesResponseDto,
   TransportCostResponseDto,
 } from './dto/itinerary.response.dto.js';
+import {
+  PaginatedPublicItinerarySearchResponseDto,
+  type PublicItinerarySearchItemResponseDto,
+} from './dto/public-itinerary.response.dto.js';
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
 import { ItineraryPdf } from './itinerary-pdf.js';
 import type {
+  BudgetEntryView,
+  BudgetSummaryView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -91,6 +100,75 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<Paginated<ItinerarySummary>> {
     return this.itinerariesService.listMine(user.id, query);
+  }
+
+  /**
+   * Static path: declare before `/:id` (endpoints.md). ITN-21 extends this with
+   * keyword and filters; ITN-20 already publishes the visible public list.
+   */
+  @Public()
+  @Get('public/search')
+  @ApiOperation({
+    summary: 'ITN-20, ITN-21 Search public itineraries (read-only)',
+  })
+  @ApiOkResponse({ type: PaginatedPublicItinerarySearchResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid pagination query' })
+  async searchPublic(
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<PublicItinerarySearchItemResponseDto>> {
+    const result = await this.itinerariesService.searchPublic(query);
+    return {
+      ...result,
+      items: result.items.map(({ id, startDate, ...summary }) => ({
+        ...summary,
+        _id: id,
+        startDate: startDate.toISOString().slice(0, 10),
+      })),
+    };
+  }
+
+  @Get(':id/budget-summary')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary: 'ITN-14/18 Budget summary in my preferred currency',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: BudgetSummaryResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID or currency' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary not found or owned by another user',
+  })
+  getBudgetSummary(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<BudgetSummaryView> {
+    return this.itinerariesService.getBudgetSummary(id.toHexString(), user.id);
+  }
+
+  @Post(':id/days/:dayId/budgets')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'ITN-14 Add a budget entry to a day' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'dayId', type: String })
+  @ApiCreatedResponse({ type: BudgetEntryResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid day, category, amount or currency',
+  })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or day not found, or owned by another user',
+  })
+  addBudgetEntry(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('dayId', ParseObjectIdPipe) dayId: Types.ObjectId,
+    @Body() dto: CreateBudgetEntryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<BudgetEntryView> {
+    return this.itinerariesService.addBudgetEntry(
+      id.toHexString(),
+      dayId.toHexString(),
+      dto,
+      user.id,
+    );
   }
 
   @Get(':id')
@@ -161,7 +239,9 @@ export class ItinerariesController {
 
   @Patch(':id')
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'ITN-01 Edit my itinerary' })
+  @ApiOperation({
+    summary: 'ITN-01, ITN-20 Edit my itinerary or set its visibility',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID or body' })

@@ -55,6 +55,21 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     this.seatInventory = new FakeSeatInventory(data);
   }
 
+  /** Marks scheduled flights departed once their UTC departure time passes (FLT-30). */
+  markFlightsDeparted(now = new Date()): Promise<number> {
+    let modified = 0;
+    for (const flight of this.data.flights()) {
+      if (
+        flight.status === 'scheduled' &&
+        flight.departureAt.getTime() <= now.getTime()
+      ) {
+        flight.status = 'departed';
+        modified++;
+      }
+    }
+    return Promise.resolve(modified);
+  }
+
   async createFlight(
     input: CreateFlightInput,
     airlineId: string,
@@ -258,6 +273,29 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ...structuredClone(flight),
       departureTimeZone: departureAirport.timeZone,
       arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
+  async getFlightDetails(
+    flightId: string,
+  ): Promise<{ flight: FlightManagementView; airline: AirlineView }> {
+    const flight = this.data.flight(flightId);
+    if (!flight) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    const airline = this.data.airline(flight.airlineId);
+    if (!airline) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
+    return {
+      flight: structuredClone(flight),
+      airline: structuredClone(airline),
     };
   }
 

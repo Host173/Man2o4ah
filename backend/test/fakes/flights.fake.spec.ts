@@ -242,6 +242,15 @@ describe('FakeFlightsService', () => {
   });
 
   describe('getFlightsForBooking', () => {
+    it('includes airport IANA zones in the booking-facing flight contract', async () => {
+      const { flights } = setup();
+      const result = await flights.getFlightsForBooking(['f1']);
+      expect(result.get('f1')?.flight).toMatchObject({
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+    });
+
     it('returns each flight with its airline and leaves unknown IDs out', async () => {
       const { flights } = setup();
       const result = await flights.getFlightsForBooking(['f2', 'nope']);
@@ -278,6 +287,21 @@ describe('FakeFlightsService', () => {
       first.get('f1')!.flight.cabins[0].priceMinor = 1;
       const second = await flights.getFlightsForBooking(['f1']);
       expect(second.get('f1')!.flight.cabins[0].priceMinor).toBe(30000);
+    });
+  });
+
+  describe('markFlightsDeparted', () => {
+    it('uses the exact boundary, leaves cancelled flights unchanged, and is idempotent', async () => {
+      const { data, flights } = setup();
+      vi.setSystemTime(new Date('2026-11-20T09:00:00.000Z'));
+
+      await expect(flights.markFlightsDeparted()).resolves.toBe(3);
+      await expect(flights.markFlightsDeparted()).resolves.toBe(0);
+      expect(data.flight('f2')?.status).toBe('departed');
+      expect(data.flight('f1')?.status).toBe('departed');
+      expect(data.flight('f3')?.status).toBe('scheduled');
+      expect(data.flight('f6')?.status).toBe('departed');
+      expect(data.flight('f5')?.status).toBe('cancelled');
     });
   });
 

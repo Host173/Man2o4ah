@@ -1,10 +1,21 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -17,6 +28,7 @@ import { FlightHoldResponseDto } from './dto/flight-hold.response.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
 import type { FlightHold, FlightQuote } from './flight-bookings.types.js';
+import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightQuoteService } from './flight-quote.service.js';
 
@@ -27,6 +39,7 @@ export class FlightBookingsController {
   constructor(
     private readonly quotes: FlightQuoteService,
     private readonly holds: FlightHoldService,
+    private readonly eTickets: FlightETicket,
   ) {}
 
   /** A quote saves nothing, so it answers 200, not 201. */
@@ -68,5 +81,37 @@ export class FlightBookingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<FlightHold> {
     return this.holds.hold(body, user.id);
+  }
+
+  /** Only the owner's own confirmed booking; anyone else's answers 404 (ACC-11). */
+  @Get(':id/e-ticket')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-23 Download the e-ticket (PDF) of my confirmed booking',
+    description:
+      'Reference, passengers and every flight with its local departure and arrival times (GEN-06).',
+  })
+  @ApiOkResponse({
+    description: 'The e-ticket as a downloadable PDF',
+    content: {
+      'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description: 'CONFLICT: the booking is not confirmed',
+  })
+  async eTicket(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<StreamableFile> {
+    const ticket = await this.eTickets.render(id, user.id);
+    return new StreamableFile(ticket.pdf, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${ticket.filename}"`,
+    });
   }
 }

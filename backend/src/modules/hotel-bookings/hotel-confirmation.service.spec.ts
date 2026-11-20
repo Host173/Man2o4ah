@@ -1,4 +1,5 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { loginAs } from '../../../test/support/auth.js';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
@@ -14,17 +15,19 @@ import { Events } from '../../common/events/events.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
+import { User, UserStatus } from '../accounts/schemas/user.schema.js';
 import { RESERVATION_REFERENCE } from './hotel-confirmation.service.js';
 import type { HotelHoldRequestDto } from './dto/hotel-hold.dto.js';
 import { HotelBookingsModule } from './hotel-bookings.module.js';
 import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelReservation } from './schemas/hotel-reservation.schema.js';
+import { HotelActiveBookings } from './hotel-active-bookings.js';
 
 const HOTEL = '6553a1f0c2b4e8a9d0f1a801';
 const ROOM_101 = '6553a1f0c2b4e8a9d0f1a802';
 const ROOM_102 = '6553a1f0c2b4e8a9d0f1a803';
-const USER = '6553a1f0c2b4e8a9d0f1a899';
+let USER: string;
 
 const room = (id: string, name: string) => ({
   id,
@@ -118,6 +121,7 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
     payments.refunds.length = 0;
     nextReferences.length = 0;
     await clearCollections(t.connection);
+    USER = (await loginAs(t.connection, 'user')).id;
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -137,6 +141,8 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
   it('confirms the reservation with a reference, and keeps its nights', async () => {
     const hold = await holds.hold(stay(), USER);
     nextReferences.push('HRAB12CD');
+    const check = t.moduleRef.get(HotelActiveBookings);
+    expect(await check.hasUpcomingConfirmed(USER)).toBe(false);
 
     await paymentSucceeded(hold.reservationId);
 
@@ -144,6 +150,10 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
     expect(after).toMatchObject({ status: 'confirmed', reference: 'HRAB12CD' });
     expect(after?.confirmedAt).toBeInstanceOf(Date);
     expect(nightsOf(hold.reservationId)).toHaveLength(2);
+    expect(await check.hasUpcomingConfirmed(USER)).toBe(true);
+    expect(
+      await check.hasUpcomingConfirmed(new Types.ObjectId().toHexString()),
+    ).toBe(false);
   });
 
   it('emits HotelReservationConfirmed once, after the change', async () => {
@@ -212,6 +222,70 @@ describe('HotelConfirmationService: payment.succeeded (HTL-17)', () => {
   // §8.6 / data-model §8 #14: a payment that arrives after the hold expired is
   // not confirmed (the rooms may be gone); the user gets all their money back.
   describe('late payment', () => {
+    it('expires a pending reservation for a deactivated owner, releases nights and requests a full refund', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await t.connection
+        .model<User>(User.name)
+        .updateOne(
+          { _id: USER, status: UserStatus.ACTIVE },
+          { $set: { status: UserStatus.DEACTIVATED } },
+        );
+
+      await paymentSucceeded(hold.reservationId);
+      await paymentSucceeded(hold.reservationId);
+
+      expect((await saved(hold.reservationId))?.status).toBe('expired');
+      expect(nightsOf(hold.reservationId)).toEqual([]);
+      expect(payments.refunds).toEqual([
+        expect.objectContaining({
+          bookingId: hold.reservationId,
+          amountMinor: hold.totalMinor,
+          reason: 'late_payment',
+        }),
+      ]);
+      expect(events.payloadsOf(Events.HotelReservationConfirmed)).toEqual([]);
+      expect(events.payloadsOf(Events.HotelReservationExpired)).toHaveLength(1);
+    });
+
+    it('keeps an existing booking valid when its owner is suspended', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await t.connection
+        .model<User>(User.name)
+        .updateOne(
+          { _id: USER, status: UserStatus.ACTIVE },
+          { $set: { status: UserStatus.SUSPENDED } },
+        );
+
+      await paymentSucceeded(hold.reservationId);
+
+      expect((await saved(hold.reservationId))?.status).toBe('confirmed');
+      expect(nightsOf(hold.reservationId)).toHaveLength(2);
+      expect(payments.refunds).toEqual([]);
+    });
+
+    it('rolls back expiry and emits no event or refund if releasing nights fails', async () => {
+      const hold = await holds.hold(stay(), USER);
+      await t.connection
+        .model<User>(User.name)
+        .updateOne(
+          { _id: USER, status: UserStatus.ACTIVE },
+          { $set: { status: UserStatus.DEACTIVATED } },
+        );
+      const release = vi
+        .spyOn(inventory, 'release')
+        .mockRejectedValueOnce(new Error('Inventory release failed'));
+      try {
+        await paymentSucceeded(hold.reservationId);
+      } finally {
+        release.mockRestore();
+      }
+
+      expect((await saved(hold.reservationId))?.status).toBe('pending_payment');
+      expect(nightsOf(hold.reservationId)).toHaveLength(2);
+      expect(payments.refunds).toEqual([]);
+      expect(events.emitted).toEqual([]);
+    });
+
     it('refunds an expired reservation in full instead of confirming it', async () => {
       const hold = await holds.hold(stay(), USER);
       await job.expireDueHolds(hold.holdExpiresAt);

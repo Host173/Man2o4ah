@@ -49,6 +49,51 @@ describe('validate', () => {
     },
   );
 
+  it.each([undefined, '', 'sk_test_abc123', 'rk_test_abc123'])(
+    'accepts STRIPE_SECRET_KEY %j (optional, test mode only)',
+    (key) => {
+      expect(() => validate({ ...base, STRIPE_SECRET_KEY: key })).not.toThrow();
+    },
+  );
+
+  it.each(['sk_live_abc123', 'rk_live_abc123', 'pk_test_abc123', 'abc'])(
+    'rejects STRIPE_SECRET_KEY %j and names the variable',
+    (key) => {
+      expect(() => validate({ ...base, STRIPE_SECRET_KEY: key })).toThrow(
+        /STRIPE_SECRET_KEY must be a test-mode key/,
+      );
+    },
+  );
+
+  it('never prints the rejected Stripe key', () => {
+    let message = '';
+    try {
+      validate({ ...base, STRIPE_SECRET_KEY: 'sk_live_topsecret' });
+    } catch (error) {
+      message = error instanceof Error ? error.message : '';
+    }
+    expect(message).toMatch(/STRIPE_SECRET_KEY/);
+    expect(message).not.toContain('topsecret');
+  });
+
+  it.each([undefined, '', 'whsec_abc123'])(
+    'accepts STRIPE_WEBHOOK_SECRET %j (optional)',
+    (secret) => {
+      expect(() =>
+        validate({ ...base, STRIPE_WEBHOOK_SECRET: secret }),
+      ).not.toThrow();
+    },
+  );
+
+  it.each(['sk_test_abc123', 'abc'])(
+    'rejects STRIPE_WEBHOOK_SECRET %j and names the variable',
+    (secret) => {
+      expect(() =>
+        validate({ ...base, STRIPE_WEBHOOK_SECRET: secret }),
+      ).toThrow(/STRIPE_WEBHOOK_SECRET must start with whsec_/);
+    },
+  );
+
   it('still rejects a missing MONGODB_URI', () => {
     expect(() => validate({})).toThrow(/MONGODB_URI/);
   });

@@ -33,6 +33,7 @@ export function convertFlightTimes(
   if (departure.toMillis() <= now.getTime()) {
     throw invalidField('departureLocal', 'must be in the future');
   }
+
   if (arrival.toMillis() <= departure.toMillis()) {
     throw invalidField('arrivalLocal', 'must be after departure');
   }
@@ -45,6 +46,12 @@ export function convertFlightTimes(
       (arrival.toMillis() - departure.toMillis()) / 60_000,
     ),
   };
+}
+
+export function formatLocalDateTime(instant: Date, timeZone: string): string {
+  return DateTime.fromJSDate(instant, { zone: 'UTC' })
+    .setZone(timeZone)
+    .toFormat(LOCAL_DATE_TIME_FORMAT);
 }
 
 function parseLocalDateTime(

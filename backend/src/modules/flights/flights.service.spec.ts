@@ -11,6 +11,7 @@ import { FlightsService } from './flights.service.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
 import { SeatInventory } from './seat-inventory.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
 
 describe('FlightsService', () => {
   let moduleRef: TestingModule | undefined;
@@ -31,6 +32,7 @@ describe('FlightsService', () => {
         { provide: ReferenceDataService, useValue: {} },
         { provide: getConnectionToken(), useValue: {} },
         { provide: SeatInventory, useValue: {} },
+        { provide: AppEvents, useValue: { emit: vi.fn() } },
       ],
     }).compile();
 
@@ -115,6 +117,7 @@ describe('FlightsService', () => {
           { provide: ReferenceDataService, useValue: reference },
           { provide: getConnectionToken(), useValue: connection },
           { provide: SeatInventory, useValue: inventory },
+          { provide: AppEvents, useValue: { emit: vi.fn() } },
         ],
       }).compile();
       service = moduleRef.get(FlightsService);

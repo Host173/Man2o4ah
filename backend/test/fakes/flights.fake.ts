@@ -7,7 +7,10 @@ import {
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
-import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
+import {
+  convertFlightTimes,
+  formatLocalDateTime,
+} from '../../src/modules/flights/flight-time.js';
 import { validateCabinInput } from '../../src/modules/flights/cabin-input.js';
 import type { FlightsService } from '../../src/modules/flights/flights.service.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
@@ -27,6 +30,8 @@ import type {
   RoundTripSearchResult,
   SearchFlightsBase,
   SearchFlightsQuery,
+  UpdateCabinInput,
+  UpdateFlightInput,
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
@@ -225,6 +230,156 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       });
     }
     await this.seatInventory.addCabin(flightId, input, moderatorAirlineId);
+    return {
+      ...structuredClone(flight),
+      departureTimeZone: departureAirport.timeZone,
+      arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
+  async updateFlight(
+    flightId: string,
+    input: UpdateFlightInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    const departureAirportId =
+      input.departureAirportId?.trim().toUpperCase() ??
+      flight.departureAirportId;
+    const arrivalAirportId =
+      input.arrivalAirportId?.trim().toUpperCase() ?? flight.arrivalAirportId;
+    if (departureAirportId === arrivalAirportId) {
+      throw invalid('arrivalAirportId', 'must differ from departureAirportId');
+    }
+    if (
+      flight.hasBookings &&
+      (departureAirportId !== flight.departureAirportId ||
+        arrivalAirportId !== flight.arrivalAirportId)
+    ) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'Airports cannot be changed after a booking or seat hold',
+      });
+    }
+
+    const airportCodes = [departureAirportId, arrivalAirportId];
+    const airports = await this.referenceData.getAirports(airportCodes);
+    const departureAirport = airports.get(departureAirportId);
+    const arrivalAirport = airports.get(arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw invalid(
+        !departureAirport ? 'departureAirportId' : 'arrivalAirportId',
+        'is not a known airport',
+      );
+    }
+    const departureLocal =
+      input.departureLocal ??
+      formatLocalDateTime(flight.departureAt, departureAirport.timeZone);
+    const arrivalLocal =
+      input.arrivalLocal ??
+      formatLocalDateTime(flight.arrivalAt, arrivalAirport.timeZone);
+    const times = convertFlightTimes(
+      departureLocal,
+      departureAirport.timeZone,
+      arrivalLocal,
+      arrivalAirport.timeZone,
+    );
+    flight.departureAirportId = departureAirportId;
+    flight.arrivalAirportId = arrivalAirportId;
+    flight.departureAt = times.departureAt;
+    flight.arrivalAt = times.arrivalAt;
+    flight.departureLocalDate = times.departureLocalDate;
+    flight.durationMinutes = times.durationMinutes;
+    return {
+      ...structuredClone(flight),
+      departureTimeZone: departureAirport.timeZone,
+      arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
+  async updateCabin(
+    flightId: string,
+    cabinId: string,
+    input: UpdateCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    const cabin = flight.cabins.find((item) => item.id === cabinId);
+    if (!cabin) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight or cabin not found',
+      });
+    }
+    if (input.priceMinor === undefined && input.totalSeats === undefined) {
+      throw invalid('input', 'at least one field must be provided');
+    }
+    if (
+      (input.priceMinor !== undefined &&
+        (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1)) ||
+      (input.totalSeats !== undefined &&
+        (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1))
+    ) {
+      throw invalid(
+        input.priceMinor !== undefined ? 'priceMinor' : 'totalSeats',
+        'must be a positive safe integer',
+      );
+    }
+    if (input.totalSeats !== undefined) {
+      await this.seatInventory.changeCapacity(
+        flightId,
+        cabinId,
+        input.totalSeats,
+        cabin.totalSeats,
+      );
+    }
+    if (input.priceMinor !== undefined) {
+      cabin.priceMinor = input.priceMinor;
+    }
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
     return {
       ...structuredClone(flight),
       departureTimeZone: departureAirport.timeZone,

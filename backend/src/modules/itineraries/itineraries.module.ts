@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AccountsModule } from '../accounts/accounts.module.js';
 import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
+import { BudgetsController } from './budgets.controller.js';
 import { StorageModule } from '../storage/storage.module.js';
 import { ActivitiesController } from './activities.controller.js';
 import { ItinerariesController } from './itineraries.controller.js';
@@ -14,6 +16,11 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
     ]),
+    // ITN-18: the display currency is the ACC-09 preferred currency read
+    // through accounts' exported service. FxService comes from AppModule and
+    // is looked up lazily, so importing this module does not drag in the fx
+    // model (see ItinerariesService.fx()).
+    AccountsModule,
     ReferenceDataModule,
     StorageModule,
   ],
@@ -21,6 +28,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     ItinerariesController,
     ActivitiesController,
     TransportCostsController,
+    BudgetsController,
   ],
   providers: [ItinerariesService, ItineraryPdf],
   exports: [ItinerariesService],

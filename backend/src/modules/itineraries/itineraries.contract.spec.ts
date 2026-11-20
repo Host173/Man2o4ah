@@ -7,6 +7,8 @@ describe('itineraries contract (stubs)', () => {
     null as never,
     null as never,
     null as never,
+    null as never,
+    null as never,
   );
 
   it('listPublicByAuthor fails explicitly until ITN-20 implements it', () => {

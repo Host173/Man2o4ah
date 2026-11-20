@@ -4,9 +4,15 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { buildConverter } from '../../src/modules/fx/fx-conversion.js';
+import type { Converter } from '../../src/modules/fx/fx.types.js';
+import { validateBudgetEntry } from '../../src/modules/itineraries/budget-entries.js';
+import { buildBudgetSummary } from '../../src/modules/itineraries/budget-summary.js';
 import { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import type { CreateBudgetEntryDto } from '../../src/modules/itineraries/dto/create-budget-entry.dto.js';
 import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import { UpdateActivityDto } from '../../src/modules/itineraries/dto/update-activity.dto.js';
+import type { UpdateBudgetEntryDto } from '../../src/modules/itineraries/dto/update-budget-entry.dto.js';
 import type { UpdateTransportCostDto } from '../../src/modules/itineraries/dto/update-transport-cost.dto.js';
 import { validateActivityInput } from '../../src/modules/itineraries/activity-input.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
@@ -37,6 +43,9 @@ import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
+  BudgetEntryView,
+  BudgetSummaryInput,
+  BudgetSummaryView,
   ActivityView,
   ItineraryDayView,
   ItineraryDetailView,
@@ -101,6 +110,12 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     itineraries: PublicItinerarySummary[] = [],
     referenceData: FakeReferenceDataService = new FakeReferenceDataService(),
     storage: FakeStorageService = new FakeStorageService(),
+    private readonly converter: Converter = buildConverter({
+      rateDate: '2026-11-01',
+      rates: { USD: 1, EGP: 50, EUR: 5, JPY: 100 },
+      minorUnits: { USD: 2, EGP: 2, EUR: 2, JPY: 0 },
+    }),
+    private readonly preferredCurrency: string = 'USD',
   ) {
     // A deep copy, so a test that changes its fixtures can't affect another test.
     this.itineraries = structuredClone(itineraries);
@@ -588,6 +603,88 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return this.toDetail(itinerary);
   }
 
+  /** ITN-14: mirrors the service's ownership, validation and day checks. */
+  async addBudgetEntry(
+    itineraryId: string,
+    dayId: string,
+    dto: CreateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    await validateBudgetEntry(dto, this.referenceData, true);
+    const day = itinerary.days.find((candidate) => candidate._id === dayId);
+    if (!day) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    const entry: BudgetEntryView = {
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      category: dto.category,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    day.budgetEntries.push(entry);
+    itinerary.updatedAt = new Date();
+    return structuredClone(entry);
+  }
+
+  async updateBudgetEntry(
+    budgetId: string,
+    dto: UpdateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const { itinerary, entry } = this.findOwnedBudgetEntry(budgetId, userId);
+    await validateBudgetEntry(dto, this.referenceData, false);
+    for (const field of [
+      'category',
+      'amountMinor',
+      'currency',
+      'note',
+    ] as const) {
+      if (dto[field] !== undefined) {
+        Object.assign(entry, { [field]: dto[field] });
+        itinerary.updatedAt = new Date();
+      }
+    }
+    return structuredClone(entry);
+  }
+
+  async deleteBudgetEntry(budgetId: string, userId: string): Promise<void> {
+    const { itinerary, entry } = this.findOwnedBudgetEntry(budgetId, userId);
+    for (const day of itinerary.days) {
+      day.budgetEntries = day.budgetEntries.filter(
+        (candidate) => candidate._id !== entry._id,
+      );
+    }
+    itinerary.updatedAt = new Date();
+  }
+
+  /** ITN-14/18: the same pure roll-up and converter as the real service. */
+  async getBudgetSummary(
+    itineraryId: string,
+    userId: string,
+  ): Promise<BudgetSummaryView> {
+    const itinerary = this.toDetail(this.findOwned(itineraryId, userId));
+    const input: BudgetSummaryInput = {
+      startDate: toDateOnly(itinerary.startDate),
+      days: itinerary.days.map((day) => ({
+        _id: day._id,
+        cityId: day.cityId,
+        budgetEntries: day.budgetEntries,
+        activities: day.activities,
+      })),
+      transportCosts: itinerary.transportCosts.map((cost) => ({
+        dayId: cost.dayId,
+        amountMinor: cost.amountMinor,
+        currency: cost.currency,
+      })),
+    };
+    return buildBudgetSummary(input, this.converter, this.preferredCurrency);
+  }
+
   async addTransportCost(
     itineraryId: string,
     dto: CreateTransportCostDto,
@@ -663,6 +760,28 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       (entry) => entry._id !== cost._id,
     );
     itinerary.updatedAt = new Date();
+  }
+
+  private findOwnedBudgetEntry(
+    budgetId: string,
+    userId: string,
+  ): { itinerary: ItineraryDetailView; entry: BudgetEntryView } {
+    if (typeof budgetId !== 'string' || !/^[0-9a-f]{24}$/i.test(budgetId)) {
+      this.invalidField('budgetId', 'must be a valid ObjectId');
+    }
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      for (const day of itinerary.days) {
+        const entry = day.budgetEntries.find(
+          (candidate) => candidate._id === budgetId.toLowerCase(),
+        );
+        if (entry) return { itinerary, entry };
+      }
+    }
+    throw new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary not found',
+    });
   }
 
   private findOwnedTransportCost(

@@ -1349,3 +1349,39 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+implement htl22 and after you fifnish make a self review according to the md file and fix any bugs if any then make a pr
+
+How the output was used:
+Added hotel moderator DTOs, service, controller, module wiring and integration/API tests; self-reviewed against the project rules; feat(hotel-bookings): add hotel moderator views (HTL-22).
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+Aya and Kareem have approved — proceed
+
+How the output was used:
+Recorded owner/team-leader approval for hotel-bookings work and created the isolated HTL-22 branch from origin/develop.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+Blocked (not bookable), with reason
+
+How the output was used:
+Documented and tested blocked_range, inactive_room and outside_availability reasons in the room status response DTO and service.
+================================================

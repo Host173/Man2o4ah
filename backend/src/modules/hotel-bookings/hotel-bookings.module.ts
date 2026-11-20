@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AccountsModule } from '../accounts/accounts.module.js';
 import { HotelsModule } from '../hotels/hotels.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { HotelBookingsController } from './hotel-bookings.controller.js';
@@ -12,6 +13,8 @@ import {
 import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelPayableBooking } from './hotel-payable-booking.js';
+import { HotelModeratorController } from './hotel-moderator.controller.js';
+import { HotelModeratorService } from './hotel-moderator.service.js';
 import {
   HotelReservation,
   HotelReservationSchema,
@@ -26,12 +29,14 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
     ]),
     // hotel-bookings may call hotels (data-model 6.1).
     HotelsModule,
+    AccountsModule,
     // Registers HotelPayableBooking with payments' registry (PAY-01).
     PaymentsModule,
   ],
-  controllers: [HotelBookingsController],
+  controllers: [HotelBookingsController, HotelModeratorController],
   providers: [
     HotelBookingsService,
+    HotelModeratorService,
     HotelHoldService,
     HotelPayableBooking,
     HotelHoldExpiryJob,

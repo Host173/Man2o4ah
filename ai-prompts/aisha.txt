@@ -9639,3 +9639,88 @@ please resolve this and once resolved please give me the report
 How the output was used:
 Answer only, no files changed (Playwright browser download still fails on DNS; CI status not readable without GitHub auth)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+please resolve the issues so that this review prompt will come back as completely passed and continuously try and fix and engineer the problems till i get a 100% clear
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Make sure my branch is current: `git fetch origin`, then `git merge-base --is-ancestor origin/develop HEAD`. If it isn't, tell me to merge develop first (merge, never rebase) and stop.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Set up a local Playwright headless-shell stand-in from the installed Chromium 1254 (outside the repo) so the ITN-28 PDF tests run; no repo files changed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+once it passes push it and give me the report
+
+How the output was used:
+Answer only at that point; the push was done after the rerun below
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+please pause and pull from the repo and then rerun the report
+
+How the output was used:
+Pulled Pierre's ACC-08 commits (7bef515, 50934b3: revoke all sessions, transactional login) and reran the self-review (probes 8/8, 2092/2092 tests with 4 workers, build passed)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+once it passes push it and give me the report
+
+How the output was used:
+Pushed feature/ACC-08-change-password-forced-change to PR #139 (merge of Pierre's commits and prompt-log commits); self-review report given
+================================================

@@ -261,6 +261,29 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     };
   }
 
+  async getFlightDetails(
+    flightId: string,
+  ): Promise<{ flight: FlightManagementView; airline: AirlineView }> {
+    const flight = this.data.flight(flightId);
+    if (!flight) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    const airline = this.data.airline(flight.airlineId);
+    if (!airline) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
+    return {
+      flight: structuredClone(flight),
+      airline: structuredClone(airline),
+    };
+  }
+
   getFlightsForBooking(
     flightIds: string[],
   ): Promise<Map<string, FlightWithAirline>> {

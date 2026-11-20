@@ -18,7 +18,7 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import type { AirportView } from '../reference-data/reference-data.types.js';
-import { convertFlightTimes } from './flight-time.js';
+import { convertFlightTimes, formatLocalDateTime } from './flight-time.js';
 import { AirlinesService } from './airlines.service.js';
 import { validateCabinInput } from './cabin-input.js';
 import { SeatInventory } from './seat-inventory.js';
@@ -35,6 +35,8 @@ import type {
   RoundTripSearchQuery,
   RoundTripSearchResult,
   SearchFlightsQuery,
+  UpdateCabinInput,
+  UpdateFlightInput,
 } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Cabin } from './schemas/flight.schema.js';
@@ -311,6 +313,257 @@ export class FlightsService {
         if (!updated) throw this.flightNotFound();
         return this.toManagementView(updated, departureAirport, arrivalAirport);
       });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Edit a scheduled flight's airports and/or local times (FLT-05).
+   * Airports are locked after any hold or booking. Time changes emit
+   * `flight.rescheduled` after the transaction commits.
+   */
+  async updateFlight(
+    flightId: string,
+    input: UpdateFlightInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    if (
+      Object.keys(input).length === 0 ||
+      (input.departureLocal === undefined &&
+        input.arrivalLocal === undefined &&
+        input.departureAirportId === undefined &&
+        input.arrivalAirportId === undefined)
+    ) {
+      throw this.invalidField('input', 'at least one field must be provided');
+    }
+
+    const flightObjectId = this.flightObjectId(flightId);
+    if (
+      moderatorAirlineId === undefined ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+    const airlineObjectId = new Types.ObjectId(moderatorAirlineId);
+    const filter = { _id: flightObjectId, airlineId: airlineObjectId };
+    const flight = await this.flightModel
+      .findOne(filter)
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) throw this.flightNotFound();
+    if (flight.status !== FlightStatus.SCHEDULED) {
+      throw this.flightNotScheduled();
+    }
+
+    const departureAirportId =
+      input.departureAirportId?.trim().toUpperCase() ??
+      flight.departureAirportId;
+    const arrivalAirportId =
+      input.arrivalAirportId?.trim().toUpperCase() ?? flight.arrivalAirportId;
+    if (departureAirportId === arrivalAirportId) {
+      throw this.invalidField(
+        'arrivalAirportId',
+        'must differ from departureAirportId',
+      );
+    }
+    if (
+      flight.hasBookings &&
+      (departureAirportId !== flight.departureAirportId ||
+        arrivalAirportId !== flight.arrivalAirportId)
+    ) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'Airports cannot be changed after a booking or seat hold',
+      });
+    }
+
+    const airports = await this.referenceData.getAirports([
+      departureAirportId,
+      arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(departureAirportId);
+    const arrivalAirport = airports.get(arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw this.invalidField(
+        !departureAirport ? 'departureAirportId' : 'arrivalAirportId',
+        'is not a known airport',
+      );
+    }
+
+    const departureLocal =
+      input.departureLocal ??
+      formatLocalDateTime(flight.departureAt, departureAirport.timeZone);
+    const arrivalLocal =
+      input.arrivalLocal ??
+      formatLocalDateTime(flight.arrivalAt, arrivalAirport.timeZone);
+    const times = convertFlightTimes(
+      departureLocal,
+      departureAirport.timeZone,
+      arrivalLocal,
+      arrivalAirport.timeZone,
+    );
+
+    const timeChanged =
+      times.departureAt.getTime() !== flight.departureAt.getTime() ||
+      times.arrivalAt.getTime() !== flight.arrivalAt.getTime();
+    const session = await this.connection.startSession();
+    try {
+      let updated: FlightRecord | null = null;
+      await session.withTransaction(async () => {
+        const airportsChanged =
+          departureAirportId !== flight.departureAirportId ||
+          arrivalAirportId !== flight.arrivalAirportId;
+        const result = await this.flightModel
+          .updateOne(
+            {
+              ...filter,
+              status: FlightStatus.SCHEDULED,
+              // A hold placed after the read above must still lock the airports.
+              ...(airportsChanged ? { hasBookings: false } : {}),
+            },
+            {
+              $set: {
+                departureAirportId,
+                arrivalAirportId,
+                departureAt: times.departureAt,
+                arrivalAt: times.arrivalAt,
+                departureLocalDate: times.departureLocalDate,
+                durationMinutes: times.durationMinutes,
+              },
+            },
+            { session, runValidators: true },
+          )
+          .exec();
+        // matchedCount: re-sending the current values modifies nothing but is valid.
+        if (result.matchedCount !== 1) {
+          if (airportsChanged) {
+            throw new ConflictException({
+              code: ErrorCode.Conflict,
+              message:
+                'Airports cannot be changed after a booking or seat hold',
+            });
+          }
+          throw this.flightNotFound();
+        }
+        updated = await this.flightModel
+          .findOne(filter)
+          .session(session)
+          .lean<FlightRecord>()
+          .exec();
+        if (!updated) throw this.flightNotFound();
+      });
+      if (timeChanged) {
+        this.events.emit(Events.FlightRescheduled, {
+          flightId: flightId,
+          departureAt: times.departureAt,
+          arrivalAt: times.arrivalAt,
+        });
+      }
+      if (!updated) throw this.flightNotFound();
+      return this.toManagementView(updated, departureAirport, arrivalAirport);
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Edit a cabin's price and/or total seat count (FLT-05).
+   * Capacity uses SeatInventory and cannot fall below held plus booked seats.
+   */
+  async updateCabin(
+    flightId: string,
+    cabinId: string,
+    input: UpdateCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    if (input.priceMinor === undefined && input.totalSeats === undefined) {
+      throw this.invalidField('input', 'at least one field must be provided');
+    }
+    if (
+      (input.priceMinor !== undefined &&
+        (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1)) ||
+      (input.totalSeats !== undefined &&
+        (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1))
+    ) {
+      const field =
+        input.priceMinor !== undefined &&
+        (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1)
+          ? 'priceMinor'
+          : 'totalSeats';
+      throw this.invalidField(field, 'must be a positive safe integer');
+    }
+
+    const flightObjectId = this.flightObjectId(flightId);
+    const cabinObjectId = this.flightObjectId(cabinId);
+    if (
+      moderatorAirlineId === undefined ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+    const airlineObjectId = new Types.ObjectId(moderatorAirlineId);
+    const filter = { _id: flightObjectId, airlineId: airlineObjectId };
+    const flight = await this.flightModel
+      .findOne(filter)
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) throw this.flightNotFound();
+    if (flight.status !== FlightStatus.SCHEDULED) {
+      throw this.flightNotScheduled();
+    }
+    const cabin = flight.cabins.find((item) => item._id.equals(cabinObjectId));
+    if (!cabin) throw this.flightNotFound();
+
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+
+    const session = await this.connection.startSession();
+    try {
+      let updated: FlightRecord | null = null;
+      await session.withTransaction(async () => {
+        if (input.totalSeats !== undefined) {
+          await this.seatInventory.changeCapacity(
+            flightId,
+            cabinId,
+            input.totalSeats,
+            cabin.totalSeats,
+            { session },
+          );
+        }
+        if (input.priceMinor !== undefined) {
+          const result = await this.flightModel
+            .updateOne(
+              {
+                ...filter,
+                status: FlightStatus.SCHEDULED,
+                cabins: { $elemMatch: { _id: cabinObjectId } },
+              },
+              { $set: { 'cabins.$.priceMinor': input.priceMinor } },
+              { session, runValidators: true },
+            )
+            .exec();
+          if (result.matchedCount !== 1) throw this.flightNotFound();
+        }
+        updated = await this.flightModel
+          .findOne(filter)
+          .session(session)
+          .lean<FlightRecord>()
+          .exec();
+        if (!updated) throw this.flightNotFound();
+      });
+      if (!updated) throw this.flightNotFound();
+      return this.toManagementView(updated, departureAirport, arrivalAirport);
     } finally {
       await session.endSession();
     }

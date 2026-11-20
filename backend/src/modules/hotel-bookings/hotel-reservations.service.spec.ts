@@ -159,6 +159,7 @@ describe('HotelReservationsService (HTL-20)', () => {
     reference?: string;
     checkInDate: string;
     checkOutDate: string;
+    holdExpiresAt?: Date;
     confirmedAt?: Date;
     expiredAt?: Date;
     completedAt?: Date;
@@ -203,7 +204,8 @@ describe('HotelReservationsService (HTL-20)', () => {
         checkInTime: '14:00',
         checkOutTime: '12:00',
       },
-      holdExpiresAt: new Date('2027-03-01T10:10:00.000Z'),
+      holdExpiresAt:
+        options.holdExpiresAt ?? new Date('2027-03-01T10:10:00.000Z'),
       ...(options.confirmedAt ? { confirmedAt: options.confirmedAt } : {}),
       ...(options.expiredAt ? { expiredAt: options.expiredAt } : {}),
       ...(options.completedAt ? { completedAt: options.completedAt } : {}),
@@ -246,7 +248,7 @@ describe('HotelReservationsService (HTL-20)', () => {
       now,
     );
     expect(page.total).toBe(1);
-    expect(page.items.map((item) => item.reservationId)).toEqual([
+    expect(page.items.map((item) => item._id)).toEqual([
       ownUpcoming._id.toHexString(),
     ]);
 
@@ -303,9 +305,10 @@ describe('HotelReservationsService (HTL-20)', () => {
       status: HotelReservationStatus.PENDING_PAYMENT,
       checkInDate: '2027-03-20',
       checkOutDate: '2027-03-22',
+      holdExpiresAt: new Date(now.getTime() + 1),
     });
 
-    // Past: confirmed awaiting hourly completion job, completed, expired, past pending
+    // Past: confirmed awaiting hourly completion job, completed, expired, past/overdue pending
     const awaitingCompletion = await seedReservation({
       status: HotelReservationStatus.CONFIRMED,
       reference: 'HRPAST01',
@@ -330,6 +333,12 @@ describe('HotelReservationsService (HTL-20)', () => {
       status: HotelReservationStatus.PENDING_PAYMENT,
       checkInDate: '2027-03-04',
       checkOutDate: '2027-03-06',
+    });
+    const overduePending = await seedReservation({
+      status: HotelReservationStatus.PENDING_PAYMENT,
+      checkInDate: '2027-03-25',
+      checkOutDate: '2027-03-27',
+      holdExpiresAt: now,
     });
 
     // Cancelled: remains in cancelled regardless of past, ongoing, or future dates
@@ -377,9 +386,7 @@ describe('HotelReservationsService (HTL-20)', () => {
     ]);
 
     expect(upcomingList.total).toBe(4);
-    expect(
-      new Set(upcomingList.items.map((item) => item.reservationId)),
-    ).toEqual(
+    expect(new Set(upcomingList.items.map((item) => item._id))).toEqual(
       new Set([
         futureConfirmed._id.toHexString(),
         ongoingConfirmed._id.toHexString(),
@@ -389,34 +396,40 @@ describe('HotelReservationsService (HTL-20)', () => {
     );
     // Unconfirmed pending_payment keeps no fabricated reference.
     const pendingItem = upcomingList.items.find(
-      (i) => i.reservationId === futurePending._id.toHexString(),
+      (i) => i._id === futurePending._id.toHexString(),
     );
     expect(pendingItem?.reference).toBeUndefined();
     expect('reference' in pendingItem!).toBe(false);
 
-    expect(pastList.total).toBe(4);
-    expect(new Set(pastList.items.map((item) => item.reservationId))).toEqual(
+    expect(pastList.total).toBe(5);
+    expect(new Set(pastList.items.map((item) => item._id))).toEqual(
       new Set([
         awaitingCompletion._id.toHexString(),
         completed._id.toHexString(),
         expiredFutureDates._id.toHexString(),
         pastPending._id.toHexString(),
+        overduePending._id.toHexString(),
       ]),
     );
-    // Reading does not mutate the confirmed stay awaiting the completion job.
+    const overdueItem = pastList.items.find(
+      (i) => i._id === overduePending._id.toHexString(),
+    );
+    expect(overdueItem?.status).toBe('pending_payment');
+    expect('reference' in overdueItem!).toBe(false);
+    // Reading does not mutate the confirmed or overdue-pending stays.
     expect(
-      pastList.items.find(
-        (i) => i.reservationId === awaitingCompletion._id.toHexString(),
-      )?.status,
+      pastList.items.find((i) => i._id === awaitingCompletion._id.toHexString())
+        ?.status,
     ).toBe('confirmed');
     expect(
       (await reservations.findById(awaitingCompletion._id).lean())?.status,
     ).toBe('confirmed');
+    expect(
+      (await reservations.findById(overduePending._id).lean())?.status,
+    ).toBe('pending_payment');
 
     expect(cancelledList.total).toBe(2);
-    expect(
-      new Set(cancelledList.items.map((item) => item.reservationId)),
-    ).toEqual(
+    expect(new Set(cancelledList.items.map((item) => item._id))).toEqual(
       new Set([
         cancelledPast._id.toHexString(),
         cancelledFuture._id.toHexString(),
@@ -432,7 +445,7 @@ describe('HotelReservationsService (HTL-20)', () => {
     );
     expect(
       pastAfterJob.items.find(
-        (i) => i.reservationId === awaitingCompletion._id.toHexString(),
+        (i) => i._id === awaitingCompletion._id.toHexString(),
       )?.status,
     ).toBe('completed');
     const detailAfterJob = await service.getMineById(
@@ -480,7 +493,7 @@ describe('HotelReservationsService (HTL-20)', () => {
       total: 3,
       totalPages: 2,
     });
-    expect(upPage1.items.map((i) => i.reservationId)).toEqual([
+    expect(upPage1.items.map((i) => i._id)).toEqual([
       idLow.toHexString(),
       idHigh.toHexString(),
     ]);
@@ -490,9 +503,7 @@ describe('HotelReservationsService (HTL-20)', () => {
       { group: HotelReservationGroup.UPCOMING, page: 2, limit: 2 },
       now,
     );
-    expect(upPage2.items.map((i) => i.reservationId)).toEqual([
-      idLatest.toHexString(),
-    ]);
+    expect(upPage2.items.map((i) => i._id)).toEqual([idLatest.toHexString()]);
 
     // Past: checkInDate desc, _id desc
     const pLow = new Types.ObjectId('6553a1f0c2b4e8a9d0f20001');
@@ -522,7 +533,7 @@ describe('HotelReservationsService (HTL-20)', () => {
       { group: HotelReservationGroup.PAST, page: 1, limit: 10 },
       now,
     );
-    expect(pastPage.items.map((i) => i.reservationId)).toEqual([
+    expect(pastPage.items.map((i) => i._id)).toEqual([
       pHigh.toHexString(),
       pLow.toHexString(),
       pOlder.toHexString(),
@@ -560,7 +571,7 @@ describe('HotelReservationsService (HTL-20)', () => {
     );
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({
-      reservationId: hold.reservationId,
+      _id: hold.reservationId,
       hotelId: HOTEL_A,
       hotelName: 'Nile Grand Palace',
       checkInDate: '2027-03-10',
@@ -583,7 +594,7 @@ describe('HotelReservationsService (HTL-20)', () => {
 
     const detail = await service.getMineById(hold.reservationId, USER_A);
     expect(detail).toMatchObject({
-      reservationId: hold.reservationId,
+      _id: hold.reservationId,
       hotelName: 'Nile Grand Palace',
       totalMinor: 30_000,
       policy: {
@@ -672,7 +683,7 @@ describe('HotelReservationsService (HTL-20)', () => {
     });
     const detail = await service.getMineById(expired._id.toHexString(), USER_A);
     expect(detail).toMatchObject({
-      reservationId: expired._id.toHexString(),
+      _id: expired._id.toHexString(),
       hotelId: HOTEL_B,
       hotelName: 'Pyramids Inn',
       status: 'expired',

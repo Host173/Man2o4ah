@@ -116,6 +116,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     checkInDate: string;
     checkOutDate: string;
     reference?: string;
+    holdExpiresAt?: Date;
     confirmedAt?: Date;
     expiredAt?: Date;
     completedAt?: Date;
@@ -157,7 +158,8 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
         checkInTime: '14:00',
         checkOutTime: '12:00',
       },
-      holdExpiresAt: new Date('2028-03-01T10:10:00.000Z'),
+      holdExpiresAt:
+        options.holdExpiresAt ?? new Date(Date.now() + 10 * 60 * 1000),
       ...(options.confirmedAt ? { confirmedAt: options.confirmedAt } : {}),
       ...(options.expiredAt ? { expiredAt: options.expiredAt } : {}),
       ...(options.completedAt ? { completedAt: options.completedAt } : {}),
@@ -244,11 +246,10 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       total: 2,
       totalPages: 1,
     });
-    expect(
-      defaultRes.body.items.map(
-        (i: { reservationId: string }) => i.reservationId,
-      ),
-    ).toEqual([upcoming._id.toHexString(), pending._id.toHexString()]);
+    expect(defaultRes.body.items.map((i: { _id: string }) => i._id)).toEqual([
+      upcoming._id.toHexString(),
+      pending._id.toHexString(),
+    ]);
 
     // Unconfirmed pending_payment reservation has no fabricated reference
     const pendingSummary = defaultRes.body.items[1];
@@ -258,7 +259,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
 
     // Exact summary shape check
     expect(defaultRes.body.items[0]).toEqual({
-      reservationId: upcoming._id.toHexString(),
+      _id: upcoming._id.toHexString(),
       reference: 'HRAPI001',
       status: 'confirmed',
       hotelId: HOTEL,
@@ -293,18 +294,14 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       total: 2,
       totalPages: 2,
     });
-    expect(pastRes.body.items[0].reservationId).toBe(
-      pastExpired._id.toHexString(),
-    );
+    expect(pastRes.body.items[0]._id).toBe(pastExpired._id.toHexString());
 
     const pastPage2 = await t
       .http()
       .get('/api/hotel-bookings?group=past&page=2&limit=1')
       .set('Cookie', owner.cookie);
     expect(pastPage2.status).toBe(200);
-    expect(pastPage2.body.items[0].reservationId).toBe(
-      pastCompleted._id.toHexString(),
-    );
+    expect(pastPage2.body.items[0]._id).toBe(pastCompleted._id.toHexString());
 
     // Cancelled group
     const cancelledRes = await t
@@ -313,9 +310,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       .set('Cookie', owner.cookie);
     expect(cancelledRes.status).toBe(200);
     expect(cancelledRes.body.total).toBe(1);
-    expect(cancelledRes.body.items[0].reservationId).toBe(
-      cancelled._id.toHexString(),
-    );
+    expect(cancelledRes.body.items[0]._id).toBe(cancelled._id.toHexString());
 
     // Another user's detail returns 404
     const crossUserDetail = await t
@@ -334,6 +329,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       reference: 'HRDET001',
       checkInDate: '2028-06-01',
       checkOutDate: '2028-06-03',
+      holdExpiresAt: new Date('2028-03-01T10:10:00.000Z'),
       confirmedAt: new Date('2026-11-20T08:00:00.000Z'),
       cancellation: {
         cancelledAt: new Date('2026-11-20T09:00:00.000Z'),
@@ -355,7 +351,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       .set('Cookie', owner.cookie);
     expect(detailRes.status).toBe(200);
     expect(detailRes.body).toMatchObject({
-      reservationId: cancelled._id.toHexString(),
+      _id: cancelled._id.toHexString(),
       reference: 'HRDET001',
       status: 'cancelled',
       hotelId: HOTEL,
@@ -383,7 +379,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     expect(typeof detailRes.body.createdAt).toBe('string');
     expect(typeof detailRes.body.updatedAt).toBe('string');
     expect(detailRes.body.userId).toBeUndefined();
-    expect(detailRes.body._id).toBeUndefined();
+    expect(detailRes.body.reservationId).toBeUndefined();
     expect(detailRes.body.rooms[0]._id).toBeUndefined();
 
     const pendingDetail = await t
@@ -479,5 +475,39 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     expect(detailOp?.summary).toMatch(/^HTL-20 /);
     expect(detailOp?.responses['200']).toBeDefined();
     expect(detailOp?.responses['404']).toBeDefined();
+  });
+
+  it('places overdue pending_payment holds in past rather than upcoming without mutating status', async () => {
+    const owner = await loginAs(t.connection, UserRole.USER);
+    const overdue = await seedReservation({
+      userId: owner.id,
+      status: HotelReservationStatus.PENDING_PAYMENT,
+      checkInDate: '2028-05-10',
+      checkOutDate: '2028-05-12',
+      holdExpiresAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    const upcomingRes = await t
+      .http()
+      .get('/api/hotel-bookings?group=upcoming')
+      .set('Cookie', owner.cookie);
+    expect(upcomingRes.status).toBe(200);
+    expect(upcomingRes.body.total).toBe(0);
+    expect(upcomingRes.body.items).toEqual([]);
+
+    const pastRes = await t
+      .http()
+      .get('/api/hotel-bookings?group=past')
+      .set('Cookie', owner.cookie);
+    expect(pastRes.status).toBe(200);
+    expect(pastRes.body.total).toBe(1);
+    expect(pastRes.body.items[0]).toMatchObject({
+      _id: overdue._id.toHexString(),
+      status: 'pending_payment',
+    });
+    expect(Object.hasOwn(pastRes.body.items[0], 'reference')).toBe(false);
+    expect((await reservations.findById(overdue._id).lean())?.status).toBe(
+      'pending_payment',
+    );
   });
 });

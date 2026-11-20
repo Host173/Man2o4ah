@@ -1,7 +1,8 @@
 import { FakeStorageService } from './storage.fake.js';
+import { imageBytes } from '../support/image-fixtures.js';
 
 const png = (bytes = 'png-bytes') => {
-  const buffer = Buffer.from(bytes);
+  const buffer = Buffer.concat([imageBytes('png'), Buffer.from(bytes)]);
   return {
     buffer,
     originalname: 'a.png',
@@ -18,7 +19,12 @@ describe('FakeStorageService', () => {
     expect(storage.has(stored.key)).toBe(true);
     expect(storage.keys()).toEqual([stored.key]);
     expect(storage.urlOf(stored.key)).toBe(`/uploads/${stored.key}`);
-    const jpeg = await storage.save({ ...png(), mimetype: 'image/jpeg' });
+    const jpeg = await storage.save({
+      ...png(),
+      buffer: imageBytes('jpg'),
+      size: 32,
+      mimetype: 'image/jpeg',
+    });
     expect(jpeg.key).toMatch(/\.jpg$/);
   });
 
@@ -36,7 +42,7 @@ describe('FakeStorageService', () => {
     const copy = await storage.copy(original.key);
     expect(copy.key).not.toBe(original.key);
     expect(copy._id.toString()).not.toBe(original._id.toString());
-    expect(storage.bytesOf(copy.key)?.toString()).toBe('same bytes');
+    expect(storage.bytesOf(copy.key)).toEqual(storage.bytesOf(original.key));
   });
 
   it('answers 404 NOT_FOUND when copying an unknown key', async () => {

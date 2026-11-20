@@ -6,6 +6,7 @@ import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fak
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
@@ -1922,7 +1923,14 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
           .http()
           .post(`/api/hotels/${created.id}/photos`)
           .set('Cookie', moderator.cookie)
-          .attach('file', bytes, { filename, contentType })
+          .attach(
+            'file',
+            imageBytes(contentType === 'image/png' ? 'png' : 'jpg'),
+            {
+              filename,
+              contentType,
+            },
+          )
           .expect(201);
         for (const photo of response.body.photos) {
           expect(photo).toEqual({

@@ -4,6 +4,7 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import {
   ALLOWED_IMAGE_TYPES,
   assertImageAllowed,
+  assertImageContent,
 } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import type {
@@ -12,16 +13,14 @@ import type {
 } from '../../src/modules/storage/storage.service.js';
 import type { PublicApi } from './public-api.js';
 
-/**
- * A working `StorageService` that keeps the files in memory and applies the real image rules.
- * It does not check the file's real content (magic bytes), so tests may use any bytes.
- */
+/** A working `StorageService` that keeps files in memory and applies the real type, size and content rules. */
 export class FakeStorageService implements PublicApi<StorageService> {
   private readonly files = new Map<string, Buffer>();
 
   // save and copy are async so a rejected image or an unknown key rejects the promise.
   async save(file: UploadedImage): Promise<StoredImage> {
     assertImageAllowed(file);
+    assertImageContent(file);
     const extension =
       ALLOWED_IMAGE_TYPES[file.mimetype as keyof typeof ALLOWED_IMAGE_TYPES];
     return this.store(file.buffer, extension);

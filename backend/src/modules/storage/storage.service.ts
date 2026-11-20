@@ -1,12 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Types } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -54,14 +49,6 @@ export class StorageService {
 
   /** Validates type, size and real content, then saves the file under a random key (GEN-08). */
   async save(file: UploadedImage): Promise<StoredImage> {
-    // A controller passes undefined when the request had no file.
-    if (!file) {
-      throw new BadRequestException({
-        code: ErrorCode.ValidationFailed,
-        message: 'Invalid image',
-        details: [{ field: 'file', message: 'an image file is required' }],
-      });
-    }
     assertImageAllowed(file);
     assertImageContent(file);
     const extension =
@@ -105,8 +92,25 @@ export class StorageService {
   private async write(bytes: Buffer, extension: string): Promise<StoredImage> {
     await mkdir(this.dir, { recursive: true });
     const key = `${randomUUID()}.${extension}`;
-    // `wx` fails rather than overwrite an existing file.
-    await writeFile(join(this.dir, key), bytes, { flag: 'wx' });
+    const path = join(this.dir, key);
+    const handle = await open(path, 'wx');
+    try {
+      // Disposal closes the owned file before cleanup, including on Windows.
+      await using file = handle;
+      await writeFile(file, bytes);
+    } catch (error) {
+      try {
+        await unlink(path);
+      } catch (cleanupError) {
+        if (!isNotFound(cleanupError)) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Image write and cleanup failed',
+          );
+        }
+      }
+      throw error;
+    }
     return { _id: new Types.ObjectId(), key };
   }
 }

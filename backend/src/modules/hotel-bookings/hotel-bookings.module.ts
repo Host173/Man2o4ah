@@ -5,6 +5,7 @@ import { PaymentsModule } from '../payments/payments.module.js';
 import { HotelBookingsController } from './hotel-bookings.controller.js';
 import { newReservationReference } from './booking-reference.js';
 import { HotelBookingsService } from './hotel-bookings.service.js';
+import { HotelCancellationService } from './hotel-cancellation.service.js';
 import {
   HotelConfirmationService,
   RESERVATION_REFERENCE,
@@ -32,6 +33,7 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
   controllers: [HotelBookingsController],
   providers: [
     HotelBookingsService,
+    HotelCancellationService,
     HotelHoldService,
     HotelPayableBooking,
     HotelHoldExpiryJob,

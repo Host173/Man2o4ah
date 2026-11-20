@@ -1349,3 +1349,27 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+implement htl21 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Added hotel cancellation endpoints, service, refund tiers and DTOs with unit, integration and API tests; failing tests committed as 1a1d991 before implementation.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+Yes, Aya approved this work
+
+How the output was used:
+Authorized hotel-bookings changes with Aya's agreement and created the isolated feature/HTL-21-hotel-cancellations branch from latest develop.
+================================================

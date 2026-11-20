@@ -4,6 +4,7 @@ import {
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
@@ -13,7 +14,11 @@ import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
+import { ProfileService } from '../accounts/users/profile.service.js';
+import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { validateBudgetEntry } from './budget-entries.js';
+import { buildBudgetSummary } from './budget-summary.js';
 import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
@@ -21,12 +26,16 @@ import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import type { AddActivityDto } from './dto/add-activity.dto.js';
+import type { CreateBudgetEntryDto } from './dto/create-budget-entry.dto.js';
+import type { UpdateBudgetEntryDto } from './dto/update-budget-entry.dto.js';
 import type { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import type { UpdateTransportCostDto } from './dto/update-transport-cost.dto.js';
 import { validateTransportCost } from './transport-costs.js';
 import type {
   ActivityView,
   BudgetEntryView,
+  BudgetSummaryInput,
+  BudgetSummaryView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -80,7 +89,18 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name)
     private readonly itineraryModel: Model<StoredItinerary>,
     private readonly referenceData: ReferenceDataService,
+    private readonly moduleRef: ModuleRef,
+    private readonly profile: ProfileService,
   ) {}
+
+  /**
+   * ITN-18: the fx module is registered in AppModule but is not imported here,
+   * so importers of ItinerariesModule don't need the exchange-rate model just
+   * to start. The same lazy lookup accounts uses for reference data.
+   */
+  private fx(): FxService {
+    return this.moduleRef.get(FxService, { strict: false });
+  }
 
   /** ITN-01: creates a private itinerary owned by the authenticated user. */
   async create(
@@ -403,6 +423,163 @@ export class ItinerariesService {
     return this.toDayView(day, updatedIndex, itinerary.startDate);
   }
 
+  /**
+   * ITN-14: appends a non-negative budget entry to one day. The entry and all
+   * read-side totals derive from the stored array, so nothing else is cached.
+   * The `$map` re-reads `days` at write time: an overlapping add or edit on a
+   * different day is preserved (the ITN-05/ITN-16 concurrency pattern).
+   */
+  async addBudgetEntry(
+    itineraryId: string,
+    dayId: string,
+    dto: CreateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+    const targetDayId = this.parseId(dayId, 'dayId');
+    if (!(await this.itineraryModel.exists({ _id: id, ownerId }))) {
+      throw this.notFound();
+    }
+    await validateBudgetEntry(dto, this.referenceData, true);
+
+    const entry: StoredBudgetEntry = {
+      _id: new Types.ObjectId(),
+      category: dto.category,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            budgetEntries: {
+                              $concatArrays: [
+                                '$$day.budgetEntries',
+                                { $literal: [entry] },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+    return this.toBudgetEntryView(entry);
+  }
+
+  /** ITN-14: edits only the supplied fields, preserving concurrent edits to others. */
+  async updateBudgetEntry(
+    budgetId: string,
+    dto: UpdateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const targetId = this.parseId(budgetId, 'budgetId');
+    const ownerId = this.parseId(userId, 'userId');
+    const filter = { ownerId, 'days.budgetEntries._id': targetId };
+    const itinerary = await this.itineraryModel.findOne(filter).lean().exec();
+    if (!itinerary) throw this.notFound();
+    await validateBudgetEntry(dto, this.referenceData, false);
+
+    const changes = {
+      ...(dto.category !== undefined ? { category: dto.category } : {}),
+      ...(dto.amountMinor !== undefined
+        ? { amountMinor: dto.amountMinor }
+        : {}),
+      ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    let record = itinerary;
+    if (Object.keys(changes).length > 0) {
+      const updated = await this.itineraryModel
+        .findOneAndUpdate(
+          filter,
+          [
+            {
+              $set: {
+                days: {
+                  $map: {
+                    input: '$days',
+                    as: 'day',
+                    in: {
+                      $mergeObjects: [
+                        '$$day',
+                        {
+                          budgetEntries: {
+                            $map: {
+                              input: '$$day.budgetEntries',
+                              as: 'entry',
+                              in: {
+                                $cond: [
+                                  { $eq: ['$$entry._id', targetId] },
+                                  {
+                                    $mergeObjects: [
+                                      '$$entry',
+                                      { $literal: changes },
+                                    ],
+                                  },
+                                  '$$entry',
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+          { returnDocument: 'after', updatePipeline: true },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      record = updated;
+    }
+    const entry = (record.days ?? [])
+      .flatMap((day) => day.budgetEntries ?? [])
+      .find((candidate) => candidate._id.equals(targetId));
+    if (!entry) throw this.notFound();
+    return this.toBudgetEntryView(entry);
+  }
+
+  /** ITN-14: pulls one entry without rewriting the others; foreign IDs are 404. */
+  async deleteBudgetEntry(budgetId: string, userId: string): Promise<void> {
+    const targetId = this.parseId(budgetId, 'budgetId');
+    const ownerId = this.parseId(userId, 'userId');
+    const result = await this.itineraryModel.updateOne(
+      { ownerId, 'days.budgetEntries._id': targetId },
+      { $pull: { 'days.$[].budgetEntries': { _id: targetId } } },
+    );
+    if (result.matchedCount === 0) throw this.notFound();
+  }
+
   /** ITN-16: adds a transport cost; the day must still exist at write time. */
   async addTransportCost(
     itineraryId: string,
@@ -524,6 +701,50 @@ export class ItinerariesService {
       { $pull: { transportCosts: { _id: targetId } } },
     );
     if (result.matchedCount === 0) throw this.notFound();
+  }
+
+  /**
+   * ITN-14/18: the owner's budget summary, computed on read. One converter is
+   * loaded for the whole trip so every amount uses the same cached rate date;
+   * the display currency is the user's ACC-09 preferred currency. Ownership is
+   * checked before either dependency is called, so a foreign itinerary is 404.
+   */
+  async getBudgetSummary(
+    itineraryId: string,
+    userId: string,
+  ): Promise<BudgetSummaryView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const displayCurrency = await this.profile.getPreferredCurrency(userId);
+    if (!(await this.referenceData.getCurrency(displayCurrency))) {
+      throw new BadRequestException({
+        code: ErrorCode.UnsupportedCurrency,
+        message: `Unsupported currency: ${displayCurrency}`,
+      });
+    }
+    const converter = await this.fx().getConverter();
+
+    const input: BudgetSummaryInput = {
+      startDate: itinerary.startDate,
+      days: (itinerary.days ?? []).map((day) => ({
+        _id: day._id.toHexString(),
+        cityId: day.cityId,
+        budgetEntries: day.budgetEntries ?? [],
+        activities: day.activities ?? [],
+      })),
+      transportCosts: (itinerary.transportCosts ?? []).map((cost) => ({
+        dayId: cost.dayId.toHexString(),
+        amountMinor: cost.amountMinor,
+        currency: cost.currency,
+      })),
+    };
+    return buildBudgetSummary(input, converter, displayCurrency);
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */

@@ -1,5 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeFxService } from '../../../test/fakes/fx.fake.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
@@ -12,7 +13,11 @@ import { User, UserRole } from '../accounts/schemas/user.schema.js';
 import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { ItinerariesModule } from './itineraries.module.js';
-import { BudgetCategory, TransportMode } from './schemas/itinerary.schema.js';
+import {
+  BudgetCategory,
+  Itinerary,
+  TransportMode,
+} from './schemas/itinerary.schema.js';
 
 /**
  * HTTP contract of ITN-14 (budget entries) and ITN-18 (converted summary).
@@ -27,7 +32,7 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
   let dayIds: string[];
   const referenceData = new FakeReferenceDataService();
   const fx = new FakeFxService({
-    rates: { USD: 1, EGP: 50, EUR: 5, JPY: 100 },
+    rates: { USD: 1, EGP: 50, EUR: 10, JPY: 100 },
     minorUnits: { JPY: 0 },
     rateDate: '2026-11-01',
   });
@@ -35,12 +40,11 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
+      // FxService is looked up from the app (not imported by ItinerariesModule),
+      // so register the FX contract fake as a root provider.
+      providers: [{ provide: FxService, useValue: fx }],
       override: (builder) =>
-        builder
-          .overrideProvider(ReferenceDataService)
-          .useValue(referenceData)
-          .overrideProvider(FxService)
-          .useValue(fx),
+        builder.overrideProvider(ReferenceDataService).useValue(referenceData),
     });
   }, HOOK_TIMEOUT);
 
@@ -137,12 +141,25 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
       amountMinor: 100,
       currency: 'JPY',
     }).expect(201);
-    await t
-      .http()
-      .post(`/api/itineraries/${itineraryId}/days/${dayIds[0]}/activities`)
-      .set('Cookie', cookie)
-      .send({ name: 'Pyramids', cost: 1000 })
-      .expect(201);
+    // Activity costs are produced by ITN-10. That ticket's HTTP controller is
+    // not on this stack (only its service/schema are), so seed the embedded
+    // activity directly; the budget summary must still count it.
+    const itineraries = t.moduleRef.get<Model<Itinerary>>(
+      getModelToken(Itinerary.name),
+    );
+    await itineraries.updateOne(
+      { _id: new Types.ObjectId(itineraryId) },
+      {
+        $push: {
+          'days.0.activities': {
+            _id: new Types.ObjectId(),
+            name: 'Pyramids',
+            cost: { amountMinor: 1000, currency: 'EGP' },
+            images: [],
+          },
+        },
+      },
+    );
     await t
       .http()
       .post(`/api/itineraries/${itineraryId}/transport-costs`)
@@ -343,11 +360,10 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
     ];
     // Malformed IDs and unknown body fields are 400; well-formed IDs that
     // do not resolve to an owned resource are 404.
-    for (const [index, response] of responses.entries()) {
-      expect(response.status).toBe(
-        [5, 6, 9].includes(index) ? 400 : index < 5 ? 400 : 404,
-      );
-    }
+    const expected = [400, 400, 400, 404, 404, 400, 400, 404, 404, 400, 404];
+    responses.forEach((response, index) => {
+      expect(response.status, `response ${index}`).toBe(expected[index]);
+    });
     expect((await getTrip()).days[0].budgetEntries).toEqual([created]);
   });
 
@@ -532,7 +548,7 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
       Object.assign(
         fx,
         new FakeFxService({
-          rates: { USD: 1, EGP: 50, EUR: 5, JPY: 100 },
+          rates: { USD: 1, EGP: 50, EUR: 10, JPY: 100 },
           minorUnits: { JPY: 0 },
           rateDate: '2026-11-01',
         }),

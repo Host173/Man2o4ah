@@ -107,26 +107,32 @@ describe('POST /api/auth/login (API, ACC-04, ACC-19)', () => {
       expect(body).not.toContain(cookieValue(cookies.get('refresh_token')));
     });
 
-    it('sets both cookies httpOnly, Secure, SameSite=Lax, path / with their lifetimes', async () => {
-      await createUser();
+    it.each([
+      [UserRole.USER, 604800],
+      [UserRole.ADMIN, 28800],
+    ])(
+      'sets secure cookies with the %s refresh lifetime',
+      async (role, maxAge) => {
+        await createUser({ role });
 
-      const res = await t
-        .http()
-        .post(URL)
-        .send({ email: EMAIL, password: PASSWORD });
+        const res = await t
+          .http()
+          .post(URL)
+          .send({ email: EMAIL, password: PASSWORD });
 
-      const cookies = setCookies(res.headers);
-      const access = cookies.get('access_token') ?? '';
-      const refresh = cookies.get('refresh_token') ?? '';
-      for (const line of [access, refresh]) {
-        expect(line).toMatch(/; HttpOnly/);
-        expect(line).toMatch(/; Secure/);
-        expect(line).toMatch(/; SameSite=Lax/);
-        expect(line).toMatch(/; Path=\//);
-      }
-      expect(access).toMatch(/Max-Age=900;/);
-      expect(refresh).toMatch(/Max-Age=604800;/);
-    });
+        const cookies = setCookies(res.headers);
+        const access = cookies.get('access_token') ?? '';
+        const refresh = cookies.get('refresh_token') ?? '';
+        for (const line of [access, refresh]) {
+          expect(line).toMatch(/; HttpOnly/);
+          expect(line).toMatch(/; Secure/);
+          expect(line).toMatch(/; SameSite=Lax/);
+          expect(line).toMatch(/; Path=\//);
+        }
+        expect(access).toMatch(/Max-Age=900;/);
+        expect(refresh).toContain(`Max-Age=${maxAge};`);
+      },
+    );
 
     it('creates one live session that stores only the SHA-256 of the refresh token', async () => {
       const user = await createUser();

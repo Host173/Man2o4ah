@@ -3,7 +3,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { vi } from 'vitest';
 import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
 import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
@@ -16,6 +18,7 @@ import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { FlightsService } from '../flights/flights.service.js';
+import { FxService } from '../fx/fx.service.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -60,10 +63,16 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   const storage = new FakeStorageService();
   const fakeFlights = new FakeFlightsService();
   const fakeHotels = new FakeHotelsService();
+  const fx = new FakeFxService({
+    rates: { USD: 1, EGP: 50 },
+    rateDate: '2026-11-01',
+  });
 
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
+      // FxService is looked up lazily from the app (ITN-18), so register the fake.
+      providers: [{ provide: FxService, useValue: fx }],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)
@@ -1927,6 +1936,145 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       ).rejects.toMatchObject({
         response: { code: ErrorCode.ValidationFailed },
       });
+    });
+  });
+
+  describe('getPublicById (ITN-21)', () => {
+    /** An itinerary with one EGP budget entry, made public. */
+    async function publicTrip(ownerId: string, currency = 'EGP') {
+      const created = await itineraries.create(createDto(), ownerId);
+      const day = await itineraries.addDay(created._id, dayDto(), ownerId);
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(created._id), 'days._id': { $exists: true } },
+        {
+          $set: {
+            'days.0.budgetEntries': [
+              {
+                _id: new Types.ObjectId(),
+                category: 'food',
+                amountMinor: 5000,
+                currency,
+              },
+            ],
+          },
+        },
+      );
+      await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PUBLIC },
+        ownerId,
+      );
+      return { id: created._id, dayId: day._id };
+    }
+
+    it('returns the read-only view with the author name from accounts', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const { id, dayId } = await publicTrip(owner.id);
+
+      const view = await itineraries.getPublicById(id);
+
+      expect(view).toMatchObject({
+        _id: id,
+        ownerId: owner.id,
+        authorName: `Test ${UserRole.USER}`,
+        title: 'Egypt in a week',
+        countryCodes: ['EG'],
+        startDate: '2027-04-01',
+        dayCount: 1,
+        cityIds: ['cairo'],
+        days: [{ _id: dayId, dayNumber: 1, date: '2027-04-01' }],
+        transportCosts: [],
+      });
+      expect(view.cityGroups).toHaveLength(1);
+      for (const key of [
+        'visibility',
+        'isHidden',
+        'authorDeactivated',
+        'createdAt',
+      ]) {
+        expect(view).not.toHaveProperty(key);
+      }
+    });
+
+    it('has a null author name when the owner account cannot be found', async () => {
+      const ownerId = new Types.ObjectId().toHexString();
+      const { id } = await publicTrip(ownerId);
+
+      const view = await itineraries.getPublicById(id);
+
+      expect(view.authorName).toBeNull();
+    });
+
+    it('converts the budget into the platform currency, not a viewer currency', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const { id } = await publicTrip(owner.id);
+
+      const view = await itineraries.getPublicById(id);
+
+      expect(view.budget).toMatchObject({
+        displayCurrency: 'USD',
+        rateDate: '2026-11-01',
+        total: { amountMinor: 100, currency: 'USD' },
+      });
+    });
+
+    it('returns a null budget when rates are unavailable or a currency is unsupported', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const { id } = await publicTrip(owner.id);
+      const down = new FakeFxService();
+      down.setNoRates();
+      vi.spyOn(fx, 'getConverter').mockImplementationOnce(() =>
+        down.getConverter(),
+      );
+      expect((await itineraries.getPublicById(id)).budget).toBeNull();
+
+      const unsupported = await publicTrip(owner.id, 'ZZZ');
+      const view = await itineraries.getPublicById(unsupported.id);
+      expect(view.budget).toBeNull();
+      expect(view.days).toHaveLength(1);
+    });
+
+    it('lets an error that is not an exchange-rate problem propagate', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const { id } = await publicTrip(owner.id);
+      vi.spyOn(fx, 'getConverter').mockRejectedValueOnce(new Error('boom'));
+
+      await expect(itineraries.getPublicById(id)).rejects.toThrow('boom');
+    });
+
+    it('throws 404 for private, hidden, deactivated-author and unknown itineraries', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const privateTrip = await itineraries.create(createDto(), owner.id);
+      const hidden = await publicTrip(owner.id);
+      const deactivated = await publicTrip(owner.id);
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(hidden.id) },
+        { $set: { isHidden: true } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(deactivated.id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      for (const id of [
+        privateTrip._id,
+        hidden.id,
+        deactivated.id,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        await expect(itineraries.getPublicById(id)).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+      }
+    });
+
+    it('rejects a malformed ID with 400 VALIDATION_FAILED', async () => {
+      const error = await itineraries
+        .getPublicById('not-an-id')
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(errorDetails(error).code).toBe(ErrorCode.ValidationFailed);
     });
   });
 

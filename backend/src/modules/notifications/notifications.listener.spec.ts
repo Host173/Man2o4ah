@@ -388,6 +388,64 @@ describe('NotificationsListener (GEN-01)', () => {
       }
     });
 
+    it.each([
+      [Events.AccountSuspended, Events.AccountReactivated],
+      [Events.AccountReactivated, Events.AccountSuspended],
+    ])(
+      'ignores delayed %s retries after the opposite change',
+      async (first, opposite) => {
+        const original = { userId: USER, eventId: 'account-change-1' };
+        await emitter.emitAsync(first, original);
+        await emitter.emitAsync(opposite, {
+          userId: USER,
+          eventId: 'account-change-2',
+        });
+        await emitter.emitAsync(first, original);
+        expect(await model.countDocuments()).toBe(2);
+        await emitter.emitAsync(first, {
+          userId: USER,
+          eventId: 'account-change-3',
+        });
+        expect(await model.countDocuments()).toBe(3);
+      },
+    );
+
+    it.each([
+      [Events.ProviderDeactivated, Events.ProviderReactivated],
+      [Events.ProviderReactivated, Events.ProviderDeactivated],
+    ])(
+      'ignores delayed %s retries after the opposite provider change',
+      async (first, opposite) => {
+        const original = { ...provider, eventId: 'provider-change-1' };
+        await emitter.emitAsync(first, original);
+        await emitter.emitAsync(opposite, {
+          ...provider,
+          eventId: 'provider-change-2',
+        });
+        await emitter.emitAsync(first, original);
+        expect(await model.countDocuments()).toBe(MODERATORS.length * 2);
+        await emitter.emitAsync(first, {
+          ...provider,
+          eventId: 'provider-change-3',
+        });
+        expect(await model.countDocuments()).toBe(MODERATORS.length * 3);
+      },
+    );
+
+    it('logs and rejects a repeatable notification event without an identity', async () => {
+      const errors = vi.spyOn(Logger.prototype, 'error');
+      try {
+        await emitter.emitAsync(Events.AccountSuspended, {
+          userId: USER,
+          eventId: '',
+        });
+        expect(await model.countDocuments()).toBe(0);
+        expect(errors).toHaveBeenCalledWith(expect.stringContaining('eventId'));
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
     it('notifies about a new reschedule once the earlier one was read', async () => {
       const rescheduled = { bookingId: BOOKING, userId: USER };
       await emitter.emitAsync(Events.FlightBookingRescheduled, rescheduled);

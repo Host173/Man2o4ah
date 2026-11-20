@@ -382,6 +382,72 @@ describe('NotificationsController HTTP API (GEN-01)', () => {
     expect(count.body).toEqual({ count: 0 });
   });
 
+  it('keeps a read schedule notification unchanged when its event is retried', async () => {
+    const user = await loginAs(t.connection, Role.USER);
+    const payload = {
+      eventId: 'reschedule-1',
+      bookingId: new Types.ObjectId().toString(),
+      userId: user.id,
+    };
+    await emitter.emitAsync(Events.FlightBookingRescheduled, payload);
+    const before = await t
+      .http()
+      .get('/api/notifications')
+      .set('Cookie', user.cookie);
+    expect(before.status).toBe(200);
+    const id = (before.body.items as NotificationView[])[0]?._id;
+    expect(id).toBeDefined();
+    const marked = await t
+      .http()
+      .patch(`/api/notifications/${id}/read`)
+      .set('Cookie', user.cookie);
+    expect(marked.status).toBe(200);
+
+    const retries = await Promise.allSettled(
+      Array.from({ length: 8 }, () =>
+        emitter.emitAsync(Events.FlightBookingRescheduled, payload),
+      ),
+    );
+    expect(retries.every((result) => result.status === 'fulfilled')).toBe(true);
+    const after = await t
+      .http()
+      .get('/api/notifications')
+      .set('Cookie', user.cookie);
+    expect(after.status).toBe(200);
+    expect(after.body.total).toBe(1);
+    expect(after.body.items).toEqual([marked.body]);
+    const count = await t
+      .http()
+      .get('/api/notifications/unread-count')
+      .set('Cookie', user.cookie);
+    expect(count.body).toEqual({ count: 0 });
+  });
+
+  it('notifies for distinct reschedules even while an earlier alert is unread', async () => {
+    const user = await loginAs(t.connection, Role.USER);
+    const booking = {
+      bookingId: new Types.ObjectId().toString(),
+      userId: user.id,
+    };
+    for (const eventId of ['reschedule-1', 'reschedule-2', 'reschedule-1']) {
+      await emitter.emitAsync(Events.FlightBookingRescheduled, {
+        ...booking,
+        eventId,
+      });
+    }
+    const response = await t
+      .http()
+      .get('/api/notifications')
+      .set('Cookie', user.cookie);
+    expect(response.status).toBe(200);
+    expect(response.body.total).toBe(2);
+    expect(
+      (response.body.items as NotificationView[]).every(
+        (item) => item.readAt === null,
+      ),
+    ).toBe(true);
+  });
+
   it('documents the four routes in Swagger', () => {
     const document = SwaggerModule.createDocument(
       t.app,
@@ -398,5 +464,10 @@ describe('NotificationsController HTTP API (GEN-01)', () => {
       expect(operation?.summary).toContain('GEN-01');
       expect(operation?.tags).toContain('notifications');
     }
+    const id = operations[3]?.parameters?.find(
+      (parameter) =>
+        'in' in parameter && parameter.in === 'path' && parameter.name === 'id',
+    );
+    expect(id).toMatchObject({ schema: { type: 'string' } });
   });
 });

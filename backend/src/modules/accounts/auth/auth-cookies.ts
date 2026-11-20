@@ -54,8 +54,3 @@ export function clearAuthCookies(res: Response): void {
   res.clearCookie(ACCESS_TOKEN_COOKIE, BASE);
   res.clearCookie(REFRESH_TOKEN_COOKIE, BASE);
 }
-
-export function clearAuthCookies(res: Response): void {
-  res.clearCookie(ACCESS_TOKEN_COOKIE, BASE);
-  res.clearCookie(REFRESH_TOKEN_COOKIE, BASE);
-}

@@ -32,3 +32,8 @@ export function setAuthCookies(
     maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   });
 }
+
+export function clearAuthCookies(res: Response): void {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, BASE);
+  res.clearCookie(REFRESH_TOKEN_COOKIE, BASE);
+}

@@ -45,7 +45,7 @@ Login `POST /api/auth/login`, in this order:
 2. If `lockedUntil > now`, return `401 ACCOUNT_LOCKED` with the minutes remaining (ACC-05).
 3. If `bcrypt.compare` fails, increment `failedLoginAttempts` atomically (`$inc`, never read-then-write). At 5, set `lockedUntil = now + 15 min` and reset the count, then return `ACCOUNT_LOCKED`; otherwise return `INVALID_CREDENTIALS`.
 4. If the password is right but status is `suspended`, return `403 ACCOUNT_SUSPENDED` "Your account is suspended" (ACC-04).
-5. Reset `failedLoginAttempts`, create a session, set cookies, return `{ user: MeDto }`.
+5. In one transaction, reset `failedLoginAttempts` conditional on the verified password hash and create a session. A hash changed by a concurrent password change returns `401 INVALID_CREDENTIALS` instead. Set cookies and return `{ user: MeDto }`.
 
 `MeDto` (`GET /api/auth/me`): `{ _id, name, email, role, status, preferredCurrency, moderatorOf?, mustChangePassword }`.
 
@@ -54,7 +54,7 @@ Password rule (ACC-01, shared by ACC-07a, ACC-08, ACC-13): 8 to 72 characters wi
 Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching the password rule, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
 
 Temporary passwords (ACC-07a, ACC-13): the admin sets one, the backend stores the hash, sets `mustChangePassword = true` and deletes the user's sessions. While `mustChangePassword` is true, the guard allows only `GET /auth/me`, `PATCH /auth/change-password` and `POST /auth/logout` and returns `403 PASSWORD_CHANGE_REQUIRED` for anything else.
-Change password (ACC-08) `PATCH /api/auth/change-password` `{ currentPassword, newPassword }`: requires the current password (wrong → `400 VALIDATION_FAILED` with `details` on `currentPassword`, not 401, since the caller is still logged in); the new one follows the password rule; during a forced change (`mustChangePassword`), a new password that still matches the temporary one (checked with `bcrypt.compare` against the stored hash) gets `400 VALIDATION_FAILED` on `newPassword`, while a normal change may keep the same password; in one transaction, store a new bcrypt hash and clear `mustChangePassword` (an update conditional on the old hash) and delete the user's other sessions, so neither happens without the other (the calling session stays logged in). Returns `204`, no cookie changes.
+Change password (ACC-08) `PATCH /api/auth/change-password` `{ currentPassword, newPassword }`: requires the current password (wrong → `400 VALIDATION_FAILED` with `details` on `currentPassword`, not 401, since the caller is still logged in); the new one follows the password rule; during a forced change (`mustChangePassword`), a new password that still matches the temporary one (checked with `bcrypt.compare` against the stored hash) gets `400 VALIDATION_FAILED` on `newPassword`, while a normal change may keep the same password; in one transaction, store a new bcrypt hash and clear `mustChangePassword` (an update conditional on the old hash) and delete all of the user's sessions, so neither happens without the other (data model §3.2). Returns `204` and clears both authentication cookies at path `/`; the caller must log in again with the new password.
 
 ## 5. Guards and decorators
 

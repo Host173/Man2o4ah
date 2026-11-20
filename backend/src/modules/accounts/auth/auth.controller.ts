@@ -25,7 +25,7 @@ import { ChangePasswordDto } from '../dto/change-password.dto.js';
 import { LoginDto } from '../dto/login.dto.js';
 import { AuthUserResponseDto, MeDto } from '../dto/me.response.dto.js';
 import { RegisterDto } from '../dto/register.dto.js';
-import { setAuthCookies } from './auth-cookies.js';
+import { clearAuthCookies, setAuthCookies } from './auth-cookies.js';
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from './auth.types.js';
 import { CurrentUser, Public } from './decorators.js';
@@ -96,7 +96,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'ACC-08 Change password',
     description:
-      'Also the forced change after a temporary password (ACC-07a): clears mustChangePassword. Logs out every other session; this one stays logged in.',
+      'Also the forced change after a temporary password (ACC-07a): clears mustChangePassword. Revokes every session and clears both authentication cookies; log in again with the new password.',
   })
   @ApiNoContentResponse({ description: 'Password changed.' })
   @ApiBadRequestResponse({
@@ -110,7 +110,9 @@ export class AuthController {
   async changePassword(
     @CurrentUser() user: AuthUser,
     @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    await this.auth.changePassword(user.id, user.sid, dto);
+    await this.auth.changePassword(user.id, dto);
+    clearAuthCookies(res);
   }
 }

@@ -169,26 +169,42 @@ export class AuthService {
       });
     }
 
-    // A successful login resets the counter and any expired lock (ACC-05).
-    await this.userModel.updateOne(
-      { _id: user._id },
-      { $set: { failedLoginAttempts: 0, lockedUntil: null } },
-    );
-
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
-    const now = Date.now();
-    const session = await this.sessionModel.create({
-      userId: user._id,
-      refreshTokenHash: hashRefreshToken(refreshToken),
-      lastActivityAt: new Date(now),
-      expiresAt: new Date(now + SESSION_IDLE_MS),
-    });
+    const dbSession = await this.connection.startSession();
+    let sid: string;
+    try {
+      // Serialize session creation with password changes on the verified hash.
+      sid = await dbSession.withTransaction(async () => {
+        const result = await this.userModel.updateOne(
+          { _id: user._id, passwordHash: hash },
+          { $set: { failedLoginAttempts: 0, lockedUntil: null } },
+          { session: dbSession },
+        );
+        if (result.matchedCount === 0) throw invalidCredentials();
+
+        const now = Date.now();
+        const [session] = await this.sessionModel.create(
+          [
+            {
+              userId: user._id,
+              refreshTokenHash: hashRefreshToken(refreshToken),
+              lastActivityAt: new Date(now),
+              expiresAt: new Date(now + SESSION_IDLE_MS),
+            },
+          ],
+          { session: dbSession },
+        );
+        return session._id.toString();
+      });
+    } finally {
+      await dbSession.endSession();
+    }
 
     const providerId = user.moderatorOf?.providerId.toString();
     const payload: AccessTokenPayload = {
       sub: user._id.toString(),
       role: user.role,
-      sid: session._id.toString(),
+      sid,
       ...(providerId ? { providerId } : {}),
     };
     const accessToken = await this.jwt.signAsync(payload);
@@ -257,19 +273,15 @@ export class AuthService {
 
   /**
    * ACC-08, ACC-07a (auth.md §4): checks the current password, stores a new
-   * salted bcrypt hash, clears `mustChangePassword` and deletes the user's
-   * other sessions; the session `sid` making the request stays logged in.
+   * salted bcrypt hash, clears `mustChangePassword` and deletes all of the
+   * user's sessions (data-model.md §3.2). The caller must log in again.
    * A wrong current password → 400 VALIDATION_FAILED on `currentPassword`.
    * During a forced change (`mustChangePassword`), a new password that still
    * matches the temporary one → 400 VALIDATION_FAILED on `newPassword`; a
    * normal change may keep the same password (not decided otherwise).
    * The DTO has already applied the password rule to the new password.
    */
-  async changePassword(
-    userId: string,
-    sid: string,
-    dto: ChangePasswordDto,
-  ): Promise<void> {
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
     const user = await this.userModel
       .findById(userId)
       .select('+passwordHash')
@@ -295,7 +307,7 @@ export class AuthService {
     // Hashed before the transaction: it's slow and needn't be redone on a retry.
     const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
 
-    // One transaction: the new password and the logout of the other sessions
+    // One transaction: the new password and the logout of all sessions
     // must happen together, so a failure can't leave old sessions alive with
     // the password already changed (data-model.md §1.9).
     const session = await this.connection.startSession();
@@ -311,10 +323,7 @@ export class AuthService {
         if (result.modifiedCount === 0) {
           throw wrongCurrentPassword();
         }
-        await this.sessionModel.deleteMany(
-          { userId: user._id, _id: { $ne: sid } },
-          { session },
-        );
+        await this.sessionModel.deleteMany({ userId: user._id }, { session });
       });
     } finally {
       await session.endSession();

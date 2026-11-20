@@ -20,7 +20,6 @@ import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
-import type { AddActivityDto } from './dto/add-activity.dto.js';
 import type {
   ActivityView,
   BudgetEntryView,
@@ -357,47 +356,6 @@ export class ItinerariesService {
       updatedIndex,
       record.startDate,
     );
-  }
-
-  /** ITN-10: adds an activity to a specific day of the owner's itinerary. */
-  async addActivity(
-    itineraryId: string,
-    dayId: string,
-    dto: AddActivityDto,
-    userId: string,
-  ): Promise<ItineraryDayView> {
-    const id = this.parseId(itineraryId, 'itineraryId');
-    const ownerId = this.parseId(userId, 'userId');
-    const targetDayId = this.parseId(dayId, 'dayId');
-
-    const activity: StoredActivity = {
-      _id: new Types.ObjectId(),
-      name: dto.name.trim(),
-      description: dto.description,
-      time: dto.time,
-      cost: dto.cost ? { amountMinor: dto.cost, currency: 'EGP' } : undefined,
-      images: [],
-    };
-
-    // Append the activity inside the database so concurrent adds are preserved.
-    // Read the itinerary, modify the day in memory, and save.
-    const itinerary = await this.itineraryModel
-      .findOne({ _id: id, ownerId })
-      .exec();
-    if (!itinerary) throw this.notFound();
-
-    const day = itinerary.days.find(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
-    );
-    if (!day) throw this.notFound();
-
-    day.activities.push(activity);
-    await itinerary.save();
-
-    const updatedIndex = itinerary.days.findIndex(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
-    );
-    return this.toDayView(day, updatedIndex, itinerary.startDate);
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */

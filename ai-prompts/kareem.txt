@@ -2401,3 +2401,17 @@ CLI version), stop and tell me instead of working around it.
 How the output was used:
 Added backend/scripts/dev-stripe.mjs (Node built-ins only) and the dev:stripe script: it checks the Stripe CLI, reads the webhook secret with `stripe listen --print-secret` and passes it to the backend as STRIPE_WEBHOOK_SECRET, runs `stripe listen` and `npm run start:dev` with [stripe]/[api] prefixes, masks any whsec_ value in the output, and stops both process trees on Ctrl+C or when either exits. Documented it in the root README Run section. npm run verify passes; with stripe missing from PATH the script prints the install message and exits 1. Committed on the PAY-01 branch; not pushed.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+i don't thing it's working
+[pasted npm run dev:stripe output: "[stripe] must specify events to forward using --events, --all-snapshot, or --all-thin", then "[stripe] exited (code 1), stopping both"]
+
+How the output was used:
+Stripe CLI 1.55 needs the events to forward. dev-stripe.mjs now runs stripe listen with --events for the four events the webhook handles (payment_intent.succeeded, payment_intent.payment_failed, refund.updated, refund.failed). Committed on the PAY-01 branch; not pushed.
+================================================

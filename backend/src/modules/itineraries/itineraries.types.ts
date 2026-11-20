@@ -15,6 +15,7 @@ import type {
 export interface ActivityImageView {
   _id: string;
   key: string;
+  url: string;
 }
 
 /** An activity's own cost; counted under Activities in the budget (ITN-14). */
@@ -57,6 +58,21 @@ export interface ItineraryDayView {
   budgetEntries: BudgetEntryView[];
 }
 
+/** A group of consecutive days in the same city, computed on read (ITN-09). */
+export interface CityGroupView {
+  cityId: string;
+  /** The first day of the group (day number). */
+  fromDay: number;
+  /** The last day of the group (day number). */
+  toDay: number;
+  /** Days in the group. */
+  dayCount: number;
+  /** The first day's date, `YYYY-MM-DD`. */
+  checkIn: string;
+  /** The day after the last day's date, `YYYY-MM-DD` (ITN-25). */
+  checkOut: string;
+}
+
 /** Intercity transport cost of an itinerary (ITN-16). */
 export interface TransportCostView {
   _id: string;
@@ -92,6 +108,8 @@ export interface ItinerarySummary {
 /** An itinerary with its full details (ITN-03). */
 export interface ItineraryDetailView extends ItinerarySummary {
   days: ItineraryDayView[];
+  /** Consecutive same-city days, computed on read (ITN-09). */
+  cityGroups: CityGroupView[];
   transportCosts: TransportCostView[];
   isHidden: boolean;
   authorDeactivated: boolean;

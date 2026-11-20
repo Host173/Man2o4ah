@@ -12,17 +12,26 @@ import { AuthController } from './auth/auth.controller.js';
 import { AuthService } from './auth/auth.service.js';
 import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
 import { RolesGuard } from './auth/roles.guard.js';
+import { RefreshAuthCookiesInterceptor } from './auth/refresh-auth-cookies.interceptor.js';
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
+import { ProfileService } from './users/profile.service.js';
+import { SelfDeactivationService } from './users/self-deactivation.service.js';
+import { UsersController } from './users/users.controller.js';
 
 /**
  * Accounts (CTR-01). Registers the global guards: every route needs a
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
- * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user);
- * `AuthService` stays internal. Other
+ * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-06 refresh/logout,
+ * ACC-08 change password, ACC-19 current user)
+ * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
+ * currencies come from `ReferenceDataService`, looked up from the app, so
+ * `ReferenceDataModule` must be registered beside this module; ACC-12
+ * self-deactivation); `AuthService`, `ProfileService` and
+ * `SelfDeactivationService` stay internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
@@ -44,10 +53,13 @@ import { User, UserSchema } from './schemas/user.schema.js';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, UsersController],
   providers: [
     AccountsService,
     AuthService,
+    ProfileService,
+    SelfDeactivationService,
+    RefreshAuthCookiesInterceptor,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).
     { provide: APP_GUARD, useClass: JwtAuthGuard },

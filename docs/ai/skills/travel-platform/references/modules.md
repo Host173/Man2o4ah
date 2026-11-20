@@ -41,7 +41,7 @@ Needs that cross packages: use a fake of the other side until it's merged (`test
 | payments | Stripe payments, webhook, refunds, policy acceptance | payments, refunds, policy_acceptances, stripe_webhook_events |
 | itineraries | Days, cities, activities, images, budgets, transport, sharing, cloning | itineraries |
 | fx | Daily exchange rates and conversion | exchange_rates |
-| blog | Posts, tags, images, comments, likes, author page | posts, comments, likes |
+| blog | Posts, tags, images, comments, likes, author page, deleted-post file cleanup | posts, comments, likes, post_image_cleanups |
 | moderation | Reports on posts, comments, reviews, itineraries | reports |
 | notifications | In-app notifications (listens to events) | notifications |
 | audit | Append-only admin action log (listens to events) | audit_logs |
@@ -118,6 +118,8 @@ Handlers must be **idempotent** (conditional updates), because an event can be h
 
 Events carry the recipients' user IDs, so listeners don't look them up. Emit after the transaction commits.
 
+`flight-booking.rescheduled`, account suspension/reactivation and provider deactivation/reactivation also carry `eventId`: a non-empty opaque ID generated once per committed change and reused for retries. Distinct changes use distinct IDs, regardless of whether earlier notifications were read (`data-model.md` §6.3).
+
 ## 7. Background jobs (`@nestjs/schedule`)
 
 Each job lives in the module that owns the data and only uses conditional updates (safe if two app instances run it).
@@ -130,6 +132,7 @@ Each job lives in the module that owns the data and only uses conditional update
 | Expire hotel holds (+ `RoomNightInventory.release`) | hotel-bookings | 30 s |
 | Complete stays (check-out date passed) | hotel-bookings | 1 h |
 | Refresh exchange rates | fx | daily |
+| Retry post image cleanup | blog | 30 s |
 
 ## 8. Where an endpoint lives
 

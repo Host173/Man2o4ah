@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
@@ -20,6 +21,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -28,6 +30,8 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { ImageUpload } from '../storage/image-upload.decorator.js';
 import { BlogService } from './blog.service.js';
 import type {
   AuthorPageView,
@@ -103,7 +107,7 @@ export class BlogController {
   @Public()
   @Get('posts/:id')
   @ApiOperation({
-    summary: 'BLG-02 Read a published post page with author',
+    summary: 'BLG-02 / GEN-10 Read a published post page with author',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostDetailResponseDto })
@@ -113,8 +117,9 @@ export class BlogController {
   })
   getById(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user?: AuthUser,
   ): Promise<PostDetailView> {
-    return this.blogService.getById(id.toHexString());
+    return this.blogService.getById(id.toHexString(), user);
   }
 
   @Patch('posts/:id')
@@ -157,7 +162,7 @@ export class BlogController {
   @Get('posts/:id/comments')
   @ApiOperation({
     summary:
-      'BLG-05 / GEN-05 List paginated comments on a published post in chronological order',
+      'BLG-05 / GEN-05 / GEN-10 List paginated comments on a published post in chronological order',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PaginatedCommentsResponseDto })
@@ -168,8 +173,9 @@ export class BlogController {
   listComments(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Query() query: PaginationQueryDto,
+    @CurrentUser() user?: AuthUser,
   ): Promise<Paginated<CommentView>> {
-    return this.blogService.listComments(id.toHexString(), query);
+    return this.blogService.listComments(id.toHexString(), query, user);
   }
 
   @Post('posts/:id/comments')
@@ -262,6 +268,53 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<PostLikeView> {
     return this.blogService.unlikePost(id.toHexString(), user.id);
+  }
+
+  @Post('posts/:id/images')
+  @ImageUpload()
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Attach an image to own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: PostResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'Missing image, invalid post ID, invalid image file, or LIMIT_EXCEEDED: post already has 5 images',
+  })
+  @ApiPayloadTooLargeResponse({ description: 'Image exceeds 5 MB' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or owned by another user',
+  })
+  addImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @UploadedFile() file: UploadedImage | undefined,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostView> {
+    return this.blogService.addImage(id.toHexString(), file, user.id);
+  }
+
+  @Delete('posts/:id/images/:imageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Remove an image from own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'imageId', type: String })
+  @ApiNoContentResponse({ description: 'Image removed from post' })
+  @ApiBadRequestResponse({ description: 'Invalid post ID or image ID' })
+  @ApiNotFoundResponse({
+    description: 'Post or image not found, or post owned by another user',
+  })
+  async removeImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('imageId', ParseObjectIdPipe) imageId: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.blogService.removeImage(
+      id.toHexString(),
+      imageId.toHexString(),
+      user.id,
+    );
   }
 
   @Public()

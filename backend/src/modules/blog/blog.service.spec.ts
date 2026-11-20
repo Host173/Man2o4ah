@@ -1,20 +1,23 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types, type Model } from 'mongoose';
 import { vi } from 'vitest';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
+import { EventsModule } from '../../common/events/events.module.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { AccountsService } from '../accounts/accounts.service.js';
+import { Role, type AuthUser } from '../accounts/auth/auth.types.js';
 import { Session } from '../accounts/schemas/session.schema.js';
 import {
   ProviderType,
@@ -24,22 +27,31 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
+import {
+  Report,
+  ReportTargetType,
+} from '../moderation/schemas/report.schema.js';
 import { Airport } from '../reference-data/schemas/airport.schema.js';
 import { Attraction } from '../reference-data/schemas/attraction.schema.js';
 import { City } from '../reference-data/schemas/city.schema.js';
 import { Country } from '../reference-data/schemas/country.schema.js';
 import { Currency } from '../reference-data/schemas/currency.schema.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
+import { PostImageCleanup } from './schemas/post-image-cleanup.schema.js';
 import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
 
 describe('BlogService (skeleton)', () => {
   it('Provides and exports BlogService from BlogModule', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [BlogModule],
+      imports: [EventEmitterModule.forRoot(), EventsModule, BlogModule],
     })
       .useMocker((token) => {
         if (token === getConnectionToken()) return {};
@@ -54,12 +66,18 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Like.name))
       .useValue({})
+      .overrideProvider(getModelToken(PostImageCleanup.name))
+      .useValue({})
       .overrideProvider(getModelToken(User.name))
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
       .useValue({})
+      .overrideProvider(getModelToken(Report.name))
+      .useValue({})
+      .overrideProvider(AppEvents)
+      .useValue({ emit: vi.fn() })
       // ItinerariesModule imports ReferenceDataModule (ITN-01).
       .overrideProvider(getModelToken(Country.name))
       .useValue({})
@@ -82,14 +100,18 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   let service: BlogService;
   const fakeAccounts = new FakeAccountsService();
   const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
+  let registry: ReportableContentRegistry;
   let appEvents: AppEvents;
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
   let likeModel: Model<LikeDocument>;
+  let cleanupModel: Model<PostImageCleanup>;
 
   const ownerId = new Types.ObjectId().toHexString();
   const otherUserId = new Types.ObjectId().toHexString();
+  const adminUserId = new Types.ObjectId().toHexString();
   const suspendedUserId = new Types.ObjectId().toHexString();
   const activeCommenterId = new Types.ObjectId().toHexString();
   const deactivatedCommenterId = new Types.ObjectId().toHexString();
@@ -103,9 +125,12 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
           .overrideProvider(AccountsService)
           .useValue(fakeAccounts)
           .overrideProvider(ItinerariesService)
-          .useValue(fakeItineraries),
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage),
     });
     service = testApp.moduleRef.get(BlogService);
+    registry = testApp.moduleRef.get(ReportableContentRegistry);
     appEvents = testApp.moduleRef.get(AppEvents);
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -117,6 +142,9 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
     likeModel = testApp.moduleRef.get<Model<LikeDocument>>(
       getModelToken(Like.name),
     );
+    cleanupModel = testApp.moduleRef.get<Model<PostImageCleanup>>(
+      getModelToken(PostImageCleanup.name),
+    );
     await Promise.all([
       postModel.init(),
       commentModel.init(),
@@ -127,6 +155,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
   beforeEach(async () => {
     vi.restoreAllMocks();
     Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
     Object.assign(
       fakeAccounts,
       new FakeAccountsService([
@@ -293,7 +322,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(result.items[0].isHidden).toBe(true);
       expect(result.items[0].tags).toEqual(['egypt']);
       expect(result.items[0].images).toEqual([
-        { _id: imageId.toHexString(), key: 'blog/post-1.webp' },
+        {
+          _id: imageId.toHexString(),
+          key: 'blog/post-1.webp',
+          url: '/uploads/blog/post-1.webp',
+        },
       ]);
       expect(result.items[1].status).toBe(PostStatus.PUBLISHED);
     });
@@ -617,7 +650,11 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(result.items[1].authorName).toBe('Aisha Rawahi');
       expect(result.items[1].tags).toEqual(['cairo', 'nile']);
       expect(result.items[1].images).toEqual([
-        { _id: olderImageId.toHexString(), key: 'blog/cairo.jpg' },
+        {
+          _id: olderImageId.toHexString(),
+          key: 'blog/cairo.jpg',
+          url: '/uploads/blog/cairo.jpg',
+        },
       ]);
     });
 
@@ -720,7 +757,13 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         title: 'Dahab Diving',
         body: 'Blue Hole tips and reef safety.',
         tags: ['red-sea'],
-        images: [{ _id: imageId.toHexString(), key: 'blog/reef.png' }],
+        images: [
+          {
+            _id: imageId.toHexString(),
+            key: 'blog/reef.png',
+            url: '/uploads/blog/reef.png',
+          },
+        ],
         status: PostStatus.PUBLISHED,
         likeCount: 4,
         commentCount: 2,
@@ -2551,6 +2594,912 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         total: 0,
         totalPages: 0,
       });
+    });
+  });
+
+  describe('GEN-10 ReportableContent & hidden-content visibility', () => {
+    function authViewer(id: string, role: Role): AuthUser {
+      return { id, role, sid: new Types.ObjectId().toHexString() };
+    }
+
+    it('registers PostReportableContent with ReportableContentRegistry and supports exists, hide, and cascading delete with storage cleanup', async () => {
+      const postProvider = registry.get(ReportTargetType.POST);
+      const post = await service.create(
+        {
+          title: 'Moderated Post',
+          body: 'Post body with image.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const savedImage = await fakeStorage.save({
+        originalname: 'photo.jpg',
+        mimetype: 'image/jpeg',
+        size: 16,
+        buffer: Buffer.from('fake-jpeg-bytes!'),
+      });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(post._id) },
+        { $set: { images: [savedImage] } },
+      );
+
+      await service.createComment(
+        post._id,
+        { body: 'Comment to cascade delete' },
+        activeCommenterId,
+      );
+      await service.likePost(post._id, otherUserId);
+
+      expect(await postProvider.exists(post._id)).toBe(true);
+      expect(
+        await postProvider.exists(new Types.ObjectId().toHexString()),
+      ).toBe(false);
+      expect(fakeStorage.has(savedImage.key)).toBe(true);
+
+      await postProvider.hide(post._id);
+      const hiddenDoc = await postModel.findById(post._id).lean().exec();
+      expect(hiddenDoc?.isHidden).toBe(true);
+      expect(await postProvider.exists(post._id)).toBe(true);
+
+      await postProvider.delete(post._id);
+      expect(await postProvider.exists(post._id)).toBe(false);
+      expect(
+        await commentModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect(
+        await likeModel.countDocuments({
+          postId: new Types.ObjectId(post._id),
+        }),
+      ).toBe(0);
+      expect(fakeStorage.has(savedImage.key)).toBe(false);
+
+      await expect(postProvider.hide(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(postProvider.delete(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('queues admin-deleted post images when storage fails and retries after commit (GEN-10, BLG-10)', async () => {
+      const post = await service.create(
+        {
+          title: 'Admin deletion with deferred image cleanup',
+          body: 'Post body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const buffer = Buffer.from('admin-delete-image');
+      const withImage = await service.addImage(
+        post._id,
+        {
+          originalname: 'moderated.png',
+          mimetype: 'image/png',
+          size: buffer.length,
+          buffer,
+        },
+        ownerId,
+      );
+      const key = withImage.images[0]!.key;
+      await service.createComment(
+        post._id,
+        { body: 'Comment to cascade delete' },
+        activeCommenterId,
+      );
+      await service.likePost(post._id, otherUserId);
+      const deleteFile = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockRejectedValueOnce(new Error('storage temporarily unavailable'));
+
+      await expect(
+        registry.get(ReportTargetType.POST).delete(post._id),
+      ).resolves.toBeUndefined();
+
+      expect(await postModel.exists({ _id: post._id })).toBeNull();
+      expect(await commentModel.countDocuments({ postId: post._id })).toBe(0);
+      expect(await likeModel.countDocuments({ postId: post._id })).toBe(0);
+      expect(await cleanupModel.countDocuments({ postId: post._id, key })).toBe(
+        1,
+      );
+      expect(fakeStorage.has(key)).toBe(true);
+
+      deleteFile.mockRestore();
+      await new PostImageCleanupJob(cleanupModel, fakeStorage).run();
+      expect(await cleanupModel.countDocuments({ postId: post._id })).toBe(0);
+      expect(fakeStorage.has(key)).toBe(false);
+    });
+
+    it('registers CommentReportableContent, hides idempotently with one commentCount decrement, and deletes cleanly', async () => {
+      const commentProvider = registry.get(ReportTargetType.COMMENT);
+      const post = await service.create(
+        {
+          title: 'Post with moderated comments',
+          body: 'Parent body.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const comment1 = await service.createComment(
+        post._id,
+        { body: 'Comment to hide then delete' },
+        activeCommenterId,
+      );
+      const comment2 = await service.createComment(
+        post._id,
+        { body: 'Comment to delete directly' },
+        otherUserId,
+      );
+
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(2);
+      expect(await commentProvider.exists(comment1._id)).toBe(true);
+
+      // Hide decrements commentCount once; second hide is idempotent without double decrement.
+      await commentProvider.hide(comment1._id);
+      await commentProvider.hide(comment1._id);
+      expect((await commentModel.findById(comment1._id).lean())?.isHidden).toBe(
+        true,
+      );
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(1);
+
+      // Deleting an already-hidden comment keeps commentCount at 1.
+      await commentProvider.delete(comment1._id);
+      expect(await commentProvider.exists(comment1._id)).toBe(false);
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(1);
+
+      // Deleting a visible comment decrements commentCount to 0.
+      await commentProvider.delete(comment2._id);
+      expect((await postModel.findById(post._id).lean())?.commentCount).toBe(0);
+
+      await expect(commentProvider.hide(comment1._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(commentProvider.delete(comment2._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restricts hidden posts and hidden comments to their author and admins while preserving draft/deactivated 404 guards', async () => {
+      const postProvider = registry.get(ReportTargetType.POST);
+      const commentProvider = registry.get(ReportTargetType.COMMENT);
+
+      const post = await service.create(
+        {
+          title: 'Moderated Visibility Post',
+          body: 'Post body.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const draft = await service.create(
+        {
+          title: 'Secret Draft',
+          body: 'Draft body.',
+          status: PostStatus.DRAFT,
+        },
+        ownerId,
+      );
+      const visibleComment = await service.createComment(
+        post._id,
+        { body: 'Visible comment' },
+        otherUserId,
+      );
+      const hiddenComment = await service.createComment(
+        post._id,
+        { body: 'Moderated comment' },
+        activeCommenterId,
+      );
+
+      await commentProvider.hide(hiddenComment._id);
+
+      const ownerViewer = authViewer(ownerId, Role.USER);
+      const otherViewer = authViewer(otherUserId, Role.USER);
+      const commenterViewer = authViewer(activeCommenterId, Role.USER);
+      const adminViewer = authViewer(adminUserId, Role.ADMIN);
+
+      // Visible post with hidden comment: guest, post owner, and other users do not see hidden comment; commenter and admin do.
+      expect(
+        (
+          await service.listComments(post._id, { page: 1, limit: 10 })
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            ownerViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            commenterViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id, hiddenComment._id]);
+      expect(
+        (
+          await service.listComments(
+            post._id,
+            { page: 1, limit: 10 },
+            adminViewer,
+          )
+        ).items.map((c) => c._id),
+      ).toEqual([visibleComment._id, hiddenComment._id]);
+
+      // Hide parent post: only post owner and admin can read it or its comments.
+      await postProvider.hide(post._id);
+      await expect(service.getById(post._id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.getById(post._id, otherViewer)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(
+        service.listComments(post._id, { page: 1, limit: 10 }, otherViewer),
+      ).rejects.toThrow(NotFoundException);
+
+      const asOwner = await service.getById(post._id, ownerViewer);
+      expect(asOwner.isHidden).toBe(true);
+      const asAdmin = await service.getById(post._id, adminViewer);
+      expect(asAdmin.isHidden).toBe(true);
+
+      const hiddenPostCommentsForAdmin = await service.listComments(
+        post._id,
+        { page: 1, limit: 10 },
+        adminViewer,
+      );
+      expect(hiddenPostCommentsForAdmin.items.map((c) => c._id)).toEqual([
+        visibleComment._id,
+        hiddenComment._id,
+      ]);
+
+      // Drafts and deactivated-author posts still return 404 even for admins.
+      await expect(service.getById(draft._id, adminViewer)).rejects.toThrow(
+        NotFoundException,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(post._id) },
+        { $set: { authorDeactivated: true } },
+      );
+      await expect(service.getById(post._id, adminViewer)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('post images (BLG-10)', () => {
+    const sampleImage = (
+      name = 'photo.png',
+      mimetype = 'image/png',
+    ): UploadedImage => {
+      const buffer = Buffer.from(`bytes-for-${name}`);
+      return {
+        buffer,
+        originalname: name,
+        mimetype,
+        size: buffer.length,
+      };
+    };
+
+    it('attaches up to 5 images, stores ImageRef only in DB, computes url, and rejects a 6th with LIMIT_EXCEEDED', async () => {
+      const post = await service.create(
+        {
+          title: 'Siwa Sunset',
+          body: 'Dunes in golden hour.',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+
+      const first = await service.addImage(
+        post._id,
+        sampleImage('one.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      expect(first.images).toHaveLength(1);
+      expect(first.images[0]).toEqual({
+        _id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        key: expect.stringMatching(/^[0-9a-f]{24}\.jpg$/),
+        url: `/uploads/${first.images[0]!.key}`,
+      });
+      expect(fakeStorage.has(first.images[0]!.key)).toBe(true);
+
+      const stored = await postModel.findById(post._id).lean().exec();
+      expect(stored?.images).toHaveLength(1);
+      expect(stored?.images[0]).toMatchObject({ key: first.images[0]!.key });
+      expect('url' in (stored?.images[0] ?? {})).toBe(false);
+
+      let latest = first;
+      for (let i = 2; i <= 5; i += 1) {
+        latest = await service.addImage(
+          post._id,
+          sampleImage(`img-${i}.png`),
+          ownerId,
+        );
+      }
+      expect(latest.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+
+      await expect(
+        service.addImage(post._id, sampleImage('sixth.png'), ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: { code: ErrorCode.LimitExceeded },
+      });
+
+      const afterRejected = await postModel.findById(post._id).lean().exec();
+      expect(afterRejected?.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+    });
+
+    it('removes an image, leaves empty array after last removal, and allows attaching again', async () => {
+      const post = await service.create(
+        { title: 'Gallery', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      let latest = post;
+      for (let i = 1; i <= 5; i += 1) {
+        latest = await service.addImage(
+          post._id,
+          sampleImage(`pic-${i}.png`),
+          ownerId,
+        );
+      }
+      const removedImg = latest.images[2]!;
+
+      await service.removeImage(post._id, removedImg._id, ownerId);
+      expect(fakeStorage.has(removedImg.key)).toBe(false);
+      expect(fakeStorage.keys()).toHaveLength(4);
+
+      const afterRemove = await service.getById(post._id);
+      expect(afterRemove.images).toHaveLength(4);
+      expect(afterRemove.images.map((img) => img._id)).not.toContain(
+        removedImg._id,
+      );
+
+      const replaced = await service.addImage(
+        post._id,
+        sampleImage('replacement.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      expect(replaced.images).toHaveLength(5);
+      expect(fakeStorage.keys()).toHaveLength(5);
+
+      for (const img of replaced.images) {
+        await service.removeImage(post._id, img._id, ownerId);
+      }
+      const emptied = await postModel.findById(post._id).lean().exec();
+      expect(emptied?.images).toEqual([]);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('supports attaching and removing images on own draft and hidden posts', async () => {
+      const draft = await service.create(
+        { title: 'Draft Post', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const hidden = await service.create(
+        { title: 'Hidden Post', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+
+      const draftUpdated = await service.addImage(
+        draft._id,
+        sampleImage('draft.png'),
+        ownerId,
+      );
+      expect(draftUpdated.images).toHaveLength(1);
+      await service.removeImage(
+        draft._id,
+        draftUpdated.images[0]!._id,
+        ownerId,
+      );
+      expect(fakeStorage.has(draftUpdated.images[0]!.key)).toBe(false);
+
+      const hiddenUpdated = await service.addImage(
+        hidden._id,
+        sampleImage('hidden.png'),
+        ownerId,
+      );
+      expect(hiddenUpdated.images).toHaveLength(1);
+      await service.removeImage(
+        hidden._id,
+        hiddenUpdated.images[0]!._id,
+        ownerId,
+      );
+      expect(fakeStorage.has(hiddenUpdated.images[0]!.key)).toBe(false);
+    });
+
+    it('rejects unknown imageId, another post imageId, repeated delete, missing post, non-owner, and malformed ids', async () => {
+      const postA = await service.create(
+        { title: 'Post A', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const postB = await service.create(
+        { title: 'Post B', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const withImgB = await service.addImage(
+        postB._id,
+        sampleImage('b.png'),
+        ownerId,
+      );
+      const imgB = withImgB.images[0]!;
+
+      await expect(
+        service.removeImage(
+          postA._id,
+          new Types.ObjectId().toHexString(),
+          ownerId,
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.removeImage(postA._id, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.addImage(postA._id, sampleImage('intruder.png'), otherUserId),
+      ).rejects.toThrow(NotFoundException);
+
+      await expect(
+        service.removeImage(postB._id, imgB._id, otherUserId),
+      ).rejects.toThrow(NotFoundException);
+
+      const missingPostId = new Types.ObjectId().toHexString();
+      await expect(
+        service.addImage(missingPostId, sampleImage('missing.png'), ownerId),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.removeImage(missingPostId, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+
+      // Malformed IDs and missing file return 400 VALIDATION_FAILED.
+      await expect(
+        service.addImage('bad-id', sampleImage('m.png'), ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'postId' }],
+        },
+      });
+      await expect(
+        service.removeImage('bad-id', imgB._id, ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'postId' }],
+        },
+      });
+      await expect(
+        service.removeImage(postB._id, 'bad-image-id', ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'imageId' }],
+        },
+      });
+      await expect(
+        service.addImage(postA._id, undefined, ownerId),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [{ field: 'file' }],
+        },
+      });
+
+      // Repeated delete fails with NOT_FOUND and does not touch other posts' files.
+      await service.removeImage(postB._id, imgB._id, ownerId);
+      await expect(
+        service.removeImage(postB._id, imgB._id, ownerId),
+      ).rejects.toThrow(NotFoundException);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('enforces the 5-image limit atomically across parallel uploads without leaving orphan files', async () => {
+      const post = await service.create(
+        { title: 'Concurrent', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      for (let i = 1; i <= 3; i += 1) {
+        await service.addImage(post._id, sampleImage(`seed-${i}.png`), ownerId);
+      }
+
+      const settled = await Promise.allSettled(
+        Array.from({ length: 5 }, (_, i) =>
+          service.addImage(post._id, sampleImage(`parallel-${i}.png`), ownerId),
+        ),
+      );
+
+      const fulfilled = settled.filter(
+        (
+          result,
+        ): result is PromiseFulfilledResult<
+          Awaited<ReturnType<typeof service.addImage>>
+        > => result.status === 'fulfilled',
+      );
+      const rejected = settled.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      );
+
+      expect(fulfilled).toHaveLength(2);
+      expect(rejected).toHaveLength(3);
+      for (const rej of rejected) {
+        expect(rej.reason).toBeInstanceOf(BadRequestException);
+        expect((rej.reason as BadRequestException).getResponse()).toMatchObject(
+          { code: ErrorCode.LimitExceeded },
+        );
+      }
+
+      const finalDoc = await postModel.findById(post._id).lean().exec();
+      expect(finalDoc?.images).toHaveLength(5);
+      const storedKeys = (finalDoc?.images ?? []).map((img) => img.key);
+      expect(new Set(fakeStorage.keys())).toEqual(new Set(storedKeys));
+      expect(fakeStorage.keys()).toHaveLength(5);
+    });
+
+    it('propagates StorageService failures cleanly and cleans up newly saved files on post-save DB errors or deletion races', async () => {
+      const post = await service.create(
+        {
+          title: 'Failure Cleanup',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const initial = await service.addImage(
+        post._id,
+        sampleImage('initial.png'),
+        ownerId,
+      );
+
+      vi.spyOn(fakeStorage, 'save').mockRejectedValueOnce(
+        new BadRequestException({
+          code: ErrorCode.ValidationFailed,
+          message: 'Invalid image',
+          details: [
+            { field: 'file', message: 'only JPG or PNG images are allowed' },
+          ],
+        }),
+      );
+
+      await expect(
+        service.addImage(
+          post._id,
+          sampleImage('bad.gif', 'image/gif'),
+          ownerId,
+        ),
+      ).rejects.toMatchObject({
+        constructor: BadRequestException,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+
+      // DB write fails after storage.save: newly saved file is deleted.
+      vi.spyOn(postModel, 'findOneAndUpdate').mockReturnValueOnce({
+        lean: () => ({
+          exec: () => Promise.reject(new Error('db write failure')),
+        }),
+      } as never);
+      await expect(
+        service.addImage(post._id, sampleImage('db-fail.png'), ownerId),
+      ).rejects.toThrow('db write failure');
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+
+      // Post is deleted while file is being saved: newly saved file is deleted and 404 is thrown.
+      const realSave = fakeStorage.save.bind(fakeStorage);
+      vi.spyOn(fakeStorage, 'save').mockImplementationOnce(async (file) => {
+        await postModel.deleteOne({ _id: new Types.ObjectId(post._id) }).exec();
+        return realSave(file);
+      });
+      await expect(
+        service.addImage(post._id, sampleImage('race-del.png'), ownerId),
+      ).rejects.toThrow(NotFoundException);
+      expect(fakeStorage.keys()).toEqual([initial.images[0]!.key]);
+    });
+
+    it('deletes all post image files when the post is deleted, and preserves them if the delete transaction rolls back', async () => {
+      const target = await service.create(
+        {
+          title: 'Delete With Images',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      const bystander = await service.create(
+        { title: 'Keep Images', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+
+      await service.addImage(target._id, sampleImage('t1.png'), ownerId);
+      const targetWithImgs = await service.addImage(
+        target._id,
+        sampleImage('t2.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      const bystanderWithImg = await service.addImage(
+        bystander._id,
+        sampleImage('keep.png'),
+        ownerId,
+      );
+
+      // Rollback preserves files.
+      const deleteLikesSpy = vi
+        .spyOn(likeModel, 'deleteMany')
+        .mockImplementationOnce(
+          () =>
+            ({
+              exec: () => Promise.reject(new Error('rollback delete')),
+            }) as never,
+        );
+      const deleteFile = vi.spyOn(fakeStorage, 'delete');
+      await expect(service.delete(target._id, ownerId)).rejects.toThrow(
+        'rollback delete',
+      );
+      deleteLikesSpy.mockRestore();
+      expect(deleteFile).not.toHaveBeenCalled();
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      for (const img of targetWithImgs.images) {
+        expect(fakeStorage.has(img.key)).toBe(true);
+      }
+
+      // Successful post deletion removes all target files and keeps bystander's file.
+      const realDelete = FakeStorageService.prototype.delete.bind(fakeStorage);
+      deleteFile.mockImplementation(async (key) => {
+        expect(await postModel.exists({ _id: target._id })).toBeNull();
+        expect(await cleanupModel.exists({ key })).not.toBeNull();
+        await realDelete(key);
+      });
+      await service.delete(target._id, ownerId);
+      for (const img of targetWithImgs.images) {
+        expect(fakeStorage.has(img.key)).toBe(false);
+      }
+      expect(fakeStorage.has(bystanderWithImg.images[0]!.key)).toBe(true);
+      expect(fakeStorage.keys()).toEqual([bystanderWithImg.images[0]!.key]);
+      expect(await cleanupModel.countDocuments()).toBe(0);
+    });
+
+    it('persists failed image cleanup during post delete while still attempting every file', async () => {
+      const post = await service.create(
+        {
+          title: 'Partial Storage Delete Failure',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.addImage(post._id, sampleImage('p1.png'), ownerId);
+      await service.addImage(
+        post._id,
+        sampleImage('p2.jpg', 'image/jpeg'),
+        ownerId,
+      );
+      const postWithImages = await service.addImage(
+        post._id,
+        sampleImage('p3.png'),
+        ownerId,
+      );
+      const [img1, img2, img3] = postWithImages.images;
+      expect(img1 && img2 && img3).toBeTruthy();
+
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      const deleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockImplementation(async (key) => {
+          if (key === img1!.key) {
+            throw new Error('storage unlink failure');
+          }
+          return realDelete(key);
+        });
+
+      await expect(service.delete(post._id, ownerId)).resolves.toBeUndefined();
+
+      expect(deleteSpy).toHaveBeenCalledTimes(3);
+      expect(deleteSpy).toHaveBeenCalledWith(img1!.key);
+      expect(deleteSpy).toHaveBeenCalledWith(img2!.key);
+      expect(deleteSpy).toHaveBeenCalledWith(img3!.key);
+      expect(fakeStorage.has(img1!.key)).toBe(true);
+      expect(fakeStorage.has(img2!.key)).toBe(false);
+      expect(fakeStorage.has(img3!.key)).toBe(false);
+      expect(await postModel.findById(post._id).lean().exec()).toBeNull();
+      const pending = await testApp!.connection
+        .collection<{ postId: Types.ObjectId; key: string }>(
+          'post_image_cleanups',
+        )
+        .find({ postId: new Types.ObjectId(post._id) })
+        .toArray();
+      expect(pending.map((item) => item.key)).toEqual([img1!.key]);
+
+      deleteSpy.mockRestore();
+      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      const settled = await Promise.allSettled([
+        restarted.run(),
+        testApp!.moduleRef.get(PostImageCleanupJob).run(),
+      ]);
+      expect(settled.map((result) => result.status)).toEqual([
+        'fulfilled',
+        'fulfilled',
+      ]);
+      expect(fakeStorage.keys()).toEqual([]);
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      await restarted.run();
+      expect(await cleanupModel.countDocuments()).toBe(0);
+    });
+
+    it('rolls back post, comments and likes without deleting files when cleanup cannot be persisted', async () => {
+      const post = await service.create(
+        { title: 'Queue Failure', body: 'Body', status: PostStatus.PUBLISHED },
+        ownerId,
+      );
+      const withImage = await service.addImage(
+        post._id,
+        sampleImage('queue-failure.png'),
+        ownerId,
+      );
+      const postId = new Types.ObjectId(post._id);
+      await commentModel.create({
+        postId,
+        authorId: new Types.ObjectId(otherUserId),
+        body: 'Keep this comment',
+      });
+      await likeModel.create({
+        postId,
+        userId: new Types.ObjectId(otherUserId),
+      });
+      vi.spyOn(cleanupModel, 'create').mockRejectedValueOnce(
+        new Error('cleanup queue unavailable'),
+      );
+      const deleteFile = vi.spyOn(fakeStorage, 'delete');
+
+      await expect(service.delete(post._id, ownerId)).rejects.toThrow(
+        'cleanup queue unavailable',
+      );
+
+      expect(await postModel.exists({ _id: postId })).not.toBeNull();
+      expect(await commentModel.countDocuments({ postId })).toBe(1);
+      expect(await likeModel.countDocuments({ postId })).toBe(1);
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      expect(fakeStorage.has(withImage.images[0]!.key)).toBe(true);
+      expect(deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('recovers persisted cleanup after a worker restart and retries an acknowledgement failure idempotently', async () => {
+      const post = await service.create(
+        { title: 'Worker Restart', body: 'Body', status: PostStatus.DRAFT },
+        ownerId,
+      );
+      const withImage = await service.addImage(
+        post._id,
+        sampleImage('restart.png'),
+        ownerId,
+      );
+      const key = withImage.images[0]!.key;
+      vi.spyOn(
+        testApp!.moduleRef.get(PostImageCleanupJob),
+        'deletePending',
+      ).mockRejectedValueOnce(new Error('worker unavailable after commit'));
+
+      await expect(service.delete(post._id, ownerId)).resolves.toBeUndefined();
+      expect(await postModel.exists({ _id: post._id })).toBeNull();
+      expect(await cleanupModel.countDocuments({ key })).toBe(1);
+      expect(fakeStorage.has(key)).toBe(true);
+
+      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      vi.spyOn(cleanupModel, 'deleteOne').mockReturnValueOnce({
+        exec: () => Promise.reject(new Error('acknowledgement unavailable')),
+      } as never);
+      await restarted.run();
+      expect(fakeStorage.has(key)).toBe(false);
+      expect(await cleanupModel.countDocuments({ key })).toBe(1);
+
+      await restarted.run();
+      expect(await cleanupModel.countDocuments()).toBe(0);
+      expect(fakeStorage.keys()).toEqual([]);
+    });
+
+    it('does not starve later files behind a full batch of failed cleanup records', async () => {
+      const log = vi
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const postId = new Types.ObjectId();
+      const files = await Promise.all(
+        Array.from({ length: 101 }, () =>
+          fakeStorage.save(sampleImage('backlog.png')),
+        ),
+      );
+      await cleanupModel.create(files.map(({ key }) => ({ postId, key })));
+      const failingKeys = new Set(files.slice(0, 100).map((file) => file.key));
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      vi.spyOn(fakeStorage, 'delete').mockImplementation(async (key) => {
+        if (failingKeys.has(key)) throw new Error('file busy');
+        await realDelete(key);
+      });
+
+      await testApp!.moduleRef.get(PostImageCleanupJob).run();
+
+      expect(new Set(fakeStorage.keys())).toEqual(failingKeys);
+      expect(
+        new Set((await cleanupModel.find().lean()).map((item) => item.key)),
+      ).toEqual(failingKeys);
+      expect(log).toHaveBeenCalledTimes(100);
+    });
+
+    it('keeps the image reference in removeImage when storage.delete fails and succeeds cleanly on retry', async () => {
+      const post = await service.create(
+        {
+          title: 'Remove Image Storage Failure',
+          body: 'Body',
+          status: PostStatus.PUBLISHED,
+        },
+        ownerId,
+      );
+      await service.addImage(post._id, sampleImage('keep-1.png'), ownerId);
+      const updated = await service.addImage(
+        post._id,
+        sampleImage('keep-2.png'),
+        ownerId,
+      );
+      const [img1, img2] = updated.images;
+      expect(img1 && img2).toBeTruthy();
+
+      const deleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockRejectedValueOnce(new Error('disk busy'));
+
+      await expect(
+        service.removeImage(post._id, img1!._id, ownerId),
+      ).rejects.toThrow('disk busy');
+      expect(deleteSpy).toHaveBeenCalledWith(img1!.key);
+
+      // Reference and stored file remain intact when file deletion fails.
+      const afterFailedRemoveDoc = await postModel
+        .findById(post._id)
+        .lean()
+        .exec();
+      expect(afterFailedRemoveDoc?.images.map((item) => item.key)).toEqual([
+        img1!.key,
+        img2!.key,
+      ]);
+      const afterFailedRemoveView = await service.getById(post._id);
+      expect(afterFailedRemoveView.images.map((item) => item._id)).toEqual([
+        img1!._id,
+        img2!._id,
+      ]);
+      expect(fakeStorage.has(img1!.key)).toBe(true);
+      expect(fakeStorage.has(img2!.key)).toBe(true);
+
+      // Retrying once storage recovers removes both file and reference.
+      await expect(
+        service.removeImage(post._id, img1!._id, ownerId),
+      ).resolves.toBeUndefined();
+      const afterRetryDoc = await postModel.findById(post._id).lean().exec();
+      expect(afterRetryDoc?.images.map((item) => item.key)).toEqual([
+        img2!.key,
+      ]);
+      const afterRetryView = await service.getById(post._id);
+      expect(afterRetryView.images.map((item) => item._id)).toEqual([
+        img2!._id,
+      ]);
+      expect(fakeStorage.has(img1!.key)).toBe(false);
+      expect(fakeStorage.has(img2!.key)).toBe(true);
     });
   });
 });

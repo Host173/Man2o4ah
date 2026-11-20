@@ -63,6 +63,7 @@ All app collections use `{ timestamps: true }` (`createdAt`, `updatedAt`). Refer
 - Responses compute the URL: `${PUBLIC_BASE_URL}/uploads/${key}`. The URL is never stored.
 - Limits: JPG/PNG, ≤ 5 MB each; ≤ 5 per post, activity or hotel; 1 logo per airline.
 - Removing an image (or its parent) deletes the file.
+- For blog post deletion, image keys enter `post_image_cleanups` in the same transaction that removes the post, comments and likes. File deletion starts only after commit. A failed deletion remains durably queued for retry, including across restarts; the API still returns 204 for the committed post deletion.
 
 ### 1.7 Visibility flags
 | Field | On | Set by | Meaning |
@@ -114,6 +115,7 @@ Comments and reviews of a deactivated user stay visible but show **"Deleted user
 | 25 | `reports` | moderation | User reports on content |
 | 26 | `notifications` | notifications | In-app notifications |
 | 27 | `audit_logs` | audit | Append-only log of admin actions |
+| 28 | `post_image_cleanups` | blog | Durable file cleanup for deleted posts (BLG-10) |
 
 `admin` owns no collection. `storage` owns no collection (files on disk). `common` owns no collection.
 
@@ -213,13 +215,16 @@ One document per logged-in device. Implements refresh-token revocation and the 3
 | `userId` | ObjectId → users | ✓ | |
 | `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
 | `lastActivityAt` | Date | ✓ | |
-| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+| `expiresAt` | Date | ✓ | `min(lastActivityAt + 30 min, absoluteExpiresAt)` |
+| `absoluteExpiresAt` | Date | ✓ | immutable; login + 8 hours for admins, login + 7 days for other roles (ACC-06, ticket #27) |
 
 Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
 
 Rules
-- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
-- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Every authenticated request checks the session exists, `expiresAt > now` and `absoluteExpiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session), never beyond `absoluteExpiresAt`.
+- The absolute deadline is fixed from the role at login, including the refresh cookie's max age; refresh and role changes never extend it. Existing sessions without this field require a new login; no Atlas data migration is needed.
+- Logout is public and idempotent: delete the authenticated session, or use the refresh token's hash if the access cookie cannot authenticate, then clear both cookies and return 204. Missing or already-revoked credentials still clear the cookies. Other sessions are unaffected.
+- Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
 - Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
 
 ---
@@ -271,7 +276,7 @@ Indexes: `{ code: 1 }` unique · `{ isActive: 1 }`
 | `freeBags` | int | ≥ 0, free bag count per passenger |
 | `maxBagWeightKg` | number | > 0, per bag (also the limit for extra bags, FLT-08) |
 
-**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
+**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) initializes or changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
 
 Indexes
 - `{ airlineId: 1, flightNumber: 1, departureLocalDate: 1 }` **unique** (FLT-03; cancelled flights keep their number for that date)
@@ -502,7 +507,7 @@ Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 
 | `stripeRefundId` | string | | set once Stripe accepts the request |
 | `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
 | `currency` | string | ✓ | |
-| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = payment succeeded after the hold expired |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation |
 | `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
 
 Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
@@ -613,6 +618,7 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `authorId` | ObjectId → users | ✓ | |
+| `itineraryId` | ObjectId → itineraries | | optional reference to one of the author's public or private itineraries (BLG-13); no embedded copy |
 | `title` | string | ✓ | 1–150 chars |
 | `body` | string | ✓ | 1–20000 chars |
 | `tags` | string[] | ✓ | 0–5; trimmed, lowercased, 1–30 chars, unique (BLG-08) |
@@ -627,6 +633,8 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 Indexes: `{ status: 1, isHidden: 1, authorDeactivated: 1, publishedAt: -1 }` · `{ authorId: 1, updatedAt: -1 }` · `{ tags: 1, status: 1 }`
 
 Search (BLG-09) orders by `likeCount + commentCount` descending, then `publishedAt` descending (computed in the aggregation, not stored). Deleting a post deletes its comments, likes and image files.
+
+BLG-13 schema prerequisite: existing posts need no migration and the indexes stay unchanged. The attachment API ships separately and must verify ownership through `ItinerariesService.getById(itineraryId, authorId)` before storing the reference. Attaching an itinerary does not publish it, copy its contents, or bypass its visibility and ownership checks.
 
 #### `comments`
 | Field | Type | Req | Rules |
@@ -646,6 +654,16 @@ Indexes: `{ postId: 1, createdAt: 1 }` · `{ authorId: 1 }`
 
 Indexes: `{ postId: 1, userId: 1 }` **unique** (BLG-06) · `{ userId: 1 }`
 Like = insert + `$inc likeCount`; a duplicate key means already liked. Unlike = delete + `$inc -1` only if a document was deleted.
+
+#### `post_image_cleanups` (BLG-10)
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `postId` | ObjectId | ✓ | ID of the deleted post; intentionally survives the parent |
+| `key` | string | ✓ | Stored file name, unique; never reused by storage |
+
+Indexes: `{ key: 1 }` **unique** · `{ postId: 1, _id: 1 }`
+
+Created with the caller's session in the post deletion transaction. The post-commit attempt and the 30-second job call idempotent `StorageService.delete(key)` and remove the record only after success. Storage or acknowledgement failure leaves the record for retry; no TTL. Concurrent workers may attempt the same key safely. Batches advance past failed records so they cannot starve later files. No API response exposes these internal records.
 
 ---
 
@@ -713,11 +731,14 @@ These classes are the **only** code that changes inventory. Each method takes th
 
 | Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
 |---|---|---|---|
+| `addCabin(flightId, input, moderatorAirlineId)` | flight belongs to the moderator's airline, `status: scheduled`, no cabin of `input.cabinClass` | atomically append a cabin with `totalSeats = availableSeats = input.totalSeats`, `heldSeats = bookedSeats = 0` | `NotFound`, `InvalidStatusTransition` or `Conflict` |
 | `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
 | `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
 | `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+`addCabin` takes the plain `AddCabinInput` fields (class, total seats, price in minor units, free bags and per-bag weight) and required `InventoryOptions { session }`, like the other inventory methods. `FlightsService.addCabin` owns its transaction and reads the resulting flight in the same session. This extends the inventory contract without changing the schema or indexes.
 
 Example (`hold`, one item):
 ```js
@@ -761,7 +782,7 @@ pending_payment ──payment succeeded──▶ confirmed ──end of trip/sta
 |---|---|---|
 | create `pending_payment` | user proceeds to payment | `SeatInventory.hold` / `RoomNightInventory.reserve` |
 | → `confirmed` | event `payment.succeeded` | `SeatInventory.confirm` / nothing (nights stay) |
-| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06) | `SeatInventory.release` / `RoomNightInventory.release` |
+| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06), or payment confirmation after account deactivation (ACC-12, approved decision §3) | `SeatInventory.release` / `RoomNightInventory.release` |
 | → `cancelled` | user (FLT-26, HTL-21) or flight cancelled (FLT-06) | `SeatInventory.returnBooked` / `RoomNightInventory.release` |
 | → `completed` | job: flight `lastDepartureAt ≤ now`; hotel `checkOutDate < today` | none |
 
@@ -807,7 +828,9 @@ A URL path does not decide the module. Endpoints that combine provider data with
 |---|---|---|
 | `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)` → `{ amountMinor, currency, status, holdExpiresAt }`; `getPolicies(bookingId, userId)` |
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
-| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` (blocks ACC-12) |
+| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId, { session? })` (blocks ACC-12; caller transaction used when supplied) |
+
+**ACC-12 serialization.** Before confirming a pending booking, the booking owner calls `AccountsService.tryLockForBookingConfirmation(userId, { session })` with its active transaction. Accounts conditionally increments the existing Mongoose `users.__v` for active or suspended accounts; false means missing/deactivated. Deactivation writes the same user document, then reads both booking checks sequentially with its caller session before deleting sessions. A conflicting transaction retries against current account/booking state. If deactivation wins, hotel confirmation expires the pending reservation and releases its nights together, then requests the full `late_payment` refund after commit. A duplicate event reuses payments' one-refund-per-booking contract. Future flight confirmation must use this same fence and release its held seats when expiry wins.
 
 **Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`). Moderation: `ReportableContentRegistry` (`moderation/ports/`).
 
@@ -815,6 +838,8 @@ A URL path does not decide the module. Endpoints that combine provider data with
 Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
+
+Repeatable notification changes carry a required, non-empty opaque `eventId`: generate it once for the committed source change and reuse it for every retry or redelivery. Different reschedules and account/provider state changes have different IDs. Notification deduplication never depends on `readAt` or the latest state; a distinct reschedule notifies even while an earlier alert is unread. Notification `_id` is derived from the recipient, event type, entity and event identity, using the existing unique `_id` index; no collection field or index is added.
 
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
@@ -827,14 +852,14 @@ Names and payload types live in `backend/src/common/events/` (`Events`, `EventPa
 | `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
 | `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
 | `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
-| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight-booking.rescheduled` | `{ eventId, bookingId, userId }` | flight-bookings | notifications |
 | `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
 | `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
 | `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
-| `account.suspended` | `{ userId }` | accounts | notifications |
-| `account.reactivated` | `{ userId }` | accounts | notifications |
-| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `account.suspended` | `{ eventId, userId }` | accounts | notifications |
+| `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
+| `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 ---
@@ -850,6 +875,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |
 | Complete stays | hotel-bookings | 1 h | `confirmed` with `checkOutDate < today` → `completed` |
 | Refresh rates | fx | daily | fetch FXRatesAPI, insert today's `exchange_rates` |
+| Retry post image cleanup | blog | 30 s | Delete queued files via storage; remove each cleanup record only after success |
 
 Sessions need no job (TTL index).
 

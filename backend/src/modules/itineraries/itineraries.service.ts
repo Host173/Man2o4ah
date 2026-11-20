@@ -18,6 +18,8 @@ import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
+import { HotelSearchQuery, HotelSearchResult } from '../hotels/hotels.types.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import { ProfileService } from '../accounts/users/profile.service.js';
 import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -29,6 +31,7 @@ import { StorageService } from '../storage/storage.service.js';
 import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import type { ItineraryHotelsQueryDto } from './dto/itinerary-hotels-query.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
@@ -105,6 +108,7 @@ export class ItinerariesService {
     private readonly storage: StorageService,
     private readonly moduleRef: ModuleRef,
     private readonly profile: ProfileService,
+    private readonly hotels: HotelsService,
   ) {}
 
   /**
@@ -168,6 +172,50 @@ export class ItinerariesService {
       .exec();
     if (!itinerary) throw this.notFound();
     return this.toDetailView(itinerary as ItineraryRecord);
+  }
+
+  /** ITN-25: hotels available for the chosen city group's derived dates. */
+  async getHotelsForCityGroup(
+    itineraryId: string,
+    query: ItineraryHotelsQueryDto,
+    userId: string,
+  ): Promise<Paginated<HotelSearchResult>> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const groups = cityGroups(record.days ?? [], record.startDate);
+    if (
+      !Number.isInteger(query.groupIndex) ||
+      query.groupIndex < 0 ||
+      query.groupIndex >= groups.length
+    ) {
+      throw this.notFound();
+    }
+    const group = groups[query.groupIndex];
+
+    const hotelQuery: HotelSearchQuery = {
+      cityId: group.cityId,
+      checkIn: toDateOnly(group.checkIn),
+      checkOut: toDateOnly(group.checkOut),
+      guests: query.guests,
+      rooms: query.rooms ?? 1,
+      minPriceMinor: query.minPrice,
+      maxPriceMinor: query.maxPrice,
+      minRating: query.minRating,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+      page: query.page,
+      limit: query.limit,
+    };
+
+    return this.hotels.search(hotelQuery);
   }
 
   /** ITN-01/20: edits the owner's title, countries, start date or visibility. */

@@ -188,6 +188,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
     });
     expect(document.paths['/api/itineraries/{id}']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.patch).toBeDefined();
+    expect(document.paths['/api/itineraries/{id}/hotels']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.delete).toBeDefined();
     expect(document.paths['/api/itineraries/{id}/days']?.post).toBeDefined();
     expect(
@@ -2115,6 +2116,101 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(document.components?.schemas?.ActivityCostDto).toMatchObject({
         required: ['amountMinor', 'currency'],
       });
+    });
+  });
+
+  describe('GET /api/itineraries/:id/hotels (ITN-25)', () => {
+    it('rejects unauthenticated requests with 401', async () => {
+      const id = new Types.ObjectId().toHexString();
+      const response = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/hotels?groupIndex=0&guests=1`);
+      expect(response.status).toBe(401);
+      expect(response.body.code).toBe(ErrorCode.NotAuthenticated);
+    });
+
+    it('returns 404 for a foreign or missing itinerary', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const other = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      const foreign = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/hotels?groupIndex=0&guests=1`)
+        .set('Cookie', other.cookie);
+      expect(foreign.status).toBe(404);
+      expect(foreign.body.code).toBe(ErrorCode.NotFound);
+
+      const missing = await testApp
+        .http()
+        .get(
+          `/api/itineraries/${new Types.ObjectId().toHexString()}/hotels?groupIndex=0&guests=1`,
+        )
+        .set('Cookie', owner.cookie);
+      expect(missing.status).toBe(404);
+      expect(missing.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('rejects malformed ids and query parameters with 400', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+
+      const badId = await testApp
+        .http()
+        .get(`/api/itineraries/not-an-id/hotels?groupIndex=0&guests=1`)
+        .set('Cookie', owner.cookie);
+      expect(badId.status).toBe(400);
+      expect(badId.body.code).toBe(ErrorCode.ValidationFailed);
+
+      for (const query of [
+        'groupIndex=abc&guests=1',
+        'groupIndex=-1&guests=1',
+        'groupIndex=0',
+        'groupIndex=0&guests=0',
+        'groupIndex=0&guests=1&rooms=0',
+      ]) {
+        const bad = await testApp
+          .http()
+          .get(`/api/itineraries/${id}/hotels?${query}`)
+          .set('Cookie', owner.cookie);
+        expect(bad.status).toBe(400);
+        expect(bad.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+    });
+
+    it('returns an empty page for a valid city group and registers in Swagger', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      const response = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/hotels?groupIndex=0&guests=2&rooms=1`)
+        .set('Cookie', owner.cookie);
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const outOfRange = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/hotels?groupIndex=5&guests=1`)
+        .set('Cookie', owner.cookie);
+      expect(outOfRange.status).toBe(404);
+      expect(outOfRange.body.code).toBe(ErrorCode.NotFound);
     });
   });
 });

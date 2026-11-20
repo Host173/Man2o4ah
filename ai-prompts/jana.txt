@@ -450,4 +450,107 @@ Search by airports, local date and passengers; round trip returns outbound and r
 
 How the output was used:
 Implemented public FLT-11/12/15 flight search with DTO validation, active-airline/route/date/status filtering, direct inventory-seat checks, price/cabin/sort/pagination and round trips; added integration/API coverage and full backend verification, committed in 368e17d.
+================================================================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-11
+
+Prompt:
+### [flights](http://localhost:4000/api/docs#/flights)
+GET[/api/flights/search](http://localhost:4000/api/docs#/flights/FlightsController_search)FLT-11, FLT-12, FLT-15 Search bookable flights
+
+#### Parameters
+
+Cancel
+
+NameDescriptionfrom *
+string
+
+(query)
+to *
+string
+
+(query)
+date *
+string
+
+(query)
+adults *
+number
+
+(query)
+children *
+number
+
+(query)
+infants *
+number
+
+(query)
+cabinClass
+string
+
+(query)
+--economypremium_economybusinessfirstminPriceMinor
+integer
+
+(query)
+maxPriceMinor
+integer
+
+(query)
+sortBy *
+string
+
+(query)
+pricedurationdeparturereturnDate
+string
+
+(query)
+page
+number
+
+(query)
+limit
+number
+
+(query)
+
+Please correct the following validation errors and try again.
+- For 'date': Value must follow pattern YYYY-MM-DD.
+- For 'returnDate': Value must follow pattern YYYY-MM-DD. i entered correct values in the date and it still failed can you chekc the problem
+
+[Attached: main.ts]
+import { readFileSync } from 'node:fs';
+import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
+import * as dns from 'node:dns';
+
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  const config = app.get(ConfigService);
+
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
+  });
+
+  const { version } = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ) as { version: string };
+  setupSwagger(app, version);
+
+  await app.listen(config.get<number>('PORT', 4000));
+}
+await bootstrap();
+
+How the output was used:
+Corrected the FLT-11 Swagger date patterns from the literal YYYY-MM-DD to the executable ^\d{4}-\d{2}-\d{2}$ regex for date and returnDate, added an OpenAPI regression assertion, and committed the fix in 0e26b22.
 ================================================

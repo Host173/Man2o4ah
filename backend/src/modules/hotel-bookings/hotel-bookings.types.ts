@@ -147,3 +147,31 @@ export interface HotelReservationDetailView extends HotelReservationSummaryView 
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface CreateHotelReviewInput {
+  rating: number;
+  text?: string;
+}
+
+export interface UpdateHotelReviewInput {
+  rating?: number;
+  text?: string | null;
+}
+
+export interface ListHotelReviewsQuery {
+  page?: number;
+  limit?: number;
+}
+
+export interface HotelRatingSummary {
+  average: number | null;
+  count: number;
+}
+
+export interface HotelReviewView {
+  _id: string;
+  rating: number;
+  text?: string;
+  isHidden: boolean;
+  createdAt: Date;
+}

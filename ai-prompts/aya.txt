@@ -1767,3 +1767,63 @@ how do i test flt 29 on swagger
 How the output was used:
 Answer only, no files changed (prompt log appended)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+it didnt work
+
+How the output was used:
+Investigated the auth guard and GET /api/auth/me allow-list; the 403 cause remained unknown without its response code, and no files were changed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+seed a moderator user
+
+How the output was used:
+Reviewed the existing moderator-creation route and DTO; created no database user because the request was canceled
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: HTL-23
+
+Prompt:
+never mind this i will test it on my own start on htl 23
+
+How the output was used:
+Created feature/HTL-23-reviews-ratings from develop and began the scoped HTL-23 implementation
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: HTL-23
+
+Prompt:
+that is on a different branch ignore it rn
+
+How the output was used:
+Left the unrelated FLT-29 prompt-log edits untouched and preserved them in a stash before resuming HTL-23
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: HTL-23
+
+Prompt:
+continue htl 23 now
+
+How the output was used:
+Fast-forwarded the HTL-23 branch to latest develop and implemented hotel review create, edit, delete, listing, moderation registration, and tests
+================================================

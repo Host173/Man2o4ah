@@ -1755,3 +1755,15 @@ Prompt:
 How the output was used:
 Explained how to supply the moderator's providerId, retrieve a flight _id, and use it to test the FLT-29 endpoints
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-29
+
+Prompt:
+how do i test flt 29 on swagger
+
+How the output was used:
+Answer only, no files changed (prompt log appended)
+================================================

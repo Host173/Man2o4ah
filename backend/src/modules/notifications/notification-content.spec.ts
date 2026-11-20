@@ -1,5 +1,5 @@
-import type { ProviderType } from '../accounts/schemas/user.schema.js';
-import type { RefundStatus } from '../payments/schemas/refund.schema.js';
+import type { Events } from '../../common/events/events.js';
+import type { PayloadOf } from '../../common/events/event-payloads.js';
 import {
   accountReactivated,
   accountSuspended,
@@ -21,6 +21,10 @@ const MODERATORS = [
   '6736f0b2c5a1b2c3d4e5f6a3',
 ];
 const booking = { bookingId: BOOKING, userId: USER, reference: 'FB-1234' };
+type ProviderType = PayloadOf<
+  typeof Events.ProviderDeactivated
+>['providerType'];
+type RefundStatus = PayloadOf<typeof Events.RefundUpdated>['status'];
 
 describe('notification content (GEN-01)', () => {
   it('builds the flight booking confirmed notification', () => {
@@ -89,11 +93,16 @@ describe('notification content (GEN-01)', () => {
 
   it('builds the flight schedule changed notification', () => {
     expect(
-      flightBookingRescheduled({ bookingId: BOOKING, userId: USER }),
+      flightBookingRescheduled({
+        bookingId: BOOKING,
+        userId: USER,
+        eventId: 'reschedule-1',
+      }),
     ).toEqual([
       {
         userId: USER,
         type: 'flight_schedule_changed',
+        eventId: 'reschedule-1',
         title: 'Flight schedule changed',
         message:
           'A flight in your booking has new times. Check your booking for the new schedule.',
@@ -103,10 +112,14 @@ describe('notification content (GEN-01)', () => {
   });
 
   it('builds the account suspended notification without an entity', () => {
-    const [item] = accountSuspended({ userId: USER });
+    const [item] = accountSuspended({
+      userId: USER,
+      eventId: 'account-change-1',
+    });
     expect(item).toEqual({
       userId: USER,
       type: 'account_suspended',
+      eventId: 'account-change-1',
       title: 'Account suspended',
       message: 'Your account was suspended by an administrator.',
     });
@@ -114,10 +127,14 @@ describe('notification content (GEN-01)', () => {
   });
 
   it('builds the account reactivated notification without an entity', () => {
-    const [item] = accountReactivated({ userId: USER });
+    const [item] = accountReactivated({
+      userId: USER,
+      eventId: 'account-change-1',
+    });
     expect(item).toEqual({
       userId: USER,
       type: 'account_reactivated',
+      eventId: 'account-change-1',
       title: 'Account reactivated',
       message: 'Your account is active again.',
     });
@@ -131,6 +148,7 @@ describe('notification content (GEN-01)', () => {
     'builds one deactivated notification per moderator of a %s',
     (providerType, label) => {
       const items = providerDeactivated({
+        eventId: 'provider-change-1',
         providerType,
         providerId: PROVIDER,
         moderatorIds: MODERATORS,
@@ -140,6 +158,7 @@ describe('notification content (GEN-01)', () => {
       for (const item of items) {
         expect(item).toMatchObject({
           type: 'provider_deactivated',
+          eventId: 'provider-change-1',
           title: `${label} deactivated`,
           message: `Your ${providerType} was deactivated by an administrator.`,
           entity: { type: providerType, id: PROVIDER },
@@ -155,6 +174,7 @@ describe('notification content (GEN-01)', () => {
     'builds one reactivated notification per moderator of a %s',
     (providerType, label) => {
       const items = providerReactivated({
+        eventId: 'provider-change-1',
         providerType,
         providerId: PROVIDER,
         moderatorIds: MODERATORS,
@@ -164,6 +184,7 @@ describe('notification content (GEN-01)', () => {
       for (const item of items) {
         expect(item).toMatchObject({
           type: 'provider_reactivated',
+          eventId: 'provider-change-1',
           title: `${label} reactivated`,
           message: `Your ${providerType} is active again.`,
           entity: { type: providerType, id: PROVIDER },
@@ -174,6 +195,7 @@ describe('notification content (GEN-01)', () => {
 
   it('builds nothing for a provider event without moderators', () => {
     const payload = {
+      eventId: 'provider-change-1',
       providerType: 'airline' as const,
       providerId: PROVIDER,
       moderatorIds: [],
@@ -196,15 +218,21 @@ describe('notification content (GEN-01)', () => {
       ...(['pending', 'refunded', 'failed'] as const).flatMap((status) =>
         refundUpdated({ refundId: REFUND, userId: USER, status }),
       ),
-      ...flightBookingRescheduled({ bookingId: BOOKING, userId: USER }),
-      ...accountSuspended({ userId: USER }),
-      ...accountReactivated({ userId: USER }),
+      ...flightBookingRescheduled({
+        bookingId: BOOKING,
+        userId: USER,
+        eventId: 'reschedule-1',
+      }),
+      ...accountSuspended({ userId: USER, eventId: 'account-change-1' }),
+      ...accountReactivated({ userId: USER, eventId: 'account-change-2' }),
       ...providerDeactivated({
+        eventId: 'provider-change-1',
         providerType: 'hotel',
         providerId: PROVIDER,
         moderatorIds: MODERATORS,
       }),
       ...providerReactivated({
+        eventId: 'provider-change-2',
         providerType: 'airline',
         providerId: PROVIDER,
         moderatorIds: MODERATORS,

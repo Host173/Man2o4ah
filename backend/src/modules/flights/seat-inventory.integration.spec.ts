@@ -52,12 +52,44 @@ describe('SeatInventory integration (INV-01)', () => {
     expect(rejected[0].reason).toMatchObject({
       response: { code: ErrorCode.SeatsUnavailable },
     });
+
     await expectCounters(flightModel, flight, {
       totalSeats: 5,
       availableSeats: 0,
       heldSeats: 5,
       bookedSeats: 0,
     });
+  });
+
+  it('rolls back a new cabin when the caller transaction aborts', async () => {
+    const flight = await createFlight(flightModel);
+    const original = await flightModel.findById(flight.id).orFail().lean();
+    const input = {
+      cabinClass: 'business' as const,
+      totalSeats: 7,
+      priceMinor: 75000,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    };
+    const aborted = new Error('Caller aborted');
+
+    await expect(
+      inTransaction(testApp!, async (session) => {
+        await inventory.addCabin(
+          flight.id,
+          input,
+          original.airlineId.toHexString(),
+          { session },
+        );
+        throw aborted;
+      }),
+    ).rejects.toBe(aborted);
+
+    const persisted = await flightModel.findById(flight.id).lean();
+    expect(persisted?.cabins).toHaveLength(1);
+    expect(
+      persisted?.cabins.some((cabin) => cabin.cabinClass === 'business'),
+    ).toBe(false);
   });
 
   it('rejects holds for unavailable, cancelled, departed, or past flights', async () => {

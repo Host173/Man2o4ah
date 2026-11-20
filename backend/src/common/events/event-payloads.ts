@@ -42,6 +42,8 @@ export interface FlightRescheduledEvent {
 
 /** Emitted by flight-bookings; handled by notifications. */
 export interface FlightBookingRescheduledEvent {
+  /** Stable ID of the committed change; reused on every retry. */
+  eventId: string;
   bookingId: string;
   userId: string;
 }
@@ -56,8 +58,16 @@ export interface UserStatusEvent {
   userId: string;
 }
 
+/** Emitted by accounts after a suspension/reactivation commits. */
+export interface AccountStatusEvent extends UserStatusEvent {
+  /** Stable ID of the committed change; reused on every retry. */
+  eventId: string;
+}
+
 /** Emitted by admin; handled by notifications. */
 export interface ProviderStatusEvent {
+  /** Stable ID of the committed change; reused on every retry. */
+  eventId: string;
   providerType: ProviderType;
   providerId: string;
   moderatorIds: string[];
@@ -86,8 +96,8 @@ export interface EventPayloads {
   [Events.FlightCancelled]: FlightCancelledEvent;
   [Events.UserDeactivated]: UserStatusEvent;
   [Events.UserReactivated]: UserStatusEvent;
-  [Events.AccountSuspended]: UserStatusEvent;
-  [Events.AccountReactivated]: UserStatusEvent;
+  [Events.AccountSuspended]: AccountStatusEvent;
+  [Events.AccountReactivated]: AccountStatusEvent;
   [Events.ProviderDeactivated]: ProviderStatusEvent;
   [Events.ProviderReactivated]: ProviderStatusEvent;
   [Events.AdminAction]: AdminActionEvent;

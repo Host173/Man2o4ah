@@ -1,12 +1,31 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
 import {
   IsString,
-  IsOptional,
-  IsNumber,
+  IsInt,
+  IsObject,
+  Matches,
   Min,
   MinLength,
   MaxLength,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { HH_MM } from '../../../common/database/validators.js';
+import type { ActivityCostView } from '../itineraries.types.js';
+
+/** ITN-10: an activity's non-negative cost in a supported currency. */
+export class ActivityCostDto implements ActivityCostView {
+  @ApiProperty({ type: 'integer', minimum: 0, example: 2000 })
+  @IsInt()
+  @Min(0)
+  amountMinor!: number;
+
+  @ApiProperty({ example: 'EGP', pattern: '^[A-Z]{3}$' })
+  @IsString()
+  @Matches(/^[A-Z]{3}$/)
+  currency!: string;
+}
 
 /**
  * Request payload for adding an activity to an itinerary day (ITN-10).
@@ -15,12 +34,16 @@ import {
 export class AddActivityDto {
   @ApiProperty({
     minLength: 1,
+    maxLength: 100,
     example: 'Pyramids of Giza',
     description: 'Activity name (trimmed, required).',
   })
-  @IsString()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @MinLength(1)
+  @MaxLength(100)
   name!: string;
 
   @ApiPropertyOptional({
@@ -28,25 +51,28 @@ export class AddActivityDto {
     example: 'Guided tour of the pyramids',
     description: 'Optional activity description.',
   })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @MaxLength(1000)
   description?: string;
 
   @ApiPropertyOptional({
     example: '09:30',
+    pattern: HH_MM.source,
     description: 'Optional time in HH:mm format.',
   })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
+  @Matches(HH_MM)
   time?: string;
 
   @ApiPropertyOptional({
-    example: 2000,
-    description: 'Optional cost in minor units (e.g. 2000 = 20.00 EGP).',
+    type: ActivityCostDto,
+    description: 'Optional integer minor-unit amount and supported currency.',
   })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  cost?: number;
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ActivityCostDto)
+  cost?: ActivityCostDto;
 }

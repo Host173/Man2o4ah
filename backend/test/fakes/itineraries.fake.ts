@@ -1,9 +1,7 @@
-import {
-  BadRequestException,
-  NotFoundException,
-  NotImplementedException,
-} from '@nestjs/common';
-import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import { UpdateActivityDto } from '../../src/modules/itineraries/dto/update-activity.dto.js';
+import { validateActivityInput } from '../../src/modules/itineraries/activity-input.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
@@ -28,6 +26,7 @@ import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
+  ActivityView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -273,16 +272,106 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return structuredClone(this.toDetail(itinerary).days[index]);
   }
 
-  /** ITN-10: stub for adding an activity to a day. */
+  /** ITN-10: adds an owned activity with the real service's validation and errors. */
   async addActivity(
-    _itineraryId: string,
-    _dayId: string,
-    _dto: AddActivityDto,
-    _userId: string,
+    itineraryId: string,
+    dayId: string,
+    dto: AddActivityDto,
+    userId: string,
   ): Promise<ItineraryDayView> {
-    throw new NotImplementedException(
-      'addActivity: implemented in ITN-12/GEN-08',
+    const targetItineraryId = this.activityResourceId(
+      itineraryId,
+      'itineraryId',
     );
+    const targetDayId = this.activityResourceId(dayId, 'dayId');
+    const input = await validateActivityInput(
+      AddActivityDto,
+      dto,
+      this.referenceData,
+    );
+    const itinerary = this.findOwned(targetItineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === targetDayId);
+    if (index === -1)
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    const day = itinerary.days[index];
+    day.activities.push({
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      name: input.name,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
+      images: [],
+    });
+    itinerary.updatedAt = new Date();
+    return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ActivityView> {
+    const id = this.activityResourceId(activityId, 'activityId');
+    const input = await validateActivityInput(
+      UpdateActivityDto,
+      dto,
+      this.referenceData,
+    );
+    const { itinerary, activity } = this.findActivity(id, userId);
+    const changes = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
+    };
+    if (Object.keys(changes).length > 0) {
+      Object.assign(activity, changes);
+      itinerary.updatedAt = new Date();
+    }
+    return structuredClone(activity);
+  }
+
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
+    const id = this.activityResourceId(activityId, 'activityId');
+    const { itinerary } = this.findActivity(id, userId);
+    for (const day of itinerary.days) {
+      day.activities = day.activities.filter((activity) => activity._id !== id);
+    }
+    itinerary.updatedAt = new Date();
+  }
+
+  private activityResourceId(value: string, field: string): string {
+    if (typeof value !== 'string' || !/^[0-9a-fA-F]{24}$/.test(value)) {
+      throw this.invalidField(field, 'must be a valid ObjectId');
+    }
+    return value.toLowerCase();
+  }
+
+  private findActivity(
+    activityId: string,
+    userId: string,
+  ): {
+    itinerary: ItineraryDetailView;
+    activity: ActivityView;
+  } {
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      const activity = itinerary.days
+        .flatMap((day) => day.activities)
+        .find((activity) => activity._id === activityId);
+      if (activity) return { itinerary, activity };
+    }
+    throw new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary activity not found',
+    });
   }
 
   async deleteDay(

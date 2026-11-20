@@ -43,6 +43,7 @@ describe('ITN-12 activity images (integration, storage fake)', () => {
   }, HOOK_TIMEOUT);
 
   beforeEach(async () => {
+    vi.restoreAllMocks();
     await clearCollections(t.connection);
     for (const key of storage.keys()) await storage.delete(key);
   });
@@ -109,6 +110,7 @@ describe('ITN-12 activity images (integration, storage fake)', () => {
     expect(day.activities[0].images[0]).toEqual({
       _id: expect.stringMatching(/^[0-9a-f]{24}$/),
       key: expect.stringMatching(/^[0-9a-f]{24}\.jpg$/),
+      url: storage.urlOf(day.activities[0].images[0].key),
     });
     expect(storage.keys()).toEqual([day.activities[0].images[0].key]);
 
@@ -206,13 +208,17 @@ describe('ITN-12 activity images (integration, storage fake)', () => {
 
   it('deletes only the removed day’s activity image files', async () => {
     const { user, itineraryId, activityId } = await trip();
-    await service.addActivityImage(activityId, image('one.jpg'), user.id);
+    const first = await service.addActivityImage(
+      activityId,
+      image('one.jpg'),
+      user.id,
+    );
     const itinerary = await model.findById(itineraryId).lean().exec();
     const otherDayId = itinerary!.days[1]._id;
     const otherActivityId = (
       itinerary!.days[1].activities[0] as unknown as { _id: Types.ObjectId }
     )._id;
-    await service.addActivityImage(
+    const second = await service.addActivityImage(
       otherActivityId.toHexString(),
       image('two.png'),
       user.id,
@@ -224,9 +230,110 @@ describe('ITN-12 activity images (integration, storage fake)', () => {
       user.id,
     );
 
-    expect(storage.keys()).toHaveLength(1);
-    expect(storage.has(storage.keys()[0])).toBe(true);
-    expect(otherDayId).toBeDefined();
+    const remainingKey = second.activities[0].images[0].key;
+    expect(storage.keys()).toEqual([remainingKey]);
+    expect(storage.has(first.activities[0].images[0].key)).toBe(false);
+    const remaining = await service.getById(itineraryId, user.id);
+    expect(remaining.days.map((day) => day._id)).toEqual([
+      otherDayId.toHexString(),
+    ]);
+    expect(remaining.days[0].activities[0].images[0].key).toBe(remainingKey);
+  });
+
+  it.each(['itinerary', 'day'] as const)(
+    'keeps the %s reachable after an unlink failure so deletion can be retried',
+    async (parent) => {
+      const { user, itineraryId, activityId } = await trip();
+      const added = await service.addActivityImage(
+        activityId,
+        image(),
+        user.id,
+      );
+      const key = added.activities[0].images[0].key;
+      const remove = () =>
+        parent === 'itinerary'
+          ? service.delete(itineraryId, user.id)
+          : service.deleteDay(itineraryId, added._id, user.id);
+      vi.spyOn(storage, 'delete').mockRejectedValueOnce(
+        new Error('unlink unavailable'),
+      );
+
+      await expect(remove()).rejects.toThrow('unlink unavailable');
+      const retained = await service.getById(itineraryId, user.id);
+      expect(retained.days[0].activities[0].images[0].key).toBe(key);
+      expect(storage.has(key)).toBe(true);
+
+      await remove();
+      expect(storage.has(key)).toBe(false);
+      if (parent === 'itinerary') {
+        await expect(
+          service.getById(itineraryId, user.id),
+        ).rejects.toMatchObject({ status: 404 });
+      } else {
+        const remaining = await service.getById(itineraryId, user.id);
+        expect(remaining.days).toHaveLength(1);
+      }
+    },
+  );
+
+  it('rejects a day deletion when an image is attached after its cleanup snapshot', async () => {
+    const { user, itineraryId, activityId } = await trip();
+    const added = await service.addActivityImage(activityId, image(), user.id);
+    const update = model.findOneAndUpdate.bind(model);
+    vi.spyOn(model, 'findOneAndUpdate').mockImplementationOnce(
+      (filter, updates, options) => {
+        const query = update(filter, updates, options);
+        const exec = query.exec.bind(query);
+        vi.spyOn(query, 'exec').mockImplementationOnce(async () => {
+          await service.addActivityImage(
+            activityId,
+            image('late.png'),
+            user.id,
+          );
+          return exec();
+        });
+        return query;
+      },
+    );
+
+    await expect(
+      service.deleteDay(itineraryId, added._id, user.id),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'CONCURRENT_CHANGE' },
+    });
+    const retained = await service.getById(itineraryId, user.id);
+    const lateKey = retained.days[0].activities[0].images[1].key;
+    expect(storage.has(lateKey)).toBe(true);
+    await service.deleteDay(itineraryId, added._id, user.id);
+    expect(storage.keys()).toEqual([]);
+  });
+
+  it('rejects itinerary deletion when its days change after the cleanup snapshot', async () => {
+    const { user, itineraryId, activityId } = await trip();
+    const remove = model.findOneAndDelete.bind(model);
+    vi.spyOn(model, 'findOneAndDelete').mockImplementationOnce(
+      (filter, options) => {
+        const query = remove(filter, options);
+        const exec = query.exec.bind(query);
+        vi.spyOn(query, 'exec').mockImplementationOnce(async () => {
+          await service.addActivityImage(activityId, image(), user.id);
+          return exec();
+        });
+        return query;
+      },
+    );
+
+    await expect(service.delete(itineraryId, user.id)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'CONCURRENT_CHANGE' },
+    });
+    const retained = await service.getById(itineraryId, user.id);
+    expect(storage.has(retained.days[0].activities[0].images[0].key)).toBe(
+      true,
+    );
+    await service.delete(itineraryId, user.id);
+    expect(storage.keys()).toEqual([]);
   });
 
   it('scopes images to the owner: another user gets 404 and files stay', async () => {

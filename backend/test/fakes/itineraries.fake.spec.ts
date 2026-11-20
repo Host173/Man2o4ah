@@ -735,6 +735,9 @@ describe('FakeItinerariesService owner-only methods', () => {
         'user-1',
       );
       expect(added.activities[0].images).toHaveLength(1);
+      expect(added.activities[0].images[0]).toMatchObject({
+        url: storage.urlOf(added.activities[0].images[0].key),
+      });
       expect(storage.keys()).toEqual([added.activities[0].images[0].key]);
 
       const imageId = added.activities[0].images[0]._id;
@@ -771,5 +774,57 @@ describe('FakeItinerariesService owner-only methods', () => {
       await itineraries.delete(id, 'user-1');
       expect(storage.keys()).toEqual([]);
     });
+
+    it('caps parallel attaches at five and discards rejected files', async () => {
+      const { itineraries, storage, activityId } = await trip();
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () =>
+          itineraries.addActivityImage(activityId, imageFile(), 'user-1'),
+        ),
+      );
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(5);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).toMatchObject({
+            status: 400,
+            response: { code: ErrorCode.LimitExceeded },
+          });
+        }
+      }
+      expect(storage.keys()).toHaveLength(5);
+    });
+
+    it.each(['itinerary', 'day'] as const)(
+      'retains a concurrently changed %s during cleanup',
+      async (parent) => {
+        const { itineraries, storage, id, activityId } = await trip();
+        const added = await itineraries.addActivityImage(
+          activityId,
+          imageFile(),
+          'user-1',
+        );
+        const unlink = storage.delete.bind(storage);
+        vi.spyOn(storage, 'delete').mockImplementationOnce(async (key) => {
+          await unlink(key);
+          await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+        });
+        const remove = () =>
+          parent === 'itinerary'
+            ? itineraries.delete(id, 'user-1')
+            : itineraries.deleteDay(id, added._id, 'user-1');
+        await expect(remove()).rejects.toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.ConcurrentChange },
+        });
+        const retained = await itineraries.getById(id, 'user-1');
+        expect(storage.has(retained.days[0].activities[0].images[1].key)).toBe(
+          true,
+        );
+        await remove();
+        expect(storage.keys()).toEqual([]);
+      },
+    );
   });
 });

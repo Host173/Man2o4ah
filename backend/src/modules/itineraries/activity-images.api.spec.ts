@@ -109,6 +109,12 @@ describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
     expect(add?.post?.security).toBeDefined();
     expect(remove?.delete?.security).toBeDefined();
     expect(document.components?.schemas?.ItineraryDayResponseDto).toBeDefined();
+    expect(
+      document.components?.schemas?.ActivityImageResponseDto,
+    ).toMatchObject({
+      properties: { url: { type: 'string' } },
+      required: expect.arrayContaining(['url']),
+    });
   });
 
   it('rejects both routes without a session (401 NOT_AUTHENTICATED)', async () => {
@@ -133,11 +139,15 @@ describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
     expect(jpg.body.activities[0].images[0]).toEqual({
       _id: expect.stringMatching(/^[0-9a-f]{24}$/),
       key: expect.stringMatching(/^[0-9a-f]{24}\.jpg$/),
+      url: `/uploads/${jpg.body.activities[0].images[0].key}`,
     });
 
     const png = await attach(activityId, user.cookie, 'two.png');
     expect(png.status).toBe(201);
     expect(png.body.activities[0].images[1].key).toMatch(/^[0-9a-f]{24}\.png$/);
+    expect(png.body.activities[0].images[1].url).toBe(
+      `/uploads/${png.body.activities[0].images[1].key}`,
+    );
 
     const stored = await model
       .findOne({ 'days.activities._id': new Types.ObjectId(activityId) })
@@ -210,6 +220,30 @@ describe('ITN-12 activity image HTTP API (limits and contracts)', () => {
     expect(missing.body.code).toBe(ErrorCode.ValidationFailed);
 
     expect(storage.keys()).toEqual([]);
+  });
+
+  it('accepts exactly 5 MB without storing the response URL', async () => {
+    const user = await loginAs(testApp.connection, UserRole.USER);
+    const activityId = await seedActivity(user);
+    const response = await testApp
+      .http()
+      .post(`/api/activities/${activityId}/images`)
+      .set('Cookie', user.cookie)
+      .attach('file', Buffer.alloc(MAX_IMAGE_BYTES), {
+        filename: 'boundary.png',
+        contentType: 'image/png',
+      });
+    expect(response.status).toBe(201);
+    expect(response.body.activities[0].images[0].url).toBe(
+      `/uploads/${response.body.activities[0].images[0].key}`,
+    );
+    const stored = await model
+      .findOne({ 'days.activities._id': new Types.ObjectId(activityId) })
+      .lean()
+      .exec();
+    expect('url' in (stored?.days[0].activities[0].images[0] ?? {})).toBe(
+      false,
+    );
   });
 
   it('returns 400 for malformed IDs and 404 for another user’s activity', async () => {

@@ -66,6 +66,61 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   });
 
   describe('activity writes (ITN-10)', () => {
+    it('targets activity IDs while day reordering and other activity writes overlap', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const first = await itineraries.addDay(created._id, dayDto(), owner.id);
+      const second = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+      const added = await itineraries.addActivity(
+        created._id,
+        first._id,
+        { name: 'Edit me' },
+        owner.id,
+      );
+      const other = await itineraries.addActivity(
+        created._id,
+        second._id,
+        { name: 'Delete me' },
+        owner.id,
+      );
+      const results = await Promise.allSettled([
+        itineraries.reorderDays(
+          created._id,
+          { dayIds: [second._id, first._id] },
+          owner.id,
+        ),
+        itineraries.updateActivity(
+          added.activities[0]._id,
+          { name: '$$ROOT' },
+          owner.id,
+        ),
+        itineraries.addActivity(
+          created._id,
+          first._id,
+          { name: 'New' },
+          owner.id,
+        ),
+        itineraries.deleteActivity(other.activities[0]._id, owner.id),
+      ]);
+      expect(results.map((result) => result.status)).toEqual(
+        Array(4).fill('fulfilled'),
+      );
+      const stored = await itineraries.getById(created._id, owner.id);
+      expect(stored.days.map((day) => day._id)).toEqual([
+        second._id,
+        first._id,
+      ]);
+      expect(stored.days[0].activities).toEqual([]);
+      expect(
+        stored.days[1].activities.map((activity) => activity.name).sort(),
+      ).toEqual(['$$ROOT', 'New']);
+      expect(stored).toMatchObject({ dayCount: 2 });
+    });
+
     it('keeps every valid concurrent addition on the target day', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const created = await itineraries.create(createDto(), owner.id);

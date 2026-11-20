@@ -124,6 +124,105 @@ function createDto(
 }
 
 describe('FakeItinerariesService owner-only methods', () => {
+  it('preserves optional fields and zero cost through activity edits and removal', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      {
+        name: 'Museum',
+        description: 'Keep',
+        time: '23:59',
+        cost: { amountMinor: 100, currency: 'JPY' },
+      },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    const edited = await itineraries.updateActivity(
+      id,
+      { cost: { amountMinor: 0, currency: 'USD' } },
+      'user-1',
+    );
+    expect(edited).toMatchObject({
+      name: 'Museum',
+      description: 'Keep',
+      time: '23:59',
+      cost: { amountMinor: 0, currency: 'USD' },
+    });
+    expect(await itineraries.updateActivity(id, {}, 'user-1')).toEqual(edited);
+    await expect(
+      itineraries.updateActivity(id, { name: 'Foreign' }, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.deleteActivity(id, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await itineraries.deleteActivity(id, 'user-1');
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual([]);
+    await expect(
+      itineraries.deleteActivity(id, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
+  it('rejects invalid activity input and missing resources without mutation', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: 'Keep' },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    await expect(
+      itineraries.updateActivity(
+        id,
+        { cost: { amountMinor: 1, currency: 'ZZZ' } },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'cost.currency' }],
+      },
+    });
+    await expect(
+      itineraries.updateActivity('bad', {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.deleteActivity('bad', 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(created._id, 'bad', { name: 'New' }, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        'f'.repeat(24),
+        { name: 'New' },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.updateActivity('f'.repeat(24), {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual(added.activities);
+  });
+
   it('adds an owned activity instead of throwing an unimplemented stub', async () => {
     const itineraries = new FakeItinerariesService();
     const created = await itineraries.create(createDto(), 'user-1');

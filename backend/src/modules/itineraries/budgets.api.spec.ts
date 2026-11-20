@@ -556,6 +556,41 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
     }
   });
 
+  it('returns a coded 400 rather than 500 when a supported conversion overflows', async () => {
+    await addBudget(dayIds[0], {
+      ...body,
+      amountMinor: Number.MAX_SAFE_INTEGER,
+      currency: 'EUR',
+    }).expect(201);
+    const response = await summary().expect(400);
+    expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+    expect(response.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'amountMinor' }),
+      ]),
+    );
+  });
+
+  it('returns converted subtotals on the itinerary city-group view', async () => {
+    await seedSummaryData();
+    const trip = await getTrip();
+    expect(
+      trip.cityGroups.map((group: { subtotal: object }) => group.subtotal),
+    ).toEqual([
+      { amountMinor: 32600, currency: 'EGP' },
+      { amountMinor: 10000, currency: 'EGP' },
+    ]);
+  });
+
+  it('uses UNSUPPORTED_CURRENCY for an unknown budget currency without mutation', async () => {
+    const response = await addBudget(dayIds[0], {
+      ...body,
+      currency: 'XXX',
+    }).expect(400);
+    expect(response.body.code).toBe(ErrorCode.UnsupportedCurrency);
+    expect((await getTrip()).days[0].budgetEntries).toEqual([]);
+  });
+
   it('documents all four routes with ITN-14 summaries and typed responses', () => {
     const document = SwaggerModule.createDocument(
       t.app,

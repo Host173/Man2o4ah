@@ -181,6 +181,66 @@ describe('budget summary calculator (ITN-14, ITN-18)', () => {
     });
   });
 
+  it.each([
+    [[Number.MAX_SAFE_INTEGER, 1, 1]],
+    [[Number.MAX_SAFE_INTEGER], [1]],
+  ])(
+    'rejects totals outside safe integer minor units: %j',
+    async (...amounts) => {
+      const data: BudgetSummaryInput = {
+        startDate,
+        days: amounts.map((values, index) => ({
+          _id: String(index),
+          cityId: 'cairo',
+          budgetEntries: values.map((amountMinor) => ({
+            category: 'food',
+            amountMinor,
+            currency: 'USD',
+          })),
+          activities: [],
+        })),
+        transportCosts: [],
+      };
+      const fx = await converter();
+      expect(() => buildBudgetSummary(data, fx, 'USD')).toThrow(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            code: ErrorCode.ValidationFailed,
+          }),
+        }),
+      );
+    },
+  );
+
+  it('rejects a conversion that cannot be represented in minor units', async () => {
+    const data: BudgetSummaryInput = {
+      startDate,
+      days: [
+        {
+          _id: 'day',
+          cityId: 'cairo',
+          budgetEntries: [
+            {
+              category: 'food',
+              amountMinor: Number.MAX_SAFE_INTEGER,
+              currency: 'USD',
+            },
+          ],
+          activities: [],
+        },
+      ],
+      transportCosts: [],
+    };
+    const fx = await converter();
+    expect(() => buildBudgetSummary(data, fx, 'EGP')).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          code: ErrorCode.ValidationFailed,
+        }),
+      }),
+    );
+  });
+
   it('propagates the FX unsupported-currency error for an unknown entry currency', async () => {
     const base = input();
     const data: BudgetSummaryInput = {

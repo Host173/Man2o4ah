@@ -255,6 +255,24 @@ describe('FakeItinerariesService budget contract (ITN-14)', () => {
       ],
     });
   });
+
+  it('converts an accepted AED budget and exposes the city-group subtotal', async () => {
+    const { service, trip, day, body } = await setup();
+    await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      {
+        ...body,
+        amountMinor: 100,
+        currency: 'AED',
+      },
+      'user-1',
+    );
+    const summary = await service.getBudgetSummary(trip._id, 'user-1');
+    expect(summary.total).toEqual({ amountMinor: 27, currency: 'USD' });
+    const detail = await service.getById(trip._id, 'user-1');
+    expect(detail.cityGroups[0]).toHaveProperty('subtotal', summary.total);
+  });
 });
 
 describe('FakeItinerariesService.listPublicByAuthor', () => {

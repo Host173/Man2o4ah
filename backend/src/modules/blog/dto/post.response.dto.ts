@@ -18,6 +18,9 @@ export class PostImageResponseDto implements PostImageView {
 
   @ApiProperty({ example: 'cairo-123.jpg' })
   key!: string;
+
+  @ApiProperty({ example: '/uploads/cairo-123.jpg' })
+  url!: string;
 }
 
 /** Swagger response model for a blog post (`BLG-01`, `BLG-03`, `BLG-04`). */
@@ -95,13 +98,20 @@ export class PaginatedPostResponseDto implements Paginated<PostResponseDto> {
   totalPages!: number;
 }
 
-/** Swagger response model for a published post with author name (`BLG-02`). */
+/** Swagger response model for a published post with author name and excerpt (`BLG-02`, `BLG-09`). */
 export class PublishedPostResponseDto
   extends PostResponseDto
   implements PublishedPostView
 {
   @ApiProperty({ type: String, nullable: true, example: 'Aisha Rawahi' })
   authorName!: string | null;
+
+  @ApiProperty({
+    example: 'Start at the pyramids early in the morning.',
+    description:
+      'Plain-text excerpt (~200 characters) of the post body (BLG-09)',
+  })
+  excerpt!: string;
 }
 
 /** Swagger response model for a paginated list of published posts (`BLG-02`). */

@@ -59,6 +59,7 @@ classDiagram
     class posts
     class comments
     class likes
+    class post_image_cleanups
   }
   namespace moderation {
     class reports
@@ -91,8 +92,10 @@ classDiagram
   policy_acceptances ..> flight_bookings_
   policy_acceptances ..> hotel_reservations
   itineraries_ ..> cities
+  posts ..> itineraries_ : itineraryId (optional, BLG-13)
   comments --> posts
   likes --> posts
+  post_image_cleanups --> posts : deleted postId (parent may be absent)
   reports ..> posts : target (post, comment, review, itinerary)
 ```
 
@@ -155,6 +158,7 @@ classDiagram
       refreshTokenHash : string
       lastActivityAt : Date
       expiresAt : Date (TTL)
+      absoluteExpiresAt : Date (immutable)
     }
   }
   City --> Country : countryCode
@@ -487,6 +491,7 @@ classDiagram
   namespace blog {
     class Post {
       authorId : ObjectId
+      itineraryId : ObjectId?
       title : string
       body : string
       tags : string[0..5]
@@ -507,6 +512,10 @@ classDiagram
     class Like {
       postId : ObjectId
       userId : ObjectId
+    }
+    class PostImageCleanup {
+      postId : ObjectId
+      key : string (unique)
     }
   }
   namespace moderation {
@@ -539,8 +548,13 @@ classDiagram
       createdAt : Date
     }
   }
+  namespace itineraries {
+    class Itinerary
+  }
   Comment "*" --> "1" Post : postId
+  Post "*" ..> "0..1" Itinerary : itineraryId (BLG-13)
   Like "*" --> "1" Post : postId (unique postId+userId)
+  PostImageCleanup "*" --> "0..1" Post : postId (survives deletion)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId
 ```

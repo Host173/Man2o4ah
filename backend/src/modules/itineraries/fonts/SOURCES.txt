@@ -1,0 +1,14 @@
+Unmodified Noto fonts, redistributed under the accompanying SIL Open Font
+License 1.1 notices. No font files are fetched at runtime.
+
+NotoSans.ttf (Latin-OFL.txt):
+https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf
+
+NotoSansArabic.ttf (Arabic-OFL.txt):
+https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf
+
+NotoSansCJKsc.otf (CJK-OFL.txt):
+https://github.com/notofonts/noto-cjk/blob/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+
+NotoEmoji.ttf (Emoji-OFL.txt):
+https://github.com/google/fonts/blob/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf

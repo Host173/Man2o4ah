@@ -2,10 +2,11 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import type { PublicItinerarySummary } from '../itineraries/itineraries.types.js';
 import type { PostStatus } from './schemas/post.schema.js';
 
-/** Plain view of an image reference on a post (GEN-08). */
+/** Plain view of an image reference on a post (`BLG-10`, `GEN-08`). */
 export interface PostImageView {
   _id: string;
   key: string;
+  url: string;
 }
 
 /**
@@ -31,10 +32,11 @@ export interface PostView {
 
 /**
  * Plain view of a published blog post including the resolved author name
- * (`BLG-02`).
+ * and body excerpt (`BLG-02`, `BLG-09`).
  */
 export interface PublishedPostView extends PostView {
   authorName: string | null;
+  excerpt: string;
 }
 
 /**

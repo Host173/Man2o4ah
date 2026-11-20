@@ -1,0 +1,263 @@
+import bcrypt from 'bcrypt';
+import { Types } from 'mongoose';
+import type { Model } from 'mongoose';
+import { vi } from 'vitest';
+import { ErrorCode } from '../../../common/errors/error-codes.js';
+import { clearCollections } from '../../../../test/support/clear-collections.js';
+import { HOOK_TIMEOUT } from '../../../../test/support/mongo-memory.js';
+import { createTestApp } from '../../../../test/support/test-app.js';
+import type { TestApp } from '../../../../test/support/test-app.js';
+import { Session } from '../schemas/session.schema.js';
+import { User, UserRole } from '../schemas/user.schema.js';
+import { AuthService } from './auth.service.js';
+
+const CURRENT = 'abcdefg1';
+const NEW = 'hijklmn2';
+const MINUTE = 60_000;
+
+describe('AuthService.changePassword (integration, ACC-08, ACC-07a)', () => {
+  let t: TestApp;
+  let auth: AuthService;
+  let users: Model<User>;
+  let sessions: Model<Session>;
+
+  beforeAll(async () => {
+    t = await createTestApp();
+    auth = t.moduleRef.get(AuthService);
+    users = t.connection.model<User>(User.name);
+    sessions = t.connection.model<Session>(Session.name);
+  }, HOOK_TIMEOUT);
+
+  afterAll(() => t.close(), HOOK_TIMEOUT);
+
+  beforeEach(() => clearCollections(t.connection));
+
+  async function createUser(mustChangePassword = false) {
+    return users.create({
+      name: 'Aisha',
+      email: `aisha.${new Types.ObjectId().toHexString()}@example.com`,
+      passwordHash: await bcrypt.hash(CURRENT, 4),
+      role: UserRole.USER,
+      mustChangePassword,
+    });
+  }
+
+  async function createSession(userId: Types.ObjectId) {
+    const now = Date.now();
+    return sessions.create({
+      userId,
+      refreshTokenHash: new Types.ObjectId().toHexString(),
+      lastActivityAt: new Date(now),
+      expiresAt: new Date(now + 30 * MINUTE),
+      absoluteExpiresAt: new Date(now + 24 * 60 * MINUTE),
+    });
+  }
+
+  const storedHash = async (id: Types.ObjectId) =>
+    (await users.findById(id).select('+passwordHash').lean())?.passwordHash ??
+    '';
+
+  it('stores a new salted bcrypt hash (cost 12) of the new password only', async () => {
+    const user = await createUser();
+    await createSession(user._id);
+
+    await auth.changePassword(user._id.toString(), {
+      currentPassword: CURRENT,
+      newPassword: NEW,
+    });
+
+    const hash = await storedHash(user._id);
+    expect(hash).toMatch(/^\$2b\$12\$/);
+    expect(await bcrypt.compare(NEW, hash)).toBe(true);
+    expect(await bcrypt.compare(CURRENT, hash)).toBe(false);
+  });
+
+  it('clears mustChangePassword (the forced change, ACC-07a)', async () => {
+    const user = await createUser(true);
+    await createSession(user._id);
+
+    await auth.changePassword(user._id.toString(), {
+      currentPassword: CURRENT,
+      newPassword: NEW,
+    });
+
+    const stored = await users.findById(user._id).lean();
+    expect(stored?.mustChangePassword).toBe(false);
+  });
+
+  it("deletes all of the user's sessions, including the current one, but keeps other users' sessions", async () => {
+    const user = await createUser();
+    const other = await createUser();
+    await createSession(user._id);
+    await createSession(user._id);
+    await createSession(user._id);
+    const othersSession = await createSession(other._id);
+
+    await auth.changePassword(user._id.toString(), {
+      currentPassword: CURRENT,
+      newPassword: NEW,
+    });
+
+    const left = await sessions.find().lean();
+    expect(left.map((s) => s._id.toString())).toEqual([
+      othersSession._id.toString(),
+    ]);
+  });
+
+  it('wrong current password → 400 VALIDATION_FAILED on currentPassword; nothing changes', async () => {
+    const user = await createUser(true);
+    await createSession(user._id);
+    await createSession(user._id);
+    const before = await storedHash(user._id);
+
+    await expect(
+      auth.changePassword(user._id.toString(), {
+        currentPassword: 'wrongpass1',
+        newPassword: NEW,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [expect.objectContaining({ field: 'currentPassword' })],
+      },
+    });
+
+    expect(await storedHash(user._id)).toBe(before);
+    expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+      true,
+    );
+    expect(await sessions.countDocuments()).toBe(2);
+  });
+
+  describe('new password equal to the current one', () => {
+    it('forced change (ACC-07a) → 400 VALIDATION_FAILED on newPassword; nothing changes', async () => {
+      const user = await createUser(true);
+      await createSession(user._id);
+      await createSession(user._id);
+      const before = await storedHash(user._id);
+
+      await expect(
+        auth.changePassword(user._id.toString(), {
+          currentPassword: CURRENT,
+          newPassword: CURRENT,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: ErrorCode.ValidationFailed,
+          details: [expect.objectContaining({ field: 'newPassword' })],
+        },
+      });
+
+      expect(await storedHash(user._id)).toBe(before);
+      expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+        true,
+      );
+      expect(await sessions.countDocuments()).toBe(2);
+    });
+
+    it('forced change: also rejects a new password bcrypt cannot tell apart from the temporary one', async () => {
+      // Same first 72 bytes ("a1" + 35 × "é" = 72 bytes), different after.
+      const temporary = `a1${'é'.repeat(70)}`;
+      const lookalike = `a1${'é'.repeat(35)}${'x'.repeat(35)}`;
+      const user = await createUser(true);
+      await users.updateOne(
+        { _id: user._id },
+        { $set: { passwordHash: await bcrypt.hash(temporary, 4) } },
+      );
+      await createSession(user._id);
+
+      await expect(
+        auth.changePassword(user._id.toString(), {
+          currentPassword: temporary,
+          newPassword: lookalike,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+        true,
+      );
+    });
+
+    it('normal change (no forced change) is still allowed', async () => {
+      const user = await createUser(false);
+      await createSession(user._id);
+
+      await auth.changePassword(user._id.toString(), {
+        currentPassword: CURRENT,
+        newPassword: CURRENT,
+      });
+
+      expect(await bcrypt.compare(CURRENT, await storedHash(user._id))).toBe(
+        true,
+      );
+    });
+  });
+
+  it('lets exactly one of two parallel changes with the same current password win', async () => {
+    const user = await createUser();
+    await createSession(user._id);
+    const userId = user._id.toString();
+
+    const results = await Promise.allSettled([
+      auth.changePassword(userId, {
+        currentPassword: CURRENT,
+        newPassword: 'first123',
+      }),
+      auth.changePassword(userId, {
+        currentPassword: CURRENT,
+        newPassword: 'second123',
+      }),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const hash = await storedHash(user._id);
+    const matches = await Promise.all([
+      bcrypt.compare('first123', hash),
+      bcrypt.compare('second123', hash),
+    ]);
+    expect(matches.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('if logging out the sessions fails, the password is not changed either (one transaction)', async () => {
+    const user = await createUser(true);
+    await createSession(user._id);
+    await createSession(user._id);
+    const before = await storedHash(user._id);
+    const failing = vi
+      .spyOn(sessions, 'deleteMany')
+      .mockRejectedValueOnce(new Error('network blip'));
+
+    try {
+      await expect(
+        auth.changePassword(user._id.toString(), {
+          currentPassword: CURRENT,
+          newPassword: NEW,
+        }),
+      ).rejects.toThrow('network blip');
+    } finally {
+      failing.mockRestore();
+    }
+
+    expect(await storedHash(user._id)).toBe(before);
+    expect((await users.findById(user._id).lean())?.mustChangePassword).toBe(
+      true,
+    );
+    expect(await sessions.countDocuments()).toBe(2);
+  });
+
+  it('an account deleted after the guard ran → 401 SESSION_EXPIRED', async () => {
+    await expect(
+      auth.changePassword(new Types.ObjectId().toString(), {
+        currentPassword: CURRENT,
+        newPassword: NEW,
+      }),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: { code: ErrorCode.SessionExpired },
+    });
+  });
+});

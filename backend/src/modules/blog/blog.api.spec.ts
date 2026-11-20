@@ -4,6 +4,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -17,7 +18,10 @@ import {
   UserStatus,
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { MAX_IMAGE_BYTES } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
 import { BlogModule } from './blog.module.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { Comment, type CommentDocument } from './schemas/comment.schema.js';
 import { Like, type LikeDocument } from './schemas/like.schema.js';
 import { Post, PostStatus, type PostDocument } from './schemas/post.schema.js';
@@ -26,6 +30,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   let testApp: TestApp | undefined;
   const fakeAccounts = new FakeAccountsService();
   const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
   let eventEmitter: EventEmitter2;
   let postModel: Model<PostDocument>;
   let commentModel: Model<CommentDocument>;
@@ -39,7 +44,9 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
           .overrideProvider(AccountsService)
           .useValue(fakeAccounts)
           .overrideProvider(ItinerariesService)
-          .useValue(fakeItineraries),
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage),
     });
     eventEmitter = testApp.moduleRef.get(EventEmitter2);
     postModel = testApp.moduleRef.get<Model<PostDocument>>(
@@ -56,6 +63,7 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
   beforeEach(async () => {
     Object.assign(fakeAccounts, new FakeAccountsService());
     Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
     if (testApp) {
       await clearCollections(testApp.connection);
     }
@@ -91,6 +99,36 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
     expect(document.paths['/api/comments/{id}']?.delete).toBeDefined();
     expect(document.paths['/api/posts/{id}/like']?.post).toBeDefined();
     expect(document.paths['/api/posts/{id}/like']?.delete).toBeDefined();
+    expect(document.paths['/api/posts/{id}/images']?.post).toBeDefined();
+    expect(
+      document.paths['/api/posts/{id}/images']?.post?.summary?.startsWith(
+        'BLG-10',
+      ),
+    ).toBe(true);
+    const uploadRequestBody = document.paths['/api/posts/{id}/images']?.post
+      ?.requestBody as
+      | {
+          content?: {
+            'multipart/form-data'?: {
+              schema?: {
+                properties?: { file?: { type?: string; format?: string } };
+              };
+            };
+          };
+        }
+      | undefined;
+    expect(
+      uploadRequestBody?.content?.['multipart/form-data']?.schema?.properties
+        ?.file,
+    ).toEqual({ type: 'string', format: 'binary' });
+    expect(
+      document.paths['/api/posts/{id}/images/{imageId}']?.delete,
+    ).toBeDefined();
+    expect(
+      document.paths[
+        '/api/posts/{id}/images/{imageId}'
+      ]?.delete?.summary?.startsWith('BLG-10'),
+    ).toBe(true);
     expect(document.paths['/api/tags/{tag}/posts']?.get).toBeDefined();
     expect(
       document.paths['/api/tags/{tag}/posts']?.get?.security,
@@ -164,6 +202,18 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         .delete(`/api/posts/${someId}/like`);
       expect(unlikePostRes.status).toBe(401);
       expect(unlikePostRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const addImageRes = await testApp!
+        .http()
+        .post(`/api/posts/${someId}/images`);
+      expect(addImageRes.status).toBe(401);
+      expect(addImageRes.body.code).toBe(ErrorCode.NotAuthenticated);
+
+      const removeImageRes = await testApp!
+        .http()
+        .delete(`/api/posts/${someId}/images/${someId}`);
+      expect(removeImageRes.status).toBe(401);
+      expect(removeImageRes.body.code).toBe(ErrorCode.NotAuthenticated);
     });
 
     it('rejects expired sessions with 401 and mustChangePassword users with 403 PASSWORD_CHANGE_REQUIRED', async () => {
@@ -858,7 +908,9 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(badLimit.status).toBe(400);
       expect(badLimit.body.code).toBe(ErrorCode.ValidationFailed);
 
-      const unknownParam = await testApp!.http().get('/api/posts?q=search');
+      const unknownParam = await testApp!
+        .http()
+        .get('/api/posts?unknownParam=search');
       expect(unknownParam.status).toBe(400);
       expect(unknownParam.body.code).toBe(ErrorCode.ValidationFailed);
     });
@@ -920,7 +972,13 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
         title: 'Luxor Temple Night',
         body: 'Walk along the Sphinx Avenue at dusk.',
         tags: ['luxor', 'history'],
-        images: [{ _id: imageId.toHexString(), key: 'blog/luxor.jpg' }],
+        images: [
+          {
+            _id: imageId.toHexString(),
+            key: 'blog/luxor.jpg',
+            url: '/uploads/blog/luxor.jpg',
+          },
+        ],
         status: PostStatus.PUBLISHED,
         likeCount: 7,
         commentCount: 3,
@@ -2586,6 +2644,673 @@ describe('BlogController HTTP API (BLG-01, BLG-02, BLG-03, BLG-04)', () => {
       expect(userControlRes.body.name).toBe('Normal Traveler');
       expect(userControlRes.body.posts.items).toHaveLength(1);
       expect(userControlRes.body.itineraries.items).toHaveLength(1);
+    });
+  });
+
+  describe('GET /api/posts?q= search (BLG-09)', () => {
+    it('searches published posts by title, tag, and author name, orders by engagement then date, includes excerpts, and handles edge cases', async () => {
+      const aisha = await loginAs(testApp!.connection, UserRole.USER);
+      const tariq = await loginAs(testApp!.connection, UserRole.USER);
+      const deactivated = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          { id: aisha.id, name: 'Aisha Rawahi', email: 'aisha@example.com' },
+          { id: tariq.id, name: 'Tariq Oasis', email: 'tariq@example.com' },
+          {
+            id: deactivated.id,
+            name: 'Deactivated Writer',
+            email: 'deactivated@example.com',
+            status: UserStatus.DEACTIVATED,
+          },
+        ]),
+      );
+
+      const postByTitle = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Backpacking Siwa (2026) & Caves',
+          body: '<p>Short plain summary for Siwa.</p>',
+          status: PostStatus.PUBLISHED,
+          tags: ['desert'],
+        });
+      const postByTag = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Western Desert Itinerary',
+          body: `Detailed route ${'B'.repeat(210)}`,
+          status: PostStatus.PUBLISHED,
+          tags: ['Siwa-Camps', 'egypt'],
+        });
+      const postByAuthor = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', tariq.cookie)
+        .send({
+          title: 'Morning Coffee',
+          body: 'Quiet streets.',
+          status: PostStatus.PUBLISHED,
+          tags: ['lifestyle'],
+        });
+
+      // Draft and hidden posts must never show up in search.
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Siwa Draft Notes',
+          body: 'Private.',
+          status: PostStatus.DRAFT,
+          tags: ['siwa'],
+        });
+      const hidden = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', aisha.cookie)
+        .send({
+          title: 'Siwa Hidden Notes',
+          body: 'Moderated.',
+          status: PostStatus.PUBLISHED,
+          tags: ['siwa'],
+        });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(hidden.body._id as string) },
+        { $set: { isHidden: true } },
+      );
+
+      // Deactivated author's post marked via event must never appear even if searched by author name.
+      await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', deactivated.cookie)
+        .send({
+          title: 'Siwa Deactivated Post',
+          body: 'Gone.',
+          status: PostStatus.PUBLISHED,
+          tags: ['siwa'],
+        });
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: deactivated.id,
+      });
+
+      // Raise engagement on postByTag so it outranks postByTitle when both match "siwa".
+      await testApp!
+        .http()
+        .post(`/api/posts/${postByTag.body._id}/comments`)
+        .set('Cookie', tariq.cookie)
+        .send({ body: 'Awesome Siwa guide!' });
+      await postModel.updateOne(
+        { _id: new Types.ObjectId(postByTag.body._id as string) },
+        { $inc: { likeCount: 3 } },
+      );
+
+      // Search by partial case-insensitive keyword matching both title and tag; check engagement sort + excerpt + response shape.
+      const siwaPage1 = await testApp!
+        .http()
+        .get('/api/posts?q=%20SIWA%20&page=1&limit=1');
+      expect(siwaPage1.status).toBe(200);
+      expect(siwaPage1.body).toMatchObject({
+        page: 1,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(siwaPage1.body.items[0]).toMatchObject({
+        _id: postByTag.body._id,
+        authorName: 'Aisha Rawahi',
+        title: 'Western Desert Itinerary',
+        likeCount: 3,
+        commentCount: 1,
+        excerpt: `Detailed route ${'B'.repeat(185)}...`,
+      });
+
+      const siwaPage2 = await testApp!
+        .http()
+        .get('/api/posts?q=siwa&page=2&limit=1');
+      expect(siwaPage2.status).toBe(200);
+      expect(siwaPage2.body.items[0]).toMatchObject({
+        _id: postByTitle.body._id,
+        authorName: 'Aisha Rawahi',
+        excerpt: 'Short plain summary for Siwa.',
+      });
+
+      // Combine q + tag filter.
+      const combined = await testApp!
+        .http()
+        .get('/api/posts?q=siwa&tag=DESERT');
+      expect(combined.status).toBe(200);
+      expect(combined.body.items.map((p: { _id: string }) => p._id)).toEqual([
+        postByTitle.body._id,
+      ]);
+
+      // Search by partial case-insensitive author name.
+      const authorSearch = await testApp!.http().get('/api/posts?q=tari');
+      expect(authorSearch.status).toBe(200);
+      expect(
+        authorSearch.body.items.map((p: { _id: string }) => p._id),
+      ).toEqual([postByAuthor.body._id]);
+      expect(authorSearch.body.items[0].authorName).toBe('Tariq Oasis');
+      expect(authorSearch.body.items[0].excerpt).toBe('Quiet streets.');
+
+      // Special regex characters match literally without 500 error.
+      const specialCharSearch = await testApp!
+        .http()
+        .get('/api/posts?q=(2026)%20%26');
+      expect(specialCharSearch.status).toBe(200);
+      expect(
+        specialCharSearch.body.items.map((p: { _id: string }) => p._id),
+      ).toEqual([postByTitle.body._id]);
+
+      // Deactivated author search returns empty page; unknown query returns empty page.
+      const deactivatedSearch = await testApp!
+        .http()
+        .get('/api/posts?q=Deactivated');
+      expect(deactivatedSearch.status).toBe(200);
+      expect(deactivatedSearch.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const noResults = await testApp!.http().get('/api/posts?q=patagonia');
+      expect(noResults.status).toBe(200);
+      expect(noResults.body).toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      // Empty or whitespace-only q acts as unfiltered published browse.
+      const blankSearch = await testApp!.http().get('/api/posts?q=%20%20%20');
+      expect(blankSearch.status).toBe(200);
+      expect(blankSearch.body.total).toBe(3);
+
+      // Overlong q (> 150 chars) fails validation cleanly with 400 VALIDATION_FAILED on field 'q'.
+      const overlongSearch = await testApp!
+        .http()
+        .get(`/api/posts?q=${'x'.repeat(151)}`);
+      expect(overlongSearch.status).toBe(400);
+      expect(overlongSearch.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(
+        overlongSearch.body.details.some(
+          (d: { field: string }) => d.field === 'q',
+        ),
+      ).toBe(true);
+    });
+
+    it.each([
+      { label: '76 x 😀 (152 UTF-16 units)', q: '😀'.repeat(76) },
+      { label: '150 x 😀 (300 UTF-16 units)', q: '😀'.repeat(150) },
+      { label: '150 x "a"', q: 'a'.repeat(150) },
+      {
+        label: 'mixed emoji and letters at 150 code points',
+        q: `${'a'.repeat(50)}${'😀'.repeat(100)}`,
+      },
+    ])('returns 200 for q with $label (BLG-09)', async ({ q }) => {
+      const res = await testApp!
+        .http()
+        .get(`/api/posts?q=${encodeURIComponent(q)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+      });
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(typeof res.body.total).toBe('number');
+      expect(typeof res.body.totalPages).toBe('number');
+    });
+
+    it.each([
+      { label: '151 x 😀', q: '😀'.repeat(151) },
+      { label: '151 x "a"', q: 'a'.repeat(151) },
+    ])(
+      'returns 400 VALIDATION_FAILED for overlong q with $label (BLG-09)',
+      async ({ q }) => {
+        const res = await testApp!
+          .http()
+          .get(`/api/posts?q=${encodeURIComponent(q)}`);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((d: { field: string }) => d.field),
+        ).toContain('q');
+      },
+    );
+  });
+
+  describe('Post images (BLG-10)', () => {
+    const sampleBytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+
+    it('lets the author attach JPG/PNG up to 5, rejects the 6th with 400 LIMIT_EXCEEDED, and keeps url computed only', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      Object.assign(
+        fakeAccounts,
+        new FakeAccountsService([
+          {
+            id: author.id,
+            name: 'Aisha Rawahi',
+            email: 'aisha@example.com',
+            status: UserStatus.ACTIVE,
+          },
+        ]),
+      );
+
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Sinai Trails',
+          body: 'High mountain trails in Saint Catherine.',
+          status: PostStatus.PUBLISHED,
+        });
+      expect(created.status).toBe(201);
+      const postId = created.body._id as string;
+
+      const jpgRes = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'sinai.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(jpgRes.status).toBe(201);
+      expect(jpgRes.body.images).toHaveLength(1);
+      expect(jpgRes.body.images[0]).toEqual({
+        _id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        key: expect.stringMatching(/^[0-9a-f]{24}\.jpg$/),
+        url: `/uploads/${jpgRes.body.images[0].key}`,
+      });
+      expect(fakeStorage.has(jpgRes.body.images[0].key as string)).toBe(true);
+
+      // Database keeps only { _id, key } with no stored url.
+      const dbDoc = await postModel.findById(postId).lean().exec();
+      expect(dbDoc?.images).toHaveLength(1);
+      expect('url' in (dbDoc?.images[0] ?? {})).toBe(false);
+
+      // Existing read endpoints return the exact same computed image shape.
+      const detailRes = await testApp!.http().get(`/api/posts/${postId}`);
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.images).toEqual(jpgRes.body.images);
+
+      for (let i = 2; i <= 5; i += 1) {
+        const nextRes = await testApp!
+          .http()
+          .post(`/api/posts/${postId}/images`)
+          .set('Cookie', author.cookie)
+          .attach('file', sampleBytes, {
+            filename: `trail-${i}.png`,
+            contentType: 'image/png',
+          });
+        expect(nextRes.status).toBe(201);
+        expect(nextRes.body.images).toHaveLength(i);
+      }
+
+      const sixthRes = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'extra.png',
+          contentType: 'image/png',
+        });
+      expect(sixthRes.status).toBe(400);
+      expect(sixthRes.body.code).toBe(ErrorCode.LimitExceeded);
+      expect(fakeStorage.keys()).toHaveLength(5);
+    });
+
+    it('lets the author delete images, handles 404 cases, and deletes images when deleting a post', async () => {
+      const author = await loginAs(testApp!.connection, UserRole.USER);
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Draft Gallery',
+          body: 'Notes from Aswan.',
+          status: PostStatus.DRAFT,
+        });
+      expect(created.status).toBe(201);
+      const postId = created.body._id as string;
+
+      const otherPost = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', author.cookie)
+        .send({
+          title: 'Other Gallery',
+          body: 'Notes from Luxor.',
+          status: PostStatus.PUBLISHED,
+        });
+      expect(otherPost.status).toBe(201);
+      const otherPostId = otherPost.body._id as string;
+
+      const upA = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'aswan-1.png',
+          contentType: 'image/png',
+        });
+      expect(upA.status).toBe(201);
+      const upB = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'aswan-2.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(upB.status).toBe(201);
+      const upOther = await testApp!
+        .http()
+        .post(`/api/posts/${otherPostId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'luxor.png',
+          contentType: 'image/png',
+        });
+      expect(upOther.status).toBe(201);
+
+      const firstImg = upB.body.images[0] as { _id: string; key: string };
+      const secondImg = upB.body.images[1] as { _id: string; key: string };
+      const otherImg = upOther.body.images[0] as { _id: string; key: string };
+
+      const delRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${firstImg._id}`)
+        .set('Cookie', author.cookie);
+      expect(delRes.status).toBe(204);
+      expect(delRes.text).toBe('');
+      expect(fakeStorage.has(firstImg.key)).toBe(false);
+
+      // Repeated delete and cross-post imageId return 404 NOT_FOUND.
+      const repeatDel = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${firstImg._id}`)
+        .set('Cookie', author.cookie);
+      expect(repeatDel.status).toBe(404);
+      expect(repeatDel.body.code).toBe(ErrorCode.NotFound);
+
+      const wrongPostDel = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${otherImg._id}`)
+        .set('Cookie', author.cookie);
+      expect(wrongPostDel.status).toBe(404);
+      expect(wrongPostDel.body.code).toBe(ErrorCode.NotFound);
+
+      const unknownImgDel = await testApp!
+        .http()
+        .delete(
+          `/api/posts/${postId}/images/${new Types.ObjectId().toHexString()}`,
+        )
+        .set('Cookie', author.cookie);
+      expect(unknownImgDel.status).toBe(404);
+      expect(unknownImgDel.body.code).toBe(ErrorCode.NotFound);
+
+      // Deleting the last image leaves an empty images array, then re-attaching works cleanly.
+      await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${secondImg._id}`)
+        .set('Cookie', author.cookie)
+        .expect(204);
+      const afterEmpty = await postModel.findById(postId).lean().exec();
+      expect(afterEmpty?.images).toEqual([]);
+
+      const reUp = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', author.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'reattached.png',
+          contentType: 'image/png',
+        });
+      expect(reUp.status).toBe(201);
+      const reImgKey = reUp.body.images[0].key as string;
+
+      // Deleting the post deletes its stored image file while keeping other posts' files.
+      await testApp!
+        .http()
+        .delete(`/api/posts/${postId}`)
+        .set('Cookie', author.cookie)
+        .expect(204);
+      expect(fakeStorage.has(reImgKey)).toBe(false);
+      expect(fakeStorage.has(otherImg.key)).toBe(true);
+    });
+
+    it('returns the BLG-01 non-owner 404 response for another user and handles validation errors cleanly', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const intruder = await loginAs(testApp!.connection, UserRole.USER);
+      const admin = await loginAs(testApp!.connection, UserRole.ADMIN);
+
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'Owner Post',
+          body: 'Private draft notes.',
+          status: PostStatus.DRAFT,
+        });
+      const postId = created.body._id as string;
+
+      const uploaded = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'owner.png',
+          contentType: 'image/png',
+        });
+      expect(uploaded.status).toBe(201);
+      const imageId = uploaded.body.images[0]._id as string;
+      const imageKey = uploaded.body.images[0].key as string;
+
+      // Non-owners (regular user and admin) receive 404 NOT_FOUND, matching BLG-01/BLG-04.
+      for (const actor of [intruder, admin]) {
+        const postNonOwner = await testApp!
+          .http()
+          .post(`/api/posts/${postId}/images`)
+          .set('Cookie', actor.cookie)
+          .attach('file', sampleBytes, {
+            filename: 'hijack.png',
+            contentType: 'image/png',
+          });
+        expect(postNonOwner.status).toBe(404);
+        expect(postNonOwner.body.code).toBe(ErrorCode.NotFound);
+
+        const delNonOwner = await testApp!
+          .http()
+          .delete(`/api/posts/${postId}/images/${imageId}`)
+          .set('Cookie', actor.cookie);
+        expect(delNonOwner.status).toBe(404);
+        expect(delNonOwner.body.code).toBe(ErrorCode.NotFound);
+      }
+
+      // Missing file field -> 400 VALIDATION_FAILED with 'file' in details.
+      const missingFile = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie);
+      expect(missingFile.status).toBe(400);
+      expect(missingFile.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(
+        missingFile.body.details.map((d: { field: string }) => d.field),
+      ).toContain('file');
+
+      // Storage validation errors propagate cleanly (empty / non-JPG-PNG / oversized / multiple).
+      const badMime = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'notes.pdf',
+          contentType: 'application/pdf',
+        });
+      expect(badMime.status).toBe(400);
+      expect(badMime.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const emptyFile = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', Buffer.alloc(0), {
+          filename: 'empty.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(emptyFile.status).toBe(400);
+      expect(emptyFile.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const oversized = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', Buffer.alloc(MAX_IMAGE_BYTES + 1), {
+          filename: 'huge.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(oversized.status).toBe(413);
+      expect(oversized.body.code).toBe(ErrorCode.RequestFailed);
+
+      // Malformed postId / imageId return 400 VALIDATION_FAILED.
+      const badPostUpload = await testApp!
+        .http()
+        .post('/api/posts/not-an-objectid/images')
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'ok.png',
+          contentType: 'image/png',
+        });
+      expect(badPostUpload.status).toBe(400);
+      expect(badPostUpload.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badPostDelete = await testApp!
+        .http()
+        .delete(`/api/posts/not-an-objectid/images/${imageId}`)
+        .set('Cookie', owner.cookie);
+      expect(badPostDelete.status).toBe(400);
+      expect(badPostDelete.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const badImageDelete = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/not-an-objectid`)
+        .set('Cookie', owner.cookie);
+      expect(badImageDelete.status).toBe(400);
+      expect(badImageDelete.body.code).toBe(ErrorCode.ValidationFailed);
+
+      expect(fakeStorage.keys()).toEqual([imageKey]);
+    });
+
+    it('retains failed image removal references and durably queues failed post cleanup before returning 204', async () => {
+      const owner = await loginAs(testApp!.connection, UserRole.USER);
+      const sampleBytes = Buffer.from('api-failure-image-bytes');
+
+      const created = await testApp!
+        .http()
+        .post('/api/posts')
+        .set('Cookie', owner.cookie)
+        .send({
+          title: 'HTTP Storage Failure Handling',
+          body: 'Published post body.',
+          status: PostStatus.PUBLISHED,
+        });
+      const postId = created.body._id as string;
+
+      const up1 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'one.png',
+          contentType: 'image/png',
+        });
+      const up2 = await testApp!
+        .http()
+        .post(`/api/posts/${postId}/images`)
+        .set('Cookie', owner.cookie)
+        .attach('file', sampleBytes, {
+          filename: 'two.jpg',
+          contentType: 'image/jpeg',
+        });
+      expect(up1.status).toBe(201);
+      expect(up2.status).toBe(201);
+
+      const img1 = up2.body.images[0] as { _id: string; key: string };
+      const img2 = up2.body.images[1] as { _id: string; key: string };
+
+      // removeImage fails when storage.delete rejects -> reference stays on post.
+      const removeSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockRejectedValueOnce(new Error('storage delete error'));
+      const failedRemoveRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}/images/${img1._id}`)
+        .set('Cookie', owner.cookie);
+      expect(failedRemoveRes.status).toBe(500);
+      expect(failedRemoveRes.body.code).toBe(ErrorCode.InternalError);
+      removeSpy.mockRestore();
+
+      const afterFailedRemove = await testApp!
+        .http()
+        .get(`/api/posts/${postId}`);
+      expect(afterFailedRemove.status).toBe(200);
+      expect(
+        afterFailedRemove.body.images.map((item: { _id: string }) => item._id),
+      ).toEqual([img1._id, img2._id]);
+
+      // delete post attempts every file even if one fails and still returns 204.
+      const realDelete = fakeStorage.delete.bind(fakeStorage);
+      const postDeleteSpy = vi
+        .spyOn(fakeStorage, 'delete')
+        .mockImplementation(async (key) => {
+          if (key === img1.key) {
+            throw new Error('storage unlink failed');
+          }
+          return realDelete(key);
+        });
+      const deletePostRes = await testApp!
+        .http()
+        .delete(`/api/posts/${postId}`)
+        .set('Cookie', owner.cookie);
+      expect(deletePostRes.status).toBe(204);
+      expect(postDeleteSpy).toHaveBeenCalledTimes(2);
+      expect(postDeleteSpy).toHaveBeenCalledWith(img1.key);
+      expect(postDeleteSpy).toHaveBeenCalledWith(img2.key);
+      postDeleteSpy.mockRestore();
+
+      expect(fakeStorage.has(img1.key)).toBe(true);
+      expect(fakeStorage.has(img2.key)).toBe(false);
+      const pending = await testApp!.connection
+        .collection<{ postId: Types.ObjectId; key: string }>(
+          'post_image_cleanups',
+        )
+        .find({ postId: new Types.ObjectId(postId) })
+        .toArray();
+      expect(pending.map((item) => item.key)).toEqual([img1.key]);
+      await testApp!.moduleRef.get(PostImageCleanupJob).run();
+      expect(fakeStorage.keys()).toEqual([]);
+      expect(
+        await testApp!.connection
+          .collection('post_image_cleanups')
+          .countDocuments(),
+      ).toBe(0);
+
+      const missingAfterDelete = await testApp!
+        .http()
+        .get(`/api/posts/${postId}`);
+      expect(missingAfterDelete.status).toBe(404);
+      expect(missingAfterDelete.body.code).toBe(ErrorCode.NotFound);
     });
   });
 });

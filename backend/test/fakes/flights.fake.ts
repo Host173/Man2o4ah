@@ -8,9 +8,11 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
+import { validateCabinInput } from '../../src/modules/flights/cabin-input.js';
 import type { FlightsService } from '../../src/modules/flights/flights.service.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
+  AddCabinInput,
   AirlineView,
   BookabilityResult,
   CabinView,
@@ -28,6 +30,7 @@ import type {
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeSeatInventory } from './seat-inventory.fake.js';
 import type { PublicApi } from './public-api.js';
 
 /**
@@ -37,6 +40,7 @@ import type { PublicApi } from './public-api.js';
  */
 export class FakeFlightsService implements PublicApi<FlightsService> {
   private nextFlightId = 1;
+  private readonly seatInventory: FakeSeatInventory;
 
   constructor(
     readonly data: FakeFlightsData = new FakeFlightsData(),
@@ -44,7 +48,9 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ReferenceDataService,
       'getAirports'
     > = new FakeReferenceDataService(),
-  ) {}
+  ) {
+    this.seatInventory = new FakeSeatInventory(data);
+  }
 
   async createFlight(
     input: CreateFlightInput,
@@ -174,6 +180,56 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
         };
       });
     return toPage(items, flights.length, query.page, query.limit);
+  }
+
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    validateCabinInput(input);
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'This flight already has that cabin class',
+      });
+    }
+
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+    await this.seatInventory.addCabin(flightId, input, moderatorAirlineId);
+    return {
+      ...structuredClone(flight),
+      departureTimeZone: departureAirport.timeZone,
+      arrivalTimeZone: arrivalAirport.timeZone,
+    };
   }
 
   getFlightsForBooking(

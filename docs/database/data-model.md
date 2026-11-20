@@ -276,7 +276,7 @@ Indexes: `{ code: 1 }` unique · `{ isActive: 1 }`
 | `freeBags` | int | ≥ 0, free bag count per passenger |
 | `maxBagWeightKg` | number | > 0, per bag (also the limit for extra bags, FLT-08) |
 
-**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
+**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) initializes or changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
 
 Indexes
 - `{ airlineId: 1, flightNumber: 1, departureLocalDate: 1 }` **unique** (FLT-03; cancelled flights keep their number for that date)
@@ -731,11 +731,14 @@ These classes are the **only** code that changes inventory. Each method takes th
 
 | Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
 |---|---|---|---|
+| `addCabin(flightId, input, moderatorAirlineId)` | flight belongs to the moderator's airline, `status: scheduled`, no cabin of `input.cabinClass` | atomically append a cabin with `totalSeats = availableSeats = input.totalSeats`, `heldSeats = bookedSeats = 0` | `NotFound`, `InvalidStatusTransition` or `Conflict` |
 | `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
 | `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
 | `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+`addCabin` takes the plain `AddCabinInput` fields (class, total seats, price in minor units, free bags and per-bag weight) and required `InventoryOptions { session }`, like the other inventory methods. `FlightsService.addCabin` owns its transaction and reads the resulting flight in the same session. This extends the inventory contract without changing the schema or indexes.
 
 Example (`hold`, one item):
 ```js
@@ -834,6 +837,8 @@ Handlers are **idempotent**: they use conditional updates, so handling the same 
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
 
+Repeatable notification changes carry a required, non-empty opaque `eventId`: generate it once for the committed source change and reuse it for every retry or redelivery. Different reschedules and account/provider state changes have different IDs. Notification deduplication never depends on `readAt` or the latest state; a distinct reschedule notifies even while an earlier alert is unread. Notification `_id` is derived from the recipient, event type, entity and event identity, using the existing unique `_id` index; no collection field or index is added.
+
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
 | `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
@@ -845,14 +850,14 @@ Names and payload types live in `backend/src/common/events/` (`Events`, `EventPa
 | `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
 | `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
 | `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
-| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight-booking.rescheduled` | `{ eventId, bookingId, userId }` | flight-bookings | notifications |
 | `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
 | `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
 | `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
-| `account.suspended` | `{ userId }` | accounts | notifications |
-| `account.reactivated` | `{ userId }` | accounts | notifications |
-| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `account.suspended` | `{ eventId, userId }` | accounts | notifications |
+| `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
+| `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 ---

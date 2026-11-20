@@ -858,3 +858,143 @@ Implement BLG-10 (issue #82, Sprint 2, package 7, Community & Admin, module: blo
 How the output was used:
 Wired StorageModule and implemented POST /api/posts/:id/images, DELETE /api/posts/:id/images/:imageId, computed /uploads/<key> urls, atomic 5-image limit with orphan cleanup, and post-delete image file cleanup in backend/src/modules/blog/blog.module.ts, blog.types.ts, dto/post.response.dto.ts, blog.service.ts, and blog.controller.ts (e3a52df), and added BLG-10 integration and Supertest API tests in blog.service.spec.ts and blog.api.spec.ts (7799387).
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: GEN-10
+
+Prompt:
+Implement ticket GEN-10 ("Report resolution and direct moderation", issue #85).
+
+Context:
+- Package 7: Community & Admin
+- Owner: Mostafa
+- Tool: Antigravity
+- Modules: moderation, admin, blog
+- Branch: feature/GEN-10-report-resolution-direct-moderation
+- PR title, for reference only: GEN-10: Report resolution and direct moderation
+- Prompt log: ai-prompts/mostafa.txt
+- Ticket tests: Integration and API (admin only)
+- TDD: No
+
+1. Inspect before editing
+
+Read README.md "Team rules", docs/ai/skills/travel-platform/SKILL.md and its relevant references, docs/DECISIONS.md, and docs/database/data-model.md. Read issue #85 and confirm its dependencies.
+
+Follow the source-of-truth order: official requirements > locked decisions > data model > project skill. Inspect merged code to reuse current contracts and conventions, but do not let existing implementation override authoritative requirements or frozen contracts. Report conflicts instead of silently choosing.
+
+Fetch origin and create the feature branch directly from the latest origin/develop without modifying develop or main. Preserve unrelated local changes. If the branch already exists or local changes prevent safe branching, stop and ask rather than resetting or overwriting work.
+
+Inspect merged implementations in:
+- moderation: CTR-07 and GEN-09
+- admin
+- blog: BLG-01, BLG-02, BLG-05 and other already-implemented read/delete workflows affected by GEN-10
+- common: PLT-05 and PLT-06
+- storage: its existing service contract and fake
+
+If a genuine ambiguity affects behavior, data, failure handling or shared contracts, stop before editing the affected code and present concise numbered questions for Kareem. Distinguish documented rules from recommendations.
+
+2. Implement blog handlers and visibility
+
+Implement ReportableContent handlers for posts and comments using the existing port. Register each through ReportableContentRegistry in onModuleInit. Moderation must not import content implementers.
+
+Support exists, hide and delete with the existing contract's errors. Reuse shared blog logic rather than duplicating deletion or visibility rules.
+
+Post deletion must cascade to comments, likes and stored image references, calling StorageService.delete for image cleanup. Keep commentCount consistent with the data model: it counts non-hidden comments. Repeated hiding must not decrement twice, and deleting an already-hidden comment must not decrement again.
+
+Enforce GEN-10 visibility across relevant existing blog read endpoints: hidden content must not leak to guests or unrelated users, while authors and admins retain permitted access. Reuse existing optional authentication on public routes. Preserve draft, publication and deactivated-author rules; do not implement unrelated or future blog features.
+
+Storage dependency:
+At the time this prompt was prepared, StorageService.delete was still a stub and GEN-08 (#17) was open. Recheck current develop. If still unfinished, wire calls to the existing contract and test cleanup using the existing FakeStorageService. Do not implement storage, silently skip cleanup, or claim production file deletion works. Explicitly report the GEN-08 dependency. If safe failure behavior requires an undecided design or contract change, ask Kareem.
+
+3. Implement moderation workflows
+
+Add paginated report listing with validated status filtering:
+- Default status: open
+- Default page size: 10
+- Maximum page size: 50
+- Reuse PaginationQueryDto and the standard paginated response shape.
+
+Implement report resolution:
+- Actions: dismiss, hide, delete.
+- Use conditional open-to-resolved transitions and check write results.
+- Close all open reports for the same targetType and targetId with the matching final status, resolvedBy and resolvedAt.
+- Invoke the selected hide/delete handler once for the winning resolution, not once per report.
+- Dismiss must not require the target to exist or invoke a content mutation.
+- Preserve existing port and registry errors.
+
+Implement direct hide/delete through the registry for post, comment, review and itinerary. Do not modify the review or itinerary packages.
+
+Handle concurrent resolutions and failures without duplicate successful actions or false success responses. The existing port has no session argument: do not assume cross-module transaction participation, place non-transactional side effects inside retryable transaction callbacks, or promise crash-safe exactly-once execution. Ask Kareem if required guarantees cannot be met within existing contracts.
+
+Emit correctly typed audit events through AppEvents.emit(Events.AdminAction, ...) using existing AuditAction values, only after successful writes and after any transaction commits. Do not emit success events for failed operations.
+
+4. Expose admin endpoints
+
+Add these admin-only endpoints using thin delegation to ModerationService:
+- GET /api/admin/reports
+- PATCH /api/admin/reports/:id
+- PATCH /api/admin/content/:type/:id/hide
+- DELETE /api/admin/content/:type/:id
+
+Use validated DTOs, existing authentication/authorization conventions, plain typed views, standard errors and Swagger documentation. Preserve existing admin routes.
+
+5. Tests
+
+Use the project's in-memory MongoDB replica set and existing support helpers: createTestApp, clearCollections, loginAs and FakeEvents, as appropriate. Never touch Atlas or load development .env values.
+
+Add focused integration and admin API tests for:
+- Pagination defaults, boundaries and status filters
+- Each resolution action and closure of related reports
+- Dismissing reports after content deletion
+- Already-resolved reports, missing targets and handler failures
+- Concurrent resolutions, asserting invariants and handler invocation counts
+- Direct moderation for all four target types
+- Authentication, roles, validation, errors and response shapes
+- Event payloads and absence of success events on failures
+- Blog handler registration, cascading deletion, image-cleanup calls and comment-count idempotency
+
+Although the ticket's API minimum is admin-only, also add focused blog HTTP regression tests for visibility changes. Exercise guests, authors, unrelated users and admins so cookie-to-controller-to-service identity propagation is verified.
+
+Reuse existing fake registry handlers for review and itinerary. Do not change their packages.
+
+Modify existing tests only when GEN-10 intentionally changes specified behavior. Report exactly which tests changed and why. Never weaken, skip or delete tests to obtain a pass.
+
+6. Boundaries and verification
+
+Change only Mostafa's modules and directly related tests and prompt log. Preserve frozen schemas and shared contracts. Stop for owner/team-leader approval if another package or shared contract needs changes.
+
+Follow existing backend conventions. Avoid any, TypeScript suppression and lint-disable comments. Do not add feature or contract documentation to README files.
+
+Run npm run verify inside backend. Preserve the existing requirement that every src/modules/**/*.service.ts file has at least 80% line coverage individually.
+
+Fix failures introduced by or directly coupled to GEN-10, then rerun verification. Do not expand scope to repair unrelated baseline failures or another owner's modules. Report those blockers with exact commands and evidence; never claim verification passed when it did not.
+
+7. Logging, commits and final report
+
+Commit only intended GEN-10 changes on the feature branch using Conventional Commits with module scope and (GEN-10) at the end of the subject.
+
+Never commit to develop or main, push, open a PR, force-push, rebase or amend commits.
+
+Append one entry for this prompt to ai-prompts/mostafa.txt in the existing format:
+- Date
+- Student: Mostafa
+- Tool: Antigravity
+- Related Requirement: GEN-10
+- Complete prompt copied verbatim, with secrets replaced by <removed>
+- One-line "How the output was used" listing changed files and implementation commit hashes
+
+Preserve previous entries. Include the log in a final commit; do not attempt to record that commit's own hash inside itself.
+
+Finally report:
+- Changed files
+- Tests added or updated, including reasons for existing test changes
+- Exact verification commands and results
+- Remaining dependencies or blockers, especially GEN-08 if unfinished
+- Commit hashes
+
+How the output was used:
+Implemented GEN-10 across blog (ReportableContent handlers, cascading delete with StorageService cleanup, and hidden-content visibility in backend/src/modules/blog/*, 3adaafc), moderation (paginated report listing defaulting to open, atomic concurrency-safe resolution, direct hide/delete, and AppEvents audit emission in backend/src/modules/moderation/*, ea93a78), and admin (AdminController endpoints delegating to ModerationService in backend/src/modules/admin/*, 3838c75), with integration and HTTP API tests in blog, moderation, and admin (f13d59f, 93aaf65, b85a69f).
+================================================

@@ -268,6 +268,10 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDetailView> {
     const itinerary = this.findOwned(itineraryId, userId);
+    const visibility =
+      dto.visibility === undefined
+        ? undefined
+        : this.parseVisibility(dto.visibility);
     let changed = false;
     if (dto.title !== undefined) {
       itinerary.title = dto.title.trim();
@@ -281,8 +285,8 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       itinerary.startDate = dto.startDate;
       changed = true;
     }
-    if (dto.visibility !== undefined) {
-      itinerary.visibility = this.parseVisibility(dto.visibility);
+    if (visibility !== undefined) {
+      itinerary.visibility = visibility;
       changed = true;
     }
     // The real service returns the itinerary untouched when nothing changed.

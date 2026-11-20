@@ -42,7 +42,10 @@ import {
   PaginatedItinerariesResponseDto,
   TransportCostResponseDto,
 } from './dto/itinerary.response.dto.js';
-import { PaginatedPublicItinerariesResponseDto } from './dto/public-itinerary.response.dto.js';
+import {
+  PaginatedPublicItinerarySearchResponseDto,
+  type PublicItinerarySearchItemResponseDto,
+} from './dto/public-itinerary.response.dto.js';
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
@@ -51,7 +54,6 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
-  PublicItinerarySummary,
   TransportCostView,
 } from './itineraries.types.js';
 
@@ -99,12 +101,20 @@ export class ItinerariesController {
   @ApiOperation({
     summary: 'ITN-20, ITN-21 Search public itineraries (read-only)',
   })
-  @ApiOkResponse({ type: PaginatedPublicItinerariesResponseDto })
+  @ApiOkResponse({ type: PaginatedPublicItinerarySearchResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid pagination query' })
-  searchPublic(
+  async searchPublic(
     @Query() query: PaginationQueryDto,
-  ): Promise<Paginated<PublicItinerarySummary>> {
-    return this.itinerariesService.searchPublic(query);
+  ): Promise<Paginated<PublicItinerarySearchItemResponseDto>> {
+    const result = await this.itinerariesService.searchPublic(query);
+    return {
+      ...result,
+      items: result.items.map(({ id, startDate, ...summary }) => ({
+        ...summary,
+        _id: id,
+        startDate: startDate.toISOString().slice(0, 10),
+      })),
+    };
   }
 
   @Get(':id')

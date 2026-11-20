@@ -81,8 +81,9 @@ const MAX_TITLE_LENGTH = 100;
 
 /**
  * Itinerary workflows (ITN-01, ITN-03, ITN-16): create, edit, delete, list the owner's
- * itineraries and open one. Every read and write is scoped by `ownerId`, so
- * another user's itinerary is a 404, never a 403 (ACC-11).
+ * itineraries and open one. Owner-scoped reads and writes filter by `ownerId`,
+ * so another user's itinerary is a 404 (ACC-11). Public summaries separately
+ * filter visibility, moderation and author-deactivation flags (ITN-20).
  */
 @Injectable()
 export class ItinerariesService {
@@ -149,7 +150,7 @@ export class ItinerariesService {
     return this.toDetailView(itinerary as ItineraryRecord);
   }
 
-  /** ITN-01: edits the owner's title, countries or start date; other fields stay. */
+  /** ITN-01/20: edits the owner's title, countries, start date or visibility. */
   async update(
     itineraryId: string,
     dto: UpdateItineraryDto,

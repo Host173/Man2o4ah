@@ -7,6 +7,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { ReportTargetType } from '../moderation/ports/reportable-content.port.js';
 import type { ReportableContent } from '../moderation/ports/reportable-content.port.js';
 import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
+import { ItinerariesService } from './itineraries.service.js';
 import { Itinerary } from './schemas/itinerary.schema.js';
 
 const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
@@ -26,6 +27,7 @@ export class ItineraryReportableContent
     @InjectModel(Itinerary.name)
     private readonly itineraryModel: Model<Itinerary>,
     private readonly registry: ReportableContentRegistry,
+    private readonly itineraries: ItinerariesService,
   ) {}
 
   onModuleInit(): void {
@@ -52,13 +54,15 @@ export class ItineraryReportableContent
     if (!result.matchedCount) throw this.notFound();
   }
 
-  /** GEN-10: permanently deletes the itinerary and every embedded item. */
+  /** GEN-10: deletes the itinerary and its image files with retryable cleanup. */
   async delete(id: string): Promise<void> {
-    const deleted = await this.itineraryModel
-      .findOneAndDelete({ _id: this.parseId(id) })
+    const itinerary = await this.itineraryModel
+      .findById(this.parseId(id))
+      .select({ ownerId: 1 })
       .lean()
       .exec();
-    if (!deleted) throw this.notFound();
+    if (!itinerary) throw this.notFound();
+    await this.itineraries.delete(id, itinerary.ownerId.toHexString());
   }
 
   private parseId(id: string): Types.ObjectId {

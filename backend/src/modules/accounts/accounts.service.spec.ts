@@ -538,7 +538,10 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       expect(await sessions.countDocuments({ userId: user._id })).toBe(0);
       expect(await sessions.countDocuments({ userId: other._id })).toBe(1);
       expect(events.emitted).toEqual([
-        { name: Events.AccountSuspended, payload: { userId: user.id } },
+        {
+          name: Events.AccountSuspended,
+          payload: { eventId: expect.any(String), userId: user.id },
+        },
       ]);
     });
 
@@ -555,8 +558,23 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       expect((await reload(user._id))?.status).toBe(UserStatus.ACTIVE);
       await expect(auth.login(credentials)).resolves.toBeDefined();
       expect(events.payloadsOf(Events.AccountReactivated)).toEqual([
-        { userId: user.id },
+        { eventId: expect.any(String), userId: user.id },
       ]);
+    });
+
+    it('gives each committed change its own non-empty eventId (data-model §6.3)', async () => {
+      const user = await createUser();
+
+      await accounts.suspend(user.id);
+      await accounts.reactivate(user.id);
+      await accounts.suspend(user.id);
+
+      const ids = events.emitted.map(
+        (e) => (e.payload as { eventId: string }).eventId,
+      );
+      expect(ids).toHaveLength(3);
+      for (const id of ids) expect(id).toMatch(/\S/);
+      expect(new Set(ids).size).toBe(3);
     });
 
     it('suspends a moderator the same way (ACC-15)', async () => {

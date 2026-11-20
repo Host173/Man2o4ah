@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -309,7 +310,7 @@ export class AccountsService {
   /**
    * ACC-15, ACC-16: `active` → `suspended`, deletes all of the account's
    * sessions in the same transaction, then emits `account.suspended` after the
-   * commit. Bookings and content are untouched. Unknown or malformed ID → 404
+   * commit with a new `eventId`. Bookings and content are untouched. Unknown or malformed ID → 404
    * NOT_FOUND; any other status → 409 INVALID_STATUS_TRANSITION (nothing
    * changes, nothing is emitted).
    */
@@ -337,12 +338,13 @@ export class AccountsService {
     }
 
     // After the commit (modules.md §6): notifications tells the user.
-    events.emit(Events.AccountSuspended, { userId });
+    // `eventId` identifies this committed change (data-model.md §6.3).
+    events.emit(Events.AccountSuspended, { eventId: randomUUID(), userId });
   }
 
   /**
    * ACC-15, ACC-16: `suspended` → `active` (one conditional update), then
-   * emits `account.reactivated`. Unknown or malformed ID → 404 NOT_FOUND; any
+   * emits `account.reactivated` with a new `eventId`. Unknown or malformed ID → 404 NOT_FOUND; any
    * other status, including `deactivated`, → 409 INVALID_STATUS_TRANSITION.
    */
   async reactivate(userId: string): Promise<void> {
@@ -357,7 +359,7 @@ export class AccountsService {
       await this.throwTransitionError(userId, UserStatus.SUSPENDED);
     }
 
-    events.emit(Events.AccountReactivated, { userId });
+    events.emit(Events.AccountReactivated, { eventId: randomUUID(), userId });
   }
 
   /**

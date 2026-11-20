@@ -802,6 +802,9 @@ describe('AdminService', () => {
     expect((await fakeFlights.getAirline(airlineId))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
         providerType: ProviderType.AIRLINE,
         providerId: airlineId,
         moderatorIds: [modA1, modA2],
@@ -828,6 +831,9 @@ describe('AdminService', () => {
     expect(setAirlineSpy).not.toHaveBeenCalled();
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
         providerType: ProviderType.HOTEL,
         providerId: hotelId,
         moderatorIds: [],

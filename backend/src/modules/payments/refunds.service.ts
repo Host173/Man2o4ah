@@ -9,6 +9,7 @@ import { Events } from '../../common/events/events.js';
 import type { RefundRequest, RefundView } from './payments.types.js';
 import {
   assertRefundAmount,
+  assertRefundIds,
   checkRefundRequest,
   refundStatusAfter,
   refundStatusFromGateway,
@@ -86,8 +87,9 @@ export class RefundsService {
 
   /** See `PaymentsService.refund`. */
   async refund(request: RefundRequest): Promise<RefundView> {
-    // Nothing is read before this check.
+    // Nothing is read before these checks.
     assertRefundAmount(request.amountMinor);
+    assertRefundIds(request);
     const filter = {
       bookingType: request.bookingType,
       bookingId: new Types.ObjectId(request.bookingId),
@@ -147,7 +149,7 @@ export class RefundsService {
       );
     }
     // Conditional on `pending`: a webhook may already have moved it.
-    await this.refunds.updateOne(
+    const written = await this.refunds.updateOne(
       { _id: created._id, status: 'pending' },
       {
         $set: result
@@ -164,11 +166,15 @@ export class RefundsService {
       .findById(created._id)
       .lean<RefundRecord>();
     if (!stored) throw new Error(`Refund ${refundId} disappeared after saving`);
-    this.events.emit(Events.RefundUpdated, {
-      refundId,
-      userId: stored.userId.toString(),
-      status: stored.status,
-    });
+    // Announce it only if this call wrote the status: when a webhook got there
+    // first, the webhook already announced it.
+    if (written.modifiedCount === 1) {
+      this.events.emit(Events.RefundUpdated, {
+        refundId,
+        userId: stored.userId.toString(),
+        status: stored.status,
+      });
+    }
     return this.toView(stored);
   }
 

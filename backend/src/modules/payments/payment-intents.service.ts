@@ -16,6 +16,7 @@ import { decidePaymentStart, paymentStatusAfter } from './payment-rules.js';
 import type { PaymentSession, PaymentView } from './payments.types.js';
 import type { Payable } from './ports/payable-booking.port.js';
 import { PayableBookingRegistry } from './ports/payable-booking.registry.js';
+import { RefundsService } from './refunds.service.js';
 import { Payment } from './schemas/payment.schema.js';
 import type { PaymentStatus } from './schemas/payment.schema.js';
 import { PolicyAcceptance } from './schemas/policy-acceptance.schema.js';
@@ -81,6 +82,7 @@ export class PaymentIntentsService {
     private readonly registry: PayableBookingRegistry,
     @Inject(STRIPE_GATEWAY) private readonly gateway: StripeGateway,
     private readonly events: AppEvents,
+    private readonly refunds: RefundsService,
   ) {}
 
   /**
@@ -208,10 +210,12 @@ export class PaymentIntentsService {
     }
     const event = this.gateway.parseWebhook(rawBody, signature);
     if (!('paymentIntent' in event)) {
-      // Refund events belong to PAY-03; anything else is not ours.
-      this.logger.debug(
-        `Ignoring webhook event ${event.type === 'ignored' ? event.originalType : event.type}`,
-      );
+      // Refund events are handled by the refunds service (PAY-03).
+      if ('refund' in event) {
+        await this.refunds.handleWebhookEvent(event);
+        return;
+      }
+      this.logger.debug(`Ignoring webhook event ${event.originalType}`);
       return;
     }
 

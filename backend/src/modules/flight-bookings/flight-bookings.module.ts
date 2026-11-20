@@ -17,7 +17,9 @@ import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightPayableBooking } from './flight-payable-booking.js';
+import { FlightProviderCancellationService } from './flight-provider-cancellation.service.js';
 import { FlightQuoteService } from './flight-quote.service.js';
+import { FlightRescheduleSyncService } from './flight-reschedule-sync.service.js';
 import { MyFlightBookingsService } from './my-flight-bookings.service.js';
 import {
   FlightBooking,
@@ -47,6 +49,8 @@ import {
     FlightConfirmationService,
     FlightETicket,
     FlightCancellationService,
+    FlightProviderCancellationService,
+    FlightRescheduleSyncService,
     MyFlightBookingsService,
     // The real reference maker; tests swap it to choose the references.
     { provide: BOOKING_REFERENCE, useValue: newBookingReference },

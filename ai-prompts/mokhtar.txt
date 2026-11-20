@@ -336,7 +336,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
 
 ### 1. Fix `notes: null` and Pipeline Spread
 * **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
@@ -373,7 +373,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received the latest code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received the latest code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
 Align `FakeItinerariesService` behavior completely with the real service:
@@ -386,7 +386,7 @@ Align `FakeItinerariesService` behavior completely with the real service:
 * **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
 
 ### 3. Git Workflow Reminder (Red Test Commit Rule)
-* Note the reviewer's tip: *ï¿½push the red test as its own commit first next timeï¿½*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+* Note the reviewer's tip: *“push the red test as its own commit first next time”*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
 
 ### 4. Format, Verify, and Push to Update PR #154
 1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
@@ -403,7 +403,7 @@ Tool: OpenCode
 Related Requirement: ITN-05
 
 Prompt:
-We received updated code review feedback ("Changes needed ï¿½ ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+We received updated code review feedback ("Changes needed · ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
 
 ### 1. Validation Order Fix in `itineraries.fake.ts`
 * **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
@@ -1150,15 +1150,6 @@ Ran the strict self-review on feature/ITN-14-budgets-budget-summary: 5 throwaway
 Date: 2026-11-20
 Student: Mokhtar
 Tool: Opencode
-Related Requirement: ITN-21
-
-Prompt:
-I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "ITN-21: Public search and clone" (Package 6 Â· Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-21-public-search-clone from develop (ITN-20, ITN-12, ITN-14 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (public search filters, visibility, days, activities, budgets, storage copy, ownerId scoping), and fakes. Wire the clone route POST /api/itineraries/:id/clone to the existing ItinerariesService.clone deep-copy implementation, apply the public search query DTO at the controller, keep FakeItinerariesService parity, and run npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-21: Public search and clone" referencing #73 with the Self-Review Report, and confirm CI green.
-
-How the output was used:
-Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3133 tests, all green), pushed, opened PR #214, fixed the prompt-log byte mismatch by restoring origin/develop bytes and re-appending this entry, pushed again.
-================================================
-
 Related Requirement: ITN-25
 
 Prompt:
@@ -1179,4 +1170,16 @@ I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #75: "
 
 How the output was used:
 Branched from origin/develop, added ItineraryFlightsQueryDto, ItinerariesService.getFlightsForItinerary deriving origin/destination/dates and delegating to FlightsService.search, added the authenticated GET /api/itineraries/:id/flights route, added FakeItinerariesService stub, added reference-data getAirportsByCity, and added service/API tests (401, 404, 400, one-way empty result, Swagger). Overrode FlightsService with FakeFlightsService in specs, ran npm run format and npm run verify (2786 tests, all green).
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-21
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "ITN-21: Public search and clone" (Package 6 Â· Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-21-public-search-clone from develop (ITN-20, ITN-12, ITN-14 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (public search filters, visibility, days, activities, budgets, storage copy, ownerId scoping), and fakes. Wire the clone route POST /api/itineraries/:id/clone to the existing ItinerariesService.clone deep-copy implementation, apply the public search query DTO at the controller, keep FakeItinerariesService parity, and run npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-21: Public search and clone" referencing #73 with the Self-Review Report, and confirm CI green.
+
+How the output was used:
+Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3191 tests, all green), pushed, opened PR #214, resolved repeated merge conflicts by merging develop, restored prompt-log bytes, pushed again.
 ================================================

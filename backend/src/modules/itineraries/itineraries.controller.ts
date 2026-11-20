@@ -129,7 +129,9 @@ export class ItinerariesController {
 
   @Patch(':id')
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'ITN-01 Edit my itinerary' })
+  @ApiOperation({
+    summary: 'ITN-01, ITN-20 Edit my itinerary or set its visibility',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID or body' })

@@ -1,4 +1,5 @@
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
@@ -8,6 +9,8 @@ import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { Events } from '../../common/events/events.js';
+import { ReportTargetType } from '../moderation/ports/reportable-content.port.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ItinerariesModule } from './itineraries.module.js';
@@ -169,6 +172,12 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       document.paths['/api/itineraries/{id}/days/reorder']?.patch,
     ).toBeDefined();
     expect(document.components?.schemas?.CityGroupResponseDto).toBeDefined();
+    const updateSchema = document.components?.schemas?.UpdateItineraryDto as
+      { properties?: Record<string, { enum?: string[] }> } | undefined;
+    expect(updateSchema?.properties?.visibility?.enum).toEqual([
+      ItineraryVisibility.PRIVATE,
+      ItineraryVisibility.PUBLIC,
+    ]);
     for (const method of ['post', 'get'] as const) {
       expect(
         document.paths['/api/itineraries']?.[method]?.security,
@@ -526,6 +535,43 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(response.body.updatedAt >= created.body.updatedAt).toBe(true);
     });
 
+    it('lets the owner switch visibility between public and private (ITN-20)', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const created = await testApp
+        .http()
+        .post('/api/itineraries')
+        .set('Cookie', owner.cookie)
+        .send(validBody);
+      expect(created.body.visibility).toBe(ItineraryVisibility.PRIVATE);
+
+      const published = await testApp
+        .http()
+        .patch(`/api/itineraries/${created.body._id}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC });
+      expect(published.status).toBe(200);
+      expect(published.body).toMatchObject({
+        _id: created.body._id,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      });
+
+      const stored = await itineraryModel
+        .findById(created.body._id)
+        .lean()
+        .exec();
+      expect(stored?.visibility).toBe(ItineraryVisibility.PUBLIC);
+
+      const privatized = await testApp
+        .http()
+        .patch(`/api/itineraries/${created.body._id}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PRIVATE });
+      expect(privatized.status).toBe(200);
+      expect(privatized.body.visibility).toBe(ItineraryVisibility.PRIVATE);
+    });
+
     it('keeps omitted fields and returns the current itinerary for an empty body', async () => {
       const owner = await loginAs(testApp.connection, UserRole.USER);
       const created = await testApp
@@ -575,6 +621,9 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         { body: { countryCodes: [] }, field: 'countryCodes' },
         { body: { countryCodes: ['ZZ'] }, field: 'countryCodes' },
         { body: { startDate: '2027-02-30' }, field: 'startDate' },
+        { body: { visibility: null }, field: 'visibility' },
+        { body: { visibility: 'hidden' }, field: 'visibility' },
+        { body: { visibility: 1 }, field: 'visibility' },
         {
           body: { ownerId: new Types.ObjectId().toHexString() },
           field: 'ownerId',
@@ -628,6 +677,83 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         .get(`/api/itineraries/${created.body._id}`)
         .set('Cookie', owner.cookie);
       expect(stored.body.title).toBe('Egypt in a week');
+    });
+
+    it('keeps a public itinerary read-only to other users and admins (ITN-20)', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const otherUser = await loginAs(testApp.connection, UserRole.USER);
+      const admin = await loginAs(testApp.connection, UserRole.ADMIN);
+      const created = await testApp
+        .http()
+        .post('/api/itineraries')
+        .set('Cookie', owner.cookie)
+        .send(validBody);
+      const itineraryId = created.body._id as string;
+
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC });
+      const day = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+      expect(day.status).toBe(201);
+
+      for (const intruder of [otherUser, admin]) {
+        const reads = await Promise.all([
+          testApp
+            .http()
+            .get(`/api/itineraries/${itineraryId}`)
+            .set('Cookie', intruder.cookie),
+          testApp
+            .http()
+            .patch(`/api/itineraries/${itineraryId}`)
+            .set('Cookie', intruder.cookie)
+            .send({
+              title: 'Hijacked',
+              visibility: ItineraryVisibility.PRIVATE,
+            }),
+          testApp
+            .http()
+            .delete(`/api/itineraries/${itineraryId}`)
+            .set('Cookie', intruder.cookie),
+          testApp
+            .http()
+            .post(`/api/itineraries/${itineraryId}/days`)
+            .set('Cookie', intruder.cookie)
+            .send({ cityId: 'dubai' }),
+          testApp
+            .http()
+            .patch(`/api/itineraries/${itineraryId}/days/${day.body._id}`)
+            .set('Cookie', intruder.cookie)
+            .send({ cityId: 'dubai' }),
+          testApp
+            .http()
+            .delete(`/api/itineraries/${itineraryId}/days/${day.body._id}`)
+            .set('Cookie', intruder.cookie),
+          testApp
+            .http()
+            .patch(`/api/itineraries/${itineraryId}/days/reorder`)
+            .set('Cookie', intruder.cookie)
+            .send({ dayIds: [day.body._id] }),
+        ]);
+
+        for (const response of reads) {
+          expect(response.status).toBe(404);
+          expect(response.body.code).toBe(ErrorCode.NotFound);
+        }
+      }
+
+      const stored = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(stored).toMatchObject({
+        title: 'Egypt in a week',
+        visibility: ItineraryVisibility.PUBLIC,
+      });
+      expect(stored?.days).toHaveLength(1);
+      expect(stored?.days[0].cityId).toBe('cairo');
     });
 
     it('rejects a malformed ID with 400 VALIDATION_FAILED', async () => {
@@ -1413,6 +1539,116 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(
         detail.body.days.map((day: { notes: string }) => day.notes),
       ).toEqual(expect.arrayContaining(['edited', 'second']));
+    });
+  });
+
+  describe('reports and deactivation (GEN-09, GEN-10, ACC-12, ITN-20)', () => {
+    it('reports a public itinerary and rejects a second report by the same user', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const reporter = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC });
+
+      const reported = await testApp
+        .http()
+        .post('/api/reports')
+        .set('Cookie', reporter.cookie)
+        .send({
+          targetType: ReportTargetType.ITINERARY,
+          targetId: itineraryId,
+          reason: '  Spam links  ',
+        });
+      expect(reported.status).toBe(201);
+      expect(reported.body).toMatchObject({
+        reporterId: reporter.id,
+        targetType: ReportTargetType.ITINERARY,
+        targetId: itineraryId,
+        reason: 'Spam links',
+      });
+
+      const duplicate = await testApp
+        .http()
+        .post('/api/reports')
+        .set('Cookie', reporter.cookie)
+        .send({
+          targetType: ReportTargetType.ITINERARY,
+          targetId: itineraryId,
+          reason: 'Again',
+        });
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body.code).toBe(ErrorCode.AlreadyReported);
+
+      const missing = await testApp
+        .http()
+        .post('/api/reports')
+        .set('Cookie', reporter.cookie)
+        .send({
+          targetType: ReportTargetType.ITINERARY,
+          targetId: new Types.ObjectId().toHexString(),
+          reason: 'Missing',
+        });
+      expect(missing.status).toBe(404);
+      expect(missing.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('still lets an admin-facing report target a hidden itinerary', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const reporter = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(itineraryId) },
+        { $set: { isHidden: true } },
+      );
+
+      const reported = await testApp
+        .http()
+        .post('/api/reports')
+        .set('Cookie', reporter.cookie)
+        .send({
+          targetType: ReportTargetType.ITINERARY,
+          targetId: itineraryId,
+          reason: 'Still visible to moderation',
+        });
+      expect(reported.status).toBe(201);
+    });
+
+    it('hides public itineraries of a deactivated author and restores them on reactivation', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const other = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC });
+
+      await testApp.moduleRef
+        .get(EventEmitter2)
+        .emitAsync(Events.UserDeactivated, { userId: owner.id });
+      const hidden = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(hidden?.authorDeactivated).toBe(true);
+
+      // The owner still sees their own itinerary; other users still get 404.
+      const ownersView = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie);
+      expect(ownersView.status).toBe(200);
+      const othersView = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', other.cookie);
+      expect(othersView.status).toBe(404);
+
+      await testApp.moduleRef
+        .get(EventEmitter2)
+        .emitAsync(Events.UserReactivated, { userId: owner.id });
+      const restored = await itineraryModel.findById(itineraryId).lean().exec();
+      expect(restored?.authorDeactivated).toBe(false);
     });
   });
 });

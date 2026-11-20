@@ -487,3 +487,30 @@ solve https://github.com/Host173/Man2o4ah/pull/163 problem ig it's just a format
 How the output was used:
 On feature/ITN-10-activities: merged develop (resolved the conflict in backend/test/fakes/itineraries.fake.ts keeping both sides), ran npm run format, lint and typecheck, removed an unused import and prefixed unused fake stub params with underscores; the Prompt log entry check then failed because the branch had no new entry in ai-prompts/mokhtar.txt, so this entry was appended.
 ================================================
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #72: "ITN-20: Visibility and public view" (Package 6 · Itineraries, Module: itineraries). Complete it cleanly, thoroughly and accurately on the first pass: follow the stacked-branching rule (branch feature/ITN-20-visibility-public-view cleanly from develop because #65/#8/#15 are merged), read all travel-platform skills/guidelines and the itineraries module, fakes, events and ports, and the ACC-12/GEN-09/GEN-10/blog integration points. Implement public/private visibility with clean validation and DTO/response shapes, read-only public itineraries for other users, hiding while the author is deactivated with idempotent restore on reactivation, reportable/hideable support through the moderation port, public itineraries by author for the blog, full fake parity and Swagger documentation. Write integration tests (events, port) and API tests, run SELF_REVIEW_PROMPT (2).md until clean (ignoring merge/conflict findings), run npm run format and npm run verify with zero errors, log the prompts in ai-prompts/mokhtar.txt, commit and push the branch, open PR "ITN-20: Visibility and public view" referencing #72 with the Self-Review Report, and confirm CI is green.
+
+Follow-up prompt: keep going.
+
+How the output was used:
+Branched from origin/develop, implemented visibility via UpdateItineraryDto + ItinerariesService.update/parseVisibility, added listPublicByAuthor with visibility/hidden/deactivated filters and pagination, added idempotent UserDeactivated/UserReactivated handlers, added ItineraryReportableContent registered with ReportableContentRegistry, widened FakeItinerariesService for parity, and added service/API/fake/port tests plus Swagger coverage. Fixed the fake's sync-throw vs rejected-promise mismatch and the blog skeleton spec's missing Report model mock, ran npm run format and npm run verify (2506 tests, all green), and proceeded to the self-review loop.
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report. Execute the full SELF_REVIEW_PROMPT (2).md: find the ITN-20 ticket and rules, check the branch is current, run npm ci and npm run verify, read the whole diff, try to break the riskiest spots with at most 8 throwaway zz-probe-*.spec.ts cases, and answer with the exact Self-Review Report format (ignore merge/conflict findings per my instruction).
+
+How the output was used:
+Ran the strict self-review against the committed branch diff, wrote throwaway probes for limits, validation, ownership and concurrency, fixed every non-merge finding it reported, re-ran checks until clean, and used the final report in the PR description.
+================================================

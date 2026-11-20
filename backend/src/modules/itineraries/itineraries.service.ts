@@ -2,13 +2,15 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { OnEvent } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import type { PayloadOf } from '../../common/events/event-payloads.js';
+import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
@@ -33,6 +35,7 @@ import type {
 } from './itineraries.types.js';
 import {
   Itinerary,
+  ItineraryVisibility,
   MAX_DAYS,
   MAX_NOTES_LENGTH,
   type Activity,
@@ -146,6 +149,7 @@ export class ItinerariesService {
       title?: string;
       countryCodes?: string[];
       startDate?: Date;
+      visibility?: ItineraryVisibility;
     } = {};
     if (dto.title !== undefined) {
       updates.title = this.normalizeTitle(dto.title);
@@ -155,6 +159,9 @@ export class ItinerariesService {
     }
     if (dto.startDate !== undefined) {
       updates.startDate = this.parseStartDate(dto.startDate);
+    }
+    if (dto.visibility !== undefined) {
+      updates.visibility = this.parseVisibility(dto.visibility);
     }
 
     if (Object.keys(updates).length === 0) {
@@ -594,17 +601,99 @@ export class ItinerariesService {
    * `updatedAt` first. Only `visibility: public` itineraries are included, and
    * hidden ones or those of a deactivated author are left out (ITN-20).
    * Returns the shared paginated shape; `page` defaults to 1 and `limit` to 10.
-   * Implemented in ITN-20.
    */
-  listPublicByAuthor(
+  async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
-    void ownerId;
-    void query;
-    throw new NotImplementedException(
-      'listPublicByAuthor: implemented in ITN-20',
+    const owner = this.parseId(ownerId, 'ownerId');
+    const { page, limit } = this.parsePublicQuery(query);
+    const result = await paginate(
+      this.itineraryModel,
+      {
+        ownerId: owner,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      },
+      { page, limit },
+      { sort: { updatedAt: -1, _id: -1 } },
     );
+    return {
+      ...result,
+      items: result.items.map((itinerary) =>
+        this.toPublicSummary(itinerary as ItineraryRecord),
+      ),
+    };
+  }
+
+  /**
+   * ACC-12: hides every itinerary of a deactivated author from shared lists on
+   * future reads. Idempotent: the conditional update only touches rows whose
+   * flag still differs, so delivering the event twice changes nothing.
+   */
+  @OnEvent(Events.UserDeactivated)
+  async onUserDeactivated(
+    payload: PayloadOf<typeof Events.UserDeactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, true);
+  }
+
+  /** ACC-12: restores the itineraries of a reactivated author (idempotent). */
+  @OnEvent(Events.UserReactivated)
+  async onUserReactivated(
+    payload: PayloadOf<typeof Events.UserReactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, false);
+  }
+
+  private async setAuthorDeactivated(
+    userId: string,
+    authorDeactivated: boolean,
+  ): Promise<void> {
+    if (typeof userId !== 'string' || !OBJECT_ID_HEX_RE.test(userId)) return;
+    await this.itineraryModel
+      .updateMany(
+        {
+          ownerId: new Types.ObjectId(userId),
+          authorDeactivated: !authorDeactivated,
+        },
+        { $set: { authorDeactivated } },
+      )
+      .exec();
+  }
+
+  /** ITN-20: `public` or `private`; anything else is a 400 VALIDATION_FAILED. */
+  private parseVisibility(value: unknown): ItineraryVisibility {
+    if (
+      value === ItineraryVisibility.PUBLIC ||
+      value === ItineraryVisibility.PRIVATE
+    ) {
+      return value;
+    }
+    throw this.invalidField(
+      'visibility',
+      'visibility must be public or private',
+    );
+  }
+
+  /** BLG-12/ITN-20: the shared page defaults, with GEN-05's 1-50 limit. */
+  private parsePublicQuery(query: PublicItineraryQuery): {
+    page: number;
+    limit: number;
+  } {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    if (!Number.isInteger(page) || page < 1) {
+      throw this.invalidField('page', 'page must be an integer of at least 1');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw this.invalidField(
+        'limit',
+        'limit must be an integer between 1 and 50',
+      );
+    }
+    return { page, limit };
   }
 
   private async resolveCountryCodes(codes: string[]): Promise<string[]> {
@@ -744,6 +833,24 @@ export class ItinerariesService {
       dayCount: itinerary.dayCount,
       visibility: itinerary.visibility,
       createdAt: itinerary.createdAt,
+      updatedAt: itinerary.updatedAt,
+    };
+  }
+
+  /**
+   * BLG-12: the public view of an itinerary. It intentionally exposes only the
+   * fields the author page needs, with `id` (not `_id`) per the blog contract,
+   * and leaves days, budgets and transport costs to the public detail view.
+   */
+  private toPublicSummary(itinerary: ItineraryRecord): PublicItinerarySummary {
+    return {
+      id: itinerary._id.toHexString(),
+      ownerId: itinerary.ownerId.toHexString(),
+      title: itinerary.title,
+      countryCodes: [...itinerary.countryCodes],
+      startDate: itinerary.startDate,
+      dayCount: itinerary.dayCount,
+      cityIds: [...itinerary.cityIds],
       updatedAt: itinerary.updatedAt,
     };
   }

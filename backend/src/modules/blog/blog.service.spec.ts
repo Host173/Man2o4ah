@@ -15,6 +15,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { Report } from '../moderation/schemas/report.schema.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { Session } from '../accounts/schemas/session.schema.js';
 import {
@@ -66,6 +67,9 @@ describe('BlogService (skeleton)', () => {
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
+      // ItinerariesModule imports ModerationModule for ITN-20.
+      .overrideProvider(getModelToken(Report.name))
       .useValue({})
       // ItinerariesModule imports ReferenceDataModule (ITN-01).
       .overrideProvider(getModelToken(Country.name))

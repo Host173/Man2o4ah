@@ -7,10 +7,9 @@ import {
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
-import { CabinClass } from '../../common/database/cabin-class.js';
+import type { Connection, Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
@@ -18,6 +17,8 @@ import { ReferenceDataService } from '../reference-data/reference-data.service.j
 import type { AirportView } from '../reference-data/reference-data.types.js';
 import { convertFlightTimes } from './flight-time.js';
 import { AirlinesService } from './airlines.service.js';
+import { validateCabinInput } from './cabin-input.js';
+import { SeatInventory } from './seat-inventory.js';
 import type {
   AddCabinInput,
   AirlineView,
@@ -43,8 +44,8 @@ type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
 };
 
 /**
- * What other modules may ask of flights (CTR-02). Seat counters are never
- * changed here: that is `SeatInventory`. Getters return `null`, or leave the
+ * What other modules may ask of flights (CTR-02). Seat counters are initialized
+ * and changed only through `SeatInventory`. Getters return `null`, or leave the
  * key out of the `Map`, when something isn't found: the caller decides
  * between 400 and 404.
  */
@@ -61,6 +62,12 @@ export class FlightsService {
 
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
+
+    @InjectConnection()
+    private readonly connection: Connection,
+
+    @Inject(SeatInventory)
+    private readonly seatInventory: SeatInventory,
   ) {}
 
   /**
@@ -186,7 +193,7 @@ export class FlightsService {
     input: AddCabinInput,
     moderatorAirlineId: string | undefined,
   ): Promise<FlightManagementView> {
-    this.validateCabinInput(input);
+    validateCabinInput(input);
     const flightObjectId = this.flightObjectId(flightId);
     if (
       moderatorAirlineId === undefined ||
@@ -222,53 +229,23 @@ export class FlightsService {
       });
     }
 
-    const updated = await this.flightModel
-      .findOneAndUpdate(
-        {
-          ...filter,
-          status: FlightStatus.SCHEDULED,
-          'cabins.cabinClass': { $ne: input.cabinClass },
-        },
-        {
-          $push: {
-            cabins: {
-              cabinClass: input.cabinClass,
-              totalSeats: input.totalSeats,
-              availableSeats: input.totalSeats,
-              heldSeats: 0,
-              bookedSeats: 0,
-              priceMinor: input.priceMinor,
-              freeBags: input.freeBags,
-              maxBagWeightKg: input.maxBagWeightKg,
-            },
-          },
-        },
-        { returnDocument: 'after', runValidators: true },
-      )
-      .lean<FlightRecord>()
-      .exec();
-
-    if (!updated) {
-      const current = await this.flightModel
-        .findOne(filter)
-        .lean<FlightRecord>()
-        .exec();
-      if (!current) throw this.flightNotFound();
-      if (current.status !== FlightStatus.SCHEDULED) {
-        throw this.flightNotScheduled();
-      }
-      if (
-        current.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)
-      ) {
-        throw this.cabinAlreadyExists();
-      }
-      throw new ConflictException({
-        code: ErrorCode.Conflict,
-        message: 'Flight changed before the cabin could be added',
+    const session = await this.connection.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        await this.seatInventory.addCabin(flightId, input, moderatorAirlineId, {
+          session,
+        });
+        const updated = await this.flightModel
+          .findOne(filter)
+          .session(session)
+          .lean<FlightRecord>()
+          .exec();
+        if (!updated) throw this.flightNotFound();
+        return this.toManagementView(updated, departureAirport, arrivalAirport);
       });
+    } finally {
+      await session.endSession();
     }
-
-    return this.toManagementView(updated, departureAirport, arrivalAirport);
   }
 
   /**
@@ -340,31 +317,6 @@ export class FlightsService {
   private flightObjectId(id: string): Types.ObjectId {
     if (!Types.ObjectId.isValid(id)) throw this.flightNotFound();
     return new Types.ObjectId(id);
-  }
-
-  private validateCabinInput(input: AddCabinInput): void {
-    if (!Object.values(CabinClass).includes(input.cabinClass)) {
-      throw this.invalidField('cabinClass', 'is not a supported cabin class');
-    }
-    if (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1) {
-      throw this.invalidField('totalSeats', 'must be a positive safe integer');
-    }
-    if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1) {
-      throw this.invalidField('priceMinor', 'must be a positive safe integer');
-    }
-    if (!Number.isSafeInteger(input.freeBags) || input.freeBags < 0) {
-      throw this.invalidField(
-        'freeBags',
-        'must be a non-negative safe integer',
-      );
-    }
-    if (
-      typeof input.maxBagWeightKg !== 'number' ||
-      !Number.isFinite(input.maxBagWeightKg) ||
-      input.maxBagWeightKg <= 0
-    ) {
-      throw this.invalidField('maxBagWeightKg', 'must be a positive number');
-    }
   }
 
   private toManagementView(

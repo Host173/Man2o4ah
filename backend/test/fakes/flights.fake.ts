@@ -4,11 +4,11 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { CabinClass } from '../../src/common/database/cabin-class.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
+import { validateCabinInput } from '../../src/modules/flights/cabin-input.js';
 import type { FlightsService } from '../../src/modules/flights/flights.service.js';
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
@@ -30,6 +30,7 @@ import type {
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeSeatInventory } from './seat-inventory.fake.js';
 import type { PublicApi } from './public-api.js';
 
 /**
@@ -39,7 +40,7 @@ import type { PublicApi } from './public-api.js';
  */
 export class FakeFlightsService implements PublicApi<FlightsService> {
   private nextFlightId = 1;
-  private nextCabinId = 1;
+  private readonly seatInventory: FakeSeatInventory;
 
   constructor(
     readonly data: FakeFlightsData = new FakeFlightsData(),
@@ -47,7 +48,9 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ReferenceDataService,
       'getAirports'
     > = new FakeReferenceDataService(),
-  ) {}
+  ) {
+    this.seatInventory = new FakeSeatInventory(data);
+  }
 
   async createFlight(
     input: CreateFlightInput,
@@ -221,24 +224,7 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
         message: 'A flight references an unknown airport',
       });
     }
-    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
-      throw new ConflictException({
-        code: ErrorCode.Conflict,
-        message: 'This flight already has that cabin class',
-      });
-    }
-
-    flight.cabins.push({
-      id: this.newCabinId(),
-      cabinClass: input.cabinClass,
-      totalSeats: input.totalSeats,
-      availableSeats: input.totalSeats,
-      heldSeats: 0,
-      bookedSeats: 0,
-      priceMinor: input.priceMinor,
-      freeBags: input.freeBags,
-      maxBagWeightKg: input.maxBagWeightKg,
-    });
+    await this.seatInventory.addCabin(flightId, input, moderatorAirlineId);
     return {
       ...structuredClone(flight),
       departureTimeZone: departureAirport.timeZone,
@@ -345,18 +331,6 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     return id;
   }
 
-  private newCabinId(): string {
-    let id = `created-cabin-${this.nextCabinId++}`;
-    while (
-      this.data
-        .flights()
-        .some((flight) => flight.cabins.some((cabin) => cabin.id === id))
-    ) {
-      id = `created-cabin-${this.nextCabinId++}`;
-    }
-    return id;
-  }
-
   /** One direction of a search: filter, sort, paginate. */
   private searchLeg(
     query: SearchFlightsBase,
@@ -401,28 +375,6 @@ function invalid(field: string, message: string): BadRequestException {
     message: 'Invalid flight',
     details: [{ field, message }],
   });
-}
-
-function validateCabinInput(input: AddCabinInput): void {
-  if (!Object.values(CabinClass).includes(input.cabinClass)) {
-    throw invalid('cabinClass', 'is not a supported cabin class');
-  }
-  if (!Number.isSafeInteger(input.totalSeats) || input.totalSeats < 1) {
-    throw invalid('totalSeats', 'must be a positive safe integer');
-  }
-  if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 1) {
-    throw invalid('priceMinor', 'must be a positive safe integer');
-  }
-  if (!Number.isSafeInteger(input.freeBags) || input.freeBags < 0) {
-    throw invalid('freeBags', 'must be a non-negative safe integer');
-  }
-  if (
-    typeof input.maxBagWeightKg !== 'number' ||
-    !Number.isFinite(input.maxBagWeightKg) ||
-    input.maxBagWeightKg <= 0
-  ) {
-    throw invalid('maxBagWeightKg', 'must be a positive number');
-  }
 }
 
 function no(reason: Extract<BookabilityResult, { bookable: false }>['reason']) {

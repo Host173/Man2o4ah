@@ -2349,6 +2349,80 @@ Checked there are no conflicts with origin/develop, pushed feature/PAY-01-paymen
 Date: 2026-11-20
 Student: Kareem
 Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+Task: add `npm run dev:stripe` to the backend (PAY-01 local dev). Work on the PAY-01 branch
+(feature/PAY-01-payments-stripe-webhook). Read README "Team rules" and the project skill first.
+
+Goal
+`cd backend && npm run dev:stripe` starts the backend in watch mode (the same as `npm run start:dev`)
+AND the Stripe CLI webhook forwarder, in one terminal, so local test payments confirm bookings.
+
+Requirements
+1. No new npm package (no `concurrently`, no `@stripe/cli`). Write a small Node ESM script,
+   `backend/scripts/dev-stripe.mjs`, using `node:child_process` only, and add
+   `"dev:stripe": "node scripts/dev-stripe.mjs"` to backend/package.json scripts.
+2. The script:
+   a. Checks that the `stripe` CLI is installed (`stripe --version`). If not, it exits with a clear
+      message: install it with `winget install Stripe.StripeCLI` (or Scoop), then run `stripe login`.
+      It never installs anything itself.
+   b. Gets the webhook secret with `stripe listen --print-secret` and passes it to the backend
+      process as STRIPE_WEBHOOK_SECRET in its env, so it always matches the running listener.
+      Never print the full secret; log at most "webhook secret loaded (whsec_…last4)".
+   c. Starts `stripe listen --forward-to localhost:4000/api/payments/webhook` and
+      `npm run start:dev` side by side, with each output line prefixed ([stripe] / [api]).
+   d. Ctrl+C or either process exiting stops both (no orphan processes). It must work on
+      Windows (spawn with shell where needed), macOS and Linux.
+   e. Uses port 4000 from the project; don't hard-code anything else.
+3. `npm run start:dev` keeps working exactly as before for teammates without the Stripe CLI.
+4. README: in the backend run/start section, add `npm run dev:stripe` with 3-4 lines: what it
+   does, that it needs the Stripe CLI installed and `stripe login` done once, that the
+   STRIPE_SECRET_KEY (sk_test_) still comes from backend/.env, and that plain `npm run start:dev`
+   is enough when you're not testing payments. No secrets or real keys in the README.
+5. No secrets anywhere in committed files, chat output or logs.
+
+Checks before you finish
+- `cd backend && npm run verify` passes.
+- `node scripts/dev-stripe.mjs` with `stripe` missing from PATH prints the install message and
+  exits non-zero (simulate by running with a PATH that excludes it).
+- Format with Prettier (the script and README).
+
+Commits (Conventional Commits ending in the ID, stage files by name):
+- `chore(payments): add dev:stripe to run the backend with the Stripe webhook forwarder (PAY-01)`
+- `docs(readme): document npm run dev:stripe (PAY-01)`
+- Append this prompt to ai-prompts/kareem.txt in the course format, then
+  `chore(ai): log the dev:stripe prompt (PAY-01)`.
+
+Don't push, don't open a PR. Report: files changed, the commits, and the result of each check.
+If anything above isn't possible (for example `--print-secret` isn't supported by the installed
+CLI version), stop and tell me instead of working around it.
+
+How the output was used:
+Added backend/scripts/dev-stripe.mjs (Node built-ins only) and the dev:stripe script: it checks the Stripe CLI, reads the webhook secret with `stripe listen --print-secret` and passes it to the backend as STRIPE_WEBHOOK_SECRET, runs `stripe listen` and `npm run start:dev` with [stripe]/[api] prefixes, masks any whsec_ value in the output, and stops both process trees on Ctrl+C or when either exits. Documented it in the root README Run section. npm run verify passes; with stripe missing from PATH the script prints the install message and exits 1. Committed on the PAY-01 branch; not pushed.
+
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+i don't thing it's working
+[pasted npm run dev:stripe output: "[stripe] must specify events to forward using --events, --all-snapshot, or --all-thin", then "[stripe] exited (code 1), stopping both"]
+
+How the output was used:
+Stripe CLI 1.55 needs the events to forward. dev-stripe.mjs now runs stripe listen with --events for the four events the webhook handles (payment_intent.succeeded, payment_intent.payment_failed, refund.updated, refund.failed). Committed on the PAY-01 branch; not pushed.
+
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok resolve confilcts with the current develop then push and open a pr ,
+
+How the output was used:
+The PAY-01 PR (#183) was already merged into develop, so the dev:stripe commits went on a new branch from the latest develop, chore/PAY-01-dev-stripe-script (cherry-picked, no conflicts). npm run verify passes. Pushed it and opened a PR into develop.
 Related Requirement: ACC-08
 
 Prompt:

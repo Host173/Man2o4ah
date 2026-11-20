@@ -1183,3 +1183,58 @@ I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "
 How the output was used:
 Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3191 tests, all green), pushed, opened PR #214, resolved repeated merge conflicts by merging develop, restored prompt-log bytes, pushed again.
 ================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ACC-11
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. You are implementing GitHub Issue #64: **"ACC-11: Booking access for admin and account checks"** (Package: 5 · Bookings, Modules: `flight-bookings`, `hotel-bookings`)[cite: 9].
+
+We want this completed cleanly, thoroughly, and accurately on the **first pass** so it passes every automated check and human review without needing revision cycles. Do **not** guess contracts, cut corners, or copy-paste blindly—inspect the existing codebase carefully, understand every boundary and invariant, and follow all rules below.
+
+### 1. Branching Rule (Stacked Branching ONLY for Related Issues)
+* **Stacked branching is allowed ONLY for related/dependent issues**; if an issue is NOT related, its branch must come cleanly from `develop`.
+* Inspect the dependencies for **ACC-11 (#64)**: `#10` (`CTR-01`), `#13` (`CTR-04`), `#53` (`FLT-22`), and `#58` (`HTL-16`)[cite: 9].
+* If `#10`, `#13`, `#53`, and `#58` are already merged into `develop`, branch cleanly from `develop`[cite: 9]. Only stack if a directly related dependency is unmerged and required—do **not** stack off unrelated branches (such as `pkg-itineraries` branches).
+* Name the branch **`feature/ACC-11-booking-access-admin-account`**[cite: 9].
+
+### 2. Full Codebase & Domain Context (Read Before Coding)
+* Read all project skills and guidelines in `docs/ai/skills/travel-platform/` and follow all repository conventions[cite: 9].
+* Inspect both **`flight-bookings`** and **`hotel-bookings`** modules, their schemas/repositories, ports/contracts (`#10` / `CTR-01`, `#13` / `CTR-04`), existing fakes (`flight-bookings.fake.ts`, `hotel-bookings.fake.ts`), and their spec files[cite: 9].
+* Inspect how downstream consumers `#30` (`ACC-12`: account deactivation booking check) and `#88` (`ACC-17`: admin data access) expect to call/consume booking data so your port methods, DTOs, filters, and return shapes align seamlessly end-to-end[cite: 9].
+
+### 3. Core Implementation Requirements (`ACC-11`, `ACC-12` booking check, `ACC-17` data)
+Implement the complete expected output for **ACC-11**: *"Admin read-only booking data across both types; the upcoming-confirmed-bookings check used by account deactivation."*[cite: 9]
+1. **Admin Read-Only Booking Data Across Both Types (`ACC-17` data):**
+   * Provide clean, strictly read-only admin access/query capabilities across **both** flight bookings and hotel bookings (supporting filtering/lookup by user/account ID, booking status, date ranges, and pagination as defined by `CTR-01` / `CTR-04` / `ACC-17` conventions)[cite: 9].
+   * Ensure zero mutation capabilities are exposed through these read-only admin interfaces/endpoints, enforce strict admin authorization (`401` unauthenticated, `403` non-admin), and sanitize/map responses cleanly without leaking internal secrets.
+2. **Upcoming Confirmed Bookings Check for Account Deactivation (`ACC-12` booking check):**
+   * Implement the cross-booking-type check (covering **both** `flight-bookings` and `hotel-bookings`) that determines whether a user has any **upcoming confirmed bookings**[cite: 9].
+   * Handle status and time boundaries accurately and deterministically:
+     * Only **confirmed** bookings count (exclude cancelled, pending/unconfirmed, failed, or expired bookings).
+     * Only **upcoming** bookings count (compare departure/start or check-in timestamps against the injected clock/current UTC time consistently; handle boundary timestamps and multi-leg/date-range bookings cleanly so active/in-progress or future confirmed bookings are never missed, while past completed bookings do not block deactivation).
+     * Return `true` if **either** flight bookings OR hotel bookings has an upcoming confirmed booking for the user, and `false` only when **neither** does.
+3. **Fake Parity & Swagger:**
+   * Keep the `flight-bookings` and `hotel-bookings` fakes (and any shared/composed booking check adapter) in **100% behavioral, boundary-condition, and error-shape parity** with the real services.
+   * Document any exposed admin endpoints, query parameters, DTOs, and error responses with full Swagger decorators.
+
+### 4. Testing Plan (`Tests: Integration` / `TDD required: No` — Including `SELF_REVIEW_PROMPT (2).md`)
+Make sure you understand and execute every part of the test plan[cite: 9]:
+* **Integration tests:**
+  * Admin read-only booking queries across both flight and hotel bookings (filtering by user/status/dates, pagination, empty results, admin vs. non-admin/unauthenticated access if HTTP routes are exposed)[cite: 9].
+  * Upcoming-confirmed-bookings check across both modules: user with no bookings (`false`), past confirmed bookings (`false`), upcoming cancelled/pending bookings (`false`), upcoming confirmed flight only (`true`), upcoming confirmed hotel only (`true`), upcoming confirmed in both (`true`), exact boundary timestamp handling, and fake-vs-real parity[cite: 9].
+* **Self-review pass (`SELF_REVIEW_PROMPT (2).md`):** Run `SELF_REVIEW_PROMPT (2).md` against `feature/ACC-11-booking-access-admin-account`[cite: 9], fix **every** non-merge issue, edge case, fake mismatch, or missing test it flags, and re-run until clean.
+  * **Merge-issue rule during self-review:** If `SELF_REVIEW_PROMPT (2).md` flags **merge conflicts or anything related to merging**, **ignore** the merge/conflict finding and do not get blocked on it.
+* Run `npm run format` and `npm run verify` locally and confirm formatting, linting, typechecking, tests, and build pass with **zero errors**.
+
+### 5. Log Prompts, Push, Open PR & Verify Green CI Before Moving Next
+* Log the prompts used for this task into the repository's prompt log following project conventions.
+* Commit all changes cleanly and push `feature/ACC-11-booking-access-admin-account`[cite: 9].
+* Open a Pull Request titled **`ACC-11: Booking access for admin and account checks`** referencing `#64` and include the **Self-Review Report** from `SELF_REVIEW_PROMPT (2).md`[cite: 9].
+* **Confirm CI checks are green** before moving on to the next ticket.
+Attached file: `C:\Users\moham\Downloads\SELF_REVIEW_PROMPT (2).md`
+
+How the output was used:
+Branched feature/ACC-11-booking-access-admin-account cleanly from develop (all four dependencies merged); implemented real read-only listForAdmin in FlightBookingsService and HotelBookingsService with status/date filters, projection, deterministic paging and mapping; aligned both booking fakes' tie order; added integration, composition, boundary and real-vs-fake parity specs; ran npm run format and npm run verify (3289 tests green); logged prompt and opened PR with self-review report.
+================================================

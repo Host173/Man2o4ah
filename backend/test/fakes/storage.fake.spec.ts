@@ -55,4 +55,21 @@ describe('FakeStorageService', () => {
     });
     expect(storage.keys()).toEqual([]);
   });
+
+  it.each([Buffer.from('not an image'), Buffer.from([0xff, 0xd8, 0xff, 0xd9])])(
+    'rejects invalid PNG content like real storage does (%j)',
+    async (buffer) => {
+      const storage = new FakeStorageService();
+      await expect(
+        storage.save({ ...png(), buffer, size: buffer.length }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'VALIDATION_FAILED',
+          details: [{ field: 'file', message: expect.any(String) }],
+        },
+      });
+      expect(storage.keys()).toEqual([]);
+    },
+  );
 });

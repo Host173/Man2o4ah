@@ -12,6 +12,45 @@ import type { UploadedImage } from './image-rules.js';
 import { StorageModule } from './storage.module.js';
 import { StorageService } from './storage.service.js';
 
+const fault = vi.hoisted(() => ({
+  partialWrite: false,
+  cleanup: false,
+  key: '',
+  writeError: Object.assign(new Error('Partial write failed'), {
+    code: 'ENOSPC',
+  }),
+  cleanupError: Object.assign(new Error('Cleanup failed'), {
+    code: 'EACCES',
+  }),
+}));
+
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...actual,
+    randomUUID: () => fault.key || actual.randomUUID(),
+  };
+});
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      if (fault.partialWrite) {
+        fault.partialWrite = false;
+        await actual.writeFile(args[0], Buffer.from('partial'), args[2]);
+        throw fault.writeError;
+      }
+      return actual.writeFile(...args);
+    },
+    unlink: async (...args: Parameters<typeof actual.unlink>) => {
+      if (fault.cleanup) throw fault.cleanupError;
+      return actual.unlink(...args);
+    },
+  };
+});
+
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 function png(size: number): Buffer {
@@ -60,6 +99,9 @@ describe('StorageService on a real folder (GEN-08)', () => {
   afterAll(() => t.close(), HOOK_TIMEOUT);
 
   beforeEach(async () => {
+    fault.partialWrite = false;
+    fault.cleanup = false;
+    fault.key = '';
     for (const entry of await readdir(t.uploadDir)) {
       await rm(join(t.uploadDir, entry), { recursive: true, force: true });
     }
@@ -102,6 +144,43 @@ describe('StorageService on a real folder (GEN-08)', () => {
     const b = await storage.save(image(bytes, 'image/png'));
     expect(a.key).not.toBe(b.key);
     expect(await readdir(t.uploadDir)).toHaveLength(2);
+  });
+
+  it.each(['save', 'copy'] as const)(
+    'cleans up a partially written %s without changing existing files',
+    async (operation) => {
+      const bytes = png(32);
+      const original = await storage.save(image(bytes, 'image/png'));
+      fault.partialWrite = true;
+      const pending =
+        operation === 'save'
+          ? storage.save(image(bytes, 'image/png'))
+          : storage.copy(original.key);
+      await expect(pending).rejects.toBe(fault.writeError);
+      expect(await readdir(t.uploadDir)).toEqual([original.key]);
+      expect(await readFile(join(t.uploadDir, original.key))).toEqual(bytes);
+    },
+  );
+
+  it('does not remove an existing file when a generated key collides', async () => {
+    fault.key = '11111111-1111-4111-8111-111111111111';
+    const bytes = png(32);
+    const original = await storage.save(image(bytes, 'image/png'));
+    await expect(
+      storage.save(image(png(64), 'image/png')),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await readdir(t.uploadDir)).toEqual([original.key]);
+    expect(await readFile(join(t.uploadDir, original.key))).toEqual(bytes);
+  });
+
+  it('surfaces both write and cleanup errors if a partial file cannot be removed', async () => {
+    fault.partialWrite = true;
+    fault.cleanup = true;
+    await expect(
+      storage.save(image(png(32), 'image/png')),
+    ).rejects.toMatchObject({
+      errors: [fault.writeError, fault.cleanupError],
+    });
   });
 
   it('accepts exactly 5 MB and rejects 5 MB + 1 and an empty file', async () => {

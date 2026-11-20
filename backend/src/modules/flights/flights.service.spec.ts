@@ -2,6 +2,7 @@ import { NotImplementedException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
+import { AppEvents } from '../../common/events/app-events.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { AirlinesService } from './airlines.service.js';
 import { FlightsService } from './flights.service.js';
@@ -25,6 +26,7 @@ describe('FlightsService (contract stub)', () => {
         { provide: getModelToken(Flight.name), useValue: {} },
         { provide: getModelToken(Airline.name), useValue: {} },
         { provide: ReferenceDataService, useValue: {} },
+        { provide: AppEvents, useValue: { emit: vi.fn() } },
       ],
     }).compile();
 

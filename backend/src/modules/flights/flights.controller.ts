@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -15,6 +17,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiOkResponse,
   ApiParam,
@@ -62,6 +65,25 @@ export class FlightsController {
     return FlightResponseDto.fromView(
       await this.flights.createFlight(input, this.assignedAirlineId(user)),
     );
+  }
+
+  @Post('flights/:id/cancel')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-06 Cancel a scheduled flight' })
+  @ApiNoContentResponse({ description: 'Flight cancelled' })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiConflictResponse({
+    description: 'Only a scheduled flight can be cancelled',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async cancel(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.flights.cancelFlight(id.toHexString(), user.providerId);
   }
 
   @Get('airlines/:id/flights')

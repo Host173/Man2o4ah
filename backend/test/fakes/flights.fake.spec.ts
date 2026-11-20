@@ -3,6 +3,7 @@ import type {
   OneWaySearchQuery,
   RoundTripSearchQuery,
 } from '../../src/modules/flights/flights.types.js';
+import { Events } from '../../src/common/events/events.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeFlightsService } from './flights.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -493,6 +494,34 @@ describe('FakeFlightsService', () => {
             code: 'VALIDATION_FAILED',
             details: [{ field: 'departureAirportId' }],
           },
+        });
+      });
+
+      it('cancels an owned scheduled flight and removes it from search', async () => {
+        const { flights, data } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a1')).resolves.toBeUndefined();
+        expect(data.flight('f1')?.status).toBe('cancelled');
+        expect(ids((await flights.search(query())).items)).toEqual([
+          'f2',
+          'f3',
+        ]);
+        expect(flights.events.payloadsOf(Events.FlightCancelled)).toEqual([
+          { flightId: 'f1' },
+        ]);
+      });
+
+      it('returns 404 for another airline and 409 for a non-scheduled flight', async () => {
+        const { flights } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a2')).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await flights.cancelFlight('f1', 'a1');
+        await expect(flights.cancelFlight('f1', 'a1')).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'INVALID_STATUS_TRANSITION' },
         });
       });
     });

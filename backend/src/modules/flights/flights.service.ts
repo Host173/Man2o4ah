@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -10,6 +11,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -30,8 +33,7 @@ import type {
   SearchFlightsQuery,
 } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
-import { Cabin } from './schemas/flight.schema.js';
-import { Flight } from './schemas/flight.schema.js';
+import { Cabin, Flight, FlightStatus } from './schemas/flight.schema.js';
 
 type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
   _id: Types.ObjectId;
@@ -58,6 +60,8 @@ export class FlightsService {
 
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
+
+    private readonly events: AppEvents,
   ) {}
 
   /**
@@ -174,6 +178,54 @@ export class FlightsService {
   }
 
   /**
+   * Cancel a scheduled flight owned by the moderator (FLT-06). The conditional
+   * update is atomic; the cancellation event is emitted only after it succeeds.
+   */
+  async cancelFlight(
+    flightId: string,
+    moderatorAirlineId: string | undefined,
+  ): Promise<void> {
+    if (
+      !Types.ObjectId.isValid(flightId) ||
+      !moderatorAirlineId ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+
+    const id = new Types.ObjectId(flightId);
+    const airlineId = new Types.ObjectId(moderatorAirlineId);
+    const flight = await this.flightModel
+      .findOneAndUpdate(
+        { _id: id, airlineId, status: FlightStatus.SCHEDULED },
+        {
+          $set: {
+            status: FlightStatus.CANCELLED,
+            cancelledAt: new Date(),
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean<FlightRecord>()
+      .exec();
+
+    if (!flight) {
+      const ownedFlight = await this.flightModel
+        .exists({ _id: id, airlineId })
+        .exec();
+      if (!ownedFlight) throw this.flightNotFound();
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be cancelled',
+      });
+    }
+
+    this.events.emit(Events.FlightCancelled, {
+      flightId: flight._id.toString(),
+    });
+  }
+
+  /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
    * ask `checkBookable` whether they can be booked. Implemented in FLT-17.
@@ -284,6 +336,13 @@ export class FlightsService {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Airline not found',
+    });
+  }
+
+  private flightNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Flight not found',
     });
   }
 }

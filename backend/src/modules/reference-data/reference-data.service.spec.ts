@@ -42,6 +42,13 @@ describe('ReferenceDataService (GEN-12) over the seeded datasets', () => {
     expect((await service.getAirports([])).size).toBe(0);
   });
 
+  it('getAirportsByCity (ITN-26) returns the city airports, or none', async () => {
+    const cairo = await service.getAirportsByCity('cairo');
+    expect(cairo.map((a) => a.code)).toEqual(['CAI']);
+    expect(cairo[0].cityId).toBe('cairo');
+    expect(await service.getAirportsByCity('atlantis')).toEqual([]);
+  });
+
   it('getCity / getCities', async () => {
     expect(await service.getCity('new_york')).toEqual({
       id: 'new_york',

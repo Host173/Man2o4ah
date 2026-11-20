@@ -298,6 +298,31 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-05, FLT-06)', () => {
     expect(response.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
+  it('documents flight search dates with an executable YYYY-MM-DD pattern', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().setTitle('Man2o4ah API').build(),
+    );
+    const operation = document.paths['/api/flights/search']?.get;
+    expect(operation).toBeDefined();
+    const parameters = operation?.parameters as Array<{
+      name: string;
+      schema: { format?: string; pattern?: string };
+    }>;
+    const date = parameters.find((parameter) => parameter.name === 'date');
+    const returnDate = parameters.find(
+      (parameter) => parameter.name === 'returnDate',
+    );
+    expect(date?.schema).toMatchObject({
+      format: 'date',
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    });
+    expect(returnDate?.schema).toMatchObject({
+      format: 'date',
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    });
+  });
+
   it('documents the cabin creation route and validated request fields in Swagger', () => {
     const document = SwaggerModule.createDocument(
       t.app,
@@ -708,6 +733,208 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-05, FLT-06)', () => {
       .expect(409);
     expect(response.body.code).toBe(ErrorCode.InvalidStatusTransition);
     expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
+  });
+
+  it('searches public flights using direct held and booked seat counters', async () => {
+    const airlines = t.moduleRef.get<Model<Airline>>(
+      getModelToken(Airline.name),
+    );
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    const active = await airlines.create({
+      name: 'EgyptAir',
+      code: 'MS',
+      isActive: true,
+    });
+    await flights.create([
+      {
+        airlineId: active._id,
+        flightNumber: 'MS-SOLD',
+        departureAirportId: 'CAI',
+        arrivalAirportId: 'DXB',
+        departureAt: new Date('2027-03-14T08:00:00.000Z'),
+        arrivalAt: new Date('2027-03-14T12:00:00.000Z'),
+        departureLocalDate: '2027-03-14',
+        durationMinutes: 240,
+        status: 'scheduled',
+        hasBookings: true,
+        cabins: [
+          {
+            cabinClass: 'economy',
+            totalSeats: 5,
+            availableSeats: 1,
+            heldSeats: 2,
+            bookedSeats: 2,
+            priceMinor: 30000,
+            freeBags: 1,
+            maxBagWeightKg: 23,
+          },
+        ],
+      },
+      {
+        airlineId: active._id,
+        flightNumber: 'MS-OPEN',
+        departureAirportId: 'CAI',
+        arrivalAirportId: 'DXB',
+        departureAt: new Date('2027-03-14T10:00:00.000Z'),
+        arrivalAt: new Date('2027-03-14T14:00:00.000Z'),
+        departureLocalDate: '2027-03-14',
+        durationMinutes: 240,
+        status: 'scheduled',
+        hasBookings: false,
+        cabins: [
+          {
+            cabinClass: 'economy',
+            totalSeats: 5,
+            availableSeats: 5,
+            heldSeats: 0,
+            bookedSeats: 0,
+            priceMinor: 25000,
+            freeBags: 1,
+            maxBagWeightKg: 23,
+          },
+        ],
+      },
+    ]);
+
+    const response = await t
+      .http()
+      .get('/api/flights/search')
+      .query({
+        from: 'CAI',
+        to: 'DXB',
+        date: '2027-03-14',
+        adults: 2,
+        children: 0,
+        infants: 0,
+        sortBy: 'price',
+        page: 1,
+        limit: 10,
+      })
+      .expect(200);
+    expect(
+      response.body.items.map((item: any) => item.flight.flightNumber),
+    ).toEqual(['MS-OPEN']);
+    const [item] = response.body.items;
+    expect(item.flight._id).toEqual(expect.any(String));
+    expect(item.flight).toMatchObject({
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'Asia/Dubai',
+    });
+    expect(item.flight.id).toBeUndefined();
+    expect(item.airline._id).toBe(String(active._id));
+    expect(item.matchingCabins[0]._id).toEqual(expect.any(String));
+    expect(item.matchingCabins[0].id).toBeUndefined();
+
+    const none = await t
+      .http()
+      .get('/api/flights/search')
+      .query({ from: 'CAI', to: 'DXB', date: '2027-03-15' })
+      .expect(200);
+    expect(none.body).toEqual({
+      items: [],
+      page: 1,
+      limit: 10,
+      total: 0,
+      totalPages: 0,
+    });
+  });
+
+  it('returns round-trip lists and validates price and passenger boundaries', async () => {
+    const airlines = t.moduleRef.get<Model<Airline>>(
+      getModelToken(Airline.name),
+    );
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    const active = await airlines.create({
+      name: 'EgyptAir',
+      code: 'MS',
+      isActive: true,
+    });
+    await flights.create([
+      {
+        airlineId: active._id,
+        flightNumber: 'OUT',
+        departureAirportId: 'CAI',
+        arrivalAirportId: 'DXB',
+        departureAt: new Date('2027-03-14T08:00:00.000Z'),
+        arrivalAt: new Date('2027-03-14T12:00:00.000Z'),
+        departureLocalDate: '2027-03-14',
+        durationMinutes: 240,
+        status: 'scheduled',
+        hasBookings: false,
+        cabins: [
+          {
+            cabinClass: 'economy',
+            totalSeats: 5,
+            availableSeats: 5,
+            heldSeats: 0,
+            bookedSeats: 0,
+            priceMinor: 30000,
+            freeBags: 1,
+            maxBagWeightKg: 23,
+          },
+        ],
+      },
+      {
+        airlineId: active._id,
+        flightNumber: 'IN',
+        departureAirportId: 'DXB',
+        arrivalAirportId: 'CAI',
+        departureAt: new Date('2027-03-20T09:00:00.000Z'),
+        arrivalAt: new Date('2027-03-20T13:00:00.000Z'),
+        departureLocalDate: '2027-03-20',
+        durationMinutes: 240,
+        status: 'scheduled',
+        hasBookings: false,
+        cabins: [
+          {
+            cabinClass: 'economy',
+            totalSeats: 5,
+            availableSeats: 5,
+            heldSeats: 0,
+            bookedSeats: 0,
+            priceMinor: 35000,
+            freeBags: 1,
+            maxBagWeightKg: 23,
+          },
+        ],
+      },
+    ]);
+
+    const response = await t
+      .http()
+      .get('/api/flights/search')
+      .query({
+        from: 'CAI',
+        to: 'DXB',
+        date: '2027-03-14',
+        returnDate: '2027-03-20',
+        adults: 1,
+        children: 0,
+        infants: 0,
+        cabinClass: 'economy',
+        minPriceMinor: 30000,
+        maxPriceMinor: 40000,
+        sortBy: 'price',
+      })
+      .expect(200);
+    expect(response.body.outbound.items[0].flight.flightNumber).toBe('OUT');
+    expect(response.body.inbound.items[0].flight.flightNumber).toBe('IN');
+
+    const invalid = await t
+      .http()
+      .get('/api/flights/search')
+      .query({
+        from: 'CAI',
+        to: 'DXB',
+        date: '2027-03-14',
+        adults: 1,
+        infants: 2,
+        minPriceMinor: 40000,
+        maxPriceMinor: 30000,
+        sortBy: 'departure',
+      })
+      .expect(400);
+    expect(invalid.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
   it('returns public flight details with zones, cabins and airline policies', async () => {

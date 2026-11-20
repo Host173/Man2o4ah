@@ -10,7 +10,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
-import { toDateOnly } from '../../common/dates/date-only.js';
+import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { escapeRegex } from '../../common/text/escape-regex.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
@@ -19,6 +19,11 @@ import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
+import { FlightsService } from '../flights/flights.service.js';
+import type {
+  FlightSearchItem,
+  RoundTripSearchResult,
+} from '../flights/flights.types.js';
 import { HotelSearchQuery, HotelSearchResult } from '../hotels/hotels.types.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import { ProfileService } from '../accounts/users/profile.service.js';
@@ -31,6 +36,11 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
+import type { ItineraryFlightsQueryDto } from './dto/itinerary-flights-query.dto.js';
+import type {
+  OneWaySearchQuery,
+  RoundTripSearchQuery,
+} from '../flights/flights.types.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ItineraryHotelsQueryDto } from './dto/itinerary-hotels-query.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
@@ -105,6 +115,7 @@ export class ItinerariesService {
   constructor(
     @InjectModel(Itinerary.name)
     private readonly itineraryModel: Model<StoredItinerary>,
+    private readonly flights: FlightsService,
     private readonly referenceData: ReferenceDataService,
     private readonly storage: StorageService,
     private readonly moduleRef: ModuleRef,
@@ -277,6 +288,67 @@ export class ItinerariesService {
       await Promise.all(copiedKeys.map((key) => this.storage.delete(key)));
       throw error;
     }
+  }
+
+  /** ITN-26: one-way or round-trip flights from an origin to the first day's city. */
+  async getFlightsForItinerary(
+    itineraryId: string,
+    query: ItineraryFlightsQueryDto,
+    userId: string,
+  ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const days = record.days ?? [];
+    if (days.length === 0) {
+      throw this.invalidField('days', 'itinerary has no days');
+    }
+
+    const origin = (query.origin ?? '').trim().toUpperCase();
+    if (!origin) {
+      throw this.invalidField('origin', 'origin is required');
+    }
+
+    const airports = await this.referenceData.getAirportsByCity(days[0].cityId);
+    if (airports.length === 0) {
+      throw this.invalidField(
+        'destination',
+        `no airport found for city ${days[0].cityId}`,
+      );
+    }
+    const destination = airports[0].code;
+
+    const departureDate = record.startDate.toISOString().slice(0, 10);
+    const base = {
+      from: origin,
+      to: destination,
+      date: departureDate,
+      adults: query.adults ?? 1,
+      children: query.children ?? 0,
+      infants: query.infants ?? 0,
+      cabinClass: query.cabinClass,
+      sortBy: 'departure' as const,
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
+    };
+
+    if (query.tripType === 'round_trip') {
+      const returnDate = addDays(record.startDate, days.length - 1)
+        .toISOString()
+        .slice(0, 10);
+      return this.flights.search({
+        ...base,
+        returnDate,
+      } as RoundTripSearchQuery);
+    }
+    return this.flights.search(base as OneWaySearchQuery);
   }
 
   /** ITN-25: hotels available for the chosen city group's derived dates. */

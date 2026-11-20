@@ -38,6 +38,7 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { BlogModule } from '../blog/blog.module.js';
+import { ItineraryReportableContent } from '../itineraries/itinerary-reportable-content.js';
 import {
   Comment,
   type CommentDocument,
@@ -1089,7 +1090,11 @@ describe('Admin Moderation API (GEN-10)', () => {
           .overrideProvider(StorageService)
           .useValue(fakeStorage)
           .overrideProvider(AppEvents)
-          .useValue(fakeEvents),
+          .useValue(fakeEvents)
+          // This suite seeds its own in-memory itinerary provider below; keep
+          // the real ITN-20 provider from registering a second one.
+          .overrideProvider(ItineraryReportableContent)
+          .useValue({ onModuleInit: () => {} }),
     });
 
     const registry = modApp.moduleRef.get(ReportableContentRegistry);

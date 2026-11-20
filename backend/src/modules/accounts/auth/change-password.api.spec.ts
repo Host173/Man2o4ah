@@ -82,6 +82,7 @@ describe('PATCH /api/auth/change-password (API, ACC-08, ACC-07a, GEN-13)', () =>
       refreshTokenHash: new Types.ObjectId().toHexString(),
       lastActivityAt: new Date(now),
       expiresAt: new Date(now + 30 * MINUTE),
+      absoluteExpiresAt: new Date(now + 24 * 60 * MINUTE),
     });
   }
 

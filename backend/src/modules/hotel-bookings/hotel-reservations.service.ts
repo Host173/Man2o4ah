@@ -80,7 +80,7 @@ export class HotelReservationsService {
 
     const ownerId = new Types.ObjectId(userId);
     const today = toDateOnly(now.toISOString().slice(0, 10));
-    const { filter, sort } = this.groupQuery(ownerId, group, today);
+    const { filter, sort } = this.groupQuery(ownerId, group, today, now);
 
     const result = await paginate(
       this.reservationModel,
@@ -175,6 +175,7 @@ export class HotelReservationsService {
     userId: Types.ObjectId,
     group: HotelReservationGroup,
     today: Date,
+    now: Date,
   ): {
     filter: QueryFilter<StoredHotelReservation>;
     sort: Record<string, SortOrder>;
@@ -184,13 +185,17 @@ export class HotelReservationsService {
         return {
           filter: {
             userId,
-            status: {
-              $in: [
-                HotelReservationStatus.PENDING_PAYMENT,
-                HotelReservationStatus.CONFIRMED,
-              ],
-            },
-            checkOutDate: { $gte: today },
+            $or: [
+              {
+                status: HotelReservationStatus.CONFIRMED,
+                checkOutDate: { $gte: today },
+              },
+              {
+                status: HotelReservationStatus.PENDING_PAYMENT,
+                checkOutDate: { $gte: today },
+                holdExpiresAt: { $gt: now },
+              },
+            ],
           },
           sort: { checkInDate: 1, _id: 1 },
         };
@@ -216,6 +221,10 @@ export class HotelReservationsService {
                 },
                 checkOutDate: { $lt: today },
               },
+              {
+                status: HotelReservationStatus.PENDING_PAYMENT,
+                holdExpiresAt: { $lte: now },
+              },
             ],
           },
           sort: { checkInDate: -1, _id: -1 },
@@ -236,7 +245,7 @@ export class HotelReservationsService {
     hotelName: string,
   ): HotelReservationSummaryView {
     return {
-      reservationId: reservation._id.toHexString(),
+      _id: reservation._id.toHexString(),
       ...(reservation.reference !== undefined
         ? { reference: reservation.reference }
         : {}),

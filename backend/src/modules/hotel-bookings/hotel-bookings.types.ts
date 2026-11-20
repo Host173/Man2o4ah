@@ -97,7 +97,7 @@ export interface HotelReservationCancellationView {
 
 /** One item in the owner's paginated reservation list (HTL-20). */
 export interface HotelReservationSummaryView {
-  reservationId: string;
+  _id: string;
   /** Set only on confirmation (HTL-17); never generated on read. */
   reference?: string;
   status: HotelReservationStatus;

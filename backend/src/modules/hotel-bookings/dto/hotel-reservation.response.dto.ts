@@ -73,7 +73,7 @@ export class HotelReservationCancellationResponseDto implements HotelReservation
 /** One item in the owner's paginated reservation list (HTL-20). */
 export class HotelReservationSummaryResponseDto implements HotelReservationSummaryView {
   @ApiProperty({ example: '6553a1f0c2b4e8a9d0f1a2b3' })
-  reservationId!: string;
+  _id!: string;
 
   @ApiPropertyOptional({
     example: 'HRAB12CD',

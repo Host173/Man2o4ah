@@ -97,5 +97,6 @@ Ownership is checked in **services**, after loading the resource:
 ## 8. Account events and checks (ACC-12, ACC-15, ACC-16)
 
 - **Self-deactivation (ACC-12):** blocked with 409 while `ActiveBookingsCheck.hasUpcomingConfirmed(userId)` is true (a port the booking modules implement; accounts never imports them). Otherwise set `deactivated`, delete sessions, emit `user.deactivated`.
+- Deactivation writes the account and checks both booking ports inside one transaction with its caller session. Payment confirmation serializes on that account through `AccountsService.tryLockForBookingConfirmation`; deactivation winning ends the pending hotel hold, releases inventory and requests a full refund after commit. Suspension does not end existing holds. See `DECISIONS.md` §3 and data-model §6.2.
 - **Suspend / reactivate (ACC-15, ACC-16):** called by admin. Set the status, delete sessions on suspension, emit `account.suspended` / `account.reactivated`. Bookings stay valid; content stays visible unless hidden.
 - Events are emitted after the write commits; notifications and audit react to them.

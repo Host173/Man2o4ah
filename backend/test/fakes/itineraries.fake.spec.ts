@@ -2,15 +2,33 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
+import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
-import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
-import { FakeItinerariesService } from './itineraries.fake.js';
+import {
+  BudgetCategory,
+  ItineraryVisibility,
+  TransportMode,
+} from '../../src/modules/itineraries/schemas/itinerary.schema.js';
+import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
+import {
+  FakeItinerariesService,
+  type FakePublicItinerarySeed,
+} from './itineraries.fake.js';
+import { FakeStorageService } from './storage.fake.js';
+import { imageBytes } from '../support/image-fixtures.js';
+
+const imageFile = (): UploadedImage => ({
+  buffer: imageBytes('jpg'),
+  originalname: 'pyramids.jpg',
+  mimetype: 'image/jpeg',
+  size: 32,
+});
 
 function itinerary(
   id: string,
   updatedAt: string,
-  overrides: Partial<PublicItinerarySummary> = {},
-): PublicItinerarySummary {
+  overrides: Partial<FakePublicItinerarySeed> = {},
+): FakePublicItinerarySeed {
   return {
     id,
     ownerId: 'user-1',
@@ -31,6 +49,216 @@ const seed = [
 ];
 
 const ids = (items: PublicItinerarySummary[]) => items.map((item) => item.id);
+
+describe('FakeItinerariesService transport contract (ITN-16)', () => {
+  async function setup() {
+    const service = new FakeItinerariesService();
+    const trip = await service.create(
+      {
+        title: 'Transport trip',
+        countryCodes: ['EG'],
+        startDate: '2027-04-01',
+      },
+      'user-1',
+    );
+    const day = await service.addDay(trip._id, { cityId: 'cairo' }, 'user-1');
+    const body: CreateTransportCostDto = {
+      dayId: day._id,
+      mode: TransportMode.TRAIN,
+      fromCityId: 'cairo',
+      toCityId: 'dubai',
+      amountMinor: 100,
+      currency: 'EGP',
+    };
+    return { service, trip, body };
+  }
+
+  it('keeps independent returned views and mirrors partial edits, deletion and day cascade', async () => {
+    const { service, trip, body } = await setup();
+    const cost = await service.addTransportCost(trip._id, body, 'user-1');
+    cost.amountMinor = 999;
+    const edited = await service.updateTransportCost(
+      cost._id,
+      { amountMinor: 0, currency: 'JPY' },
+      'user-1',
+    );
+    expect(edited).toEqual({
+      _id: cost._id,
+      ...body,
+      amountMinor: 0,
+      currency: 'JPY',
+    });
+    const before = await service.getById(trip._id, 'user-1');
+    await service.updateTransportCost(cost._id, {}, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).updatedAt).toEqual(
+      before.updatedAt,
+    );
+    await service.deleteTransportCost(cost._id, 'user-1');
+    await expect(
+      service.deleteTransportCost(cost._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await service.addTransportCost(trip._id, body, 'user-1');
+    await service.deleteDay(trip._id, body.dayId, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).transportCosts).toEqual(
+      [],
+    );
+  });
+
+  it('mirrors ownership, day references and currency errors without mutating costs', async () => {
+    const { service, trip, body } = await setup();
+    const cost = await service.addTransportCost(trip._id, body, 'user-1');
+    for (const promise of [
+      service.addTransportCost(trip._id, body, 'user-2'),
+      service.updateTransportCost(cost._id, {}, 'user-2'),
+      service.deleteTransportCost(cost._id, 'user-2'),
+      service.updateTransportCost(
+        cost._id,
+        { dayId: 'ffffffffffffffffffffffff' },
+        'user-1',
+      ),
+    ]) {
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+    }
+    await expect(
+      service.updateTransportCost(cost._id, { currency: 'XXX' }, 'user-1'),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.UnsupportedCurrency },
+    });
+    await expect(
+      service.updateTransportCost(cost._id, { amountMinor: -1 }, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    expect((await service.getById(trip._id, 'user-1')).transportCosts).toEqual([
+      cost,
+    ]);
+  });
+});
+
+describe('FakeItinerariesService budget contract (ITN-14)', () => {
+  async function setup() {
+    const service = new FakeItinerariesService();
+    const trip = await service.create(
+      { title: 'Budget trip', countryCodes: ['EG'], startDate: '2027-04-01' },
+      'user-1',
+    );
+    const day = await service.addDay(trip._id, { cityId: 'cairo' }, 'user-1');
+    const body = {
+      category: BudgetCategory.FOOD,
+      amountMinor: 1000,
+      currency: 'EGP',
+    };
+    return { service, trip, day, body };
+  }
+
+  it('mirrors partial edits, deletion, independent views and day cascades', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    entry.amountMinor = 999;
+    const edited = await service.updateBudgetEntry(
+      entry._id,
+      { amountMinor: 0, currency: 'JPY' },
+      'user-1',
+    );
+    expect(edited).toEqual({
+      _id: entry._id,
+      category: BudgetCategory.FOOD,
+      amountMinor: 0,
+      currency: 'JPY',
+    });
+    await service.updateBudgetEntry(entry._id, {}, 'user-1');
+    await service.deleteBudgetEntry(entry._id, 'user-1');
+    await expect(
+      service.deleteBudgetEntry(entry._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    const restored = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([restored]);
+    await service.deleteDay(trip._id, day._id, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).days).toEqual([]);
+  });
+
+  it('mirrors ownership, unknown days and validation errors', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    for (const promise of [
+      service.addBudgetEntry(trip._id, day._id, body, 'user-2'),
+      service.updateBudgetEntry(entry._id, { amountMinor: 0 }, 'user-2'),
+      service.deleteBudgetEntry(entry._id, 'user-2'),
+      service.addBudgetEntry(
+        trip._id,
+        'ffffffffffffffffffffffff',
+        body,
+        'user-1',
+      ),
+    ]) {
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+    }
+    for (const [field, value] of [
+      ['category', 'shopping'],
+      ['amountMinor', -1],
+      ['currency', 'XXX'],
+      ['note', 'x'.repeat(201)],
+    ] as const) {
+      for (const promise of [
+        service.addBudgetEntry(
+          trip._id,
+          day._id,
+          { ...body, [field]: value },
+          'user-1',
+        ),
+        service.updateBudgetEntry(entry._id, { [field]: value }, 'user-1'),
+      ]) {
+        await expect(promise).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    }
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([entry]);
+  });
+
+  it('computes the same converted summary as the real service', async () => {
+    const { service, trip, day, body } = await setup();
+    await service.addBudgetEntry(trip._id, day._id, body, 'user-1');
+    const summary = await service.getBudgetSummary(trip._id, 'user-1');
+    expect(summary).toMatchObject({
+      displayCurrency: 'USD',
+      rateDate: '2026-11-01',
+      total: { amountMinor: 20, currency: 'USD' },
+      byCategory: { food: { amountMinor: 20, currency: 'USD' } },
+      byDay: [
+        {
+          dayNumber: 1,
+          date: '2027-04-01',
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+      byCityGroup: [
+        {
+          cityId: 'cairo',
+          dayCount: 1,
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+    });
+  });
+});
 
 describe('FakeItinerariesService.listPublicByAuthor', () => {
   it('returns an empty page when nothing is seeded', async () => {
@@ -110,6 +338,151 @@ describe('FakeItinerariesService.listPublicByAuthor', () => {
     const second = await itineraries.listPublicByAuthor('user-1');
     expect(second.items[0].title).toBe('Trip i-1');
   });
+
+  it('leaves out private, hidden and deactivated-author itineraries (ITN-20)', async () => {
+    const itineraries = new FakeItinerariesService([
+      itinerary('public', '2026-11-05T10:00:00.000Z'),
+      itinerary('private', '2026-11-04T10:00:00.000Z', {
+        visibility: ItineraryVisibility.PRIVATE,
+      }),
+      itinerary('hidden', '2026-11-03T10:00:00.000Z', { isHidden: true }),
+      itinerary('deactivated', '2026-11-02T10:00:00.000Z', {
+        authorDeactivated: true,
+      }),
+    ]);
+
+    const page = await itineraries.listPublicByAuthor('user-1');
+    expect(ids(page.items)).toEqual(['public']);
+    expect(page.total).toBe(1);
+  });
+
+  it('lists an owner-created itinerary only while it is public', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    expect((await itineraries.listPublicByAuthor('user-1')).items).toHaveLength(
+      0,
+    );
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-1',
+    );
+    const publicPage = await itineraries.listPublicByAuthor('user-1');
+    expect(publicPage.items.map((item) => item.id)).toEqual([created._id]);
+    expect(publicPage.items[0]).toMatchObject({
+      title: 'Egypt in a week',
+      startDate: new Date('2027-04-01T00:00:00.000Z'),
+      cityIds: [],
+    });
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PRIVATE },
+      'user-1',
+    );
+    expect((await itineraries.listPublicByAuthor('user-1')).items).toHaveLength(
+      0,
+    );
+  });
+
+  it('rejects invalid page and limit values with the real 400 shape', async () => {
+    const itineraries = new FakeItinerariesService(seed);
+    for (const [query, field] of [
+      [{ page: 0 }, 'page'],
+      [{ limit: 0 }, 'limit'],
+      [{ limit: 51 }, 'limit'],
+      [{ page: 1.5 }, 'page'],
+    ] as const) {
+      const error = await itineraries
+        .listPublicByAuthor('user-1', query)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        details: { field: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe(field);
+    }
+  });
+
+  it('hides and restores an author’s itineraries on deactivation events (ACC-12)', async () => {
+    const ownerId = 'a'.repeat(24);
+    const otherId = 'b'.repeat(24);
+    const itineraries = new FakeItinerariesService([
+      itinerary('i-1', '2026-11-01T10:00:00.000Z', { ownerId }),
+      itinerary('i-2', '2026-11-02T10:00:00.000Z', { ownerId: otherId }),
+    ]);
+    const created = await itineraries.create(createDto(), ownerId);
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      ownerId,
+    );
+
+    await itineraries.onUserDeactivated({ userId: ownerId });
+    expect((await itineraries.listPublicByAuthor(ownerId)).items).toHaveLength(
+      0,
+    );
+    expect(
+      (await itineraries.getById(created._id, ownerId)).authorDeactivated,
+    ).toBe(true);
+    expect((await itineraries.listPublicByAuthor(otherId)).items).toHaveLength(
+      1,
+    );
+
+    // A malformed ID is a no-op, like the real service's handler.
+    await itineraries.onUserDeactivated({ userId: 'bad-id' });
+    expect((await itineraries.listPublicByAuthor(otherId)).items).toHaveLength(
+      1,
+    );
+
+    await itineraries.onUserReactivated({ userId: ownerId });
+    expect((await itineraries.listPublicByAuthor(ownerId)).items).toHaveLength(
+      2,
+    );
+    expect(
+      (await itineraries.getById(created._id, ownerId)).authorDeactivated,
+    ).toBe(false);
+  });
+
+  it('searchPublic lists only public, visible items from every author', async () => {
+    const itineraries = new FakeItinerariesService([
+      itinerary('visible', '2026-11-05T10:00:00.000Z'),
+      itinerary('other', '2026-11-04T10:00:00.000Z', { ownerId: 'user-2' }),
+      itinerary('private', '2026-11-03T10:00:00.000Z', {
+        visibility: ItineraryVisibility.PRIVATE,
+      }),
+      itinerary('hidden', '2026-11-02T10:00:00.000Z', { isHidden: true }),
+      itinerary('deactivated', '2026-11-01T10:00:00.000Z', {
+        authorDeactivated: true,
+      }),
+    ]);
+    const created = await itineraries.create(createDto(), 'user-3');
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-3',
+    );
+
+    const page = await itineraries.searchPublic();
+    expect(page.items).toHaveLength(3);
+    expect(ids(page.items)).toEqual(
+      expect.arrayContaining(['visible', 'other', created._id]),
+    );
+    expect(page.total).toBe(3);
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PRIVATE },
+      'user-3',
+    );
+    expect(ids((await itineraries.searchPublic()).items)).toEqual([
+      'visible',
+      'other',
+    ]);
+  });
 });
 
 function createDto(
@@ -124,6 +497,135 @@ function createDto(
 }
 
 describe('FakeItinerariesService owner-only methods', () => {
+  it('preserves optional fields and zero cost through activity edits and removal', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      {
+        name: 'Museum',
+        description: 'Keep',
+        time: '23:59',
+        cost: { amountMinor: 100, currency: 'JPY' },
+      },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    const edited = await itineraries.updateActivity(
+      id,
+      { cost: { amountMinor: 0, currency: 'USD' } },
+      'user-1',
+    );
+    expect(edited).toMatchObject({
+      name: 'Museum',
+      description: 'Keep',
+      time: '23:59',
+      cost: { amountMinor: 0, currency: 'USD' },
+    });
+    expect(await itineraries.updateActivity(id, {}, 'user-1')).toEqual(edited);
+    await expect(
+      itineraries.updateActivity(id, { name: 'Foreign' }, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.deleteActivity(id, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await itineraries.deleteActivity(id, 'user-1');
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual([]);
+    await expect(
+      itineraries.deleteActivity(id, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
+  it('rejects invalid activity input and missing resources without mutation', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: 'Keep' },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    await expect(
+      itineraries.updateActivity(
+        id,
+        { cost: { amountMinor: 1, currency: 'ZZZ' } },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'cost.currency' }],
+      },
+    });
+    await expect(
+      itineraries.updateActivity('bad', {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.deleteActivity('bad', 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(created._id, 'bad', { name: 'New' }, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        'f'.repeat(24),
+        { name: 'New' },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.updateActivity('f'.repeat(24), {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual(added.activities);
+  });
+
+  it('adds an owned activity instead of throwing an unimplemented stub', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const updated = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: '  Museum  ' },
+      'user-1',
+    );
+    expect(updated.activities).toEqual([
+      { _id: expect.any(String), name: 'Museum', images: [] },
+    ]);
+    updated.activities[0].name = 'Changed outside the fake';
+    const stored = await itineraries.getById(created._id, 'user-1');
+    expect(stored.days[0].activities[0].name).toBe('Museum');
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        day._id,
+        { name: 'Foreign' },
+        'user-2',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
   it('creates a private itinerary and lists it for its owner only', async () => {
     const itineraries = new FakeItinerariesService();
 
@@ -205,6 +707,42 @@ describe('FakeItinerariesService owner-only methods', () => {
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
   });
 
+  it('sets visibility and rejects anything else with the real 400 shape (ITN-20)', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    const updated = await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-1',
+    );
+    expect(updated.visibility).toBe(ItineraryVisibility.PUBLIC);
+
+    for (const visibility of ['hidden', null, '', 1]) {
+      const error = await itineraries
+        .update(created._id, { visibility } as never, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.message).toBe('Validation failed');
+      expect(response.details).toEqual([
+        {
+          field: 'visibility',
+          message: 'visibility must be public or private',
+        },
+      ]);
+    }
+
+    // A rejected value never changes the stored visibility.
+    const detail = await itineraries.getById(created._id, 'user-1');
+    expect(detail.visibility).toBe(ItineraryVisibility.PUBLIC);
+  });
+
   it('leaves updatedAt alone when an update changes nothing', async () => {
     vi.useFakeTimers({ now: new Date('2027-01-01T00:00:00.000Z') });
     try {
@@ -218,6 +756,28 @@ describe('FakeItinerariesService owner-only methods', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('leaves every field unchanged when a mixed update has invalid visibility', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const before = await itineraries.getById(created._id, 'user-1');
+
+    await expect(
+      itineraries.update(
+        created._id,
+        {
+          title: 'Changed',
+          countryCodes: ['AE'],
+          startDate: '2027-05-01',
+          visibility: 'hidden',
+        } as never,
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.ValidationFailed },
+    });
+    expect(await itineraries.getById(created._id, 'user-1')).toEqual(before);
   });
 
   it('adds days numbered and dated from the start date, and groups them by city', async () => {
@@ -691,5 +1251,131 @@ describe('FakeItinerariesService owner-only methods', () => {
       };
       expect(response.details[0].field).toBe('notes');
     });
+  });
+
+  describe('activity images (ITN-12)', () => {
+    async function trip() {
+      const storage = new FakeStorageService();
+      const itineraries = new FakeItinerariesService([], undefined, storage);
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+      const withActivity = await itineraries.addActivity(
+        created._id,
+        day._id,
+        { name: 'Pyramids' },
+        'user-1',
+      );
+      return {
+        itineraries,
+        storage,
+        id: created._id,
+        activityId: withActivity.activities[0]._id,
+      };
+    }
+
+    it('attaches, lists and removes an image with the storage fake', async () => {
+      const { itineraries, storage, id, activityId } = await trip();
+
+      const added = await itineraries.addActivityImage(
+        activityId,
+        imageFile(),
+        'user-1',
+      );
+      expect(added.activities[0].images).toHaveLength(1);
+      expect(added.activities[0].images[0]).toMatchObject({
+        url: storage.urlOf(added.activities[0].images[0].key),
+      });
+      expect(storage.keys()).toEqual([added.activities[0].images[0].key]);
+
+      const imageId = added.activities[0].images[0]._id;
+      await itineraries.removeActivityImage(activityId, imageId, 'user-1');
+      expect(storage.keys()).toEqual([]);
+      const detail = await itineraries.getById(id, 'user-1');
+      expect(detail.days[0].activities[0].images).toEqual([]);
+    });
+
+    it('caps images at 5 and scopes them to the owner with 404', async () => {
+      const { itineraries, storage, activityId } = await trip();
+      for (let i = 0; i < 5; i++) {
+        await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+      }
+      const error = await itineraries
+        .addActivityImage(activityId, imageFile(), 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: ErrorCode.LimitExceeded,
+      });
+      expect(storage.keys()).toHaveLength(5);
+
+      await expect(
+        itineraries.addActivityImage(activityId, imageFile(), 'user-2'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('deletes the activity image files when the itinerary is deleted', async () => {
+      const { itineraries, storage, id, activityId } = await trip();
+      await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+      expect(storage.keys()).toHaveLength(1);
+
+      await itineraries.delete(id, 'user-1');
+      expect(storage.keys()).toEqual([]);
+    });
+
+    it('caps parallel attaches at five and discards rejected files', async () => {
+      const { itineraries, storage, activityId } = await trip();
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () =>
+          itineraries.addActivityImage(activityId, imageFile(), 'user-1'),
+        ),
+      );
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(5);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).toMatchObject({
+            status: 400,
+            response: { code: ErrorCode.LimitExceeded },
+          });
+        }
+      }
+      expect(storage.keys()).toHaveLength(5);
+    });
+
+    it.each(['itinerary', 'day'] as const)(
+      'retains a concurrently changed %s during cleanup',
+      async (parent) => {
+        const { itineraries, storage, id, activityId } = await trip();
+        const added = await itineraries.addActivityImage(
+          activityId,
+          imageFile(),
+          'user-1',
+        );
+        const unlink = storage.delete.bind(storage);
+        vi.spyOn(storage, 'delete').mockImplementationOnce(async (key) => {
+          await unlink(key);
+          await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+        });
+        const remove = () =>
+          parent === 'itinerary'
+            ? itineraries.delete(id, 'user-1')
+            : itineraries.deleteDay(id, added._id, 'user-1');
+        await expect(remove()).rejects.toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.ConcurrentChange },
+        });
+        const retained = await itineraries.getById(id, 'user-1');
+        expect(storage.has(retained.days[0].activities[0].images[1].key)).toBe(
+          true,
+        );
+        await remove();
+        expect(storage.keys()).toEqual([]);
+      },
+    );
   });
 });

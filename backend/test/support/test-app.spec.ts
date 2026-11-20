@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { Controller, Get } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { HealthModule } from '../../src/health/health.module.js';
 import { UserRole } from '../../src/modules/accounts/schemas/user.schema.js';
 import { loginAs } from './auth.js';
@@ -30,6 +31,10 @@ describe('createTestApp', () => {
   afterAll(async () => {
     if (!closed) await t.close();
   }, HOOK_TIMEOUT);
+
+  it('gives the config the temporary upload folder', () => {
+    expect(t.moduleRef.get(ConfigService).get('UPLOAD_DIR')).toBe(t.uploadDir);
+  });
 
   it('serves the module under the /api prefix with the database wired', async () => {
     const res = await t.http().get('/api/health').expect(200);

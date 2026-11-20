@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { Events } from '../../src/common/events/events.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import {
@@ -35,6 +36,7 @@ import type {
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeEvents } from '../support/fake-events.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
 import type { PublicApi } from './public-api.js';
 
@@ -53,8 +55,24 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ReferenceDataService,
       'getAirports'
     > = new FakeReferenceDataService(),
+    readonly events: FakeEvents = new FakeEvents(),
   ) {
     this.seatInventory = new FakeSeatInventory(data);
+  }
+
+  /** Marks scheduled flights departed once their UTC departure time passes (FLT-30). */
+  markFlightsDeparted(now = new Date()): Promise<number> {
+    let modified = 0;
+    for (const flight of this.data.flights()) {
+      if (
+        flight.status === 'scheduled' &&
+        flight.departureAt.getTime() <= now.getTime()
+      ) {
+        flight.status = 'departed';
+        modified++;
+      }
+    }
+    return Promise.resolve(modified);
   }
 
   async createFlight(
@@ -185,6 +203,32 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
         };
       });
     return toPage(items, flights.length, query.page, query.limit);
+  }
+
+  async cancelFlight(
+    flightId: string,
+    moderatorAirlineId: string | undefined,
+  ): Promise<void> {
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be cancelled',
+      });
+    }
+
+    flight.status = 'cancelled';
+    this.events.emit(Events.FlightCancelled, { flightId });
   }
 
   async addCabin(
@@ -384,6 +428,29 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ...structuredClone(flight),
       departureTimeZone: departureAirport.timeZone,
       arrivalTimeZone: arrivalAirport.timeZone,
+    };
+  }
+
+  async getFlightDetails(
+    flightId: string,
+  ): Promise<{ flight: FlightManagementView; airline: AirlineView }> {
+    const flight = this.data.flight(flightId);
+    if (!flight) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    const airline = this.data.airline(flight.airlineId);
+    if (!airline) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Airline not found',
+      });
+    }
+    return {
+      flight: structuredClone(flight),
+      airline: structuredClone(airline),
     };
   }
 

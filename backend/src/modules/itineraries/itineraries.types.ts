@@ -15,6 +15,7 @@ import type {
 export interface ActivityImageView {
   _id: string;
   key: string;
+  url: string;
 }
 
 /** An activity's own cost; counted under Activities in the budget (ITN-14). */
@@ -42,6 +43,72 @@ export interface BudgetEntryView {
   amountMinor: number;
   currency: string;
   note?: string;
+}
+
+/** An amount in integer minor units of `currency` (api-contract.md §3). */
+export interface MoneyView {
+  amountMinor: number;
+  currency: string;
+}
+
+/** The five totals ITN-14 reports; activity costs and transport costs feed two of them. */
+export type BudgetSummaryCategory = BudgetCategory | 'intercity_transport';
+
+/** Totals by category, in the viewer's preferred currency (ITN-14). */
+export type BudgetCategoryTotals = Record<BudgetSummaryCategory, MoneyView>;
+
+/** ITN-14: the converted amounts of one day, including activity and transport costs. */
+export interface BudgetDaySummary {
+  dayId: string;
+  dayNumber: number;
+  date: string;
+  cityId: string;
+  total: MoneyView;
+  byCategory: BudgetCategoryTotals;
+}
+
+/** ITN-14: one consecutive same-city group's converted subtotal (ITN-09). */
+export interface BudgetCityGroupSummary {
+  cityId: string;
+  fromDay: number;
+  toDay: number;
+  dayCount: number;
+  checkIn: string;
+  checkOut: string;
+  total: MoneyView;
+}
+
+/** ITN-14/18: computed on read, never stored; amounts use `displayCurrency`. */
+export interface BudgetSummaryView {
+  displayCurrency: string;
+  /** `YYYY-MM-DD` of the exchange rates used for every conversion. */
+  rateDate: string;
+  total: MoneyView;
+  byCategory: BudgetCategoryTotals;
+  byDay: BudgetDaySummary[];
+  byCityGroup: BudgetCityGroupSummary[];
+}
+
+/** Input for the pure summary calculator: plain views, no Mongoose types. */
+export interface BudgetSummaryInput {
+  startDate: Date;
+  days: readonly {
+    _id: string;
+    cityId: string;
+    budgetEntries: ReadonlyArray<{
+      category: BudgetCategory;
+      amountMinor: number;
+      currency: string;
+    }>;
+    activities: ReadonlyArray<{
+      cost?: { amountMinor: number; currency: string };
+    }>;
+  }[];
+  transportCosts: ReadonlyArray<{
+    dayId: string;
+    amountMinor: number;
+    currency: string;
+  }>;
 }
 
 /** One day of an itinerary. The number and date derive from the array order (ITN-05). */

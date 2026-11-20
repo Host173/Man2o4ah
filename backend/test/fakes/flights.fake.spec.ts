@@ -3,6 +3,7 @@ import type {
   OneWaySearchQuery,
   RoundTripSearchQuery,
 } from '../../src/modules/flights/flights.types.js';
+import { Events } from '../../src/common/events/events.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeFlightsData } from './flights-data.fake.js';
@@ -328,6 +329,15 @@ describe('FakeFlightsService', () => {
   });
 
   describe('getFlightsForBooking', () => {
+    it('includes airport IANA zones in the booking-facing flight contract', async () => {
+      const { flights } = setup();
+      const result = await flights.getFlightsForBooking(['f1']);
+      expect(result.get('f1')?.flight).toMatchObject({
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+    });
+
     it('returns each flight with its airline and leaves unknown IDs out', async () => {
       const { flights } = setup();
       const result = await flights.getFlightsForBooking(['f2', 'nope']);
@@ -364,6 +374,21 @@ describe('FakeFlightsService', () => {
       first.get('f1')!.flight.cabins[0].priceMinor = 1;
       const second = await flights.getFlightsForBooking(['f1']);
       expect(second.get('f1')!.flight.cabins[0].priceMinor).toBe(30000);
+    });
+  });
+
+  describe('markFlightsDeparted', () => {
+    it('uses the exact boundary, leaves cancelled flights unchanged, and is idempotent', async () => {
+      const { data, flights } = setup();
+      vi.setSystemTime(new Date('2026-11-20T09:00:00.000Z'));
+
+      await expect(flights.markFlightsDeparted()).resolves.toBe(3);
+      await expect(flights.markFlightsDeparted()).resolves.toBe(0);
+      expect(data.flight('f2')?.status).toBe('departed');
+      expect(data.flight('f1')?.status).toBe('departed');
+      expect(data.flight('f3')?.status).toBe('scheduled');
+      expect(data.flight('f6')?.status).toBe('departed');
+      expect(data.flight('f5')?.status).toBe('cancelled');
     });
   });
 
@@ -702,6 +727,34 @@ describe('FakeFlightsService', () => {
             code: 'VALIDATION_FAILED',
             details: [{ field: 'departureAirportId' }],
           },
+        });
+      });
+
+      it('cancels an owned scheduled flight and removes it from search', async () => {
+        const { flights, data } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a1')).resolves.toBeUndefined();
+        expect(data.flight('f1')?.status).toBe('cancelled');
+        expect(ids((await flights.search(query())).items)).toEqual([
+          'f2',
+          'f3',
+        ]);
+        expect(flights.events.payloadsOf(Events.FlightCancelled)).toEqual([
+          { flightId: 'f1' },
+        ]);
+      });
+
+      it('returns 404 for another airline and 409 for a non-scheduled flight', async () => {
+        const { flights } = setup();
+
+        await expect(flights.cancelFlight('f1', 'a2')).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await flights.cancelFlight('f1', 'a1');
+        await expect(flights.cancelFlight('f1', 'a1')).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'INVALID_STATUS_TRANSITION' },
         });
       });
     });

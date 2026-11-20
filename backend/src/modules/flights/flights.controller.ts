@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Patch,
   Param,
@@ -16,6 +18,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiOkResponse,
   ApiParam,
@@ -27,9 +30,10 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
+import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
 import { UpdateFlightDto } from './dto/update-flight.dto.js';
 import { UpdateFlightCabinDto } from './dto/update-flight-cabin.dto.js';
 import {
@@ -47,6 +51,23 @@ import { FlightsService } from './flights.service.js';
 @Controller()
 export class FlightsController {
   constructor(private readonly flights: FlightsService) {}
+
+  @Get('flights/:id')
+  @Public()
+  @ApiOperation({ summary: 'FLT-17 Get flight details' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: FlightDetailsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiNotFoundResponse({ description: 'Flight or airline not found' })
+  async getDetails(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<FlightDetailsResponseDto> {
+    const details = await this.flights.getFlightDetails(id.toHexString());
+    return FlightDetailsResponseDto.fromDetails(
+      details.flight,
+      details.airline,
+    );
+  }
 
   @Post('flights')
   @Roles(Role.AIRLINE_MODERATOR)
@@ -139,6 +160,26 @@ export class FlightsController {
         user.providerId,
       ),
     );
+  }
+
+  @Post('flights/:id/cancel')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-06 Cancel a scheduled flight' })
+  @ApiParam({ name: 'id', type: String, description: 'Flight ObjectId' })
+  @ApiNoContentResponse({ description: 'Flight cancelled' })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiConflictResponse({
+    description: 'Only a scheduled flight can be cancelled',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async cancel(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.flights.cancelFlight(id.toHexString(), user.providerId);
   }
 
   @Get('airlines/:id/flights')

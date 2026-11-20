@@ -43,6 +43,8 @@ export interface FakeFlightSeed {
   status?: FlightStatus;
   hasBookings?: boolean;
   cabins: FakeCabinSeed[];
+  departureTimeZone?: string;
+  arrivalTimeZone?: string;
 }
 
 /**
@@ -112,6 +114,20 @@ export class FakeFlightsData {
       status: seed.status ?? 'scheduled',
       hasBookings: seed.hasBookings ?? false,
       cabins: seed.cabins.map(toCabin),
+      departureTimeZone:
+        seed.departureTimeZone ??
+        (seed.departureAirportId === 'CAI'
+          ? 'Africa/Cairo'
+          : seed.departureAirportId === 'JFK'
+            ? 'America/New_York'
+            : 'UTC'),
+      arrivalTimeZone:
+        seed.arrivalTimeZone ??
+        (seed.arrivalAirportId === 'DXB'
+          ? 'Asia/Dubai'
+          : seed.arrivalAirportId === 'CAI'
+            ? 'Africa/Cairo'
+            : 'UTC'),
     };
     this.flightMap.set(flight.id, flight);
     return structuredClone(flight);

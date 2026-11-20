@@ -1,10 +1,22 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -14,11 +26,33 @@ import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
 import { FlightHoldResponseDto } from './dto/flight-hold.response.dto.js';
+import {
+  MyFlightBookingResponseDto,
+  PaginatedMyFlightBookingsResponseDto,
+} from './dto/my-flight-booking.response.dto.js';
+import { MyFlightBookingsQueryDto } from './dto/my-flight-bookings-query.dto.js';
+import { CancelFlightBookingDto } from './dto/flight-cancellation.dto.js';
+import {
+  CancelledFlightBookingResponseDto,
+  FlightRefundPreviewResponseDto,
+} from './dto/flight-cancellation.response.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
-import type { FlightHold, FlightQuote } from './flight-bookings.types.js';
+import type { Paginated } from '../../common/pagination/paginated.js';
+import type {
+  CancelledFlightBooking,
+  FlightHold,
+  FlightQuote,
+  FlightRefundPreview,
+  MyFlightBooking,
+  MyFlightBookingSummary,
+} from './flight-bookings.types.js';
+import { FlightCancellationBodyPipe } from './flight-cancellation-body.pipe.js';
+import { FlightCancellationService } from './flight-cancellation.service.js';
+import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightQuoteService } from './flight-quote.service.js';
+import { MyFlightBookingsService } from './my-flight-bookings.service.js';
 
 @ApiTags('flight-bookings')
 @ApiCookieAuth()
@@ -27,6 +61,9 @@ export class FlightBookingsController {
   constructor(
     private readonly quotes: FlightQuoteService,
     private readonly holds: FlightHoldService,
+    private readonly eTickets: FlightETicket,
+    private readonly mine: MyFlightBookingsService,
+    private readonly cancellations: FlightCancellationService,
   ) {}
 
   /** A quote saves nothing, so it answers 200, not 201. */
@@ -68,5 +105,130 @@ export class FlightBookingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<FlightHold> {
     return this.holds.hold(body, user.id);
+  }
+
+  /** The logged-in user's own bookings, one group per request (FLT-25). */
+  @Get()
+  @ApiOperation({
+    summary: 'FLT-25 List my flight bookings: upcoming, past or cancelled',
+    description:
+      'upcoming: confirmed, first flight not departed yet (soonest first). past: completed, or confirmed whose first flight has departed (most recent first). cancelled: cancelled (most recent first). Pending and expired bookings are in no group.',
+  })
+  @ApiOkResponse({ type: PaginatedMyFlightBookingsResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: group, page or limit is invalid',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  listMine(
+    @Query() query: MyFlightBookingsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<Paginated<MyFlightBookingSummary>> {
+    return this.mine.listMine(user.id, query.group, query);
+  }
+
+  /** Only the owner's own booking, in any status; anyone else's answers 404 (ACC-11). */
+  @Get(':id')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-25 Show the full details of my flight booking',
+  })
+  @ApiOkResponse({ type: MyFlightBookingResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  getMine(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<MyFlightBooking> {
+    return this.mine.getMine(id, user.id);
+  }
+
+  /** Only the owner's own confirmed booking; anyone else's answers 404 (ACC-11). */
+  @Get(':id/e-ticket')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-23 Download the e-ticket (PDF) of my confirmed booking',
+    description:
+      'Reference, passengers and every flight with its local departure and arrival times (GEN-06).',
+  })
+  @ApiOkResponse({
+    description: 'The e-ticket as a downloadable PDF',
+    content: {
+      'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description: 'CONFLICT: the booking is not confirmed',
+  })
+  async eTicket(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<StreamableFile> {
+    const ticket = await this.eTickets.render(id, user.id);
+    return new StreamableFile(ticket.pdf, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${ticket.filename}"`,
+    });
+  }
+
+  /** The owner's confirmed booking before the outbound flight departs; anyone else's answers 404 (ACC-11). */
+  @Get(':id/refund-preview')
+  @Roles(Role.USER)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-26 Preview the refund for cancelling my flight booking',
+    description:
+      'Uses the booking’s snapshot of the airline’s cancellation tiers and the full days until the outbound departure. Nothing is changed.',
+  })
+  @ApiOkResponse({ type: FlightRefundPreviewResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
+  })
+  refundPreview(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightRefundPreview> {
+    return this.cancellations.refundPreview(id, user.id);
+  }
+
+  /** Cancels the whole booking; the body is an empty object that confirms it. */
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'FLT-26 Cancel my confirmed flight booking before departure',
+    description:
+      'After viewing the refund preview, confirm with an empty body. The refund is recalculated at this moment. The status change and the seats returning to inventory happen in one transaction; a positive refund is then requested (PAY-03) and the user is notified.',
+  })
+  @ApiOkResponse({ type: CancelledFlightBookingResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: the body is not an empty object',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
+  })
+  cancel(
+    @Param('id') id: string,
+    @Body(FlightCancellationBodyPipe) _body: CancelFlightBookingDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<CancelledFlightBooking> {
+    return this.cancellations.cancel(id, user.id);
   }
 }

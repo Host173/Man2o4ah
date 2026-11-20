@@ -1,5 +1,6 @@
+import { getModelToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { Types } from 'mongoose';
+import { Types, type Model } from 'mongoose';
 import {
   afterAll,
   beforeAll,
@@ -15,10 +16,14 @@ import { FakeFlightsData } from '../../../test/fakes/flights-data.fake.js';
 import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
 import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
+import { FakeReportableContent } from '../../../test/fakes/reportable-content.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
+import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
-import { loginAs } from '../../../test/support/auth.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
@@ -32,12 +37,33 @@ import {
   UserStatus,
 } from '../accounts/schemas/user.schema.js';
 import { AuditAction } from '../audit/schemas/audit-log.schema.js';
+import { BlogModule } from '../blog/blog.module.js';
+import { ItineraryReportableContent } from '../itineraries/itinerary-reportable-content.js';
+import {
+  Comment,
+  type CommentDocument,
+} from '../blog/schemas/comment.schema.js';
+import { Like, type LikeDocument } from '../blog/schemas/like.schema.js';
+import {
+  Post,
+  PostStatus,
+  type PostDocument,
+} from '../blog/schemas/post.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
 import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { ReportResolutionAction } from '../moderation/dto/resolve-report.dto.js';
+import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
+import {
+  Report,
+  ReportStatus,
+  ReportTargetType,
+} from '../moderation/schemas/report.schema.js';
+import { StorageService } from '../storage/storage.service.js';
 import { AdminModule } from './admin.module.js';
 
 const ALLOWED_KEYS_WITH_REFERENCE = [
@@ -1034,6 +1060,594 @@ describe('Admin Bookings API (ACC-17)', () => {
   });
 });
 
+describe('Admin Moderation API (GEN-10)', () => {
+  let modApp: TestApp | undefined;
+  const fakeAccounts = new FakeAccountsService();
+  const fakeItineraries = new FakeItinerariesService();
+  const fakeStorage = new FakeStorageService();
+  const fakeEvents = new FakeEvents();
+  const reviewsFake = new FakeReportableContent(ReportTargetType.REVIEW);
+  const itinerariesFake = new FakeReportableContent(ReportTargetType.ITINERARY);
+
+  let postModel: Model<PostDocument>;
+  let commentModel: Model<CommentDocument>;
+  let likeModel: Model<LikeDocument>;
+  let reportModel: Model<Report>;
+
+  beforeAll(async () => {
+    modApp = await createTestApp({
+      imports: [AdminModule, BlogModule],
+      override: (builder) =>
+        builder
+          .overrideProvider(FlightBookingsService)
+          .useValue(new FakeFlightBookingsService([]))
+          .overrideProvider(HotelBookingsService)
+          .useValue(new FakeHotelBookingsService([]))
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(ItinerariesService)
+          .useValue(fakeItineraries)
+          .overrideProvider(StorageService)
+          .useValue(fakeStorage)
+          .overrideProvider(AppEvents)
+          .useValue(fakeEvents)
+          // This suite seeds its own in-memory itinerary provider below; keep
+          // the real ITN-20 provider from registering a second one.
+          .overrideProvider(ItineraryReportableContent)
+          .useValue({ onModuleInit: () => {} }),
+    });
+
+    const registry = modApp.moduleRef.get(ReportableContentRegistry);
+    registry.register(reviewsFake);
+    registry.register(itinerariesFake);
+
+    postModel = modApp.moduleRef.get<Model<PostDocument>>(
+      getModelToken(Post.name),
+    );
+    commentModel = modApp.moduleRef.get<Model<CommentDocument>>(
+      getModelToken(Comment.name),
+    );
+    likeModel = modApp.moduleRef.get<Model<LikeDocument>>(
+      getModelToken(Like.name),
+    );
+    reportModel = modApp.moduleRef.get<Model<Report>>(
+      getModelToken(Report.name),
+    );
+    await reportModel.init();
+  }, HOOK_TIMEOUT);
+
+  beforeEach(async () => {
+    await clearCollections(modApp!.connection);
+    Object.assign(fakeAccounts, new FakeAccountsService());
+    Object.assign(fakeItineraries, new FakeItinerariesService());
+    Object.assign(fakeStorage, new FakeStorageService());
+    fakeEvents.clear();
+    reviewsFake.clear();
+    itinerariesFake.clear();
+  });
+
+  afterAll(async () => {
+    await modApp?.close();
+  }, HOOK_TIMEOUT);
+
+  it('registers Swagger metadata for GEN-10 admin moderation endpoints', () => {
+    const document = SwaggerModule.createDocument(
+      modApp!.app,
+      new DocumentBuilder()
+        .setTitle('Man2o4ah API')
+        .setVersion('0.0.1')
+        .addCookieAuth('access_token')
+        .build(),
+    );
+
+    const reportsList = document.paths['/api/admin/reports']?.get;
+    expect(reportsList).toBeDefined();
+    expect(reportsList?.tags).toContain('admin');
+    expect(reportsList?.security).toBeDefined();
+    expect(reportsList?.responses?.['200']).toBeDefined();
+
+    const reportResolve = document.paths['/api/admin/reports/{id}']?.patch;
+    expect(reportResolve).toBeDefined();
+    expect(reportResolve?.tags).toContain('admin');
+    expect(reportResolve?.security).toBeDefined();
+    expect(reportResolve?.responses?.['200']).toBeDefined();
+    expect(reportResolve?.responses?.['409']).toBeDefined();
+
+    const directHide =
+      document.paths['/api/admin/content/{type}/{id}/hide']?.patch;
+    expect(directHide).toBeDefined();
+    expect(directHide?.tags).toContain('admin');
+    expect(directHide?.security).toBeDefined();
+    expect(directHide?.responses?.['204']).toBeDefined();
+
+    const directDelete =
+      document.paths['/api/admin/content/{type}/{id}']?.delete;
+    expect(directDelete).toBeDefined();
+    expect(directDelete?.tags).toContain('admin');
+    expect(directDelete?.security).toBeDefined();
+    expect(directDelete?.responses?.['204']).toBeDefined();
+  });
+
+  it('enforces 401 NOT_AUTHENTICATED and 403 FORBIDDEN_ROLE across all GEN-10 endpoints', async () => {
+    const sampleId = new Types.ObjectId().toHexString();
+    const checks: (() => Promise<{
+      status: number;
+      body: { code?: string };
+    }>)[] = [
+      () => modApp!.http().get('/api/admin/reports'),
+      () =>
+        modApp!
+          .http()
+          .patch(`/api/admin/reports/${sampleId}`)
+          .send({ action: ReportResolutionAction.DISMISS }),
+      () =>
+        modApp!
+          .http()
+          .patch(
+            `/api/admin/content/${ReportTargetType.POST}/${sampleId}/hide`,
+          ),
+      () =>
+        modApp!
+          .http()
+          .delete(`/api/admin/content/${ReportTargetType.POST}/${sampleId}`),
+    ];
+
+    for (const call of checks) {
+      const unauth = await call();
+      expect(unauth.status).toBe(401);
+      expect(unauth.body.code).toBe(ErrorCode.NotAuthenticated);
+    }
+
+    const nonAdminRoles = [
+      UserRole.USER,
+      UserRole.AIRLINE_MODERATOR,
+      UserRole.HOTEL_MODERATOR,
+    ];
+    for (const role of nonAdminRoles) {
+      const actor = await loginAs(modApp!.connection, role, {
+        providerId: new Types.ObjectId().toHexString(),
+      });
+
+      const listRes = await modApp!
+        .http()
+        .get('/api/admin/reports')
+        .set('Cookie', actor.cookie);
+      expect(listRes.status).toBe(403);
+      expect(listRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const resolveRes = await modApp!
+        .http()
+        .patch(`/api/admin/reports/${sampleId}`)
+        .set('Cookie', actor.cookie)
+        .send({ action: ReportResolutionAction.DISMISS });
+      expect(resolveRes.status).toBe(403);
+      expect(resolveRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const hideRes = await modApp!
+        .http()
+        .patch(`/api/admin/content/${ReportTargetType.POST}/${sampleId}/hide`)
+        .set('Cookie', actor.cookie);
+      expect(hideRes.status).toBe(403);
+      expect(hideRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const deleteRes = await modApp!
+        .http()
+        .delete(`/api/admin/content/${ReportTargetType.POST}/${sampleId}`)
+        .set('Cookie', actor.cookie);
+      expect(deleteRes.status).toBe(403);
+      expect(deleteRes.body.code).toBe(ErrorCode.ForbiddenRole);
+    }
+  });
+
+  it('lists reports with default status=open, explicit status filters, pagination bounds, and validation errors', async () => {
+    const admin = await loginAs(modApp!.connection, UserRole.ADMIN);
+    const reporterA = await loginAs(modApp!.connection, UserRole.USER);
+    const reporterB = await loginAs(modApp!.connection, UserRole.USER);
+
+    const review1 = new Types.ObjectId().toHexString();
+    const review2 = new Types.ObjectId().toHexString();
+    const review3 = new Types.ObjectId().toHexString();
+    reviewsFake.add(review1);
+    reviewsFake.add(review2);
+    reviewsFake.add(review3);
+
+    const openOlder = await reportModel.create({
+      reporterId: new Types.ObjectId(reporterA.id),
+      targetType: ReportTargetType.REVIEW,
+      targetId: new Types.ObjectId(review1),
+      reason: 'Open 1',
+      status: ReportStatus.OPEN,
+    });
+    const openNewer = await reportModel.create({
+      reporterId: new Types.ObjectId(reporterB.id),
+      targetType: ReportTargetType.REVIEW,
+      targetId: new Types.ObjectId(review2),
+      reason: 'Open 2',
+      status: ReportStatus.OPEN,
+    });
+    await reportModel.updateOne(
+      { _id: openOlder._id },
+      { $set: { createdAt: new Date('2026-11-10T09:00:00.000Z') } },
+    );
+    await reportModel.updateOne(
+      { _id: openNewer._id },
+      { $set: { createdAt: new Date('2026-11-11T09:00:00.000Z') } },
+    );
+    const dismissedDoc = await reportModel.create({
+      reporterId: new Types.ObjectId(reporterA.id),
+      targetType: ReportTargetType.REVIEW,
+      targetId: new Types.ObjectId(review3),
+      reason: 'Already dismissed',
+      status: ReportStatus.DISMISSED,
+      resolvedBy: new Types.ObjectId(admin.id),
+      resolvedAt: new Date('2026-11-12T09:00:00.000Z'),
+    });
+
+    const defaultRes = await modApp!
+      .http()
+      .get('/api/admin/reports')
+      .set('Cookie', admin.cookie);
+    expect(defaultRes.status).toBe(200);
+    expect(defaultRes.body.total).toBe(2);
+    expect(defaultRes.body.items.map((r: { _id: string }) => r._id)).toEqual([
+      openNewer._id.toHexString(),
+      openOlder._id.toHexString(),
+    ]);
+
+    const dismissedRes = await modApp!
+      .http()
+      .get(`/api/admin/reports?status=${ReportStatus.DISMISSED}&limit=50`)
+      .set('Cookie', admin.cookie);
+    expect(dismissedRes.status).toBe(200);
+    expect(dismissedRes.body.total).toBe(1);
+    expect(dismissedRes.body.items[0]._id).toBe(dismissedDoc._id.toHexString());
+
+    const pagedRes = await modApp!
+      .http()
+      .get('/api/admin/reports?page=2&limit=1')
+      .set('Cookie', admin.cookie);
+    expect(pagedRes.status).toBe(200);
+    expect(pagedRes.body.items.map((r: { _id: string }) => r._id)).toEqual([
+      openOlder._id.toHexString(),
+    ]);
+    expect(pagedRes.body.totalPages).toBe(2);
+
+    for (const badQuery of [
+      'status=pending',
+      'limit=51',
+      'limit=0',
+      'page=0',
+    ]) {
+      const invalidRes = await modApp!
+        .http()
+        .get(`/api/admin/reports?${badQuery}`)
+        .set('Cookie', admin.cookie);
+      expect(invalidRes.status).toBe(400);
+      expect(invalidRes.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+  });
+
+  it('resolves reports (dismiss, hide, delete) across real blog posts/comments and fake review/itinerary targets, handling errors properly', async () => {
+    const admin = await loginAs(modApp!.connection, UserRole.ADMIN);
+    const author = await loginAs(modApp!.connection, UserRole.USER);
+    const reporter1 = await loginAs(modApp!.connection, UserRole.USER);
+    const reporter2 = await loginAs(modApp!.connection, UserRole.USER);
+
+    const savedImage = await fakeStorage.save({
+      originalname: 'cover.png',
+      mimetype: 'image/png',
+      size: 32,
+      buffer: imageBytes('png'),
+    });
+    const postDoc = await postModel.create({
+      authorId: new Types.ObjectId(author.id),
+      title: 'Reported Blog Post',
+      body: 'Post body with image and comments.',
+      tags: ['travel'],
+      images: [savedImage],
+      status: PostStatus.PUBLISHED,
+      publishedAt: new Date(),
+      commentCount: 2,
+      likeCount: 1,
+    });
+    const comment1Doc = await commentModel.create({
+      postId: postDoc._id,
+      authorId: new Types.ObjectId(reporter1.id),
+      body: 'Comment to hide first',
+    });
+    await commentModel.create({
+      postId: postDoc._id,
+      authorId: new Types.ObjectId(reporter2.id),
+      body: 'Second comment',
+    });
+    await likeModel.create({
+      postId: postDoc._id,
+      userId: new Types.ObjectId(reporter1.id),
+    });
+
+    // 1) Report comment -> hide closes sibling report, decrements post commentCount, emits both events.
+    const cReport1 = await reportModel.create({
+      reporterId: new Types.ObjectId(author.id),
+      targetType: ReportTargetType.COMMENT,
+      targetId: comment1Doc._id,
+      reason: 'Abusive comment',
+    });
+    const cReport2 = await reportModel.create({
+      reporterId: new Types.ObjectId(reporter2.id),
+      targetType: ReportTargetType.COMMENT,
+      targetId: comment1Doc._id,
+      reason: 'Also flagged',
+    });
+
+    const hideCommentRes = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${cReport1._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.HIDE });
+    expect(hideCommentRes.status).toBe(200);
+    expect(hideCommentRes.body).toMatchObject({
+      _id: cReport1._id.toHexString(),
+      status: ReportStatus.CONTENT_HIDDEN,
+      resolvedBy: admin.id,
+    });
+    expect(
+      (await commentModel.findById(comment1Doc._id).lean())?.isHidden,
+    ).toBe(true);
+    expect((await postModel.findById(postDoc._id).lean())?.commentCount).toBe(
+      1,
+    );
+    expect((await reportModel.findById(cReport2._id).lean())?.status).toBe(
+      ReportStatus.CONTENT_HIDDEN,
+    );
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        eventId: expect.any(String),
+        actorId: admin.id,
+        action: AuditAction.REPORT_RESOLVED,
+        target: { type: 'report', id: cReport1._id.toHexString() },
+        details: {
+          action: ReportResolutionAction.HIDE,
+          status: ReportStatus.CONTENT_HIDDEN,
+          targetType: ReportTargetType.COMMENT,
+          targetId: comment1Doc._id.toHexString(),
+          closedCount: 2,
+        },
+      },
+      {
+        eventId: expect.any(String),
+        actorId: admin.id,
+        action: AuditAction.CONTENT_HIDDEN,
+        target: {
+          type: ReportTargetType.COMMENT,
+          id: comment1Doc._id.toHexString(),
+        },
+        details: { reportId: cReport1._id.toHexString() },
+      },
+    ]);
+
+    // Resolving an already-resolved report returns 409 INVALID_STATUS_TRANSITION and emits no events.
+    fakeEvents.clear();
+    const conflictRes = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${cReport2._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.DISMISS });
+    expect(conflictRes.status).toBe(409);
+    expect(conflictRes.body.code).toBe(ErrorCode.InvalidStatusTransition);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+
+    // 2) Report post -> delete cascades comments, likes, and FakeStorageService image keys.
+    const postReport = await reportModel.create({
+      reporterId: new Types.ObjectId(reporter1.id),
+      targetType: ReportTargetType.POST,
+      targetId: postDoc._id,
+      reason: 'Severe policy breach',
+    });
+    const deletePostRes = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${postReport._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.DELETE });
+    expect(deletePostRes.status).toBe(200);
+    expect(deletePostRes.body.status).toBe(ReportStatus.CONTENT_DELETED);
+    expect(await postModel.findById(postDoc._id).lean()).toBeNull();
+    expect(await commentModel.countDocuments({ postId: postDoc._id })).toBe(0);
+    expect(await likeModel.countDocuments({ postId: postDoc._id })).toBe(0);
+    expect(fakeStorage.has(savedImage.key)).toBe(false);
+
+    // 3) Missing content on hide/delete -> 404 NOT_FOUND and report stays open, whereas dismiss succeeds!
+    fakeEvents.clear();
+    const deletedItineraryId = new Types.ObjectId();
+    const orphanReport = await reportModel.create({
+      reporterId: new Types.ObjectId(reporter1.id),
+      targetType: ReportTargetType.ITINERARY,
+      targetId: deletedItineraryId,
+      reason: 'Target already removed',
+    });
+    const missingHideRes = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${orphanReport._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.HIDE });
+    expect(missingHideRes.status).toBe(404);
+    expect(missingHideRes.body.code).toBe(ErrorCode.NotFound);
+    expect((await reportModel.findById(orphanReport._id).lean())?.status).toBe(
+      ReportStatus.OPEN,
+    );
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+
+    const dismissOrphanRes = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${orphanReport._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.DISMISS });
+    expect(dismissOrphanRes.status).toBe(200);
+    expect(dismissOrphanRes.body.status).toBe(ReportStatus.DISMISSED);
+
+    // 4) Validation & missing report ID errors.
+    const badReportId = await modApp!
+      .http()
+      .patch('/api/admin/reports/not-an-id')
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.DISMISS });
+    expect(badReportId.status).toBe(400);
+    expect(badReportId.body.code).toBe(ErrorCode.ValidationFailed);
+
+    const badAction = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${orphanReport._id.toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: 'ban' });
+    expect(badAction.status).toBe(400);
+    expect(badAction.body.code).toBe(ErrorCode.ValidationFailed);
+
+    const unknownReport = await modApp!
+      .http()
+      .patch(`/api/admin/reports/${new Types.ObjectId().toHexString()}`)
+      .set('Cookie', admin.cookie)
+      .send({ action: ReportResolutionAction.DISMISS });
+    expect(unknownReport.status).toBe(404);
+    expect(unknownReport.body.code).toBe(ErrorCode.NotFound);
+  });
+
+  it('supports direct hide and delete across all four content types (204, closes open reports, emits audit events, validates inputs)', async () => {
+    const admin = await loginAs(modApp!.connection, UserRole.ADMIN);
+    const author = await loginAs(modApp!.connection, UserRole.USER);
+    const reporter = await loginAs(modApp!.connection, UserRole.USER);
+
+    const postDoc = await postModel.create({
+      authorId: new Types.ObjectId(author.id),
+      title: 'Direct Moderation Post',
+      body: 'Body text',
+      status: PostStatus.PUBLISHED,
+      publishedAt: new Date(),
+      commentCount: 1,
+    });
+    const commentDoc = await commentModel.create({
+      postId: postDoc._id,
+      authorId: new Types.ObjectId(reporter.id),
+      body: 'Direct delete comment',
+    });
+    const reviewId = new Types.ObjectId().toHexString();
+    const itineraryId = new Types.ObjectId().toHexString();
+    reviewsFake.add(reviewId);
+    itinerariesFake.add(itineraryId);
+
+    const openReviewReport = await reportModel.create({
+      reporterId: new Types.ObjectId(reporter.id),
+      targetType: ReportTargetType.REVIEW,
+      targetId: new Types.ObjectId(reviewId),
+      reason: 'Hide review directly',
+    });
+    const openItineraryReport = await reportModel.create({
+      reporterId: new Types.ObjectId(reporter.id),
+      targetType: ReportTargetType.ITINERARY,
+      targetId: new Types.ObjectId(itineraryId),
+      reason: 'Delete itinerary directly',
+    });
+
+    // Direct hide on real post and fake review -> 204 No Content.
+    const hidePostRes = await modApp!
+      .http()
+      .patch(
+        `/api/admin/content/${ReportTargetType.POST}/${postDoc._id.toHexString()}/hide`,
+      )
+      .set('Cookie', admin.cookie);
+    expect(hidePostRes.status).toBe(204);
+    expect((await postModel.findById(postDoc._id).lean())?.isHidden).toBe(true);
+
+    fakeEvents.clear();
+    const hideReviewRes = await modApp!
+      .http()
+      .patch(`/api/admin/content/${ReportTargetType.REVIEW}/${reviewId}/hide`)
+      .set('Cookie', admin.cookie);
+    expect(hideReviewRes.status).toBe(204);
+    expect(reviewsFake.isHidden(reviewId)).toBe(true);
+    expect(
+      (await reportModel.findById(openReviewReport._id).lean())?.status,
+    ).toBe(ReportStatus.CONTENT_HIDDEN);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        eventId: expect.any(String),
+        actorId: admin.id,
+        action: AuditAction.CONTENT_HIDDEN,
+        target: { type: ReportTargetType.REVIEW, id: reviewId },
+        details: { closedReportCount: 1 },
+      },
+    ]);
+
+    // Direct delete on real comment (decrements post commentCount) and fake itinerary -> 204 No Content.
+    fakeEvents.clear();
+    const delCommentRes = await modApp!
+      .http()
+      .delete(
+        `/api/admin/content/${ReportTargetType.COMMENT}/${commentDoc._id.toHexString()}`,
+      )
+      .set('Cookie', admin.cookie);
+    expect(delCommentRes.status).toBe(204);
+    expect(await commentModel.findById(commentDoc._id).lean()).toBeNull();
+    expect((await postModel.findById(postDoc._id).lean())?.commentCount).toBe(
+      0,
+    );
+
+    fakeEvents.clear();
+    const delItineraryRes = await modApp!
+      .http()
+      .delete(`/api/admin/content/${ReportTargetType.ITINERARY}/${itineraryId}`)
+      .set('Cookie', admin.cookie);
+    expect(delItineraryRes.status).toBe(204);
+    expect(itinerariesFake.has(itineraryId)).toBe(false);
+    expect(
+      (await reportModel.findById(openItineraryReport._id).lean())?.status,
+    ).toBe(ReportStatus.CONTENT_DELETED);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        eventId: expect.any(String),
+        actorId: admin.id,
+        action: AuditAction.CONTENT_DELETED,
+        target: { type: ReportTargetType.ITINERARY, id: itineraryId },
+        details: { closedReportCount: 1 },
+      },
+    ]);
+
+    // 404 NOT_FOUND when target missing and 400 VALIDATION_FAILED for invalid type or ID.
+    fakeEvents.clear();
+    const missingHide = await modApp!
+      .http()
+      .patch(
+        `/api/admin/content/${ReportTargetType.ITINERARY}/${itineraryId}/hide`,
+      )
+      .set('Cookie', admin.cookie);
+    expect(missingHide.status).toBe(404);
+    expect(missingHide.body.code).toBe(ErrorCode.NotFound);
+
+    const missingDelete = await modApp!
+      .http()
+      .delete(`/api/admin/content/${ReportTargetType.ITINERARY}/${itineraryId}`)
+      .set('Cookie', admin.cookie);
+    expect(missingDelete.status).toBe(404);
+    expect(missingDelete.body.code).toBe(ErrorCode.NotFound);
+
+    const badType = await modApp!
+      .http()
+      .patch(
+        `/api/admin/content/flight/${new Types.ObjectId().toHexString()}/hide`,
+      )
+      .set('Cookie', admin.cookie);
+    expect(badType.status).toBe(400);
+    expect(badType.body.code).toBe(ErrorCode.ValidationFailed);
+
+    const badId = await modApp!
+      .http()
+      .delete(`/api/admin/content/${ReportTargetType.POST}/not-an-id`)
+      .set('Cookie', admin.cookie);
+    expect(badId.status).toBe(400);
+    expect(badId.body.code).toBe(ErrorCode.ValidationFailed);
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+  });
+});
+
 describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => {
   let accApp: TestApp | undefined;
   const fakeAccounts = new FakeAccountsService();
@@ -1544,6 +2158,7 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
 
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.MODERATOR_CREATED,
         target: { type: 'user', id: airlineModRes.body.id },
@@ -1579,6 +2194,7 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
     expect(getAirlineSpy).not.toHaveBeenCalled();
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(1);
     expect(fakeEvents.payloadsOf(Events.AdminAction)[0]).toEqual({
+      eventId: expect.any(String),
       actorId: admin.id,
       action: AuditAction.MODERATOR_CREATED,
       target: { type: 'user', id: hotelModRes.body.id },
@@ -1746,11 +2362,13 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
     const resetEvents = fakeEvents.payloadsOf(Events.AdminAction);
     expect(resetEvents).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PASSWORD_RESET,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PASSWORD_RESET,
         target: { type: 'user', id: modHotelId },
@@ -1841,21 +2459,25 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
 
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_SUSPENDED,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_REACTIVATED,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_SUSPENDED,
         target: { type: 'user', id: modHotelId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_REACTIVATED,
         target: { type: 'user', id: modHotelId },
@@ -2233,6 +2855,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline1Id,
         moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
@@ -2240,12 +2863,16 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
       },
     ]);
 
+    const firstDeactivationId = fakeEvents.payloadsOf(
+      Events.ProviderDeactivated,
+    )[0]?.eventId;
     // 2) Repeated deactivate keeps isActive=false and emits one event pair.
     fakeEvents.clear();
     const repeatDeactAirline = await accApp!
@@ -2255,8 +2882,12 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect(repeatDeactAirline.status).toBe(204);
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toHaveLength(1);
+    expect(
+      fakeEvents.payloadsOf(Events.ProviderDeactivated)[0]?.eventId,
+    ).not.toBe(firstDeactivationId);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
@@ -2276,6 +2907,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline1Id,
         moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
@@ -2283,6 +2915,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
@@ -2299,6 +2932,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline2Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline2Id,
         moderatorIds: [],
@@ -2320,6 +2954,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.HOTEL,
         providerId: hotel1Id,
         moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
@@ -2327,6 +2962,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotel1Id },
@@ -2343,6 +2979,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.HOTEL,
         providerId: hotel1Id,
         moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
@@ -2350,6 +2987,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotel1Id },
@@ -2371,6 +3009,13 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect(repeatReactHotel.status).toBe(204);
     expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toHaveLength(2);
+    expect(
+      new Set(
+        fakeEvents
+          .payloadsOf(Events.ProviderReactivated)
+          .map((event) => event.eventId),
+      ).size,
+    ).toBe(2);
 
     // 7) Verify moderators' account statuses, account events, and bookings remained untouched
     expect(suspendSpy).not.toHaveBeenCalled();

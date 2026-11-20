@@ -62,7 +62,7 @@ export class NotificationsController {
 
   @Patch(':id/read')
   @ApiOperation({ summary: 'GEN-01 Mark one of my notifications as read' })
-  @ApiParam({ name: 'id', example: '6736f0b2c5a1b2c3d4e5f601' })
+  @ApiParam({ name: 'id', type: String, example: '6736f0b2c5a1b2c3d4e5f601' })
   @ApiOkResponse({ type: NotificationResponseDto })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiBadRequestResponse({ description: 'Malformed notification id' })
@@ -71,6 +71,6 @@ export class NotificationsController {
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
   ): Promise<NotificationView> {
-    return this.notificationsService.markRead(user.id, id);
+    return this.notificationsService.markRead(user.id, id.toHexString());
   }
 }

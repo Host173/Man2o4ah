@@ -17,6 +17,7 @@ import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.regis
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
 import { ProfileService } from './users/profile.service.js';
+import { SelfDeactivationService } from './users/self-deactivation.service.js';
 import { UsersController } from './users/users.controller.js';
 
 /**
@@ -25,11 +26,12 @@ import { UsersController } from './users/users.controller.js';
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
  * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-06 refresh/logout,
- * ACC-19 current user)
+ * ACC-08 change password, ACC-19 current user)
  * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
  * currencies come from `ReferenceDataService`, looked up from the app, so
- * `ReferenceDataModule` must be registered beside this module); `AuthService`
- * and `ProfileService` stay internal. Other
+ * `ReferenceDataModule` must be registered beside this module; ACC-12
+ * self-deactivation); `AuthService`, `ProfileService` and
+ * `SelfDeactivationService` stay internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
@@ -56,12 +58,15 @@ import { UsersController } from './users/users.controller.js';
     AccountsService,
     AuthService,
     ProfileService,
+    SelfDeactivationService,
     RefreshAuthCookiesInterceptor,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AccountsService, ActiveBookingsCheckRegistry],
+  // ProfileService is exported for ITN-18's read of the ACC-09 preferred
+  // currency; it stays otherwise internal (GET/PATCH /users/me use it).
+  exports: [AccountsService, ActiveBookingsCheckRegistry, ProfileService],
 })
 export class AccountsModule {}

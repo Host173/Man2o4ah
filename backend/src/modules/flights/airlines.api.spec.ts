@@ -80,6 +80,12 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
     expect(document.components?.schemas?.AirlineResponseDto).not.toHaveProperty(
       'properties.id',
     );
+    expect(document.components?.schemas?.AirlineLogoResponseDto).toMatchObject({
+      properties: { _id: { type: 'string' } },
+    });
+    expect(
+      document.components?.schemas?.AirlineLogoResponseDto,
+    ).not.toHaveProperty('properties.id');
     expect(document.paths['/api/airlines/{id}']?.patch?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -242,9 +248,10 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
     expect(uploaded.body._id).toBe(airline.id);
     expect(uploaded.body).not.toHaveProperty('id');
     expect(uploaded.body.logo).toMatchObject({
-      id: expect.stringMatching(/^[0-9a-f]{24}$/),
+      _id: expect.stringMatching(/^[0-9a-f]{24}$/),
       url: expect.stringMatching(/^\/uploads\//),
     });
+    expect(uploaded.body.logo).not.toHaveProperty('id');
 
     const missing = await testApp!
       .http()
@@ -384,6 +391,55 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       maxExtraBagsPerPassenger: Number.MAX_SAFE_INTEGER,
     });
   });
+
+  it.each([
+    {
+      policy: 'baggage-policy',
+      body: { extraBagPriceMinor: 2500, maxExtraBagsPerPassenger: 2 },
+    },
+    {
+      policy: 'cancellation-policy',
+      body: { tiers: [{ daysBefore: 7, refundPercent: 80 }] },
+    },
+  ])(
+    'returns canonical logo IDs when replacing $policy',
+    async ({ policy, body }) => {
+      const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });
+      const moderator = await loginAs(
+        testApp!.connection,
+        UserRole.AIRLINE_MODERATOR,
+        { providerId: airline.id },
+      );
+      const withLogo = await airlines.updateLogo(
+        airline.id,
+        {
+          buffer: Buffer.from('logo image'),
+          originalname: 'logo.png',
+          mimetype: 'image/png',
+          size: 10,
+        },
+        moderator,
+      );
+
+      const updated = await testApp!
+        .http()
+        .put(`/api/airlines/${airline.id}/${policy}`)
+        .set('Cookie', moderator.cookie)
+        .send(body)
+        .expect(200);
+      expect(updated.body.logo).toEqual({
+        _id: withLogo.logo!.id,
+        url: withLogo.logo!.url,
+      });
+      expect(updated.body).not.toHaveProperty('id');
+
+      const profile = await testApp!
+        .http()
+        .get(`/api/airlines/${airline.id}`)
+        .expect(200);
+      expect(profile.body).toEqual(updated.body);
+    },
+  );
 
   it('rejects invalid baggage policy boundaries without changing the saved policy', async () => {
     const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });

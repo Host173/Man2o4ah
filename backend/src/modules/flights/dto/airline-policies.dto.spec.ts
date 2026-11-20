@@ -10,13 +10,14 @@ function invalidProperties(dto: object): string[] {
 describe('UpdateAirlineBaggagePolicyDto', () => {
   it.each([
     { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 0 },
+    { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 1 },
     { extraBagPriceMinor: 1, maxExtraBagsPerPassenger: 0 },
     { extraBagPriceMinor: 1, maxExtraBagsPerPassenger: 1 },
     {
       extraBagPriceMinor: Number.MAX_SAFE_INTEGER,
       maxExtraBagsPerPassenger: Number.MAX_SAFE_INTEGER,
     },
-  ])('accepts valid baggage policy boundaries: %o', (input) => {
+  ])('accepts baggage policy field boundaries: %o', (input) => {
     const dto = plainToInstance(UpdateAirlineBaggagePolicyDto, input);
     expect(invalidProperties(dto)).toEqual([]);
   });
@@ -39,10 +40,6 @@ describe('UpdateAirlineBaggagePolicyDto', () => {
         extraBagPriceMinor: Number.MAX_SAFE_INTEGER + 1,
         maxExtraBagsPerPassenger: 1,
       },
-      'extraBagPriceMinor',
-    ],
-    [
-      { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 1 },
       'extraBagPriceMinor',
     ],
     [{ maxExtraBagsPerPassenger: 0 }, 'extraBagPriceMinor'],

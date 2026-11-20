@@ -2400,9 +2400,7 @@ CLI version), stop and tell me instead of working around it.
 
 How the output was used:
 Added backend/scripts/dev-stripe.mjs (Node built-ins only) and the dev:stripe script: it checks the Stripe CLI, reads the webhook secret with `stripe listen --print-secret` and passes it to the backend as STRIPE_WEBHOOK_SECRET, runs `stripe listen` and `npm run start:dev` with [stripe]/[api] prefixes, masks any whsec_ value in the output, and stops both process trees on Ctrl+C or when either exits. Documented it in the root README Run section. npm run verify passes; with stripe missing from PATH the script prints the install message and exits 1. Committed on the PAY-01 branch; not pushed.
-================================================
 
-================================================
 Date: 2026-11-20
 Student: Kareem
 Tool: Claude Code
@@ -2414,9 +2412,7 @@ i don't thing it's working
 
 How the output was used:
 Stripe CLI 1.55 needs the events to forward. dev-stripe.mjs now runs stripe listen with --events for the four events the webhook handles (payment_intent.succeeded, payment_intent.payment_failed, refund.updated, refund.failed). Committed on the PAY-01 branch; not pushed.
-================================================
 
-================================================
 Date: 2026-11-20
 Student: Kareem
 Tool: Claude Code
@@ -2427,4 +2423,11 @@ ok resolve confilcts with the current develop then push and open a pr ,
 
 How the output was used:
 The PAY-01 PR (#183) was already merged into develop, so the dev:stripe commits went on a new branch from the latest develop, chore/PAY-01-dev-stripe-script (cherry-picked, no conflicts). npm run verify passes. Pushed it and opened a PR into develop.
+Related Requirement: ACC-08
+
+Prompt:
+ok i will commit you go and do another fast commit to fix the typecheck, so just npm run lint and format ig. do t fast
+
+How the output was used:
+On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
 ================================================

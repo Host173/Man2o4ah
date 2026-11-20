@@ -57,6 +57,21 @@ describe('POST /api/auth/register (API, ACC-01, GEN-13)', () => {
       });
     });
 
+    it('201 for a 72-character password (the bcrypt limit)', async () => {
+      const password = `${'a'.repeat(71)}1`;
+
+      const res = await t
+        .http()
+        .post(URL)
+        .send({ ...valid, password });
+
+      expect(res.status).toBe(201);
+      const stored = await users.findOne().select('+passwordHash').lean();
+      expect(await bcrypt.compare(password, stored?.passwordHash ?? '')).toBe(
+        true,
+      );
+    });
+
     it('never returns the password or its hash', async () => {
       const res = await t.http().post(URL).send(valid);
 
@@ -167,6 +182,11 @@ describe('POST /api/auth/register (API, ACC-01, GEN-13)', () => {
       ['an invalid email', { email: 'not-an-email' }, 'email'],
       ['a missing email', { email: undefined }, 'email'],
       ['a 7-character password', { password: 'abcdef1' }, 'password'],
+      [
+        'a 73-character password',
+        { password: `${'a'.repeat(72)}1` },
+        'password',
+      ],
       ['a password without a digit', { password: 'abcdefgh' }, 'password'],
       ['a password without a letter', { password: '12345678' }, 'password'],
       ['missing consent', { acceptTerms: undefined }, 'acceptTerms'],

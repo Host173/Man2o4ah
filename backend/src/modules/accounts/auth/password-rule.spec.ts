@@ -1,6 +1,11 @@
-import { isValidPassword, PASSWORD_RULE } from './password-rule.js';
+import {
+  isValidPassword,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE,
+} from './password-rule.js';
 
-// ACC-01: at least 8 characters, at least one letter and at least one digit.
+// ACC-01: 8 to 72 characters (cap: 17 Nov, #126), at least one letter and one digit.
 describe('password rule (ACC-01)', () => {
   describe('length boundary', () => {
     it('rejects 7 characters even with a letter and a digit', () => {
@@ -11,8 +16,17 @@ describe('password rule (ACC-01)', () => {
       expect(isValidPassword('abcdefg1')).toBe(true);
     });
 
-    it('accepts a long password', () => {
-      expect(isValidPassword(`${'a'.repeat(63)}1`)).toBe(true);
+    it('accepts exactly 72 characters (the bcrypt limit)', () => {
+      expect(isValidPassword(`${'a'.repeat(71)}1`)).toBe(true);
+    });
+
+    it('rejects 73 characters', () => {
+      expect(isValidPassword(`${'a'.repeat(72)}1`)).toBe(false);
+    });
+
+    it('exposes the limits the rule uses', () => {
+      expect(PASSWORD_MIN_LENGTH).toBe(8);
+      expect(PASSWORD_MAX_LENGTH).toBe(72);
     });
 
     it('rejects the empty string', () => {

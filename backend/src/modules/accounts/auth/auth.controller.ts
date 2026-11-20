@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -22,6 +23,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { ChangePasswordDto } from '../dto/change-password.dto.js';
 import { LoginDto } from '../dto/login.dto.js';
 import { AuthUserResponseDto, MeDto } from '../dto/me.response.dto.js';
 import { RegisterDto } from '../dto/register.dto.js';
@@ -134,5 +136,31 @@ export class AuthController {
   })
   me(@CurrentUser() user: AuthUser): Promise<MeDto> {
     return this.auth.me(user.id);
+  }
+
+  @Patch('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'ACC-08 Change password',
+    description:
+      'Also the forced change after a temporary password (ACC-07a): clears mustChangePassword. Revokes every session and clears both authentication cookies; log in again with the new password.',
+  })
+  @ApiNoContentResponse({ description: 'Password changed.' })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: current password wrong or missing, or the new password breaks the rule',
+  })
+  @ApiUnauthorizedResponse({
+    description:
+      'NOT_AUTHENTICATED, TOKEN_EXPIRED (refresh, then retry) or SESSION_EXPIRED',
+  })
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.auth.changePassword(user.id, dto);
+    clearAuthCookies(res);
   }
 }

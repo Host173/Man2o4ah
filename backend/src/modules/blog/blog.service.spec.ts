@@ -75,6 +75,7 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
       .useValue({})
+      // ItinerariesModule imports ModerationModule for ITN-20.
       .overrideProvider(getModelToken(Report.name))
       .useValue({})
       .overrideProvider(AppEvents)

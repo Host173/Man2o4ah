@@ -4,9 +4,15 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { buildConverter } from '../../src/modules/fx/fx-conversion.js';
+import type { Converter } from '../../src/modules/fx/fx.types.js';
+import { validateBudgetEntry } from '../../src/modules/itineraries/budget-entries.js';
+import { buildBudgetSummary } from '../../src/modules/itineraries/budget-summary.js';
 import { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import type { CreateBudgetEntryDto } from '../../src/modules/itineraries/dto/create-budget-entry.dto.js';
 import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import { UpdateActivityDto } from '../../src/modules/itineraries/dto/update-activity.dto.js';
+import type { UpdateBudgetEntryDto } from '../../src/modules/itineraries/dto/update-budget-entry.dto.js';
 import type { UpdateTransportCostDto } from '../../src/modules/itineraries/dto/update-transport-cost.dto.js';
 import { validateActivityInput } from '../../src/modules/itineraries/activity-input.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
@@ -19,6 +25,8 @@ import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import type { PayloadOf } from '../../src/common/events/event-payloads.js';
+import { Events } from '../../src/common/events/events.js';
 import {
   cityGroups,
   dayDate,
@@ -37,6 +45,9 @@ import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
+  BudgetEntryView,
+  BudgetSummaryInput,
+  BudgetSummaryView,
   ActivityView,
   ItineraryDayView,
   ItineraryDetailView,
@@ -77,17 +88,32 @@ function validateNotes(notes: string): string {
 }
 
 /**
+ * A seeded public itinerary. `visibility`, `isHidden` and `authorDeactivated`
+ * default to the real service's visible state (`public`, not hidden, author
+ * active), so existing fixtures keep working while ITN-20 tests can seed a
+ * private, moderated or deactivated-author item and expect it to be left out.
+ */
+export type FakePublicItinerarySeed = PublicItinerarySummary & {
+  visibility?: ItineraryVisibility;
+  isHidden?: boolean;
+  authorDeactivated?: boolean;
+};
+
+/**
  * A working `ItinerariesService` for other modules' tests: seeded public
  * itineraries, kept in memory. `listPublicByAuthor` keeps the contract's
- * owner filter, newest-`updatedAt` order and pagination.
+ * owner, visibility, hidden, deactivated-author filters, newest-`updatedAt`
+ * order and pagination, and also lists the owner-only itineraries a test
+ * created and made public.
  *
  * The owner-only methods (ITN-01) store their itineraries in memory too, so the
  * fake keeps the contract's owner scoping and 404: a test that drives one of
  * them through another module sees the same shapes and errors as the real
- * service. Validation is the real service's job, not the fake's.
+ * service. Validation is the real service's job, not the fake's, except where
+ * the contract's error shape is what the test checks (ITN-20 visibility).
  */
 export class FakeItinerariesService implements PublicApi<ItinerariesService> {
-  readonly itineraries: PublicItinerarySummary[];
+  readonly itineraries: FakePublicItinerarySeed[];
 
   private readonly owned = new Map<string, ItineraryDetailView>();
   private nextId = 1;
@@ -98,9 +124,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   readonly storage: FakeStorageService;
 
   constructor(
-    itineraries: PublicItinerarySummary[] = [],
+    itineraries: FakePublicItinerarySeed[] = [],
     referenceData: FakeReferenceDataService = new FakeReferenceDataService(),
     storage: FakeStorageService = new FakeStorageService(),
+    private readonly converter: Converter = buildConverter({
+      rateDate: '2026-11-01',
+      rates: { USD: 1, EGP: 50, EUR: 5, JPY: 100 },
+      minorUnits: { USD: 2, EGP: 2, EUR: 2, JPY: 0 },
+    }),
+    private readonly preferredCurrency: string = 'USD',
   ) {
     // A deep copy, so a test that changes its fixtures can't affect another test.
     this.itineraries = structuredClone(itineraries);
@@ -108,18 +140,91 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     this.storage = storage;
   }
 
-  listPublicByAuthor(
+  /** ITN-20: the shared public search, matching the real service's filters. */
+  async searchPublic(
+    query: PublicItineraryQuery = {},
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.findPublic(undefined, query);
+  }
+
+  async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
-    const { page = 1, limit = 10 } = query;
-    const matching = this.itineraries
-      .filter((itinerary) => itinerary.ownerId === ownerId)
-      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-    const items = matching.slice((page - 1) * limit, page * limit);
-    return Promise.resolve(
-      toPage(structuredClone(items), matching.length, page, limit),
+    return this.findPublic(ownerId, query);
+  }
+
+  private async findPublic(
+    ownerId: string | undefined,
+    query: PublicItineraryQuery,
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    const { page, limit } = this.parsePublicQuery(query);
+    const isVisible = (itinerary: {
+      visibility: ItineraryVisibility;
+      isHidden?: boolean;
+      authorDeactivated?: boolean;
+    }): boolean =>
+      itinerary.visibility === ItineraryVisibility.PUBLIC &&
+      !itinerary.isHidden &&
+      !itinerary.authorDeactivated;
+    const seeded = this.itineraries
+      .filter(
+        (itinerary) =>
+          (ownerId === undefined || itinerary.ownerId === ownerId) &&
+          isVisible({
+            ...itinerary,
+            visibility: itinerary.visibility ?? ItineraryVisibility.PUBLIC,
+          }),
+      )
+      .map((itinerary) => this.withoutSeedFlags(itinerary));
+    // Itineraries created through the owner methods become visible here once
+    // the owner makes them public, exactly like the real service's collection.
+    const owned = [...this.owned.values()]
+      .filter(
+        (itinerary) =>
+          (ownerId === undefined || itinerary.ownerId === ownerId) &&
+          isVisible(itinerary),
+      )
+      .map((itinerary) => this.toPublicSummary(itinerary));
+    const matching = [...seeded, ...owned].sort(
+      (a, b) =>
+        b.updatedAt.getTime() - a.updatedAt.getTime() ||
+        b.id.localeCompare(a.id),
     );
+    const items = matching.slice((page - 1) * limit, page * limit);
+    return toPage(structuredClone(items), matching.length, page, limit);
+  }
+
+  /** ACC-12: mirrors the real service's deactivation handler (idempotent). */
+  async onUserDeactivated(
+    payload: PayloadOf<typeof Events.UserDeactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, true);
+  }
+
+  /** ACC-12: mirrors the real service's reactivation handler (idempotent). */
+  async onUserReactivated(
+    payload: PayloadOf<typeof Events.UserReactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, false);
+  }
+
+  private async setAuthorDeactivated(
+    userId: string,
+    authorDeactivated: boolean,
+  ): Promise<void> {
+    // The real service ignores malformed IDs, so the fake does too.
+    if (typeof userId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(userId)) return;
+    for (const itinerary of this.itineraries) {
+      if (itinerary.ownerId === userId) {
+        itinerary.authorDeactivated = authorDeactivated;
+      }
+    }
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId === userId) {
+        itinerary.authorDeactivated = authorDeactivated;
+      }
+    }
   }
 
   async create(
@@ -178,6 +283,10 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDetailView> {
     const itinerary = this.findOwned(itineraryId, userId);
+    const visibility =
+      dto.visibility === undefined
+        ? undefined
+        : this.parseVisibility(dto.visibility);
     let changed = false;
     if (dto.title !== undefined) {
       itinerary.title = dto.title.trim();
@@ -189,6 +298,10 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     }
     if (dto.startDate !== undefined) {
       itinerary.startDate = dto.startDate;
+      changed = true;
+    }
+    if (visibility !== undefined) {
+      itinerary.visibility = visibility;
       changed = true;
     }
     // The real service returns the itinerary untouched when nothing changed.
@@ -588,6 +701,88 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return this.toDetail(itinerary);
   }
 
+  /** ITN-14: mirrors the service's ownership, validation and day checks. */
+  async addBudgetEntry(
+    itineraryId: string,
+    dayId: string,
+    dto: CreateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    await validateBudgetEntry(dto, this.referenceData, true);
+    const day = itinerary.days.find((candidate) => candidate._id === dayId);
+    if (!day) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    const entry: BudgetEntryView = {
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      category: dto.category,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    day.budgetEntries.push(entry);
+    itinerary.updatedAt = new Date();
+    return structuredClone(entry);
+  }
+
+  async updateBudgetEntry(
+    budgetId: string,
+    dto: UpdateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const { itinerary, entry } = this.findOwnedBudgetEntry(budgetId, userId);
+    await validateBudgetEntry(dto, this.referenceData, false);
+    for (const field of [
+      'category',
+      'amountMinor',
+      'currency',
+      'note',
+    ] as const) {
+      if (dto[field] !== undefined) {
+        Object.assign(entry, { [field]: dto[field] });
+        itinerary.updatedAt = new Date();
+      }
+    }
+    return structuredClone(entry);
+  }
+
+  async deleteBudgetEntry(budgetId: string, userId: string): Promise<void> {
+    const { itinerary, entry } = this.findOwnedBudgetEntry(budgetId, userId);
+    for (const day of itinerary.days) {
+      day.budgetEntries = day.budgetEntries.filter(
+        (candidate) => candidate._id !== entry._id,
+      );
+    }
+    itinerary.updatedAt = new Date();
+  }
+
+  /** ITN-14/18: the same pure roll-up and converter as the real service. */
+  async getBudgetSummary(
+    itineraryId: string,
+    userId: string,
+  ): Promise<BudgetSummaryView> {
+    const itinerary = this.toDetail(this.findOwned(itineraryId, userId));
+    const input: BudgetSummaryInput = {
+      startDate: toDateOnly(itinerary.startDate),
+      days: itinerary.days.map((day) => ({
+        _id: day._id,
+        cityId: day.cityId,
+        budgetEntries: day.budgetEntries,
+        activities: day.activities,
+      })),
+      transportCosts: itinerary.transportCosts.map((cost) => ({
+        dayId: cost.dayId,
+        amountMinor: cost.amountMinor,
+        currency: cost.currency,
+      })),
+    };
+    return buildBudgetSummary(input, this.converter, this.preferredCurrency);
+  }
+
   async addTransportCost(
     itineraryId: string,
     dto: CreateTransportCostDto,
@@ -665,6 +860,28 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     itinerary.updatedAt = new Date();
   }
 
+  private findOwnedBudgetEntry(
+    budgetId: string,
+    userId: string,
+  ): { itinerary: ItineraryDetailView; entry: BudgetEntryView } {
+    if (typeof budgetId !== 'string' || !/^[0-9a-f]{24}$/i.test(budgetId)) {
+      this.invalidField('budgetId', 'must be a valid ObjectId');
+    }
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      for (const day of itinerary.days) {
+        const entry = day.budgetEntries.find(
+          (candidate) => candidate._id === budgetId.toLowerCase(),
+        );
+        if (entry) return { itinerary, entry };
+      }
+    }
+    throw new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary not found',
+    });
+  }
+
   private findOwnedTransportCost(
     costId: string,
     userId: string,
@@ -691,6 +908,55 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       message: 'Validation failed',
       details: [{ field, message }],
     });
+  }
+
+  /** ITN-20: the real service's `public | private` check and 400 shape. */
+  private parseVisibility(value: unknown): ItineraryVisibility {
+    if (
+      value === ItineraryVisibility.PUBLIC ||
+      value === ItineraryVisibility.PRIVATE
+    ) {
+      return value;
+    }
+    throw this.invalidField(
+      'visibility',
+      'visibility must be public or private',
+    );
+  }
+
+  /** BLG-12/ITN-20: the same defaults and 1-50 limit the real service enforces. */
+  private parsePublicQuery(query: PublicItineraryQuery): {
+    page: number;
+    limit: number;
+  } {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    if (!Number.isInteger(page) || page < 1) {
+      throw this.invalidField('page', 'page must be an integer of at least 1');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw this.invalidField(
+        'limit',
+        'limit must be an integer between 1 and 50',
+      );
+    }
+    return { page, limit };
+  }
+
+  /** Drops the seed-only moderation flags from a public summary. */
+  private withoutSeedFlags(
+    itinerary: FakePublicItinerarySeed,
+  ): PublicItinerarySummary {
+    return {
+      id: itinerary.id,
+      ownerId: itinerary.ownerId,
+      title: itinerary.title,
+      countryCodes: [...itinerary.countryCodes],
+      startDate: itinerary.startDate,
+      dayCount: itinerary.dayCount,
+      cityIds: [...itinerary.cityIds],
+      updatedAt: itinerary.updatedAt,
+    };
   }
 
   private findOwned(itineraryId: string, userId: string): ItineraryDetailView {
@@ -732,6 +998,25 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       dayCount: itinerary.dayCount,
       visibility: itinerary.visibility,
       createdAt: itinerary.createdAt,
+      updatedAt: itinerary.updatedAt,
+    };
+  }
+
+  /**
+   * BLG-12: the public summary the real service builds from its collection,
+   * with `startDate` as a `Date` and `cityIds` sorted like `$sortArray`.
+   */
+  private toPublicSummary(
+    itinerary: ItineraryDetailView,
+  ): PublicItinerarySummary {
+    return {
+      id: itinerary._id,
+      ownerId: itinerary.ownerId,
+      title: itinerary.title,
+      countryCodes: [...itinerary.countryCodes],
+      startDate: toDateOnly(itinerary.startDate),
+      dayCount: itinerary.dayCount,
+      cityIds: [...new Set(itinerary.days.map((day) => day.cityId))].sort(),
       updatedAt: itinerary.updatedAt,
     };
   }

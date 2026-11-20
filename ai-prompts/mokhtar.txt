@@ -735,3 +735,414 @@ Approved; proceed as Mokhtar and use mokhtar.txt
 How the output was used:
 Authorized itinerary-package changes and the Mokhtar prompt log; GitHub publishing uses the authenticated pierreofficial account, whose log is also appended for CI.
 ================================================
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #72: "ITN-20: Visibility and public view" (Package 6 · Itineraries, Module: itineraries). Complete it cleanly, thoroughly and accurately on the first pass: follow the stacked-branching rule (branch feature/ITN-20-visibility-public-view cleanly from develop because #65/#8/#15 are merged), read all travel-platform skills/guidelines and the itineraries module, fakes, events and ports, and the ACC-12/GEN-09/GEN-10/blog integration points. Implement public/private visibility with clean validation and DTO/response shapes, read-only public itineraries for other users, hiding while the author is deactivated with idempotent restore on reactivation, reportable/hideable support through the moderation port, public itineraries by author for the blog, full fake parity and Swagger documentation. Write integration tests (events, port) and API tests, run SELF_REVIEW_PROMPT (2).md until clean (ignoring merge/conflict findings), run npm run format and npm run verify with zero errors, log the prompts in ai-prompts/mokhtar.txt, commit and push the branch, open PR "ITN-20: Visibility and public view" referencing #72 with the Self-Review Report, and confirm CI is green.
+
+Follow-up prompt: keep going.
+
+How the output was used:
+Branched from origin/develop, implemented visibility via UpdateItineraryDto + ItinerariesService.update/parseVisibility, added listPublicByAuthor with visibility/hidden/deactivated filters and pagination, added idempotent UserDeactivated/UserReactivated handlers, added ItineraryReportableContent registered with ReportableContentRegistry, widened FakeItinerariesService for parity, and added service/API/fake/port tests plus Swagger coverage. Fixed the fake's sync-throw vs rejected-promise mismatch and the blog skeleton spec's missing Report model mock, ran npm run format and npm run verify (2506 tests, all green), and proceeded to the self-review loop.
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report. Execute the full SELF_REVIEW_PROMPT (2).md: find the ITN-20 ticket and rules, check the branch is current, run npm ci and npm run verify, read the whole diff, try to break the riskiest spots with at most 8 throwaway zz-probe-*.spec.ts cases, and answer with the exact Self-Review Report format (ignore merge/conflict findings per my instruction).
+
+How the output was used:
+Ran the strict self-review against the committed branch diff, wrote throwaway probes for limits, validation, ownership and concurrency, fixed every non-merge finding it reported, re-ran checks until clean, and used the final report in the PR description.
+================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Continue the ITN-20 self-review. A strict read of the whole diff found one real gap: endpoints.md assigns GET /api/itineraries/public/search to ITN-20 + ITN-21 and requirement ITN-20 says public itineraries appear in shared search and are read-only to others, but the branch had no public search route, so non-owners could not read public itineraries at all. Fix it without taking over ITN-21's keyword/filter/detail/clone work: add a minimal @Public paginated search (visible public itineraries only, newest first), typed Swagger response, fake parity, and service/API tests for anonymous access, private removal taking effect immediately, and invalid pagination. Re-run npm run format and npm run verify and keep the prompt log append-only.
+
+How the output was used:
+Added ItinerariesService.searchPublic and a shared findPublicPage filter used with listPublicByAuthor, declared GET /api/itineraries/public/search before /:id with @Public() and PaginatedPublicItinerariesResponseDto, mirrored it in FakeItinerariesService, and added service, fake and API tests. Ran 7 throwaway probes (boundaries, invalid visibility, 401/404, malformed reports, concurrent toggles, fake parity, anonymous public search) - all passed after the fix. Deleted the probes and re-ran the full verification suite.
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Continue the ITN-20 self-review. The PR was opened but GitHub reported no checks at all; the cause was that the PR had merge conflicts (GitHub skips pull_request workflows for conflicting PRs). Merge origin/develop into feature/ITN-20-visibility-public-view (never rebase), resolve every conflict preserving both sides (blog.service.spec.ts Report + AppEvents mocks, itineraries.module.ts ActivitiesController + ItineraryReportableContent, itineraries.api.spec.ts ITN-20 + ITN-10 test blocks), keep the prompt log append-only, fix any cross-module test fallout from develop's GEN-10 moderation suite, re-run npm run format and npm run verify until green, push, update PR #207, and confirm CI is green.
+
+How the output was used:
+Merged develop (33 commits) and resolved the three conflicts preserving both sides; removed a duplicate Report import, kept the AppEvents mock, combined the module's controllers/providers, and kept both ITN-20 and ITN-10 API test blocks. Overrode the real itinerary report provider in admin.api.spec.ts's GEN-10 suite so its own in-memory fake can register. Re-ran npm run format and npm run verify: 2637 tests passed, 98.36% lines, build passed.
+================================================
+
+=============================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-12
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. You are implementing GitHub Issue #69: **"ITN-12: Activity images"** (Package: 6 · Itineraries, Module: itineraries)[cite: 9].
+
+### 1. Branching Rule (Stacked Branching Only for Related Issues)
+* **Stacked branching is allowed ONLY for related/dependent issues**; if an issue is NOT related, its branch must come from `develop`.
+* Check the dependencies for **ITN-12 (#69)**: it depends on `#68` (`ITN-10`, related activities feature) and `#9` (`CTR-05`)[cite: 9].
+* Because `#68` (`ITN-10`) is directly related to activity images, you may branch/stack from the related `ITN-10` work if `#68` is not yet merged into `develop` (or branch cleanly from `develop` if `#68` is already merged). Ensure the resulting branch is named `feature/ITN-12-activity-images`[cite: 9]. Do **not** stack off unrelated branches.
+
+### 2. Full Codebase Context & Implementation (`ITN-12`)
+* Read all project skills and guidelines in `docs/ai/skills/travel-platform/` and follow repository conventions and data-model **section 3.8**[cite: 9].
+* Implement **ITN-12: Activity images** cleanly and thoroughly[cite: 9]:
+  * Attach up to **5 images** to an activity and support removing attached images[cite: 9].
+  * Ensure deleting an itinerary also deletes its activity image files/storage records per **data-model section 3.8**[cite: 9].
+  * Enforce auth, ownership/scoping, validation limits (`400` on invalid inputs or exceeding 5 images), error shapes, and Swagger documentation consistent with the project.
+
+### 3. Testing Plan (Including `SELF_REVIEW_PROMPT (2).md`)
+Make sure you understand and execute the full testing strategy (`Tests: Integration (storage fake); API (limits)` / `TDD required: No`)[cite: 9]:
+* **Integration tests (storage fake):** Test image attachment, removal, and cascading image file deletion when an itinerary is deleted using the storage fake[cite: 9].
+* **API tests (limits & contracts):** Test the 5-image maximum limit, boundary/error cases, and endpoints[cite: 9].
+* **Self-review test/check pass (`SELF_REVIEW_PROMPT (2).md`):** Run `SELF_REVIEW_PROMPT (2).md` against your branch and fix non-merge issues it flags, re-running until clean.
+  * **Merge-issue rule during self-review:** If the self-review flags **merge conflicts or anything related to merging**, **ignore** the merge/conflict finding and do not get blocked on it.
+* Run formatting, linting, typechecking, tests, and build (`npm run verify`) locally and confirm everything passes cleanly.
+
+### 4. Log Prompts, Push, Open PR & Confirm Green CI Before Moving Next
+* Log the prompts used for this task into the repository's prompt log following project rules.
+* Commit your changes cleanly and push `feature/ITN-12-activity-images`[cite: 9].
+* Open a Pull Request titled **`ITN-12: Activity images`** referencing `#69` and include the **Self-Review Report** from `SELF_REVIEW_PROMPT (2).md`[cite: 9].
+* **Verify that CI checks are green** before moving on to the next ticket.
+[Attached: SELF_REVIEW_PROMPT (2).md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Branched cleanly from develop (ITN-10 already merged), implemented ITN-12 activity images with a 5-image atomic limit, storage-fake cascade on itinerary/day deletion, owner scoping and Swagger; added integration and API tests; updated existing itinerary test setups to use the storage fake; ran `npm run format` and `npm run verify` (2468 tests green; itineraries.service.ts 89.63% lines); will run review probes, commit, push and open the ITN-12 PR with the report.
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-12
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. **CRITICAL GIT & PR RULES:**
+- Do **NOT** create any new branch or open any new Pull Request.
+- Switch directly to the **already existing `feature/ITN-12-activity-images` branch** (Issue #69: `ITN-12: Activity images`) and update the **already opened PR** in place.
+
+### Context & Current Status
+The 5 strict-review fixes (`794f0f39` red tests + `981e0d7c` implementation) are already pushed on `feature/ITN-12-activity-images`:
+1. Retaining itinerary/day references until storage cleanup succeeds so transient unlink failures can be retried.
+2. Conditional snapshot checks returning `409 CONCURRENT_CHANGE` on concurrent day/image mutations.
+3. Activity image HTTP/plain views and Swagger exposing computed `url` while DB stores only `_id` and `key`.
+4. `FakeItinerariesService` capping parallel uploads at 5, discarding rejected files, and mirroring cleanup conflicts.
+5. PR description updated to match the repository template.
+
+However, the last validation report flagged unfinished verification items and remaining tasks before merge readiness:
+- Full `npm run verify` timed out on the `ITN-28` PDF Unicode test (20s timeout under parallel load), preventing `npm run verify` from reaching `build` in one full pass.
+- Full-suite coverage pass was not cleanly completed in a single passing run (`91.37%` line coverage on `itineraries.service.ts` was only captured on a partial command that exited 1 on unselected services).
+- `npm audit --omit=dev --audit-level=high` failed due to npm registry HTTP 429 and has not passed yet.
+- The prompt-log entry (`ai-prompts/mokhtar.txt` or project prompt log) still needs to be updated.
+- Updated-head CI checks and a clean final pass of `SELF_REVIEW_PROMPT (2).md` are required.
+
+### 1. Switch to `feature/ITN-12-activity-images` & Inspect State
+* Read all project skills and guidelines in `docs/ai/skills/travel-platform/`.
+* Fetch remote refs (`git fetch origin`) and switch directly to `feature/ITN-12-activity-images` (`git pull` latest commits).
+* Inspect `git log -n 5`, `git status`, and the current PR checks (`gh pr checks`) to confirm exact commit and CI status.
+
+### 2. Resolve Remaining Verification & Coverage Gaps
+* **Full `npm run verify` Pass:** Run `npm run format` and execute the complete `npm run verify` pipeline until it finishes cleanly with **exit code 0** (including formatting, `oxlint`, `tsc` typecheck, all tests, and `build`â€”without timeout failures).
+* **Coverage Verification:** Run the full-suite coverage command configured by the repository so coverage thresholds pass across the entire suite with **exit code 0** (and confirm `itineraries.service.ts`, controllers/DTOs, and fakes meet all coverage requirements).
+* **Security Audit Check:** Re-run `npm audit --omit=dev --audit-level=high` (retry if transient HTTP 429 occurs) and verify zero high/critical production dependency vulnerabilities.
+* **Code & Edge-Case Check:** Double-check all 5 strict-review items (retain-parent cleanup retry, `409 CONCURRENT_CHANGE` snapshot race handling, computed `url` in views + Swagger without persisting `url` in MongoDB, fake parallel 5-cap + file discard + cleanup conflict parity, and inclusive 5 MB boundary tests) to ensure nothing was missed.
+
+### 3. Run `SELF_REVIEW_PROMPT (2).md` Loop Until Clean
+* Read and execute the attached `SELF_REVIEW_PROMPT (2).md` against `feature/ITN-12-activity-images`.
+* Fix any non-merge issues, missing tests, or rule violations surfaced by the self-review and re-run `SELF_REVIEW_PROMPT (2).md` until a full pass completes with **zero unresolved problems**.
+  * **Merge-issue rule during self-review:** If `SELF_REVIEW_PROMPT (2).md` flags **merge conflicts or anything related to merging**, **ignore** the merge/conflict finding and do not get blocked on it.
+
+### 4. Update Prompt Log, Push & Update Existing PR
+* Log the prompts used for this task into the repository's prompt log (`ai-prompts/mokhtar.txt` per repo conventions).
+* Commit any final changes cleanly and push directly to `feature/ITN-12-activity-images`.
+* Update the **existing Pull Request** (`ITN-12: Activity images`) with the updated verification results and the **complete Self-Review Report** from the final clean run of `SELF_REVIEW_PROMPT (2).md`, and verify that GitHub CI checks turn **green**.
+Attached file: `C:\Users\moham\Downloads\SELF_REVIEW_PROMPT (2).md`
+
+How the output was used:
+Switched to the existing ITN-12 branch, completed full verify (2478 tests), standalone coverage (exit 0, 92.55% on itineraries.service.ts), npm audit (0 vulnerabilities), and a clean self-review with 7 probes; updated this prompt log.
+[Attached: SELF_REVIEW_PROMPT (2).md]Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-12
+
+Prompt:
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Ran the strict self-review on feature/ITN-12-activity-images: 7 throwaway probes passed, no unresolved problems; final report attached to the existing PR #195.
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-14
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. You are implementing GitHub Issue #70: **"ITN-14: Budgets and budget summary"** (Package: 6 Â· Itineraries, Module: itineraries)[cite: 10].
+
+### 1. Branching Rule (Stacked Branching Only for Related Issues)
+* **Stacked branching is allowed ONLY for related/dependent issues**; if an issue is NOT related, its branch must come cleanly from `develop`.
+* Check the dependencies for **ITN-14 (#70)**: it depends on `#66` (`ITN-05`), `#68` (`ITN-10`), `#9` (`CTR-05`), and `#71` (`ITN-16`: Transport costs)[cite: 10].
+* If any of these related dependency branches (especially `#71` / `ITN-16` or `#68` / `ITN-10`) are not yet merged into `develop`, stack/branch from the appropriate related dependency branch (or branch cleanly from `develop` if all dependencies are merged)[cite: 10].
+* Name the branch **`feature/ITN-14-budgets-budget-summary`**[cite: 10]. Do **not** stack off unrelated branches.
+
+### 2. Full Codebase Context & Implementation (`ITN-14` & `ITN-18` Conversion Use)
+* Read all project skills and guidelines in `docs/ai/skills/travel-platform/` and follow all repository conventions[cite: 10].
+* Inspect the existing `itineraries` module, days/city-groups (`ITN-05`), activities (`ITN-10`), transport costs (`ITN-16`), and FX/reference-data contracts (`CTR-05`) so you understand the full data model and integration points before writing code[cite: 10].
+* Implement **ITN-14** (and **ITN-18** conversion usage) thoroughly[cite: 10]:
+  * **Budget entries:** Support budget entries per day and category in any supported currency[cite: 10].
+  * **Budget summary:** Compute and return summaries per **category**, **day**, **city group**, and **total** converted into the **user's preferred currency** along with the **rate date**[cite: 10].
+  * Enforce session authentication, strict `ownerId` scoping (`404 NOT_FOUND` for missing/foreign itineraries), proper validation/error shapes (`400 VALIDATION_FAILED` for unsupported currencies, invalid amounts, invalid categories/days), fake parity, and Swagger documentation[cite: 10].
+
+### 3. Testing Plan (`TDD required: Yes` â€” Including `SELF_REVIEW_PROMPT (2).md`)
+* **Strict TDD Discipline (`TDD required: Yes`):** Write failing ("red") tests firstâ€”and commit red tests cleanly before/separately from the implementation fixâ€”before writing the production code[cite: 10].
+* **Unit tests (totals & conversion with FX fake):** Test multi-currency totals, category/day/city-group/overall rollups, currency conversion using the FX fake, and rate date reporting[cite: 10].
+* **API tests:** Test budget entry endpoints, summary endpoints, supported/unsupported currencies, preferred currency handling, auth/ownership scoping, and validation boundaries[cite: 10].
+* **Self-review pass (`SELF_REVIEW_PROMPT (2).md`):** Run `SELF_REVIEW_PROMPT (2).md` against your branch and fix any issues, missing tests, or rule violations it surfaces, re-running until clean.
+  * **Merge-issue rule during self-review:** If the self-review flags **merge conflicts or anything related to merging**, **ignore** the merge/conflict finding and do not get blocked on it.
+* Run `npm run format` and `npm run verify` locally and confirm formatting, linting, typechecking, all unit/API/fake tests, and build pass with **zero errors**.
+
+### 4. Log Prompts, Push, Open PR & Confirm Green CI Before Moving Next
+* Log the prompts used for this task into the repository's prompt log following project rules.
+* Commit your changes cleanly and push `feature/ITN-14-budgets-budget-summary`[cite: 10].
+* Open a Pull Request titled **`ITN-14: Budgets and budget summary`** referencing `#70` and attach the **Self-Review Report** from `SELF_REVIEW_PROMPT (2).md`[cite: 10].
+* **Verify that CI checks are green** before moving on to the next ticket.
+Attached file: `C:\Users\moham\Downloads\SELF_REVIEW_PROMPT (2).md`
+
+How the output was used:
+Branched ITN-14 from the ITN-16 dependency branch, wrote red API tests first (commit 0e02d54), then implemented budget CRUD, the converted summary, fake parity and tests; npm run verify passed (2521 tests, 98% lines).
+[Attached: SELF_REVIEW_PROMPT (2).md]Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+================================================
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-14
+
+Prompt:Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Ran the strict self-review on feature/ITN-14-budgets-budget-summary: 5 throwaway probes passed with no problems; report attached to the PR.
+================================================

@@ -4,18 +4,25 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
+import { OnEvent } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import type { PayloadOf } from '../../common/events/event-payloads.js';
+import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
+import { ProfileService } from '../accounts/users/profile.service.js';
+import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { validateBudgetEntry } from './budget-entries.js';
+import { buildBudgetSummary } from './budget-summary.js';
 import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -25,6 +32,8 @@ import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
+import type { CreateBudgetEntryDto } from './dto/create-budget-entry.dto.js';
+import type { UpdateBudgetEntryDto } from './dto/update-budget-entry.dto.js';
 import { AddActivityDto } from './dto/add-activity.dto.js';
 import type { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import { UpdateActivityDto } from './dto/update-activity.dto.js';
@@ -34,6 +43,8 @@ import { validateTransportCost } from './transport-costs.js';
 import type {
   ActivityView,
   BudgetEntryView,
+  BudgetSummaryInput,
+  BudgetSummaryView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -43,6 +54,7 @@ import type {
 } from './itineraries.types.js';
 import {
   Itinerary,
+  ItineraryVisibility,
   MAX_DAYS,
   MAX_NOTES_LENGTH,
   type Activity,
@@ -78,8 +90,9 @@ const MAX_TITLE_LENGTH = 100;
 
 /**
  * Itinerary workflows (ITN-01, ITN-03, ITN-16): create, edit, delete, list the owner's
- * itineraries and open one. Every read and write is scoped by `ownerId`, so
- * another user's itinerary is a 404, never a 403 (ACC-11).
+ * itineraries and open one. Owner-scoped reads and writes filter by `ownerId`,
+ * so another user's itinerary is a 404 (ACC-11). Public summaries separately
+ * filter visibility, moderation and author-deactivation flags (ITN-20).
  */
 @Injectable()
 export class ItinerariesService {
@@ -90,7 +103,18 @@ export class ItinerariesService {
     private readonly itineraryModel: Model<StoredItinerary>,
     private readonly referenceData: ReferenceDataService,
     private readonly storage: StorageService,
+    private readonly moduleRef: ModuleRef,
+    private readonly profile: ProfileService,
   ) {}
+
+  /**
+   * ITN-18: the fx module is registered in AppModule but is not imported here,
+   * so importers of ItinerariesModule don't need the exchange-rate model just
+   * to start. The same lazy lookup accounts uses for reference data.
+   */
+  private fx(): FxService {
+    return this.moduleRef.get(FxService, { strict: false });
+  }
 
   /** ITN-01: creates a private itinerary owned by the authenticated user. */
   async create(
@@ -146,7 +170,7 @@ export class ItinerariesService {
     return this.toDetailView(itinerary as ItineraryRecord);
   }
 
-  /** ITN-01: edits the owner's title, countries or start date; other fields stay. */
+  /** ITN-01/20: edits the owner's title, countries, start date or visibility. */
   async update(
     itineraryId: string,
     dto: UpdateItineraryDto,
@@ -159,6 +183,7 @@ export class ItinerariesService {
       title?: string;
       countryCodes?: string[];
       startDate?: Date;
+      visibility?: ItineraryVisibility;
     } = {};
     if (dto.title !== undefined) {
       updates.title = this.normalizeTitle(dto.title);
@@ -168,6 +193,9 @@ export class ItinerariesService {
     }
     if (dto.startDate !== undefined) {
       updates.startDate = this.parseStartDate(dto.startDate);
+    }
+    if (dto.visibility !== undefined) {
+      updates.visibility = this.parseVisibility(dto.visibility);
     }
 
     if (Object.keys(updates).length === 0) {
@@ -779,6 +807,163 @@ export class ItinerariesService {
     throw failure;
   }
 
+  /**
+   * ITN-14: appends a non-negative budget entry to one day. The entry and all
+   * read-side totals derive from the stored array, so nothing else is cached.
+   * The `$map` re-reads `days` at write time: an overlapping add or edit on a
+   * different day is preserved (the ITN-05/ITN-16 concurrency pattern).
+   */
+  async addBudgetEntry(
+    itineraryId: string,
+    dayId: string,
+    dto: CreateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+    const targetDayId = this.parseId(dayId, 'dayId');
+    if (!(await this.itineraryModel.exists({ _id: id, ownerId }))) {
+      throw this.notFound();
+    }
+    await validateBudgetEntry(dto, this.referenceData, true);
+
+    const entry: StoredBudgetEntry = {
+      _id: new Types.ObjectId(),
+      category: dto.category,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            budgetEntries: {
+                              $concatArrays: [
+                                '$$day.budgetEntries',
+                                { $literal: [entry] },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+    return this.toBudgetEntryView(entry);
+  }
+
+  /** ITN-14: edits only the supplied fields, preserving concurrent edits to others. */
+  async updateBudgetEntry(
+    budgetId: string,
+    dto: UpdateBudgetEntryDto,
+    userId: string,
+  ): Promise<BudgetEntryView> {
+    const targetId = this.parseId(budgetId, 'budgetId');
+    const ownerId = this.parseId(userId, 'userId');
+    const filter = { ownerId, 'days.budgetEntries._id': targetId };
+    const itinerary = await this.itineraryModel.findOne(filter).lean().exec();
+    if (!itinerary) throw this.notFound();
+    await validateBudgetEntry(dto, this.referenceData, false);
+
+    const changes = {
+      ...(dto.category !== undefined ? { category: dto.category } : {}),
+      ...(dto.amountMinor !== undefined
+        ? { amountMinor: dto.amountMinor }
+        : {}),
+      ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
+      ...(dto.note !== undefined ? { note: dto.note } : {}),
+    };
+    let record = itinerary;
+    if (Object.keys(changes).length > 0) {
+      const updated = await this.itineraryModel
+        .findOneAndUpdate(
+          filter,
+          [
+            {
+              $set: {
+                days: {
+                  $map: {
+                    input: '$days',
+                    as: 'day',
+                    in: {
+                      $mergeObjects: [
+                        '$$day',
+                        {
+                          budgetEntries: {
+                            $map: {
+                              input: '$$day.budgetEntries',
+                              as: 'entry',
+                              in: {
+                                $cond: [
+                                  { $eq: ['$$entry._id', targetId] },
+                                  {
+                                    $mergeObjects: [
+                                      '$$entry',
+                                      { $literal: changes },
+                                    ],
+                                  },
+                                  '$$entry',
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+          { returnDocument: 'after', updatePipeline: true },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      record = updated;
+    }
+    const entry = (record.days ?? [])
+      .flatMap((day) => day.budgetEntries ?? [])
+      .find((candidate) => candidate._id.equals(targetId));
+    if (!entry) throw this.notFound();
+    return this.toBudgetEntryView(entry);
+  }
+
+  /** ITN-14: pulls one entry without rewriting the others; foreign IDs are 404. */
+  async deleteBudgetEntry(budgetId: string, userId: string): Promise<void> {
+    const targetId = this.parseId(budgetId, 'budgetId');
+    const ownerId = this.parseId(userId, 'userId');
+    const result = await this.itineraryModel.updateOne(
+      { ownerId, 'days.budgetEntries._id': targetId },
+      { $pull: { 'days.$[].budgetEntries': { _id: targetId } } },
+    );
+    if (result.matchedCount === 0) throw this.notFound();
+  }
+
   /** ITN-16: adds a transport cost; the day must still exist at write time. */
   async addTransportCost(
     itineraryId: string,
@@ -900,6 +1085,50 @@ export class ItinerariesService {
       { $pull: { transportCosts: { _id: targetId } } },
     );
     if (result.matchedCount === 0) throw this.notFound();
+  }
+
+  /**
+   * ITN-14/18: the owner's budget summary, computed on read. One converter is
+   * loaded for the whole trip so every amount uses the same cached rate date;
+   * the display currency is the user's ACC-09 preferred currency. Ownership is
+   * checked before either dependency is called, so a foreign itinerary is 404.
+   */
+  async getBudgetSummary(
+    itineraryId: string,
+    userId: string,
+  ): Promise<BudgetSummaryView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const displayCurrency = await this.profile.getPreferredCurrency(userId);
+    if (!(await this.referenceData.getCurrency(displayCurrency))) {
+      throw new BadRequestException({
+        code: ErrorCode.UnsupportedCurrency,
+        message: `Unsupported currency: ${displayCurrency}`,
+      });
+    }
+    const converter = await this.fx().getConverter();
+
+    const input: BudgetSummaryInput = {
+      startDate: itinerary.startDate,
+      days: (itinerary.days ?? []).map((day) => ({
+        _id: day._id.toHexString(),
+        cityId: day.cityId,
+        budgetEntries: day.budgetEntries ?? [],
+        activities: day.activities ?? [],
+      })),
+      transportCosts: (itinerary.transportCosts ?? []).map((cost) => ({
+        dayId: cost.dayId.toHexString(),
+        amountMinor: cost.amountMinor,
+        currency: cost.currency,
+      })),
+    };
+    return buildBudgetSummary(input, converter, displayCurrency);
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */
@@ -1115,21 +1344,121 @@ export class ItinerariesService {
   }
 
   /**
+   * ITN-20: the shared public search. ITN-21 adds keyword and filters; this
+   * level already exposes every visible public itinerary, newest first. It is
+   * read-only: no route here lets another user modify what they can see.
+   */
+  async searchPublic(
+    query: PublicItineraryQuery = {},
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.findPublicPage({}, query);
+  }
+
+  /**
    * BLG-12: an author's public itineraries for the author page, newest
    * `updatedAt` first. Only `visibility: public` itineraries are included, and
    * hidden ones or those of a deactivated author are left out (ITN-20).
    * Returns the shared paginated shape; `page` defaults to 1 and `limit` to 10.
-   * Implemented in ITN-20.
    */
-  listPublicByAuthor(
+  async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
-    void ownerId;
-    void query;
-    throw new NotImplementedException(
-      'listPublicByAuthor: implemented in ITN-20',
+    const owner = this.parseId(ownerId, 'ownerId');
+    return this.findPublicPage({ ownerId: owner }, query);
+  }
+
+  private async findPublicPage(
+    filter: { ownerId?: Types.ObjectId },
+    query: PublicItineraryQuery,
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    const { page, limit } = this.parsePublicQuery(query);
+    const result = await paginate(
+      this.itineraryModel,
+      {
+        ...filter,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      },
+      { page, limit },
+      { sort: { updatedAt: -1, _id: -1 } },
     );
+    return {
+      ...result,
+      items: result.items.map((itinerary) =>
+        this.toPublicSummary(itinerary as ItineraryRecord),
+      ),
+    };
+  }
+
+  /**
+   * ACC-12: hides every itinerary of a deactivated author from shared lists on
+   * future reads. Idempotent: the conditional update only touches rows whose
+   * flag still differs, so delivering the event twice changes nothing.
+   */
+  @OnEvent(Events.UserDeactivated)
+  async onUserDeactivated(
+    payload: PayloadOf<typeof Events.UserDeactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, true);
+  }
+
+  /** ACC-12: restores the itineraries of a reactivated author (idempotent). */
+  @OnEvent(Events.UserReactivated)
+  async onUserReactivated(
+    payload: PayloadOf<typeof Events.UserReactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, false);
+  }
+
+  private async setAuthorDeactivated(
+    userId: string,
+    authorDeactivated: boolean,
+  ): Promise<void> {
+    if (typeof userId !== 'string' || !OBJECT_ID_HEX_RE.test(userId)) return;
+    await this.itineraryModel
+      .updateMany(
+        {
+          ownerId: new Types.ObjectId(userId),
+          authorDeactivated: !authorDeactivated,
+        },
+        { $set: { authorDeactivated } },
+      )
+      .exec();
+  }
+
+  /** ITN-20: `public` or `private`; anything else is a 400 VALIDATION_FAILED. */
+  private parseVisibility(value: unknown): ItineraryVisibility {
+    if (
+      value === ItineraryVisibility.PUBLIC ||
+      value === ItineraryVisibility.PRIVATE
+    ) {
+      return value;
+    }
+    throw this.invalidField(
+      'visibility',
+      'visibility must be public or private',
+    );
+  }
+
+  /** BLG-12/ITN-20: the shared page defaults, with GEN-05's 1-50 limit. */
+  private parsePublicQuery(query: PublicItineraryQuery): {
+    page: number;
+    limit: number;
+  } {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    if (!Number.isInteger(page) || page < 1) {
+      throw this.invalidField('page', 'page must be an integer of at least 1');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw this.invalidField(
+        'limit',
+        'limit must be an integer between 1 and 50',
+      );
+    }
+    return { page, limit };
   }
 
   private async resolveCountryCodes(codes: string[]): Promise<string[]> {
@@ -1269,6 +1598,24 @@ export class ItinerariesService {
       dayCount: itinerary.dayCount,
       visibility: itinerary.visibility,
       createdAt: itinerary.createdAt,
+      updatedAt: itinerary.updatedAt,
+    };
+  }
+
+  /**
+   * BLG-12: the public view of an itinerary. It intentionally exposes only the
+   * fields the author page needs, with `id` (not `_id`) per the blog contract,
+   * and leaves days, budgets and transport costs to the public detail view.
+   */
+  private toPublicSummary(itinerary: ItineraryRecord): PublicItinerarySummary {
+    return {
+      id: itinerary._id.toHexString(),
+      ownerId: itinerary.ownerId.toHexString(),
+      title: itinerary.title,
+      countryCodes: [...itinerary.countryCodes],
+      startDate: itinerary.startDate,
+      dayCount: itinerary.dayCount,
+      cityIds: [...itinerary.cityIds],
       updatedAt: itinerary.updatedAt,
     };
   }

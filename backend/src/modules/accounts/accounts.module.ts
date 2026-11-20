@@ -65,6 +65,8 @@ import { UsersController } from './users/users.controller.js';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AccountsService, ActiveBookingsCheckRegistry],
+  // ProfileService is exported for ITN-18's read of the ACC-09 preferred
+  // currency; it stays otherwise internal (GET/PATCH /users/me use it).
+  exports: [AccountsService, ActiveBookingsCheckRegistry, ProfileService],
 })
 export class AccountsModule {}

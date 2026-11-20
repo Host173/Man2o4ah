@@ -709,12 +709,17 @@ Indexes: `{ userId: 1, readAt: 1, createdAt: -1 }`
 #### `audit_logs`
 Append-only: no update or delete anywhere in the code (GEN-07). `createdAt` only (`timestamps: { createdAt: true, updatedAt: false }`).
 
+The listener derives `_id` from the first 12 bytes of SHA-256 of `admin.action.eventId`.
+The existing unique `_id` index makes repeated or concurrent delivery insert only once;
+a duplicate never changes an existing entry. Distinct actions have distinct event IDs,
+even when their actor, action and target are identical. No additional field or index is needed.
+
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `actorId` | ObjectId → users | ✓ | the admin |
 | `action` | enum (below) | ✓ | |
 | `target` | `{ type: string, id: string }` | ✓ | e.g. `{ type: 'user', id }` |
-| `details` | object | | small, no secrets (never passwords) |
+| `details` | object | | small, no secrets (never passwords); retain only plain objects, arrays and primitive JSON values, omitting unsupported nested objects |
 
 `action`: `account_suspended`, `account_reactivated`, `moderator_created`, `password_reset`, `provider_deactivated`, `provider_reactivated`, `report_resolved`, `content_hidden`, `content_deleted`.
 
@@ -835,7 +840,8 @@ A URL path does not decide the module. Endpoints that combine provider data with
 **Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`). Moderation: `ReportableContentRegistry` (`moderation/ports/`).
 
 ### 6.3 Events (in-process, `@nestjs/event-emitter`)
-Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
+Handlers are **idempotent**: conditional writes make handling the same event twice change nothing.
+Audit uses insert-only writes with an event-derived `_id`, never updates or deletes.
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
 
@@ -860,7 +866,11 @@ Repeatable notification changes carry a required, non-empty opaque `eventId`: ge
 | `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
 | `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
-| `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
+| `admin.action` | `{ eventId, actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
+
+`admin.action.eventId` is a non-empty string generated once per committed action and
+reused on every delivery retry. A later action gets a new identity, including repeated
+password resets or suspension/reactivation cycles.
 
 ---
 

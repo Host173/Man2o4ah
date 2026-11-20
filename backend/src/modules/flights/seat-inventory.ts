@@ -3,12 +3,18 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
-import type { InventoryOptions, SeatItem } from './flights.types.js';
+import type {
+  AddCabinInput,
+  InventoryOptions,
+  SeatItem,
+} from './flights.types.js';
+import { validateCabinInput } from './cabin-input.js';
 import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
 @Injectable()
@@ -16,6 +22,76 @@ export class SeatInventory {
   constructor(
     @InjectModel(Flight.name) private readonly flightModel: Model<Flight>,
   ) {}
+
+  /**
+   * Initializes one unique cabin on the moderator's scheduled flight (FLT-04).
+   * The insert and any caller writes share the required caller transaction.
+   */
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string,
+    options: InventoryOptions,
+  ): Promise<void> {
+    validateCabinInput(input);
+    if (
+      !Types.ObjectId.isValid(flightId) ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw flightNotFound();
+    }
+    const filter = {
+      _id: new Types.ObjectId(flightId),
+      airlineId: new Types.ObjectId(moderatorAirlineId),
+    };
+    const result = await this.flightModel
+      .updateOne(
+        {
+          ...filter,
+          status: FlightStatus.SCHEDULED,
+          'cabins.cabinClass': { $ne: input.cabinClass },
+        },
+        {
+          $push: {
+            cabins: {
+              cabinClass: input.cabinClass,
+              totalSeats: input.totalSeats,
+              availableSeats: input.totalSeats,
+              heldSeats: 0,
+              bookedSeats: 0,
+              priceMinor: input.priceMinor,
+              freeBags: input.freeBags,
+              maxBagWeightKg: input.maxBagWeightKg,
+            },
+          },
+        },
+        { session: options.session, runValidators: true },
+      )
+      .exec();
+    if (result.modifiedCount === 1) return;
+
+    const current = await this.flightModel
+      .findOne(filter)
+      .session(options.session)
+      .select({ status: 1, 'cabins.cabinClass': 1 })
+      .lean()
+      .exec();
+    if (!current) throw flightNotFound();
+    if (current.status !== FlightStatus.SCHEDULED) {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    throw new ConflictException({
+      code: ErrorCode.Conflict,
+      message: current.cabins.some(
+        (cabin) => cabin.cabinClass === input.cabinClass,
+      )
+        ? 'This flight already has that cabin class'
+        : 'Flight changed before the cabin could be added',
+    });
+  }
 
   /**
    * Reserves seats conditionally on one flight-document update per item.
@@ -228,6 +304,13 @@ export class SeatInventory {
 interface ValidationDetail {
   field: string;
   message: string;
+}
+
+function flightNotFound(): NotFoundException {
+  return new NotFoundException({
+    code: ErrorCode.NotFound,
+    message: 'Flight not found',
+  });
 }
 
 function validationFailed(

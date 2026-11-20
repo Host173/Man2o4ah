@@ -21,6 +21,7 @@ import { FakeReportableContent } from '../../../test/fakes/reportable-content.fa
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
@@ -1335,8 +1336,8 @@ describe('Admin Moderation API (GEN-10)', () => {
     const savedImage = await fakeStorage.save({
       originalname: 'cover.png',
       mimetype: 'image/png',
-      size: 16,
-      buffer: Buffer.from('fake-png-bytes!!'),
+      size: 32,
+      buffer: imageBytes('png'),
     });
     const postDoc = await postModel.create({
       authorId: new Types.ObjectId(author.id),

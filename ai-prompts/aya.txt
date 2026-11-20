@@ -1270,3 +1270,264 @@ Open questions: `flight-booking.confirmed` carries only `{bookingId, userId, ref
 How the output was used:
 Restored develop's exact 48-char final separator in ai-prompts/aya.txt (CI append-only fix); logged this prompt; no commit
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-23
+
+Prompt:
+i want to start on flt 25 make a 4 step plan
+
+How the output was used:
+Answer only, no files changed (4-step plan for FLT-25); logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+create the branch and start step 1
+
+How the output was used:
+Created branch feature/FLT-25-my-flight-bookings from develop; drafted the grouping questions for Kareem; logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+kareem said yes to all three, start step 2
+
+How the output was used:
+Added backend/src/modules/flight-bookings/booking-groups.spec.ts (failing tests first) and a booking-groups.ts stub for Aya to implement; logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+[Attached: 7.png (screenshot of VS Code; image, no text content: terminal shows booking-groups.spec.ts with 3 failed, 1 passed)]
+
+How the output was used:
+Answer only, no files changed (groupQuery still unimplemented; gave hints)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+no do the rest of the endpoint and then tell me
+
+How the output was used:
+Implemented groupQuery, MyFlightBookingsService, GET /api/flight-bookings and GET /api/flight-bookings/:id with DTOs and API tests; npm run verify passed; commits feat(flight-bookings): add the booking groups (FLT-25), feat(flight-bookings): list and show my flight bookings (FLT-25), chore(ai): log the FLT-25 prompts (FLT-25)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+can you review FLT 25
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+
+How the output was used:
+Answer only, no files changed (self-review of FLT-25; probes written and deleted)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+just write the completion job and tell me
+
+How the output was used:
+Added backend/src/modules/flight-bookings/flight-completion.job.ts and its spec, registered it in flight-bookings.module.ts; npm run verify passed; commits feat(flight-bookings): complete flight bookings after the last departure (FLT-25), chore(ai): log the FLT-25 review and job prompts (FLT-25)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+merge develop and open the PR
+
+How the output was used:
+Merged develop into feature/FLT-25-my-flight-bookings (no conflicts), npm run verify passed, pushed and opened the PR "FLT-25: View my flight bookings"; commit chore(ai): log the PR prompt (FLT-25)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+tell me what to do to test it on swagger
+
+How the output was used:
+Answer only, no files changed (Swagger test steps for the FLT-25 routes); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+[Attached: 8.png (screenshot of VS Code with Swagger UI: POST /api/flights answered 403 FORBIDDEN_ROLE; terminal warns "No supported currencies; run npm run seed:reference"; image, no text content)]
+
+How the output was used:
+Answer only, no files changed (explained the 403 and the seed:reference warning); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+did it work
+[Attached: 9.png (screenshot of Swagger UI showing the documented Responses of a flight-bookings route: 200 example value, 401, 404; image, no text content)]
+
+How the output was used:
+Answer only, no files changed (explained the screenshot shows the documentation, not an executed call); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+make my branch up to date with develop
+
+How the output was used:
+Fetched origin: the branch is already up to date with develop (0 commits behind), so no merge was needed; committed the pending prompt-log entries as chore(ai): log the Swagger testing prompts (FLT-25), not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+hey so the login get me shows the user even when i didnt use the authorize buttpn how come
+
+How the output was used:
+Answer only, no files changed (explained cookie auth in Swagger and corrected my earlier Authorize step); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+okay again give me exact steps to test flt 25
+
+How the output was used:
+Wrote a throwaway seed script in the session scratchpad (outside the repo, not committed) and gave exact Swagger test steps; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+push log commit and tell me if the self review fixes were done
+
+How the output was used:
+Committed the pending prompt-log entries as chore(ai): log the seed script and Swagger prompts (FLT-25) and pushed the branch; answered which self-review items are done
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+add that as a to do for kareem in the pr
+
+How the output was used:
+Edited the description of PR #210: replaced the one-line to-do with a "To do for Kareem" checklist item for the DECISIONS.md grouping rule; no files changed in the repo besides this log; not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+can you add the decisions md thing
+
+How the output was used:
+Added the FLT-25 "my flight bookings" groups decision to docs/DECISIONS.md §3; commit docs(decisions): record the FLT-25 booking groups (FLT-25) and chore(ai): log the DECISIONS prompt (FLT-25), not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+no remove the to do for kareem and push that change
+
+How the output was used:
+Removed the "To do for Kareem" section from the description of PR #210 and pushed the branch (DECISIONS.md commit and log entries); commit chore(ai): log the PR to-do removal prompt (FLT-25)
+================================================

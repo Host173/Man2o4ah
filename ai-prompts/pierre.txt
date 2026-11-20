@@ -1534,3 +1534,38 @@ true
 How the output was used:
 Authorized these correctly attributed Pierre entries and an append-only correction in kareem.txt to fix the PR #192 prompt-log check.
 ================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Implemented owner-approved ITN-16 transport-cost CRUD, DTO validation and API/fake tests in an isolated worktree; full backend verification passed with VITEST_MAX_WORKERS=2.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+implement htl21 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Added hotel cancellation endpoints, service, refund tiers and DTOs with unit, integration and API tests; failing tests committed as 1a1d991 before implementation.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+Yes, Aya approved this work
+
+How the output was used:
+Authorized hotel-bookings changes with Aya's agreement and created the isolated feature/HTL-21-hotel-cancellations branch from latest develop.
+================================================

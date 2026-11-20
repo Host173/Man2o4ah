@@ -3,7 +3,13 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { FlightsModule } from '../flights/flights.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { FlightBookingsController } from './flight-bookings.controller.js';
+import { newBookingReference } from './booking-reference.js';
 import { FlightBookingsService } from './flight-bookings.service.js';
+import {
+  BOOKING_REFERENCE,
+  FlightConfirmationService,
+} from './flight-confirmation.service.js';
+import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightPayableBooking } from './flight-payable-booking.js';
@@ -30,6 +36,10 @@ import {
     FlightHoldService,
     FlightPayableBooking,
     FlightHoldExpiryJob,
+    FlightConfirmationService,
+    FlightETicket,
+    // The real reference maker; tests swap it to choose the references.
+    { provide: BOOKING_REFERENCE, useValue: newBookingReference },
   ],
   exports: [FlightBookingsService],
 })

@@ -1,4 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import type { ClientSession } from 'mongoose';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
@@ -77,6 +78,18 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
         }),
       );
     }
+  }
+
+  /** Does not emulate transaction locking; matches the account-state result. */
+  async tryLockForBookingConfirmation(
+    userId: string,
+    { session }: { session: ClientSession },
+  ): Promise<boolean> {
+    if (!session.inTransaction()) {
+      throw new Error('Booking confirmation requires an active transaction');
+    }
+    const status = this.accounts.get(userId)?.status;
+    return status === UserStatus.ACTIVE || status === UserStatus.SUSPENDED;
   }
 
   /** The stored account, or undefined. A copy: changing it changes nothing. */

@@ -2612,3 +2612,715 @@ ok i will commit you go and do another fast commit to fix the typecheck, so just
 How the output was used:
 On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+@"C:\Users\karee\Downloads\PAY02_EXECUTION.md"
+ok, execute this now, but done't forget the branch from develop rule
+[Attached: PAY02_EXECUTION.md]
+# Execution — PAY-02: Policies and acceptance
+
+Issue #22. Second ticket of lane E (PAY-01 → **PAY-02** → PAY-03). PAY-01 (#183) is merged into `develop`. TDD is not required by the ticket, but step 1 still commits the rule tests before the rule code (cheap, and it pins the decision table).
+
+## Goal
+
+Before paying, the user sees the provider's policies for **their booking** and ticks a checkbox. The backend shows the booking's policy snapshot and stores the acceptance with a timestamp. PAY-01 already blocks payment without an acceptance (`409 POLICIES_NOT_ACCEPTED`); today nothing can create one except a test.
+
+Done means:
+1. `GET /api/bookings/:type/:id/policies`: the booking's policy snapshot plus whether it was accepted and when.
+2. `POST /api/bookings/:type/:id/accept-policies` `{ accepted: true }`: stores one `policy_acceptances` document per booking, idempotently, with the server's timestamp.
+3. Accepting is refused for a booking that is already paid or whose hold is over.
+4. Integration and API tests, including the end-to-end check "pay → 409, accept, pay → 201".
+
+**Out of scope:** the real `getPolicies` implementations (flight-bookings FLT-08 / hotel-bookings HTL-09 implement the port; tests use `FakePayableBooking`), payments and the webhook (PAY-01, done), refunds (PAY-03), the summary page and checkbox UI (M2), changing `PaymentIntentsService` (it already checks acceptances).
+
+## Context you need
+
+**Requirement PAY-02 (verbatim):** "Before payment, the system shall show the provider's policies (airline: cancellation and baggage policies; hotel: cancellation policy and check-in/check-out times) and require an acceptance checkbox. Payment is blocked until accepted, and acceptance is stored with a timestamp."
+
+**Rules (`docs/ai/skills/travel-platform/references/bookings-payments.md` §4):**
+- "`GET /api/bookings/:type/:id/policies` (payments module, via `PayableBooking.getPolicies`): the booking's **policy snapshot** (airline: tiers and baggage; hotel: tiers and check-in/out times)."
+- "`POST /api/bookings/:type/:id/accept-policies` `{ accepted: true }`: payments stores a `policy_acceptances` document with `acceptedAt` (PAY-02). The accepted policy is the booking's snapshot, so nothing is copied."
+- `endpoints.md`: both routes are **Own**, module **payments**.
+- Frontend flow (§9, for context only): hold → `accept-policies` → `POST /payments`.
+
+**Data model (`docs/database/data-model.md`, `policy_acceptances`):** `bookingType` (enum), `bookingId` (ObjectId), `userId` (ObjectId → users), `acceptedAt` (Date, "PAY-02 timestamp"). Unique index `{ bookingType: 1, bookingId: 1 }`. "The accepted policy is the booking's own snapshot, so it is not copied here."
+
+**Existing code (read it; reuse, don't duplicate):**
+- `backend/src/modules/payments/ports/payable-booking.port.ts`: `PayableBooking.getPolicies(bookingId, userId) → BookingPolicies` (404 `NOT_FOUND` if missing or not the user's), `getPayable(...) → Payable { amountMinor, currency, status, holdExpiresAt }`, and the types `BookingPolicies` (a union discriminated by `bookingType`: flight `{ segments: FlightSegmentPolicies[] }`, hotel `{ cancellationTiers, checkInTime, checkOutTime }`), `FlightSegmentPolicies`, `PolicyTier`, `PayableStatus`. **Don't change this file.**
+- `ports/payable-booking.registry.ts`: `PayableBookingRegistry.get(type)`.
+- `schemas/policy-acceptance.schema.ts`: `PolicyAcceptance` (already registered in `PaymentsModule`'s `MongooseModule.forFeature`). **Don't change it.**
+- `payment-rules.ts`: PAY-01's pure rules (`decidePaymentStart`, `paymentStatusAfter`) and the messages `'This booking is already paid'` and `'The hold has expired'`. **Don't change it**; PAY-02's rule goes in a new file.
+- `payment-intents.service.ts`: PAY-01's flow; it already reads `policy_acceptances` (`acceptances.exists({ bookingType, bookingId })`) to block payment. **Don't change it.**
+- `payments.controller.ts`: the style to copy (decorators, `@Roles(Role.USER)`, `@ApiCookieAuth()`, `@CurrentUser() user: AuthUser`, Swagger responses).
+- `payments.api.spec.ts`: the test setup to copy (`createTestApp` with `PaymentsModule` and `STRIPE_GATEWAY` overridden by `FakeStripeGateway`, two `FakePayableBooking`s registered in `PayableBookingRegistry`, `loginAs`, `clearCollections`, `MINUTE_MS`), and its access test for admin/moderators (case "403 for ADMIN, HOTEL_MODERATOR, AIRLINE_MODERATOR").
+- `backend/test/fakes/payable-booking.fake.ts`: `FakePayableBooking.set(bookingId, userId, payable, policies)`. **Don't change it.**
+- `PaymentsService` is the cross-module contract (`FakePaymentsService implements PublicApi<PaymentsService>`). **Don't add public methods to it.**
+- Error codes (`backend/src/common/errors/error-codes.ts`): `NotFound`, `HoldExpired`, `InvalidStatusTransition`, `ValidationFailed`. Exceptions are `new ConflictException({ code: ErrorCode.X, message })`.
+- Validation: the global `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`, `validationExceptionFactory`) turns any DTO failure into `400 VALIDATION_FAILED`, including a DTO bound with `@Param()`. An extra body field is a 400.
+- `hotels.controller.ts` (around line 259) shows the Swagger `@ApiExtraModels` + `oneOf` + `getSchemaPath` pattern for a union response.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. **No new package.**
+
+## Design (settled here; follow it exactly)
+
+1. **Where the logic lives:** a new internal service `PolicyAcceptancesService` (`policy-acceptances.service.ts`), provided by `PaymentsModule`, **not exported**, and a new controller `PoliciesController` (`policies.controller.ts`, `@ApiTags('payments') @Controller('bookings')`). Payments owns the routes even though the URL says `bookings`.
+2. **Who may call:** `@Roles(Role.USER)` on both routes, as in PAY-01 (moderators and admins don't book). Ownership comes from the port: someone else's booking is a **404**, never a 403.
+3. **GET works in every booking status** (the owner can re-read the policies of a confirmed or expired booking). It never writes.
+4. **Accepting is allowed only while the booking can still be paid**, checked by a pure rule, in this order:
+   | Booking status | Hold | Result |
+   |---|---|---|
+   | `confirmed` or `completed` | any | 409 `INVALID_STATUS_TRANSITION`, `'This booking is already paid'` |
+   | `expired` or `cancelled` | any | 409 `HOLD_EXPIRED`, `'The hold has expired'` |
+   | `pending_payment` | `holdExpiresAt` = now (exactly) | 409 `HOLD_EXPIRED` (the hold must be **after** now, as in PAY-01) |
+   | `pending_payment` | now − 1 ms | 409 `HOLD_EXPIRED` |
+   | `pending_payment` | now + 1 ms | allowed |
+5. **Idempotent, first timestamp wins:** one acceptance per booking (the unique index). A repeated or concurrent accept returns the **existing** acceptance with its original `acceptedAt`; it never moves the timestamp. Implementation: one atomic upsert with `$setOnInsert` (never `$set`), and a duplicate-key error (two upserts racing) means "already accepted": read it and return it.
+6. **The timestamp is the server's** (`new Date()` in the service). The body is exactly `{ accepted: true }`; `false`, a string, a missing field or any extra field is `400 VALIDATION_FAILED`. Ticking the box is the only thing the client says.
+7. **Status code:** `POST …/accept-policies` answers **200** both the first time and on repeats (`@HttpCode(HttpStatus.OK)`), because it's an idempotent action on the booking, not the creation of a resource the client addresses later.
+8. **Response shapes** (dates as ISO strings in JSON):
+   - GET: the port's `BookingPolicies` flattened, plus `bookingId`, `accepted`, `acceptedAt`:
+     - flight: `{ bookingType: 'flight', bookingId, segments: FlightSegmentPolicies[], accepted, acceptedAt }`
+     - hotel: `{ bookingType: 'hotel', bookingId, cancellationTiers: PolicyTier[], checkInTime, checkOutTime, accepted, acceptedAt }`
+     - `accepted: false` → `acceptedAt: null`.
+   - POST: `{ bookingType, bookingId, accepted: true, acceptedAt }`.
+   - Never return `userId` or the acceptance's `_id`.
+9. **Wiring guard:** if the implementer returns policies whose `bookingType` differs from the route's `:type`, throw a plain `Error('PayableBooking for "<type>" returned "<other>" policies')` (a 500: a wiring bug, not a client error).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`. Confirm PAY-01 is on develop: `git log --oneline origin/develop | grep -m1 "PAY-01"` prints a line. If not, stop and report.
+2. `git worktree add ../man2o4ah-PAY-02 -b feature/PAY-02-policies-acceptance origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/payments` must pass. If not, stop and report.
+5. `git grep -n "accept-policies\|PolicyAcceptancesService" -- backend/src` prints nothing (nothing exists yet). If it prints something, stop and report.
+
+## Step 1 (red): the acceptance rule
+
+New `backend/src/modules/payments/policy-rules.spec.ts` for a pure function that doesn't exist yet:
+
+```ts
+// policy-rules.ts
+import type { Payable } from './ports/payable-booking.port.js';
+/** Throws the right ConflictException when the booking can't be accepted any more; returns normally otherwise (PAY-02). */
+export function assertCanAcceptPolicies(payable: Payable, now: Date): void;
+```
+
+One test per row of the table in Design §4 (use `it.each`), with `amountMinor: 25000`, `currency: 'USD'`, and `holdExpiresAt` = now + 5 min unless the row says otherwise. For the refused rows assert the exception class (`ConflictException`) and `getResponse()` `{ code, message }` exactly. For the allowed row assert it doesn't throw. Add one more row: `pending_payment`, hold ok, `amountMinor: 0` → allowed (accepting is not paying; PAY-01 refuses the 0 amount at payment time).
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(payments): pin when a booking's policies can be accepted (PAY-02)`
+
+## Step 2 (green): the rule
+
+New `policy-rules.ts` implementing exactly the table. Statuses `confirmed`/`completed` first, then `expired`/`cancelled`, then the hold (`payable.holdExpiresAt.getTime() <= now.getTime()` → `HOLD_EXPIRED`). Step 1 passes; nothing else changes.
+**Commit:** `feat(payments): decide when a booking's policies can be accepted (PAY-02)`
+
+## Step 3: types, DTOs and the service
+
+**`payments.types.ts`** — add (don't change the existing types):
+```ts
+/** A booking's policy snapshot as its owner sees it, with the acceptance (PAY-02). */
+export type BookingPoliciesView = BookingPolicies & {
+  bookingId: string;
+  accepted: boolean;
+  acceptedAt: Date | null;
+};
+
+/** The stored acceptance of a booking's policies (PAY-02). */
+export interface PolicyAcceptanceView {
+  bookingType: BookingType;
+  bookingId: string;
+  accepted: true;
+  acceptedAt: Date;
+}
+```
+(`BookingPolicies` is a type import from `./ports/payable-booking.port.js`.)
+
+**`dto/booking-params.dto.ts`:**
+```ts
+/** `:type` and `:id` of `/api/bookings/:type/:id/...` (PAY-02). */
+export class BookingParamsDto {
+  @ApiProperty({ enum: Object.values(BookingType) }) @IsEnum(BookingType) type!: BookingType;
+  @ApiProperty({ example: '6553a1f0c2b4e8a9d0f1a2b3' }) @IsMongoId() id!: string;
+}
+```
+
+**`dto/accept-policies.dto.ts`:**
+```ts
+/** The acceptance checkbox (PAY-02): only `true` is accepted. */
+export class AcceptPoliciesDto {
+  @ApiProperty({ enum: [true], example: true })
+  @IsBoolean() @Equals(true, { message: 'accepted must be true' })
+  accepted!: true;
+}
+```
+
+**`dto/policies.response.dto.ts`** — Swagger classes (no logic):
+- `PolicyTierResponseDto { daysBefore: number; refundPercent: number }`
+- `FlightSegmentPoliciesResponseDto` mirroring `FlightSegmentPolicies` (`direction` enum `['outbound','return']`, `flightNumber`, `cancellationTiers: PolicyTierResponseDto[]`, `freeBags`, `maxBagWeightKg`, `extraBagPriceMinor` (description "Minor units"), `maxExtraBagsPerPassenger`)
+- `FlightPoliciesResponseDto { bookingType: 'flight' (enum ['flight']); bookingId; segments: FlightSegmentPoliciesResponseDto[]; accepted: boolean; acceptedAt: Date | null (nullable: true) }`
+- `HotelPoliciesResponseDto { bookingType: 'hotel' (enum ['hotel']); bookingId; cancellationTiers: PolicyTierResponseDto[]; checkInTime (example '14:00'); checkOutTime (example '11:00'); accepted; acceptedAt (nullable) }`
+- `PolicyAcceptanceResponseDto implements PolicyAcceptanceView { bookingType (enum); bookingId; accepted: true (enum [true]); acceptedAt: Date }`
+Use `type: () => X` and `isArray: true` for nested arrays.
+
+**`policy-acceptances.service.ts`, `PolicyAcceptancesService`** (`@Injectable()`): injects `@InjectModel(PolicyAcceptance.name) acceptances: Model<PolicyAcceptance>` and `PayableBookingRegistry`.
+
+`getPolicies(userId, bookingType, bookingId): Promise<BookingPoliciesView>`:
+1. `policies = await registry.get(bookingType).getPolicies(bookingId, userId)` (404 passes through).
+2. Wiring guard (Design §9).
+3. `acceptance = await acceptances.findOne({ bookingType, bookingId: new Types.ObjectId(bookingId) }).lean()`.
+4. Return `{ ...policies, bookingId, accepted: acceptance !== null, acceptedAt: acceptance?.acceptedAt ?? null }`.
+
+`accept(userId, bookingType, bookingId): Promise<PolicyAcceptanceView>`:
+1. `payable = await registry.get(bookingType).getPayable(bookingId, userId)` (404 passes through: this is the ownership check).
+2. `assertCanAcceptPolicies(payable, new Date())`.
+3. Atomic upsert, first timestamp wins:
+   ```ts
+   const filter = { bookingType, bookingId: new Types.ObjectId(bookingId) };
+   const doc = await this.acceptances.findOneAndUpdate(
+     filter,
+     { $setOnInsert: { userId: new Types.ObjectId(userId), acceptedAt: new Date() } },
+     { upsert: true, returnDocument: 'after' },
+   ).lean();
+   ```
+   A duplicate-key error (`code === 11000`, two upserts racing on the unique index) → `findOne(filter).lean()` and use that. Reuse a local `isDuplicateKey(error)` like the one in `payment-intents.service.ts` (copy the 6-line helper into this file; don't export it from PAY-01's file).
+4. Return `{ bookingType, bookingId, accepted: true, acceptedAt: doc.acceptedAt }`. A null `doc` after the fallback is impossible; throw a plain `Error` if it happens.
+
+**Commit:** `feat(payments): show a booking's policies and store their acceptance (PAY-02)`
+
+## Step 4: the controller
+
+`policies.controller.ts`, `@ApiTags('payments') @Controller('bookings')`, constructor `(private readonly acceptances: PolicyAcceptancesService)`:
+
+| Route | Decorators | Returns | Swagger errors |
+|---|---|---|---|
+| `GET :type/:id/policies` | `@Roles(Role.USER)`, `@ApiCookieAuth()` | 200, `oneOf` Flight/Hotel policies DTOs | 400 `VALIDATION_FAILED`, 401, 403 `FORBIDDEN_ROLE`, 404 `NOT_FOUND` |
+| `POST :type/:id/accept-policies` | `@Roles(Role.USER)`, `@HttpCode(HttpStatus.OK)`, `@ApiCookieAuth()` | 200 `PolicyAcceptanceResponseDto` | 400, 401, 403, 404, 409 `HOLD_EXPIRED` / `INVALID_STATUS_TRANSITION` |
+
+- Handlers: `getPolicies(@Param() params: BookingParamsDto, @CurrentUser() user: AuthUser)` and `accept(@Param() params: BookingParamsDto, @Body() _body: AcceptPoliciesDto, @CurrentUser() user: AuthUser)`. The body is validated, then only its presence matters (it can only be `{ accepted: true }`). If oxlint flags the unused `_body`, name it `body` and don't reference it beyond what lint accepts; never add a disable comment.
+- Summaries: `'PAY-02 Show the policies of one of your bookings'` and `'PAY-02 Accept the policies of one of your bookings'`. Descriptions: GET says it is the booking's snapshot (airline: cancellation tiers and baggage per segment; hotel: cancellation tiers and check-in/out times) and works in any status; POST says payment is blocked until this is called, the server stores the time, and repeating it returns the first acceptance unchanged.
+- GET's 200 response: `@ApiExtraModels(FlightPoliciesResponseDto, HotelPoliciesResponseDto)` and `@ApiOkResponse({ schema: { oneOf: [{ $ref: getSchemaPath(FlightPoliciesResponseDto) }, { $ref: getSchemaPath(HotelPoliciesResponseDto) }] } })`, as in `hotels.controller.ts`.
+
+In `payments.module.ts`: add `PoliciesController` to `controllers` and `PolicyAcceptancesService` to `providers`. **Exports unchanged.**
+
+**Commit:** `feat(payments): add the policies and accept-policies endpoints (PAY-02)`
+
+## Step 5: API tests
+
+New `backend/src/modules/payments/policies.api.spec.ts`. Same setup as `payments.api.spec.ts` (fresh `FakeStripeGateway` overriding `STRIPE_GATEWAY`, two `FakePayableBooking`s registered, `clearCollections` then `loginAs(t.connection, Role.USER)` in `beforeEach`, `gateway.calls.length = 0`). Helpers:
+- `flightBooking(userId, overrides?: Partial<Payable>)` → new 24-hex id; `flights.set(id, userId, { amountMinor: 25000, currency: 'USD', status: 'pending_payment', holdExpiresAt: now + 10 min, ...overrides }, FLIGHT_POLICIES)` where `FLIGHT_POLICIES` has **two** segments (outbound `MS 777` and return `MS 778`), each with two tiers (`{ daysBefore: 7, refundPercent: 100 }`, `{ daysBefore: 1, refundPercent: 50 }`), `freeBags: 1`, `maxBagWeightKg: 23`, `extraBagPriceMinor: 5000`, `maxExtraBagsPerPassenger: 2`.
+- `hotelBooking(userId, overrides?)` → same with `HOTEL_POLICIES` `{ bookingType: 'hotel', cancellationTiers: [{ daysBefore: 3, refundPercent: 100 }], checkInTime: '14:00', checkOutTime: '11:00' }`.
+- `getPolicies(type, id, who = user)` and `accept(type, id, body: unknown = { accepted: true }, who = user)` wrapping `t.http()` with the user's cookie.
+
+Cases:
+1. **Flight policies:** GET → 200, body equals `{ ...FLIGHT_POLICIES, bookingId, accepted: false, acceptedAt: null }` exactly (`toEqual`), so both segments, all tiers and the baggage fields pass through unchanged.
+2. **Hotel policies:** GET → 200, `{ ...HOTEL_POLICIES, bookingId, accepted: false, acceptedAt: null }`.
+3. **Any status:** GET on a `confirmed` and on an `expired` booking → 200 each.
+4. **Accept:** note `before = Date.now()`; POST → 200 `{ bookingType: 'flight', bookingId, accepted: true, acceptedAt }` with `acceptedAt` between `before` and now; exactly one `policy_acceptances` document `{ bookingType: 'flight', bookingId: ObjectId, userId: ObjectId(user.id), acceptedAt }`.
+5. **GET after accept:** `accepted: true`, `acceptedAt` equal to the one POST returned.
+6. **First timestamp wins:** POST, wait 20 ms, POST again → both 200 with the **same** `acceptedAt`; still one document.
+7. **Race:** 5 parallel POSTs for one booking → all 200, all the same `acceptedAt`, exactly one document.
+8. **Hotel accept:** POST on a hotel booking → 200 with `bookingType: 'hotel'`; the document has `bookingType: 'hotel'`.
+9. **Body validation** (`it.each`): `{ accepted: false }`, `{}`, `{ accepted: 'true' }`, `{ accepted: 1 }`, `{ accepted: true, acceptedAt: '2020-01-01T00:00:00Z' }` → 400 `VALIDATION_FAILED`; no document.
+10. **Params validation** (`it.each`, both routes): type `train`, id `abc` → 400 `VALIDATION_FAILED`.
+11. **Refusals to accept** (no document in each): another user's booking → 404 `NOT_FOUND`; a booking id nobody set → 404; `confirmed` → 409 `INVALID_STATUS_TRANSITION`; `completed` → 409 `INVALID_STATUS_TRANSITION`; `expired` → 409 `HOLD_EXPIRED`; `cancelled` → 409 `HOLD_EXPIRED`; `pending_payment` with `holdExpiresAt` 1 s ago → 409 `HOLD_EXPIRED`.
+12. **GET refusals:** another user's booking → 404 `NOT_FOUND`.
+13. **Access** (both routes): no cookie → 401; `Role.ADMIN`, `Role.HOTEL_MODERATOR`, `Role.AIRLINE_MODERATOR` → 403 (copy the `it.each` from `payments.api.spec.ts`).
+14. **Payment is blocked until accepted (end to end):** a pending flight booking → `POST /api/payments { bookingType: 'flight', bookingId }` → 409 `POLICIES_NOT_ACCEPTED` and no gateway call; POST `accept-policies` → 200; `POST /api/payments` again → 201 with a `clientSecret`.
+15. **No secrets or internals leak:** the GET and POST bodies have no `userId` and no `_id` keys.
+16. **Swagger:** `SwaggerModule.createDocument(t.app, new DocumentBuilder().build())` has `/api/bookings/{type}/{id}/policies` (get) and `/api/bookings/{type}/{id}/accept-policies` (post), each with a summary containing `PAY-02` and the tag `payments`; the components include `FlightPoliciesResponseDto`, `HotelPoliciesResponseDto` and `PolicyAcceptanceResponseDto`.
+
+Also a unit spec `policy-acceptances.service.spec.ts` for the wiring guard only: a registry with a `FakePayableBooking(BookingType.HOTEL)` whose `set(...)` stores **flight** policies → `getPolicies(user, 'hotel', id)` rejects with an `Error` whose message contains `returned "flight" policies`. (Use `createTestApp` with `PaymentsModule` like the API spec, then call the service from `t.moduleRef.get(PolicyAcceptancesService)`.)
+
+**Commit:** `test(payments): cover the policies, their acceptance and the payment block (PAY-02)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: PAY-02`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: PAY02_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the PAY-02 prompt (PAY-02)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/payments` | 0 failed; the three new spec files run; at least 40 new tests across them |
+| G3 | `git diff --name-only origin/develop...HEAD` | only: `backend/src/modules/payments/{policy-rules.ts,policy-rules.spec.ts,policy-acceptances.service.ts,policy-acceptances.service.spec.ts,policies.controller.ts,policies.api.spec.ts,payments.types.ts,payments.module.ts}`, `backend/src/modules/payments/dto/{booking-params.dto.ts,accept-policies.dto.ts,policies.response.dto.ts}`, `ai-prompts/kareem.txt` |
+| G4 | `git diff origin/develop...HEAD -- backend/src/modules/payments/schemas backend/src/modules/payments/ports backend/src/modules/payments/payment-rules.ts backend/src/modules/payments/payment-intents.service.ts backend/src/modules/payments/payments.service.ts backend/src/modules/payments/payments.controller.ts backend/test backend/src/common` | empty |
+| G5 | Rule-first order: `git log --reverse --format=%s origin/develop..HEAD \| head -2` | first `test(payments): pin when …`, then `feat(payments): decide when …` |
+| G6 | Red proof: `git show <sha of the first commit>:backend/src/modules/payments/policy-rules.ts` | "does not exist" error; and your step 1 run showed the spec failing |
+| G7 | Negative gate: in `accept`, change `$setOnInsert` to `$set`; run `npx vitest run src/modules/payments/policies.api.spec.ts` | case 6 fails (the timestamp moved); restore and it passes |
+| G8 | Negative gate: in `accept`, comment out the `assertCanAcceptPolicies(...)` call; run the same spec | case 11 fails; restore and it passes |
+| G9 | Negative gate: in `getPolicies`, return `acceptedAt: null` always; run the same spec | case 5 fails; restore and it passes |
+| G10 | coverage line for `policy-acceptances.service.ts` and `policy-rules.ts` in the G1 output | ≥ 90% lines each |
+| G11 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(PAY-02)` |
+| G12 | `git status --porcelain` | empty |
+
+In G5, `\|` is a shell pipe `|`; type it as `|`.
+
+## Constraints
+
+- Don't change the schemas, the port, the registry, `payment-rules.ts`, `payment-intents.service.ts`, `payments.service.ts`, `payments.controller.ts`, the fakes in `backend/test/fakes/`, `common/`, other modules, CI, the frontend or docs. **No new package.**
+- `PolicyAcceptancesService` is internal: not exported from `PaymentsModule`, not added to `PaymentsService`.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G10 with the %).
+- To flag in the PR: the two new routes; acceptance is idempotent and keeps the first timestamp; accepting is refused once the booking is paid or the hold is over; end to end once FLT-08 (#34) and HTL-09 (#44) implement `getPolicies` on the real booking modules (tests use the fake).
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented PAY-02 on feature/PAY-02-policies-acceptance in the man2o4ah-PAY-02 worktree (branched from the latest origin/develop): acceptance rule (tests first), PolicyAcceptancesService, PoliciesController, DTOs and the API and wiring specs; 5 commits before this log entry, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+didi you run the review md.file  ?
+
+How the output was used:
+Ran the self-review checks on PAY-02 (branch freshness, issue and requirement, diff checklist, 8 throwaway probes deleted afterwards); no code changed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+ok i want you to run it on another agent, isolated one that have no context of this convo , and make it a rule from now on in this convo: after each exec we will run the review in isolated agent
+
+How the output was used:
+Ran the PAY-02 self-review in an isolated subagent (no conversation context): no problems, no missing tests; no code changed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+push pay-02 and open a pr
+
+How the output was used:
+Checked there are no conflicts with origin/develop, pushed feature/PAY-02-policies-acceptance and opened the PAY-02 PR into develop.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+@"C:\Users\karee\Downloads\PAY03_EXECUTION.md"
+ok now do this
+[Attached: PAY03_EXECUTION.md]
+# Execution — PAY-03: Refunds
+
+Issue #23. Third ticket of lane E (PAY-01 → PAY-02 → **PAY-03**). PAY-01 (#183) and GEN-01 (#168) are merged into `develop`. **TDD is required**: the refund rule tests are committed, failing, before the rule code.
+
+## Goal
+
+When a confirmed booking is cancelled with a positive refund (the user per the provider's tiers, the provider at 100%), or a payment arrives after the hold expired (`late_payment`, 100%), the booking module calls `PaymentsService.refund(...)` after its own transaction commits. Payments records one refund per booking, asks Stripe for it, follows its status through Stripe's webhook (`pending → refunded | failed`), shows it to the owner, and emits `refund.updated` so the user gets an in-app notification (GEN-01 already listens). Today both `PaymentsService` methods throw `… implemented in PAY-03`, and refund webhook events are ignored.
+
+Done means:
+1. `PaymentsService.refund` and `PaymentsService.getRefund` work (same public signatures; `FakePaymentsService` stays valid).
+2. `refund.updated` / `refund.failed` webhook events update the refund, idempotently, in the same style as PAY-01's payment events.
+3. `GET /api/refunds/:id` shows a refund to its owner.
+4. `refund.updated { refundId, userId, status }` is emitted after every stored status, so the user is notified.
+5. Unit, integration and API tests; no test calls Stripe.
+
+**Out of scope:** computing refund amounts or tiers (each booking module owns its tier rule, `DECISIONS.md` §3), cancelling bookings (FLT-26, FLT-06, HTL-21), deciding a payment is late (FLT-23, HTL-17 already call `refund` with `reason: 'late_payment'`), showing the refund on booking details (the booking modules call `getRefund`), retrying a failed refund automatically, partial or multiple refunds per booking, the frontend.
+
+## Context you need
+
+**Requirement PAY-03 (verbatim):** "For every cancellation with a positive refund amount (user cancellations per the provider's tiers; provider-initiated cancellations at 100%), the system shall issue a refund through the Stripe Refunds API, record it, and show its status (Pending, Refunded, Failed) on the booking details. The user receives an in-app notification."
+
+**Rules (`docs/ai/skills/travel-platform/references/bookings-payments.md`):**
+- §7: "After commit: if `refundAmountMinor > 0`, call `PaymentsService.refund(...)` (creates `refunds { status: 'pending' }`, calls Stripe with idempotency key `refund-<refundId>`, maps the result). Then emit `…cancelled`. A Stripe failure leaves the booking cancelled and the refund `failed`, visible on the booking (PAY-03), never lost."
+- §6 webhook step 4: "`refund.updated` / `refund.failed`: map Stripe's status (`succeeded` → `refunded`, `failed`/`canceled` → `failed`), emit `refund.updated`."
+- §6 late payment: the booking module "asks payments for a full refund with `reason: 'late_payment'`".
+- `endpoints.md`: `GET /api/refunds/:id` — PAY-03, **Own**, module payments.
+
+**Data model (`refunds`):** `paymentId` → payments, `bookingType`, `bookingId`, `userId` → users, `stripeRefundId` ("set once Stripe accepts the request"; unique partial index), `amountMinor` (int, **> 0**, "a 0 refund creates no document"), `currency`, `reason` (`user_cancellation | provider_cancellation | late_payment`), `status` (`pending | refunded | failed`). Indexes: `{ bookingType, bookingId }` **unique** (one refund per booking), `{ stripeRefundId }` unique partial, `{ userId }`.
+
+**Existing code (read it; reuse, don't duplicate):**
+- `backend/src/modules/payments/payments.service.ts`: the contract other modules call. Its doc comments are the contract: `refund` "Creates the refund (status `pending`) and asks Stripe for it. Call after your transaction commits. One refund per booking: a second call for the same booking returns the existing one. Throws 400 `VALIDATION_FAILED` if `amountMinor <= 0`." and `getRefund` "The booking's refund, for showing its status". Both bodies are stubs today. **Keep both signatures and doc comments; replace only the bodies.**
+- `payments.types.ts`: `RefundRequest { bookingType, bookingId, userId, amountMinor, currency, reason }`, `RefundView { refundId, bookingType, bookingId, amountMinor, currency, reason, status }`. **Don't change them.**
+- `payments.service.spec.ts`: tests that the two methods throw `NotImplementedException`. It goes with the stubs (step 5 replaces it).
+- `backend/test/fakes/payments.fake.ts`: `FakePaymentsService` — rejects `amountMinor <= 0` with 400 `VALIDATION_FAILED` and `details: [{ field: 'amountMinor', message: 'must be greater than 0' }]`; returns the existing refund on a second call; `getRefund` → view or `null`. The real service must behave the same way on those points (step 7 has a parity test). **Don't change the fake.**
+- `stripe/stripe-gateway.ts`: `createRefund({ paymentIntentId, amountMinor, idempotencyKey, metadata: { refundId } }) → { id, status: GatewayRefundStatus }`; `GatewayRefundStatus = 'pending' | 'requires_action' | 'succeeded' | 'failed' | 'canceled'`; the refund branch of `GatewayEvent` is `{ id, type: 'refund.updated' | 'refund.failed', refund: { id, status, metadata } }`. **Don't change it.** `StripeApiGateway.createRefund` and its `parseWebhook` refund mapping are already implemented and tested (PAY-01).
+- `backend/test/fakes/stripe-gateway.fake.ts`: `FakeStripeGateway` — `createRefund` is idempotent by key, returns `re_fake_<n>` with status `nextRefundStatus` (default `'pending'`); `failNext('createRefund')` makes the next call throw; `calls` log; webhook bodies are `GatewayEvent` JSON signed with `FAKE_STRIPE_SIGNATURE`. **Don't change it.**
+- `payment-intents.service.ts` (PAY-01): `handleWebhook` verifies the signature, then for non-payment events logs "Refund events belong to PAY-03; anything else is not ours." and returns. Its payment branch shows the pattern to copy: one `connection.transaction`, insert `stripe_webhook_events { _id: event.id, type, receivedAt }` first, a duplicate key (`11000`) means already processed, conditional update on the status it was read with, emit **after** the commit. It also has the `isDuplicateKey` helper and the `PaymentRecord` interface.
+- `schemas/payment.schema.ts`: `Payment` (`bookingType`, `bookingId`, `userId`, `stripePaymentIntentId`, `amountMinor`, `currency`, `status`), unique `{ bookingType, bookingId }`.
+- Events: `Events.RefundUpdated` with payload `RefundUpdatedEvent { refundId: string; userId: string; status: RefundStatus }` (`backend/src/common/events/`). Emit with `AppEvents.emit(Events.RefundUpdated, payload)`. GEN-01's `NotificationsListener` turns it into a notification (one per refund and status).
+- Error codes: `ValidationFailed`, `InvalidStatusTransition`, `NotFound`. Validation-style errors use `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Invalid refund', details: [{ field, message }] })`, the shape the fake uses.
+- `payments.controller.ts`, `policies.controller.ts` (if PAY-02 is merged): the controller style to copy. `:id` uses `ParseObjectIdPipe` from `@nestjs/mongoose` (malformed → 400 `VALIDATION_FAILED`). Another user's refund is a **404**.
+- `backend/src/modules/hotel-bookings/hotel-confirmation.service.ts` (`refundIfLate`): a real caller, for context (it passes `userId`, `totalMinor`, `currency` and `reason: 'late_payment'` from the reservation).
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. **No new package.** Never log a key, a client secret or a full webhook body.
+
+## Design (settled here; follow it exactly)
+
+1. **Where the logic lives:** a new internal `RefundsService` (`refunds.service.ts`), provided by `PaymentsModule`, **not exported**. `PaymentsService` gets a constructor that injects it, and its two methods just delegate (`return this.refunds.refund(request)` / `return this.refunds.getRefund(bookingType, bookingId)`). The public API, and so `FakePaymentsService`, doesn't change. A new `RefundsController` (`refunds.controller.ts`, `@ApiTags('payments') @Controller('refunds')`) serves `GET /api/refunds/:id`.
+
+2. **`refund(request)` order** (each step only if the previous passed):
+   1. `amountMinor` must be a safe integer > 0 → else 400 `VALIDATION_FAILED`, field `amountMinor`, message `'must be greater than 0'` (the fake's exact details). No database read happens before this check.
+   2. A refund already exists for `{ bookingType, bookingId }` → return its view. **No other check, no Stripe call, no emit.** (The contract: "a second call for the same booking returns the existing one", whatever the new arguments are.)
+   3. Load the booking's payment (`{ bookingType, bookingId }`) and run the pure check of Design §3.
+   4. Insert `Refund { paymentId, bookingType, bookingId, userId, amountMinor, currency, reason, status: 'pending' }`. A duplicate key (another call won the race) → load that refund and return its view: **no Stripe call, no emit** from the loser.
+   5. `gateway.createRefund({ paymentIntentId: payment.stripePaymentIntentId, amountMinor, idempotencyKey: `refund-${refundId}`, metadata: { refundId } })`.
+      - Success → `status = refundStatusFromGateway(result.status)`; conditional update `{ _id, status: 'pending' }` → `$set { stripeRefundId: result.id, status }`. (If the update matches nothing, a webhook already moved it: reload and use the stored status.)
+      - The gateway throws → conditional update `{ _id, status: 'pending' }` → `failed`; log a warning with the refund id and the error message only; **don't rethrow**. The caller's cancellation is already committed; the refund is visible as `failed`, never lost.
+   6. Emit `Events.RefundUpdated { refundId, userId, status }` with the stored status, **after** the writes, exactly once per `refund()` call that created the document.
+   7. Return the view (`RefundView`).
+
+3. **The pure request check** (`refund-rules.ts`, TDD), in this order:
+   | Case | Result |
+   |---|---|
+   | no payment for the booking | 409 `INVALID_STATUS_TRANSITION`, `'The booking has no succeeded payment'` |
+   | payment status `pending`, `failed` or `canceled` | the same 409 |
+   | payment `succeeded`, `request.amountMinor > payment.amountMinor` | 400 `VALIDATION_FAILED`, field `amountMinor`, `'must not exceed the amount paid'` |
+   | `request.amountMinor === payment.amountMinor` | allowed (a 100% refund) |
+   | `request.currency !== payment.currency` | 400 `VALIDATION_FAILED`, field `currency`, `'must match the payment currency'` |
+   | `request.userId !== payment.userId` (as strings) | 400 `VALIDATION_FAILED`, field `userId`, `'must be the payer'` |
+   | everything matches | allowed |
+   A late payment needs no special case: PAY-01 records a late `payment_intent.succeeded` on a canceled payment as `succeeded`.
+
+4. **Gateway status → our status** (`refundStatusFromGateway`, TDD): `succeeded` → `refunded`; `failed`, `canceled` → `failed`; `pending`, `requires_action` → `pending`.
+
+5. **Webhook transitions** (`refundStatusAfter(gatewayStatus, current) → RefundStatus | null`, TDD; null = leave it):
+   | Gateway status \ current | `pending` | `refunded` | `failed` |
+   |---|---|---|---|
+   | `succeeded` | `refunded` | null | `refunded` |
+   | `failed`, `canceled` | `failed` | `failed` (Stripe can fail a refund after it succeeded) | null |
+   | `pending`, `requires_action` | null | null | null |
+
+6. **Webhook handling** (`RefundsService.handleWebhookEvent(event)` for the refund branch of `GatewayEvent`):
+   - In **one** `connection.transaction`: insert `stripe_webhook_events { _id: event.id, type: event.type, receivedAt }`; find the refund by `stripeRefundId: event.refund.id`, else (Stripe's event can arrive before step 2.5's update is stored) by `_id: event.refund.metadata.refundId` when that is a 24-hex string; none → log a warning and finish (the event stays recorded). `next = refundStatusAfter(event.refund.status, refund.status)`. Conditional update `{ _id, status: <read status> }` → `$set { status: next, stripeRefundId: event.refund.id }` when `next` isn't null; when `next` is null but `stripeRefundId` is missing, set only `stripeRefundId`.
+   - A duplicate key on the event → already processed: return (also on the helper's retry after a write conflict, as PAY-01 does).
+   - After the commit, if the status changed: emit `Events.RefundUpdated { refundId, userId, status: next }` (ids from the refund document, never from the event).
+   - In `PaymentIntentsService.handleWebhook`, the only change: where it now returns for non-payment events, call `await this.refunds.handleWebhookEvent(event)` for `refund.updated` / `refund.failed` and keep the debug log + return for `ignored`. Inject `RefundsService` into `PaymentIntentsService`. Nothing else in that file changes.
+
+7. **`GET /api/refunds/:id`:** `@Roles(Role.USER)`; the refund must have `userId` = the caller, else 404 `'Refund not found'`. Returns `RefundView` (never `paymentId`, `userId`, `stripeRefundId`).
+
+8. **No automatic retry of a failed refund** in PAY-03. A second `refund()` call returns the failed one unchanged (Design §2.2). Flag this in the report and the PR.
+
+## Before you start
+
+1. In the main clone: `git fetch origin`. Confirm with `gh pr view 183 --json mergedAt` and `gh pr view 168 --json mergedAt` that PAY-01 and GEN-01 are merged. If not, stop and report. If PAY-02 isn't merged yet, expect small conflicts later in `payments.module.ts` (both add providers and a controller; keep both).
+2. `git worktree add ../man2o4ah-PAY-03 -b feature/PAY-03-refunds origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/payments test/fakes/payments.fake.spec.ts test/fakes/stripe-gateway.fake.spec.ts` must pass. If not, stop and report.
+5. `git grep -n "implemented in PAY-03" -- backend/src` lists exactly the two `PaymentsService` stubs. If not, stop and report.
+
+## Step 1 (TDD, red): the refund rules
+
+New `backend/src/modules/payments/refund-rules.spec.ts` for pure functions that don't exist yet:
+
+```ts
+// refund-rules.ts
+import type { RefundRequest } from './payments.types.js';
+import type { PaymentStatus } from './schemas/payment.schema.js';
+import type { RefundStatus } from './schemas/refund.schema.js';
+import type { GatewayRefundStatus } from './stripe/stripe-gateway.js';
+
+/** What the check needs from the booking's payment (ids as strings). */
+export interface PaidPayment { status: PaymentStatus; amountMinor: number; currency: string; userId: string }
+
+/** Throws 400 when the amount isn't a positive integer (checked before anything is read). */
+export function assertRefundAmount(amountMinor: number): void;
+/** Throws the right HttpException when the booking's payment can't be refunded with this request (Design §3). */
+export function checkRefundRequest(request: RefundRequest, payment: PaidPayment | null): void;
+/** Stripe's refund status as ours (Design §4). */
+export function refundStatusFromGateway(status: GatewayRefundStatus): RefundStatus;
+/** The status a webhook moves a refund to, or null to leave it (Design §5). */
+export function refundStatusAfter(gatewayStatus: GatewayRefundStatus, current: RefundStatus): RefundStatus | null;
+```
+
+Tests (decision tables with `it.each`; boundary values):
+- `assertRefundAmount`: `0`, `-1`, `1.5`, `NaN`, `Number.MAX_SAFE_INTEGER + 1` → `BadRequestException` with `getResponse()` equal to `{ code: 'VALIDATION_FAILED', message: 'Invalid refund', details: [{ field: 'amountMinor', message: 'must be greater than 0' }] }`; `1` and `25000` → no throw.
+- `checkRefundRequest`: every row of Design §3, with a succeeded payment `{ amountMinor: 25000, currency: 'USD', userId: U }` as the base; amount boundaries `24999` and `25000` allowed, `25001` refused. Assert the class (`ConflictException` / `BadRequestException`) and the full `getResponse()`.
+- `refundStatusFromGateway`: all five gateway statuses.
+- `refundStatusAfter`: all 15 cells of Design §5.
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(payments): pin the refund request check and refund status rules (PAY-03)`
+
+## Step 2 (TDD, green): the rules
+
+New `refund-rules.ts` implementing exactly the tables. Step 1 passes; nothing else changes.
+**Commit:** `feat(payments): check refund requests and map refund statuses (PAY-03)`
+
+## Step 3 (TDD, red): the refund flow
+
+New `backend/src/modules/payments/refunds.service.spec.ts` (integration) for `RefundsService`, which doesn't exist yet. Setup like `payments.api.spec.ts`: a fresh `FakeStripeGateway` overriding `STRIPE_GATEWAY`, `createTestApp({ imports: [PaymentsModule], override })`, `clearCollections` in `beforeEach`, `gateway.calls.length = 0`, `gateway.nextRefundStatus = 'pending'`, and `const updated = vi.fn(); t.moduleRef.get(EventEmitter2).on(Events.RefundUpdated, updated)` (clear it in `beforeEach`). A helper `paid(overrides?)` inserts a `Payment { bookingType: 'flight', bookingId, userId, stripePaymentIntentId: 'pi_test_1', amountMinor: 25000, currency: 'USD', status: 'succeeded' }` directly through the model and returns its ids; a helper `request(overrides?)` builds the matching `RefundRequest` (`reason: 'user_cancellation'`, `amountMinor: 10000`).
+
+Call through `t.moduleRef.get(PaymentsService)` (the contract), not `RefundsService` directly, so the delegation is covered too. Cases:
+1. **Pending:** `refund(request)` → view `{ refundId (24-hex), bookingType, bookingId, amountMinor: 10000, currency: 'USD', reason: 'user_cancellation', status: 'pending' }`; one document with `stripeRefundId: 're_fake_1'`, `paymentId` = the payment's `_id`, `userId`; the gateway got exactly `{ paymentIntentId: 'pi_test_1', amountMinor: 10000, idempotencyKey: 'refund-<refundId>', metadata: { refundId } }`; `updated` called once with `{ refundId, userId, status: 'pending' }`.
+2. **Immediate success:** `nextRefundStatus = 'succeeded'` → status `refunded` stored and returned; one emit with `refunded`.
+3. **Immediate failure:** `nextRefundStatus = 'failed'` → `failed`; one emit with `failed`.
+4. **Stripe throws:** `failNext('createRefund')` → `refund()` **resolves** with status `failed`; the document is `failed` with no `stripeRefundId`; one emit with `failed`.
+5. **One refund per booking:** a second call (even with `amountMinor: 5000`) → the same view as the first; still one document; one `createRefund` call; still one emit.
+6. **Race:** 5 parallel `refund()` calls for one booking → all resolve with the same `refundId`; exactly one document; exactly one `createRefund` call; exactly one emit.
+7. **Refusals** (no document, no gateway call, no emit in each): `amountMinor` 0 → 400 (the exact fake details); no payment → 409 `INVALID_STATUS_TRANSITION`; payment `pending` → 409; payment `canceled` → 409; `amountMinor: 25001` → 400 field `amountMinor`; currency `EUR` → 400 field `currency`; another `userId` → 400 field `userId`.
+8. **Full and late refunds:** `amountMinor: 25000, reason: 'provider_cancellation'` → allowed; a payment that went `canceled → succeeded` (insert it as `succeeded`) with `reason: 'late_payment'` → allowed and stored with that reason.
+9. **getRefund:** after case 1's call → the same view; for a booking without a refund → `null`.
+10. **Hotel:** the same flow with `bookingType: 'hotel'` stores `bookingType: 'hotel'`.
+
+Run it: it must fail (`refunds.service.ts` doesn't exist, and `PaymentsService` still throws).
+**Commit:** `test(payments): pin creating refunds through Stripe (PAY-03)`
+
+## Step 4 (TDD, green): the service
+
+New `refunds.service.ts`, `RefundsService` (`@Injectable()`): injects the `Refund` and `Payment` models (`@InjectModel(...)`), `@InjectConnection() connection`, `@Inject(STRIPE_GATEWAY) gateway: StripeGateway`, `AppEvents`, and a `Logger`. Methods:
+- `refund(request: RefundRequest): Promise<RefundView>` — Design §2, using `assertRefundAmount`, `checkRefundRequest`, `refundStatusFromGateway`.
+- `getRefund(bookingType, bookingId): Promise<RefundView | null>`.
+- `getOwn(userId, refundId): Promise<RefundView>` — 404 `'Refund not found'` unless `{ _id, userId }` matches (for the controller, step 6).
+- `handleWebhookEvent(event: Extract<GatewayEvent, { refund: unknown }>): Promise<void>` — Design §6 (implemented now, tested in step 7).
+- A private `toView(doc)` → `RefundView` (`refundId: doc._id.toString()`, `bookingId: doc.bookingId.toString()`).
+Copy the 6-line `isDuplicateKey` helper locally (don't export it from PAY-01's file).
+
+`payments.service.ts`: replace the two stub bodies with the delegation (Design §1); keep the signatures and the doc comments, and drop "Implemented in PAY-03." from them. `payments.module.ts`: add `RefundsService` to `providers` (exports unchanged). Delete `payments.service.spec.ts` (it tests the stubs; step 3's spec now covers the real methods through `PaymentsService`).
+
+Step 3's spec passes.
+**Commit:** `feat(payments): create refunds through Stripe, one per booking (PAY-03)`
+
+## Step 5: refund webhook events
+
+In `payment-intents.service.ts`: inject `RefundsService`, and route `refund.updated` / `refund.failed` to `this.refunds.handleWebhookEvent(event)` (Design §6, last bullet). Update the comment there. Nothing else in that file changes.
+**Commit:** `feat(payments): follow refund status through the Stripe webhook (PAY-03)`
+
+## Step 6: the refund endpoint
+
+New `dto/refund.response.dto.ts`: `RefundResponseDto implements RefundView` (`refundId`, `bookingType` enum, `bookingId`, `amountMinor` "Minor units", `currency`, `reason` enum `Object.values(RefundReason)`, `status` enum `Object.values(RefundStatus)`).
+
+`refunds.controller.ts`, `@ApiTags('payments') @Controller('refunds')`, constructor `(private readonly refunds: RefundsService)`:
+
+| Route | Decorators | Returns | Swagger errors |
+|---|---|---|---|
+| `GET :id` | `@Roles(Role.USER)`, `@ApiCookieAuth()` | 200 `RefundResponseDto` | 400 `VALIDATION_FAILED` (malformed id), 401, 403 `FORBIDDEN_ROLE`, 404 `NOT_FOUND` |
+
+`@ApiOperation({ summary: 'PAY-03 Get the status of one of your refunds', description: 'Pending until Stripe confirms it; then Refunded or Failed.' })`. Handler: `get(@Param('id', ParseObjectIdPipe) id: Types.ObjectId, @CurrentUser() user: AuthUser)` → `this.refunds.getOwn(user.id, id.toString())`. Register the controller in `PaymentsModule`.
+**Commit:** `feat(payments): add the refund status endpoint (PAY-03)`
+
+## Step 7: API, webhook and parity tests
+
+**`refunds.api.spec.ts`** (same setup as step 3, plus `loginAs(t.connection, Role.USER)` after each clear; create refunds through `PaymentsService.refund` for a payment of the logged-in user). A webhook helper posts `JSON.stringify(event)` to `/api/payments/webhook` with `Content-Type: application/json` and `stripe-signature: FAKE_STRIPE_SIGNATURE`; a refund event is `{ id: 'evt_r1', type: 'refund.updated', refund: { id: 're_fake_1', status: 'succeeded', metadata: { refundId } } }`.
+1. **Get:** the owner → 200, exactly the `RefundView` keys (no `paymentId`, `userId`, `stripeRefundId`, `_id`); another user → 404 `NOT_FOUND`; an unknown id → 404; `abc` → 400 `VALIDATION_FAILED`; no cookie → 401; `Role.ADMIN`, `Role.HOTEL_MODERATOR`, `Role.AIRLINE_MODERATOR` → 403.
+2. **Webhook succeeded:** a pending refund + `refund.updated` `succeeded` → 200 `{ received: true }`; the refund is `refunded`; `updated` called once more with `{ refundId, userId, status: 'refunded' }`; one `stripe_webhook_events` document `_id: 'evt_r1'`.
+3. **Idempotent:** the same event again → 200, no further change or emit; 5 parallel deliveries of a new event id (`refund.failed` on a refunded refund) → exactly one change to `failed` and one emit.
+4. **Failed:** `refund.failed` with `failed` on a pending refund → `failed`, one emit.
+5. **No change:** `refund.updated` with `pending` → 200, status unchanged, no emit, the event recorded.
+6. **Lookup by our id:** a refund document **without** `stripeRefundId` (insert it directly, status `pending`) + an event whose `refund.id` is `re_other` and `metadata.refundId` is the document's id → `refunded`, and `stripeRefundId` is now `re_other`.
+7. **Unknown refund:** `re_nope` with empty metadata → 200, nothing changes, no emit.
+8. **Payments still work:** a `payment_intent.succeeded` event after a `POST /api/payments` still marks the payment succeeded (one case, so the routing change can't break PAY-01).
+9. **Swagger:** `/api/refunds/{id}` (get) has a summary containing `PAY-03` and the tag `payments`.
+
+**`refund-notifications.spec.ts`** (integration, end to end with GEN-01): `createTestApp({ imports: [PaymentsModule, NotificationsModule], override })` with the fake gateway; a succeeded payment; `PaymentsService.refund(...)` → one `notifications` document for the user with type `refund_updated` and message `'Your refund is being processed.'`; then the `succeeded` webhook (call `t.moduleRef.get(PaymentIntentsService).handleWebhook(Buffer.from(JSON.stringify(event)), FAKE_STRIPE_SIGNATURE)`) → a second notification `'Your refund is complete.'`. (`emitAsync` isn't used here: wait for the listener with `await vi.waitFor(...)` on the notifications count.)
+
+**`payments.parity.spec.ts`** (the real service and `FakePaymentsService` agree on the contract): with the setup of step 3 and a succeeded payment, for both `real = t.moduleRef.get(PaymentsService)` and `fake = new FakePaymentsService()`:
+- `amountMinor: 0` → both reject with `BadRequestException` whose `getResponse()` is equal;
+- two calls for one booking → both return the same `refundId` twice;
+- `getRefund` for a booking without a refund → both `null`;
+- the first view of each has `status: 'pending'` (fake gateway default) and the same `bookingType`, `bookingId`, `amountMinor`, `currency`, `reason`.
+
+**Commit:** `test(payments): cover the refund webhook, the endpoint, notifications and the fake's parity (PAY-03)`
+
+## Step 8: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: PAY-03`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: PAY03_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the PAY-03 prompt (PAY-03)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/payments test/fakes/payments.fake.spec.ts test/fakes/stripe-gateway.fake.spec.ts` | 0 failed; at least 70 new tests across the new spec files |
+| G3 | `git grep -n "implemented in PAY-03" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/payments/` (not `schemas/`, not `stripe/`, not `ports/`, not `payment-rules.ts`), and `ai-prompts/kareem.txt`. Within `payment-intents.service.ts` only the refund routing and the injected `RefundsService` change (check with `git diff origin/develop...HEAD -- backend/src/modules/payments/payment-intents.service.ts`). |
+| G5 | TDD order: `git log --reverse --format=%s origin/develop..HEAD \| head -4` | `test(…refund request check…)`, `feat(…check refund requests…)`, `test(…creating refunds…)`, `feat(…create refunds…)` |
+| G6 | TDD red: `git show <sha of commit 1>:backend/src/modules/payments/refund-rules.ts` and `git show <sha of commit 3>:backend/src/modules/payments/refunds.service.ts` | both "does not exist"; your step 1 and step 3 runs showed the specs failing |
+| G7 | Negative gate: in `refund`, drop the duplicate-key fallback (rethrow instead); run `npx vitest run src/modules/payments/refunds.service.spec.ts` | case 6 fails; restore and it passes |
+| G8 | Negative gate: in `refund`, rethrow the gateway error instead of storing `failed`; run the same spec | case 4 fails; restore and it passes |
+| G9 | Negative gate: in `handleWebhookEvent`, remove the `stripe_webhook_events` insert; run `npx vitest run src/modules/payments/refunds.api.spec.ts` | case 3 fails; restore and it passes |
+| G10 | secrets: `git grep -nE "sk_(test\|live)_[A-Za-z0-9]{10,}\|whsec_[A-Za-z0-9]{10,}\|re_[A-Za-z0-9]{14,}" -- . ':!*.md'` | no output |
+| G11 | coverage lines for `refunds.service.ts` and `refund-rules.ts` in the G1 output (or a targeted coverage run) | ≥ 90% each |
+| G12 | `git log --format=%s origin/develop..HEAD` | 8 commits, Conventional Commits, each ending in `(PAY-03)` |
+| G13 | `git status --porcelain` | empty |
+
+In G5 and G10, `\|` is a shell pipe or regex `|`; type it as `|`.
+
+## Constraints
+
+- Don't change the schemas, `stripe/` (gateway interface and real gateway), `ports/`, `payment-rules.ts`, `payments.types.ts`, the public signatures of `PaymentsService`, the fakes in `backend/test/fakes/`, `common/`, other modules (booking modules, notifications), CI, the frontend or docs. **No new package.**
+- In `payment-intents.service.ts`, change only what Design §6 says.
+- `RefundsService` is internal: not exported from `PaymentsModule`.
+- Never put a real key, secret or Stripe id in code, tests, logs or commits.
+- Never weaken, skip or delete a test to pass a gate (the stub spec `payments.service.spec.ts` goes with the stubs). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G11 with the %).
+- To flag in the PR: `PaymentsService.refund` / `getRefund` are real now (callers: FLT-23/HTL-17 late payments, FLT-26, FLT-06, HTL-21); one refund per booking, a second call returns the first; a Stripe failure stores `failed` and doesn't throw; no automatic retry of a failed refund; `refund.updated` is emitted for every stored status, so GEN-01 notifies the user; the new route `GET /api/refunds/:id`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented PAY-03 on feature/PAY-03-refunds in the man2o4ah-PAY-03 worktree (branched from the latest origin/develop): refund rules (tests first), RefundsService, PaymentsService delegation, refund webhook routing, GET /api/refunds/:id and the API, notification and parity specs; 7 commits before this log entry, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok give me a report of what the review agent says , and what you say and  i will decide what to do.
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok option A
+
+How the output was used:
+Fixed the two review findings test-first on feature/PAY-03-refunds: the refund update is announced once when a webhook arrives first, and malformed ids are a 400; two commits, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok we will continue but first why did this call used all this tokens ??
+
+How the output was used:
+Answer only, no files changed: measured the review agent's transcript and explained the token use.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+push pay-03 and open a pr
+
+How the output was used:
+Checked there are no conflicts with origin/develop, pushed feature/PAY-03-refunds and opened the PAY-03 PR into develop.
+================================================
+Date: 2026-11-20
+Correction recorded by: Pierre
+Related Requirement: GEN-01
+
+Historical attribution correction:
+The GEN-01 implementation and review-fix prompt blocks interleaved with ITN-18 records earlier in this merged log belong to in-app notification listeners and endpoints, not ITN-18. Their complete, separately attributed original records were reconstructed in commit 50a5518. After PR #168 merged, its historical content is retained verbatim for append-only integrity; this note corrects the attribution without changing an existing line.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile validation boundary tests and aligned the DTO with the frozen UTF-16 schema limit; integrated develop and concurrent PR updates, verified 2412 tests, and pushed 4addb1a before discovering that PR #140 had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Preserved the frozen schema and ModuleRef lookup, clarified Swagger, and merged develop without losing incoming changes or prompt-log content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+Attempted gh pr reopen 140; GitHub rejected reopening because the PR was already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created fix/ACC-09-profile-followup-d103853d from the merged develop head and cherry-picked the reproducing test commit before the validation fix.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Appended these request and approval entries to ai-prompts/kareem.txt without changing its existing content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Attribution correction: the preceding five ACC-09 entries were recorded as Kareem because the assistant incorrectly assumed the GitHub account was Host173. The actual PR #192 author is pierreofficial (Pierre); correctly attributed request entries are appended to ai-prompts/pierre.txt, and the earlier kareem.txt entries remain unchanged.
+================================================

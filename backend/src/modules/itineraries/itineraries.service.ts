@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
@@ -14,13 +16,18 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
 import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
-import type { AddActivityDto } from './dto/add-activity.dto.js';
+import { AddActivityDto } from './dto/add-activity.dto.js';
+import { UpdateActivityDto } from './dto/update-activity.dto.js';
+import { validateActivityInput } from './activity-input.js';
 import type {
   ActivityView,
   BudgetEntryView,
@@ -73,10 +80,13 @@ const MAX_TITLE_LENGTH = 100;
  */
 @Injectable()
 export class ItinerariesService {
+  private readonly logger = new Logger(ItinerariesService.name);
+
   constructor(
     @InjectModel(Itinerary.name)
     private readonly itineraryModel: Model<StoredItinerary>,
     private readonly referenceData: ReferenceDataService,
+    private readonly storage: StorageService,
   ) {}
 
   /** ITN-01: creates a private itinerary owned by the authenticated user. */
@@ -173,15 +183,35 @@ export class ItinerariesService {
     return this.toDetailView(updated as ItineraryRecord);
   }
 
-  /** ITN-01: deletes the owner's itinerary. Image files ship with ITN-12. */
+  /**
+   * ITN-01/12: deletes the owner's itinerary and the files of every activity
+   * image it contained (data-model.md §3.8). References remain retryable until
+   * storage cleanup succeeds. A concurrent day change returns 409 rather than
+   * deleting files that were not in the cleanup snapshot.
+   */
   async delete(itineraryId: string, userId: string): Promise<void> {
     const id = this.parseId(itineraryId, 'itineraryId');
     const ownerId = this.parseId(userId, 'userId');
-    const deleted = await this.itineraryModel
-      .findOneAndDelete({ _id: id, ownerId })
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
       .lean()
       .exec();
-    if (!deleted) throw this.notFound();
+    if (!itinerary) throw this.notFound();
+    await this.deleteImageFiles(this.imageKeysOf(itinerary.days ?? []));
+    const deleted = await this.itineraryModel
+      .findOneAndDelete({
+        _id: id,
+        ownerId,
+        $expr: { $eq: ['$days', { $literal: itinerary.days }] },
+      })
+      .lean()
+      .exec();
+    if (!deleted) {
+      if (!(await this.itineraryModel.exists({ _id: id, ownerId }).exec())) {
+        throw this.notFound();
+      }
+      throw this.imageCleanupConflict();
+    }
   }
 
   /**
@@ -369,35 +399,381 @@ export class ItinerariesService {
     const id = this.parseId(itineraryId, 'itineraryId');
     const ownerId = this.parseId(userId, 'userId');
     const targetDayId = this.parseId(dayId, 'dayId');
+    const input = await validateActivityInput(
+      AddActivityDto,
+      dto,
+      this.referenceData,
+    );
 
     const activity: StoredActivity = {
       _id: new Types.ObjectId(),
-      name: dto.name.trim(),
-      description: dto.description,
-      time: dto.time,
-      cost: dto.cost ? { amountMinor: dto.cost, currency: 'EGP' } : undefined,
+      name: input.name,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
       images: [],
     };
 
-    // Append the activity inside the database so concurrent adds are preserved.
-    // Read the itinerary, modify the day in memory, and save.
-    const itinerary = await this.itineraryModel
-      .findOne({ _id: id, ownerId })
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            activities: {
+                              $concatArrays: [
+                                '$$day.activities',
+                                [{ $literal: activity }],
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
       .exec();
-    if (!itinerary) throw this.notFound();
+    if (!updated) throw this.notFound();
+    const index = updated.days.findIndex((day) => day._id.equals(targetDayId));
+    return this.toDayView(updated.days[index], index, updated.startDate);
+  }
 
-    const day = itinerary.days.find(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
+  /** ITN-10: edits only supplied fields on an activity owned by the caller. */
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ActivityView> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+    const input = await validateActivityInput(
+      UpdateActivityDto,
+      dto,
+      this.referenceData,
     );
-    if (!day) throw this.notFound();
+    const changes = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
+    };
+    const filter = { ownerId, 'days.activities._id': id };
+    const updated =
+      Object.keys(changes).length === 0
+        ? await this.itineraryModel.findOne(filter).lean().exec()
+        : await this.itineraryModel
+            .findOneAndUpdate(
+              filter,
+              [
+                {
+                  $set: {
+                    days: {
+                      $map: {
+                        input: '$days',
+                        as: 'day',
+                        in: {
+                          $mergeObjects: [
+                            '$$day',
+                            {
+                              activities: {
+                                $map: {
+                                  input: '$$day.activities',
+                                  as: 'activity',
+                                  in: {
+                                    $cond: [
+                                      { $eq: ['$$activity._id', id] },
+                                      {
+                                        $mergeObjects: [
+                                          '$$activity',
+                                          { $literal: changes },
+                                        ],
+                                      },
+                                      '$$activity',
+                                    ],
+                                  },
+                                },
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+                ...this.recomputeDayFields(),
+              ],
+              { returnDocument: 'after', updatePipeline: true },
+            )
+            .lean()
+            .exec();
+    if (!updated) throw this.notFound();
+    const activity = updated.days
+      .flatMap((day) => day.activities)
+      .find((activity) => activity._id.equals(id));
+    if (!activity) throw this.notFound();
+    return this.toActivityView(activity);
+  }
 
-    day.activities.push(activity);
-    await itinerary.save();
+  /** ITN-10: removes an owned activity; image file handling ships with ITN-12. */
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { ownerId, 'days.activities._id': id },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $mergeObjects: [
+                      '$$day',
+                      {
+                        activities: {
+                          $filter: {
+                            input: '$$day.activities',
+                            as: 'activity',
+                            cond: { $ne: ['$$activity._id', id] },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+  }
 
-    const updatedIndex = itinerary.days.findIndex(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
+  /**
+   * ITN-12/GEN-08: attaches one uploaded image to the owner's activity. The
+   * five-image limit is enforced atomically at write time; a file saved before
+   * a rejected write is deleted again, so no orphan is left behind.
+   */
+  async addActivityImage(
+    activityId: string,
+    file: UploadedImage | undefined,
+    userId: string,
+  ): Promise<ItineraryDayView> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+    if (!file) {
+      throw this.invalidField('file', 'must contain a JPG or PNG image');
+    }
+
+    const existing = await this.itineraryModel
+      .findOne({ ownerId, 'days.activities._id': id })
+      .select({ days: 1 })
+      .lean()
+      .exec();
+    if (!existing) throw this.activityNotFound();
+    if (
+      this.imagesOfActivity(existing.days ?? [], id).length >=
+      MAX_IMAGES_PER_ITEM
+    ) {
+      throw this.imageLimitExceeded();
+    }
+
+    const stored = await this.storage.save(file);
+    try {
+      const updated = await this.itineraryModel
+        .findOneAndUpdate(
+          { ownerId, 'days.activities._id': id },
+          { $push: { 'days.$[day].activities.$[activity].images': stored } },
+          {
+            arrayFilters: [
+              { 'day.activities._id': id },
+              { 'activity._id': id, 'activity.images.4': { $exists: false } },
+            ],
+            returnDocument: 'after',
+            runValidators: true,
+          },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.activityNotFound();
+      const day = this.activityDayView(updated as ItineraryRecord, id);
+      // A document matches the main filter even when no arrayFilter matched:
+      // a concurrent request may have filled the last slot after our read.
+      const attached = day.activities
+        .find((activity) => activity._id === id.toHexString())
+        ?.images.some((image) => image._id === stored._id.toHexString());
+      if (!attached) {
+        const stillThere = await this.itineraryModel
+          .exists({ ownerId, 'days.activities._id': id })
+          .exec();
+        throw stillThere ? this.imageLimitExceeded() : this.activityNotFound();
+      }
+      return day;
+    } catch (error) {
+      return await this.discardUnattachedImage(id, stored, error);
+    }
+  }
+
+  /**
+   * ITN-12/GEN-08: removes one image from the owner's activity. The storage
+   * file goes first, so a failed database write can be retried safely because
+   * `StorageService.delete` is idempotent (same order as BLG-10/HTL-01).
+   */
+  async removeActivityImage(
+    activityId: string,
+    imageId: string,
+    userId: string,
+  ): Promise<void> {
+    const id = this.parseId(activityId, 'activityId');
+    const imageObjectId = this.parseId(imageId, 'imageId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ ownerId, 'days.activities._id': id })
+      .select({ days: 1 })
+      .lean()
+      .exec();
+    const image = this.imagesOfActivity(itinerary?.days ?? [], id).find(
+      (item) => item._id.equals(imageObjectId),
     );
-    return this.toDayView(day, updatedIndex, itinerary.startDate);
+    if (!image) throw this.activityNotFound();
+
+    await this.storage.delete(image.key);
+    const result = await this.itineraryModel
+      .updateOne(
+        {
+          ownerId,
+          'days.activities._id': id,
+          'days.activities.images._id': imageObjectId,
+        },
+        {
+          $pull: {
+            'days.$[day].activities.$[activity].images': {
+              _id: imageObjectId,
+            },
+          },
+        },
+        {
+          arrayFilters: [{ 'day.activities._id': id }, { 'activity._id': id }],
+          runValidators: true,
+        },
+      )
+      .exec();
+    if (!result.matchedCount) throw this.activityNotFound();
+  }
+
+  /** The day view containing an activity, with its derived number and date. */
+  private activityDayView(
+    itinerary: ItineraryRecord,
+    activityId: Types.ObjectId,
+  ): ItineraryDayView {
+    const index = itinerary.days.findIndex((day) =>
+      (day.activities ?? []).some(
+        (activity) => activity._id.toHexString() === activityId.toHexString(),
+      ),
+    );
+    return this.toDayView(itinerary.days[index], index, itinerary.startDate);
+  }
+
+  private imagesOfActivity(
+    days: readonly StoredDay[],
+    activityId: Types.ObjectId,
+  ): StoredImage[] {
+    for (const day of days ?? []) {
+      const activity = (day.activities ?? []).find(
+        (item) => item._id.toHexString() === activityId.toHexString(),
+      );
+      if (activity) return activity.images ?? [];
+    }
+    return [];
+  }
+
+  private imageKeysOf(days: readonly StoredDay[]): string[] {
+    return (days ?? []).flatMap((day) =>
+      (day.activities ?? []).flatMap((activity) =>
+        (activity.images ?? []).map((image) => image.key),
+      ),
+    );
+  }
+
+  private async deleteImageFiles(keys: readonly string[]): Promise<void> {
+    await Promise.all(keys.map((key) => this.storage.delete(key)));
+  }
+
+  private imageLimitExceeded(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.LimitExceeded,
+      message: `An activity can have at most ${MAX_IMAGES_PER_ITEM} images`,
+    });
+  }
+
+  private imageCleanupConflict(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.ConcurrentChange,
+      message: 'Itinerary changed during image cleanup. Please retry deletion.',
+    });
+  }
+
+  private activityNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary activity not found',
+    });
+  }
+
+  private async discardUnattachedImage(
+    activityId: Types.ObjectId,
+    image: StoredImage,
+    failure: unknown,
+  ): Promise<never> {
+    try {
+      // A rejected reply does not prove the write was rejected.
+      const attached = await this.itineraryModel
+        .exists({
+          'days.activities._id': activityId,
+          'days.activities.images': {
+            $elemMatch: { _id: image._id, key: image.key },
+          },
+        })
+        .exec();
+      if (!attached) await this.storage.delete(image.key);
+    } catch (cleanupError) {
+      this.logger.error(
+        `Image cleanup pending for activity ${activityId.toHexString()} (key ${image.key})`,
+        cleanupError instanceof Error ? cleanupError.stack : undefined,
+      );
+    }
+    throw failure;
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */
@@ -421,8 +797,8 @@ export class ItinerariesService {
    * the schema's day-link validation happy. Numbers and dates are derived on
    * read, so the remaining days renumber and re-date themselves.
    *
-   * Deferred: the deleted activities' image files need `StorageService.delete`
-   * (ITN-12/GEN-08), and budget summaries are owned by ITN-14/18.
+   * ITN-12 deletes the image files of the activities that went with the day;
+   * budget summaries are owned by ITN-14/18.
    */
   async deleteDay(
     itineraryId: string,
@@ -435,20 +811,37 @@ export class ItinerariesService {
 
     const itinerary = await this.itineraryModel
       .findOne({ _id: id, ownerId })
+      .lean()
       .exec();
     if (!itinerary) throw this.notFound();
 
     const days = itinerary.days ?? [];
     const target = targetDayId.toHexString();
-    if (!days.some((day) => day._id.toHexString() === target)) {
-      throw this.notFound();
-    }
+    const removed = days.find((day) => day._id.toHexString() === target);
+    if (!removed) throw this.notFound();
+    const imageKeys = this.imageKeysOf([removed]);
+    await this.deleteImageFiles(imageKeys);
     // The schema checks that every transportCosts.dayId is one of `days`, so
     // both arrays must be rewritten in the same update. The pipeline re-reads
-    // them at write time: an add/edit landing at the same time is preserved.
+    // them at write time: an overlapping add/edit to another day is preserved.
     const updated = await this.itineraryModel
       .findOneAndUpdate(
-        { _id: id, ownerId, 'days._id': targetDayId },
+        {
+          _id: id,
+          ownerId,
+          $expr: {
+            $eq: [
+              {
+                $filter: {
+                  input: '$days',
+                  as: 'day',
+                  cond: { $eq: ['$$day._id', targetDayId] },
+                },
+              },
+              { $literal: [removed] },
+            ],
+          },
+        },
         [
           {
             $set: {
@@ -478,7 +871,13 @@ export class ItinerariesService {
       )
       .lean()
       .exec();
-    if (!updated) throw this.notFound();
+    if (!updated) {
+      const exists = await this.itineraryModel
+        .exists({ _id: id, ownerId, 'days._id': targetDayId })
+        .exec();
+      if (!exists) throw this.notFound();
+      throw this.imageCleanupConflict();
+    }
   }
 
   /**
@@ -811,6 +1210,7 @@ export class ItinerariesService {
       images: (activity.images ?? []).map((image) => ({
         _id: image._id.toHexString(),
         key: image.key,
+        url: this.storage.urlOf(image.key),
       })),
       ...(activity.attractionId !== undefined
         ? { attractionId: activity.attractionId }

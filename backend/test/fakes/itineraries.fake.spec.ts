@@ -4,7 +4,16 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
 import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
+import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import { FakeItinerariesService } from './itineraries.fake.js';
+import { FakeStorageService } from './storage.fake.js';
+
+const imageFile = (): UploadedImage => ({
+  buffer: Buffer.from('bytes'),
+  originalname: 'pyramids.jpg',
+  mimetype: 'image/jpeg',
+  size: 5,
+});
 
 function itinerary(
   id: string,
@@ -124,6 +133,135 @@ function createDto(
 }
 
 describe('FakeItinerariesService owner-only methods', () => {
+  it('preserves optional fields and zero cost through activity edits and removal', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      {
+        name: 'Museum',
+        description: 'Keep',
+        time: '23:59',
+        cost: { amountMinor: 100, currency: 'JPY' },
+      },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    const edited = await itineraries.updateActivity(
+      id,
+      { cost: { amountMinor: 0, currency: 'USD' } },
+      'user-1',
+    );
+    expect(edited).toMatchObject({
+      name: 'Museum',
+      description: 'Keep',
+      time: '23:59',
+      cost: { amountMinor: 0, currency: 'USD' },
+    });
+    expect(await itineraries.updateActivity(id, {}, 'user-1')).toEqual(edited);
+    await expect(
+      itineraries.updateActivity(id, { name: 'Foreign' }, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.deleteActivity(id, 'user-2'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await itineraries.deleteActivity(id, 'user-1');
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual([]);
+    await expect(
+      itineraries.deleteActivity(id, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
+  it('rejects invalid activity input and missing resources without mutation', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const added = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: 'Keep' },
+      'user-1',
+    );
+    const id = added.activities[0]._id;
+    await expect(
+      itineraries.updateActivity(
+        id,
+        { cost: { amountMinor: 1, currency: 'ZZZ' } },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [{ field: 'cost.currency' }],
+      },
+    });
+    await expect(
+      itineraries.updateActivity('bad', {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.deleteActivity('bad', 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(created._id, 'bad', { name: 'New' }, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        'f'.repeat(24),
+        { name: 'New' },
+        'user-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    await expect(
+      itineraries.updateActivity('f'.repeat(24), {}, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    expect(
+      (await itineraries.getById(created._id, 'user-1')).days[0].activities,
+    ).toEqual(added.activities);
+  });
+
+  it('adds an owned activity instead of throwing an unimplemented stub', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    const updated = await itineraries.addActivity(
+      created._id,
+      day._id,
+      { name: '  Museum  ' },
+      'user-1',
+    );
+    expect(updated.activities).toEqual([
+      { _id: expect.any(String), name: 'Museum', images: [] },
+    ]);
+    updated.activities[0].name = 'Changed outside the fake';
+    const stored = await itineraries.getById(created._id, 'user-1');
+    expect(stored.days[0].activities[0].name).toBe('Museum');
+    await expect(
+      itineraries.addActivity(
+        created._id,
+        day._id,
+        { name: 'Foreign' },
+        'user-2',
+      ),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+  });
+
   it('creates a private itinerary and lists it for its owner only', async () => {
     const itineraries = new FakeItinerariesService();
 
@@ -691,5 +829,131 @@ describe('FakeItinerariesService owner-only methods', () => {
       };
       expect(response.details[0].field).toBe('notes');
     });
+  });
+
+  describe('activity images (ITN-12)', () => {
+    async function trip() {
+      const storage = new FakeStorageService();
+      const itineraries = new FakeItinerariesService([], undefined, storage);
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+      const withActivity = await itineraries.addActivity(
+        created._id,
+        day._id,
+        { name: 'Pyramids' },
+        'user-1',
+      );
+      return {
+        itineraries,
+        storage,
+        id: created._id,
+        activityId: withActivity.activities[0]._id,
+      };
+    }
+
+    it('attaches, lists and removes an image with the storage fake', async () => {
+      const { itineraries, storage, id, activityId } = await trip();
+
+      const added = await itineraries.addActivityImage(
+        activityId,
+        imageFile(),
+        'user-1',
+      );
+      expect(added.activities[0].images).toHaveLength(1);
+      expect(added.activities[0].images[0]).toMatchObject({
+        url: storage.urlOf(added.activities[0].images[0].key),
+      });
+      expect(storage.keys()).toEqual([added.activities[0].images[0].key]);
+
+      const imageId = added.activities[0].images[0]._id;
+      await itineraries.removeActivityImage(activityId, imageId, 'user-1');
+      expect(storage.keys()).toEqual([]);
+      const detail = await itineraries.getById(id, 'user-1');
+      expect(detail.days[0].activities[0].images).toEqual([]);
+    });
+
+    it('caps images at 5 and scopes them to the owner with 404', async () => {
+      const { itineraries, storage, activityId } = await trip();
+      for (let i = 0; i < 5; i++) {
+        await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+      }
+      const error = await itineraries
+        .addActivityImage(activityId, imageFile(), 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: ErrorCode.LimitExceeded,
+      });
+      expect(storage.keys()).toHaveLength(5);
+
+      await expect(
+        itineraries.addActivityImage(activityId, imageFile(), 'user-2'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('deletes the activity image files when the itinerary is deleted', async () => {
+      const { itineraries, storage, id, activityId } = await trip();
+      await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+      expect(storage.keys()).toHaveLength(1);
+
+      await itineraries.delete(id, 'user-1');
+      expect(storage.keys()).toEqual([]);
+    });
+
+    it('caps parallel attaches at five and discards rejected files', async () => {
+      const { itineraries, storage, activityId } = await trip();
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () =>
+          itineraries.addActivityImage(activityId, imageFile(), 'user-1'),
+        ),
+      );
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(5);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).toMatchObject({
+            status: 400,
+            response: { code: ErrorCode.LimitExceeded },
+          });
+        }
+      }
+      expect(storage.keys()).toHaveLength(5);
+    });
+
+    it.each(['itinerary', 'day'] as const)(
+      'retains a concurrently changed %s during cleanup',
+      async (parent) => {
+        const { itineraries, storage, id, activityId } = await trip();
+        const added = await itineraries.addActivityImage(
+          activityId,
+          imageFile(),
+          'user-1',
+        );
+        const unlink = storage.delete.bind(storage);
+        vi.spyOn(storage, 'delete').mockImplementationOnce(async (key) => {
+          await unlink(key);
+          await itineraries.addActivityImage(activityId, imageFile(), 'user-1');
+        });
+        const remove = () =>
+          parent === 'itinerary'
+            ? itineraries.delete(id, 'user-1')
+            : itineraries.deleteDay(id, added._id, 'user-1');
+        await expect(remove()).rejects.toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.ConcurrentChange },
+        });
+        const retained = await itineraries.getById(id, 'user-1');
+        expect(storage.has(retained.days[0].activities[0].images[1].key)).toBe(
+          true,
+        );
+        await remove();
+        expect(storage.keys()).toEqual([]);
+      },
+    );
   });
 });

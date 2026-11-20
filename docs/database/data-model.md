@@ -507,7 +507,7 @@ Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 
 | `stripeRefundId` | string | | set once Stripe accepts the request |
 | `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
 | `currency` | string | ✓ | |
-| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = payment succeeded after the hold expired |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation |
 | `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
 
 Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
@@ -782,7 +782,7 @@ pending_payment ──payment succeeded──▶ confirmed ──end of trip/sta
 |---|---|---|
 | create `pending_payment` | user proceeds to payment | `SeatInventory.hold` / `RoomNightInventory.reserve` |
 | → `confirmed` | event `payment.succeeded` | `SeatInventory.confirm` / nothing (nights stay) |
-| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06) | `SeatInventory.release` / `RoomNightInventory.release` |
+| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06), or payment confirmation after account deactivation (ACC-12, approved decision §3) | `SeatInventory.release` / `RoomNightInventory.release` |
 | → `cancelled` | user (FLT-26, HTL-21) or flight cancelled (FLT-06) | `SeatInventory.returnBooked` / `RoomNightInventory.release` |
 | → `completed` | job: flight `lastDepartureAt ≤ now`; hotel `checkOutDate < today` | none |
 
@@ -828,7 +828,9 @@ A URL path does not decide the module. Endpoints that combine provider data with
 |---|---|---|
 | `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)` → `{ amountMinor, currency, status, holdExpiresAt }`; `getPolicies(bookingId, userId)` |
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
-| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` (blocks ACC-12) |
+| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId, { session? })` (blocks ACC-12; caller transaction used when supplied) |
+
+**ACC-12 serialization.** Before confirming a pending booking, the booking owner calls `AccountsService.tryLockForBookingConfirmation(userId, { session })` with its active transaction. Accounts conditionally increments the existing Mongoose `users.__v` for active or suspended accounts; false means missing/deactivated. Deactivation writes the same user document, then reads both booking checks sequentially with its caller session before deleting sessions. A conflicting transaction retries against current account/booking state. If deactivation wins, hotel confirmation expires the pending reservation and releases its nights together, then requests the full `late_payment` refund after commit. A duplicate event reuses payments' one-refund-per-booking contract. Future flight confirmation must use this same fence and release its held seats when expiry wins.
 
 **Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`). Moderation: `ReportableContentRegistry` (`moderation/ports/`).
 
@@ -836,6 +838,8 @@ A URL path does not decide the module. Endpoints that combine provider data with
 Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
+
+Repeatable notification changes carry a required, non-empty opaque `eventId`: generate it once for the committed source change and reuse it for every retry or redelivery. Different reschedules and account/provider state changes have different IDs. Notification deduplication never depends on `readAt` or the latest state; a distinct reschedule notifies even while an earlier alert is unread. Notification `_id` is derived from the recipient, event type, entity and event identity, using the existing unique `_id` index; no collection field or index is added.
 
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
@@ -848,14 +852,14 @@ Names and payload types live in `backend/src/common/events/` (`Events`, `EventPa
 | `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
 | `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
 | `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
-| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight-booking.rescheduled` | `{ eventId, bookingId, userId }` | flight-bookings | notifications |
 | `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
 | `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
 | `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
-| `account.suspended` | `{ userId }` | accounts | notifications |
-| `account.reactivated` | `{ userId }` | accounts | notifications |
-| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `account.suspended` | `{ eventId, userId }` | accounts | notifications |
+| `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
+| `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 ---

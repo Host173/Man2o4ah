@@ -2,6 +2,7 @@ import { ConflictException, NotImplementedException } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
+import { AppEvents } from '../../common/events/app-events.service.js';
 import { Types } from 'mongoose';
 import { CabinClass } from '../../common/database/cabin-class.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -31,6 +32,7 @@ describe('FlightsService', () => {
         { provide: ReferenceDataService, useValue: {} },
         { provide: getConnectionToken(), useValue: {} },
         { provide: SeatInventory, useValue: {} },
+        { provide: AppEvents, useValue: { emit: vi.fn() } },
       ],
     }).compile();
 
@@ -115,6 +117,7 @@ describe('FlightsService', () => {
           { provide: ReferenceDataService, useValue: reference },
           { provide: getConnectionToken(), useValue: connection },
           { provide: SeatInventory, useValue: inventory },
+          { provide: AppEvents, useValue: { emit: vi.fn() } },
         ],
       }).compile();
       service = moduleRef.get(FlightsService);

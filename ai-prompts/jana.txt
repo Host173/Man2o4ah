@@ -420,6 +420,77 @@ its now merged on flt-04 do it
 How the output was used:
 Continued the FLT-04 implementation on its feature branch; no separate changes.
 ================================================
+
+
+
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-06
+
+Prompt:
+# FLT-06: Cancel flights #39
+
+Open
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/39#issue-6313316251)
+
+Owner
+
+**Expected output**
+Moderator cancels a scheduled flight after confirmation; it disappears from search; emits flight.cancelled.
+
+**Requirements:** FLT-06 (flight side)
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Integration; API
+**TDD required:** No
+
+**Branch:** `feature/FLT-06-cancel-flights`
+**PR title:** `FLT-06: Cancel flights`
+
+**Depends on:** [#35](https://github.com/Host173/Man2o4ah/issues/35) (FLT-03), [#8](https://github.com/Host173/Man2o4ah/issues/8) (PLT-06)
+**Blocks:** —
+**Works end to end once these merge:** [#56](https://github.com/Host173/Man2o4ah/issues/56) (FLT-26)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure to include all test cases and follow the contract and fakes
+
+[Attached: main.ts]
+import { readFileSync } from 'node:fs';
+import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  const config = app.get(ConfigService);
+
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
+  });
+
+  const { version } = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ) as { version: string };
+  setupSwagger(app, version);
+
+  await app.listen(config.get<number>('PORT', 4000));
+}
+await bootstrap();
+
+How the output was used:
+Created the FLT-06 branch from develop; no source changes because the FLT-03 code dependency is not merged into develop.
+================================================
 ================================================
 Date: 2026-11-20
 Student: Jana

@@ -9094,6 +9094,30 @@ Ran npm run verify (passed) and pre-push checks, pushed feature/ACC-04-login-cur
 Date: 2026-11-17
 Student: Aisha
 Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+# AI AGENT PROMPT: ACC-09
+
+## A. Context
+- **You are:** Aisha Al Rawahi, owner of Package 2 · Accounts & Auth (`accounts` module) in `Host173/Man2o4ah` (§2.1)[cite: 2].
+- **Ticket:** ACC-09: Profile (#29) (§15.3)[cite: 2].
+- **Branch:** `feature/ACC-09-profile` (§15.3)[cite: 2].
+- **PR Target:** Always `develop` (never `main`) (§3.18 rules 1–2, 11; §14.3)[cite: 2].
+- **PR Title:** `ACC-09: Profile` (§15.3)[cite: 2].
+- **First action:** Read your agent file, the README "Team rules", `docs/ai/skills/travel-platform/`, and `SKILL.md` (starting with §0), applying `chat-instructions.txt` guidance (rely on `SKILL.md` for project facts, follow conflict order §17 > §3 > §5 > everything else, stick to NestJS 12 ESM, Mongoose 9, MongoDB Atlas, Vitest, Next.js 16 App Router, Stripe test mode, and FXRatesAPI) (§0.1–§0.2, §1, §3.15)[cite: 1, 2]. Merged repo code and the coding skill win over anything in this prompt[cite: 1, 2].
+
+## B. Preconditions
+1. Run `git checkout develop && git pull origin develop` first so you pull the latest `develop` (never `main`), then create/checkout `feature/ACC-09-profile` from `develop` (§3.18 rules 1–2, 12; §14.1)[cite: 2].
+2. Check the repo to confirm `#10 (CTR-01)` and `#9 (CTR-05)` are merged and their code is present (§15.3)[cite: 2].
+3. Verify live repo state rather than relying on the 2026-11-11 snapshot in §2.2 (§0.2, §2.2)[cite: 1, 2]. If `develop` isn't prepared yet or either dependency is missing, STOP and notify Aisha (§3.18 rule 12)[cite: 2].
+
+## C. Acceptance Criteria
+- [ ] Allow any logged-in user to view their profile (`GET /api/users/me`) and edit `name`, `phone`, and `preferredCurrency` (`PATCH /api/users/me`) (§5.3.2, §6.1, ACC-09)[cite: 2].
+- [ ] Validate `name` (trimmed, 1–100 chars), `phone` (optional, validated format), and `preferredCurrency` against supported currencies from `ReferenceDataService` / `reference-data`, saving only when all fields pass validation (§4.6.1, §5.3.2, §11.5, ACC-09, GEN-13)[cite: 2].
+
+Exact requirement text (§17):
+- **ACC-09:** "[M] **ACC-09** (Any logged-in user) The system shall allow any logged-in user to edit name, phone number and preferred currency, saving only if all fields pass validation. | deps: ACC-04 | Low" (§17.1)[cite: 2].
 Related Requirement: ACC-05
 
 Prompt:
@@ -9123,6 +9147,42 @@ Exact requirement text (§17):
 ## D. Decisions That Apply (with Why)
 - **Layered modular monolith (business rules in services, not controllers):** Keeps logic testable and reusable outside HTTP controllers (§3.1, §11.4)[cite: 2].
 - **One owner per collection & no cross-module `populate`:** Isolates changes per module owner and prevents schema coupling or import cycles (§3.3, §5.1.1)[cite: 2].
+- **Cross-module calls through the owning module's exported service (`ReferenceDataService`):** Enforces module boundaries and avoids direct collection reads across modules (§3.3, §4.6.1, §5.6.1)[cite: 2].
+- **No general repository layer (Mongoose model in service):** Avoids extra boilerplate files over standard NestJS Mongoose model injection (§3.4, §11.4)[cite: 2].
+- **Required `typecheck` gate alongside tests/lint/build:** Vitest strips types without type-checking, so `tsc --noEmit` catches type errors (§3.10, §14.4)[cite: 2].
+- **Consistent error codes (`common/errors/error-codes.ts`):** Gives clients and tests stable error codes rather than relying on message wording (§3.17, §10.3)[cite: 2].
+- **Per-member prompt log (`ai-prompts/aisha.txt`):** Maintains course prompt-log traceability without merge conflicts (§3.16, §14.5)[cite: 2].
+- **Branch from latest `develop`, PRs always target `develop` (never `main`), and merge commits:** Keeps `main` for milestone releases, preserves commit history, and avoids force-push risks (§3.18 rules 1–3, 7, 11; §14.1, §14.3)[cite: 2].
+
+## E. Scope
+- **May change:** `accounts` module files (`backend/src/modules/accounts/` and its tests) following §4.3, §5.3.2, §6.1, §7.5–§7.6, and §11.4[cite: 2].
+- **Must NOT change without Aisha getting Kareem's approval:** Other modules, `common/`, data models, ports, events, error codes, auth cookies, `DESIGN.md`, or new packages (§3.2, §3.3, §3.17, §5.10)[cite: 2].
+- **Downstream consumers:** `#16 (GEN-12)` (Reference data endpoints) is noted in the ticket as working end-to-end once merged; `preferredCurrency` is also used by itinerary budget conversion (`ITN-18`) (§5.3.2, §5.3.8, §15.2–§15.3)[cite: 2].
+
+## F. Workflow
+Proceed directly through pulling updates, exploration, planning, API tests, implementation, verification, self-review, and pushing/opening the PR to `develop` without pausing for extra approval unless a STOP condition or safety/completeness issue occurs:
+1. Pull latest `develop` first, then explore the repository and check what already exists for `accounts`, `#10 (CTR-01)`, `#9 (CTR-05)`, `PLT-04`, and `PLT-05` (§14.1, §15.3)[cite: 2].
+2. Form a concise implementation plan aligned with §11.4 ("Module recipe"), §11.5 ("Validation and DTO rules"), §5.3.2, §6.1, and §7.5–§7.6[cite: 2].
+3. Write **API** tests (the ticket's test level, using §13.3 and §13.6 techniques: Supertest status and error-code assertions, valid updates, invalid/unsupported currency or invalid fields rejected with no partial save, unauthenticated `401` without cookie)[cite: 2].
+4. Implement profile view and update (`GET /api/users/me`, `PATCH /api/users/me`) and supported-currency check via `ReferenceDataService` (using the contract/fake until `#16 (GEN-12)` is merged) following `SKILL.md` and the coding skill without inventing unmentioned packages or extra abstractions (§0.2, §2.1, §6.1, §11.4–§11.5, §13.5)[cite: 1, 2].
+5. Run `npm run verify` in `backend/` (§11.1, §14.4)[cite: 2].
+6. Make small Conventional Commits with scope `accounts` and requirement ID `ACC-09` (§14.2)[cite: 2].
+7. Add or verify Swagger `@ApiTags` and `@ApiOperation` summaries on the profile endpoints (§11.12)[cite: 2].
+8. Walk through the §14.6 Definition of Done (backend items) and review your diff, tests, and prompt log entry[cite: 2].
+9. Push `feature/ACC-09-profile` and open a PR targeting `develop` (never `main`) with title `ACC-09: Profile` and a description following `.github/pull_request_template.md` (requirement IDs and summary, design decisions and why, how it was tested, AI usage, checklist, and any contract changes at the top)—unless a STOP condition or safety/completeness issue occurs, in which case do NOT push or open a PR and STOP to notify Aisha clearly (§0.2, §3.18 rules 1–2, 5, 10; §14.3–§14.4)[cite: 1, 2].
+10. Deliver the final report: files changed, test results, push/PR status (or reason stopped), PR-ready "design decisions and why", contract changes to call out, and open questions for Kareem[cite: 2].
+
+## G. Prompt-Log Instruction
+Append one entry to `ai-prompts/aisha.txt` per §14.5 (`Date`, `Student: Aisha`, `Tool`, `Related Requirement: ACC-09`, `Prompt` copied verbatim with any attached file content unchanged, and one-line `How the output was used`), replacing any secrets/tokens/connection strings with `<removed>` and never editing earlier entries[cite: 2].
+
+## H. STOP Conditions
+Do not stop for routine implementation choices covered by `SKILL.md` or standard NestJS/Mongoose/DTO mechanics within `accounts/`. Only STOP and notify Aisha if you hit a real blocker: `#10 (CTR-01)` or `#9 (CTR-05)` missing/unmerged, `develop` not prepared, a change requiring another module or a shared contract (`common/`, data model, ports, events, error codes, auth cookies, `DESIGN.md`, new packages), an undecided/uncovered rule affecting data/money/status, or a CI gate that can only pass by silencing it (§0.2, §3.18 rule 12, §14.4)[cite: 1, 2].
+
+## I. Open Questions for Kareem
+- Have the 15 design calls in §5.8 (including `USD` as platform currency / default currency) been confirmed in team review (`PLT-04`), and are there specific phone format constraints beyond §5.3.2?[cite: 2]
+
+How the output was used:
+Added GET/PATCH /api/users/me with API tests in backend/src/modules/accounts; committed 92f2a12 (tests) and 192e14f (feature); not pushed: blog.service.spec.ts skeleton test fails and needs a change in the blog module
 - **No general repository layer (Mongoose model in service):** Avoids extra boilerplate files over standard NestJS Mongoose model injection (§3.4, §11.4)[cite: 2].
 - **Atomic `$inc` for lockout counter:** Prevents parallel wrong passwords from bypassing the 5-attempt lockout limit (§3.9, §4.6.2, §5.3.2, §7.4)[cite: 2].
 - **TDD required for ACC-05:** Test-first commits make exact threshold/boundary and concurrency rules clear in git history (§3.12, §13.2, §15.3)[cite: 2].
@@ -9168,6 +9228,43 @@ Added login lockout with tests in backend/src/modules/accounts/auth; committed 6
 Date: 2026-11-17
 Student: Aisha
 Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+Do NOT modify `backend/src/modules/blog/blog.service.spec.ts` or any file outside `accounts/`, so we strictly respect module ownership and scope boundaries.
+
+Instead, proceed with pushing `feature/ACC-09-profile` and preparing the PR targeting `develop` titled `ACC-09: Profile` (as a Draft PR if CI requires `blog.service.spec.ts` to pass before review, or ready for review with the blocker noted):
+
+1. **Keep scope strictly inside `accounts/`:**
+   - Leave `blog.service.spec.ts` untouched.
+   - Ignore the `common/events` parallel-load crash since those 6/6 tests pass in isolation and are a known Windows issue unrelated to ACC-09.
+
+2. **Push and open the PR form:**
+   - Push `feature/ACC-09-profile` to origin and open the pre-filled PR form targeting `develop` titled `ACC-09: Profile`.
+   - Include the following in the PR description:
+     - **Summary:** View/edit profile endpoints (`GET /api/users/me` or profile routes in `UsersController`, `ProfileService`, `UpdateProfileDto`, `ProfileDto`), `ReferenceDataModule` import (permitted per `data-model.md §6`), and 23/23 new profile API tests passing (929/930 overall; formatting, lint, typecheck, and build all pass).
+     - **Blocker / Cross-Module Test Note (for Kareem & `blog` owner):**
+       - `backend/src/modules/blog/blog.service.spec.ts` (lines 27–50) fails with `Cannot read properties of undefined (reading 'Country')` because `AccountsModule` now imports `ReferenceDataModule`, and `blog.service.spec.ts` manually mocks `AccountsModule`'s transitive model tokens without overriding the 5 reference-data models (`Country`, `City`, `Airport`, `Attraction`, `Currency`).
+       - Per module ownership rules, `blog/` was intentionally not edited in this PR. Please confirm whether I should commit the 5-line model-token override in `blog.service.spec.ts` here, or if the `blog` module owner will apply it.
+     - **Design decisions:**
+       - Accessible to any logged-in role.
+       - Atomic all-or-nothing validation and update (`preferredCurrency` checked before write; single schema-validated update).
+       - Unsupported currency returns `400 UNSUPPORTED_CURRENCY` with `details` targeting `preferredCurrency` (no new error codes).
+       - Reuses `user.schema.ts` phone regex; rejects extra/read-only fields (`email`, `role`, `status`) with `400`.
+       - `name: null` and `preferredCurrency: null` are rejected; `phone: null` clears the phone number.
+       - Swagger tagged `users` with summaries prefixed `ACC-09`.
+     - **Dependencies & Merge Notes:**
+       - `ReferenceDataService.getCurrency` on `develop` currently throws not-implemented until `GEN-12` (#16) lands (`PATCH` with `preferredCurrency` returns 501 at runtime until then; mocked in tests).
+       - Expect a minor merge conflict in `auth.service.ts` once `ACC-08` merges into `develop`.
+     - **Open questions for Kareem:**
+       1. Approve committing the 5-line model override in `blog.service.spec.ts`, or have the `blog` owner apply it?
+       2. Confirm `phone: null` clearing the stored phone number and whether stricter phone validation is needed beyond the current schema pattern.
+       3. Confirm §5.8 design calls (including `USD` as default currency) from `PLT-04`.
+
+How the output was used:
+Pushed feature/ACC-09-profile (no files outside accounts changed) and opened GitHub's prefilled PR form "ACC-09: Profile" into develop (gh CLI not installed); log commit pushed
+================================================
+
 Related Requirement: ACC-05
 
 Prompt:
@@ -9767,6 +9864,29 @@ Fixed forced-change same-password bug in auth.service.ts with service/API/DTO te
 Date: 2026-11-17
 Student: Aisha
 Tool: Claude Code
+Related Requirement: ACC-09
+
+Prompt:
+GitHub Actions CI on PR #140 (`feature/ACC-09-profile`) failed with **84/85 test files (935/936 tests) passing** and **1 test failing**—the `blog.service.spec.ts` skeleton test (`Cannot read properties of undefined (reading 'Country')`), because `blog.service.spec.ts` manually mocks `AccountsModule`'s Mongoose models without the 5 `ReferenceDataModule` models.
+
+Resolve this cleanly **without violating any rules from the original prompt or touching anything outside `accounts/`**:
+
+1. **Strict Scope & Boundary Rules:**
+   - Do **NOT** edit `backend/src/modules/blog/blog.service.spec.ts` or any file outside `backend/src/modules/accounts/` (and `docs/` only if required by existing prompt rules).
+   - Do **NOT** change any shared contracts, error codes, events, ports, or frozen data models.
+   - Keep TDD commit discipline and append to the prompt log as required by the original prompt.
+
+2. **Fix the Dependency Coupling Inside `accounts/`:**
+   - Instead of importing the full `ReferenceDataModule` into `AccountsModule` (which pulls all 5 Mongoose model tokens—`Country`, `City`, `Airport`, `Attraction`, `Currency`—into any test module like `blog.service.spec.ts` that imports `AccountsModule`), decouple `ProfileService` inside `accounts/` so `AccountsModule` no longer requires those 5 Mongoose model tokens at module initialization—for example, by injecting `ReferenceDataService` via an optional/port token or lightweight provider wrapper inside `accounts/` (while still resolving `ReferenceDataService` at runtime when `ReferenceDataModule` is registered in the app).
+   - Ensure `ProfileService`, `profile.api.spec.ts` (all 23 profile tests), and all `accounts` tests continue to validate `preferredCurrency` identically at runtime and in tests.
+
+3. **Verify, Push, and Update/Create the PR Automatically:**
+   - Run `npm run verify` (or the accounts + blog test suites plus format, lint, typecheck, and build—ignoring any known Windows-only `common/events` load issue if it passes in isolation) to confirm both `accounts` and `blog.service.spec.ts` pass (936/936).
+   - Commit the fix (plus prompt log update) and push to `feature/ACC-09-profile` so PR #140 updates automatically (and if no open PR exists on the pushed branch, automatically create the PR targeting `develop` titled `ACC-09: Profile`).
+   - Update the PR description to remove the `blog.service.spec.ts` blocker note and reflect that all 936 tests now pass without touching `blog/`.
+
+How the output was used:
+ProfileService looks up ReferenceDataService through ModuleRef and AccountsModule no longer imports ReferenceDataModule; committed 1e467ea (wiring test) and 5eae2ce (fix), npm run verify passed (937/937), pushed to PR #140; new PR description copied to clipboard for pasting (gh CLI not installed)
 Related Requirement: ACC-08
 
 Prompt:

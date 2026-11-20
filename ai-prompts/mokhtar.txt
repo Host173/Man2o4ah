@@ -735,3 +735,138 @@ Approved; proceed as Mokhtar and use mokhtar.txt
 How the output was used:
 Authorized itinerary-package changes and the Mokhtar prompt log; GitHub publishing uses the authenticated pierreofficial account, whose log is also appended for CI.
 ================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-14
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. You are implementing GitHub Issue #70: **"ITN-14: Budgets and budget summary"** (Package: 6 Â· Itineraries, Module: itineraries)[cite: 10].
+
+### 1. Branching Rule (Stacked Branching Only for Related Issues)
+* **Stacked branching is allowed ONLY for related/dependent issues**; if an issue is NOT related, its branch must come cleanly from `develop`.
+* Check the dependencies for **ITN-14 (#70)**: it depends on `#66` (`ITN-05`), `#68` (`ITN-10`), `#9` (`CTR-05`), and `#71` (`ITN-16`: Transport costs)[cite: 10].
+* If any of these related dependency branches (especially `#71` / `ITN-16` or `#68` / `ITN-10`) are not yet merged into `develop`, stack/branch from the appropriate related dependency branch (or branch cleanly from `develop` if all dependencies are merged)[cite: 10].
+* Name the branch **`feature/ITN-14-budgets-budget-summary`**[cite: 10]. Do **not** stack off unrelated branches.
+
+### 2. Full Codebase Context & Implementation (`ITN-14` & `ITN-18` Conversion Use)
+* Read all project skills and guidelines in `docs/ai/skills/travel-platform/` and follow all repository conventions[cite: 10].
+* Inspect the existing `itineraries` module, days/city-groups (`ITN-05`), activities (`ITN-10`), transport costs (`ITN-16`), and FX/reference-data contracts (`CTR-05`) so you understand the full data model and integration points before writing code[cite: 10].
+* Implement **ITN-14** (and **ITN-18** conversion usage) thoroughly[cite: 10]:
+  * **Budget entries:** Support budget entries per day and category in any supported currency[cite: 10].
+  * **Budget summary:** Compute and return summaries per **category**, **day**, **city group**, and **total** converted into the **user's preferred currency** along with the **rate date**[cite: 10].
+  * Enforce session authentication, strict `ownerId` scoping (`404 NOT_FOUND` for missing/foreign itineraries), proper validation/error shapes (`400 VALIDATION_FAILED` for unsupported currencies, invalid amounts, invalid categories/days), fake parity, and Swagger documentation[cite: 10].
+
+### 3. Testing Plan (`TDD required: Yes` â€” Including `SELF_REVIEW_PROMPT (2).md`)
+* **Strict TDD Discipline (`TDD required: Yes`):** Write failing ("red") tests firstâ€”and commit red tests cleanly before/separately from the implementation fixâ€”before writing the production code[cite: 10].
+* **Unit tests (totals & conversion with FX fake):** Test multi-currency totals, category/day/city-group/overall rollups, currency conversion using the FX fake, and rate date reporting[cite: 10].
+* **API tests:** Test budget entry endpoints, summary endpoints, supported/unsupported currencies, preferred currency handling, auth/ownership scoping, and validation boundaries[cite: 10].
+* **Self-review pass (`SELF_REVIEW_PROMPT (2).md`):** Run `SELF_REVIEW_PROMPT (2).md` against your branch and fix any issues, missing tests, or rule violations it surfaces, re-running until clean.
+  * **Merge-issue rule during self-review:** If the self-review flags **merge conflicts or anything related to merging**, **ignore** the merge/conflict finding and do not get blocked on it.
+* Run `npm run format` and `npm run verify` locally and confirm formatting, linting, typechecking, all unit/API/fake tests, and build pass with **zero errors**.
+
+### 4. Log Prompts, Push, Open PR & Confirm Green CI Before Moving Next
+* Log the prompts used for this task into the repository's prompt log following project rules.
+* Commit your changes cleanly and push `feature/ITN-14-budgets-budget-summary`[cite: 10].
+* Open a Pull Request titled **`ITN-14: Budgets and budget summary`** referencing `#70` and attach the **Self-Review Report** from `SELF_REVIEW_PROMPT (2).md`[cite: 10].
+* **Verify that CI checks are green** before moving on to the next ticket.
+Attached file: `C:\Users\moham\Downloads\SELF_REVIEW_PROMPT (2).md`
+
+How the output was used:
+Branched ITN-14 from the ITN-16 dependency branch, wrote red API tests first (commit 0e02d54), then implemented budget CRUD, the converted summary, fake parity and tests; npm run verify passed (2521 tests, 98% lines).
+[Attached: SELF_REVIEW_PROMPT (2).md]Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+================================================
+================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-14
+
+Prompt:Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Ran the strict self-review on feature/ITN-14-budgets-budget-summary: 5 throwaway probes passed with no problems; report attached to the PR.
+================================================

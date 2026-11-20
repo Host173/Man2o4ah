@@ -198,4 +198,35 @@ describe('transitionStatus on HotelReservation (GEN-11)', () => {
     );
     expect(['confirmed', 'expired']).toContain(await statusOf(id));
   });
+
+  it('enforces an extra where condition atomically in the conditional update', async () => {
+    const id = await pending();
+    await transitionStatus(reservations, id, 'pending_payment', 'confirmed');
+    const completedAt = new Date('2027-03-13T01:00:00.000Z');
+
+    await expect(
+      transitionStatus(
+        reservations,
+        id,
+        'confirmed',
+        'completed',
+        { completedAt },
+        { where: { checkOutDate: { $lt: toDateOnly('2027-03-12') } } },
+      ),
+    ).rejects.toMatchObject(INVALID_TRANSITION);
+    expect(await statusOf(id)).toBe('confirmed');
+
+    await transitionStatus(
+      reservations,
+      id,
+      'confirmed',
+      'completed',
+      { completedAt },
+      { where: { checkOutDate: { $lt: toDateOnly('2027-03-13') } } },
+    );
+    expect(await reservations.findById(id).lean()).toMatchObject({
+      status: 'completed',
+      completedAt,
+    });
+  });
 });

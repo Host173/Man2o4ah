@@ -1459,3 +1459,39 @@ make my branch up to date with develop
 How the output was used:
 Fetched origin: the branch is already up to date with develop (0 commits behind), so no merge was needed; committed the pending prompt-log entries as chore(ai): log the Swagger testing prompts (FLT-25), not pushed
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+hey so the login get me shows the user even when i didnt use the authorize buttpn how come
+
+How the output was used:
+Answer only, no files changed (explained cookie auth in Swagger and corrected my earlier Authorize step); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+okay again give me exact steps to test flt 25
+
+How the output was used:
+Wrote a throwaway seed script in the session scratchpad (outside the repo, not committed) and gave exact Swagger test steps; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+push log commit and tell me if the self review fixes were done
+
+How the output was used:
+Committed the pending prompt-log entries as chore(ai): log the seed script and Swagger prompts (FLT-25) and pushed the branch; answered which self-review items are done
+================================================

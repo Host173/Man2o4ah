@@ -4,7 +4,10 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { vi } from 'vitest';
-import { FakeStripeGateway } from '../../../test/fakes/stripe-gateway.fake.js';
+import {
+  FAKE_STRIPE_SIGNATURE,
+  FakeStripeGateway,
+} from '../../../test/fakes/stripe-gateway.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
@@ -12,6 +15,7 @@ import type { TestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
+import { PaymentIntentsService } from './payment-intents.service.js';
 import { PaymentsModule } from './payments.module.js';
 import { PaymentsService } from './payments.service.js';
 import type { RefundRequest } from './payments.types.js';
@@ -19,9 +23,27 @@ import { Payment } from './schemas/payment.schema.js';
 import type { PaymentStatus } from './schemas/payment.schema.js';
 import { Refund } from './schemas/refund.schema.js';
 import { STRIPE_GATEWAY } from './stripe/stripe-gateway.js';
+import type {
+  CreateRefundInput,
+  GatewayRefund,
+} from './stripe/stripe-gateway.js';
+
+/** A fake gateway that can hold `createRefund` back, to play out a webhook that arrives first. */
+class GatedGateway extends FakeStripeGateway {
+  /** While set, `createRefund` waits for it after Stripe "accepted" the request. */
+  gate: Promise<void> | null = null;
+
+  override async createRefund(
+    input: CreateRefundInput,
+  ): Promise<GatewayRefund> {
+    const result = await super.createRefund(input);
+    if (this.gate) await this.gate;
+    return result;
+  }
+}
 
 describe('PaymentsService refunds (PAY-03)', () => {
-  const gateway = new FakeStripeGateway();
+  const gateway = new GatedGateway();
   const updated = vi.fn();
   let t: TestApp;
   let payments: Model<Payment>;
@@ -46,6 +68,7 @@ describe('PaymentsService refunds (PAY-03)', () => {
     await clearCollections(t.connection);
     gateway.calls.length = 0;
     gateway.nextRefundStatus = 'pending';
+    gateway.gate = null;
     updated.mockClear();
   });
 
@@ -262,6 +285,18 @@ describe('PaymentsService refunds (PAY-03)', () => {
       },
     );
 
+    it.each([
+      ['bookingId', { bookingId: 'not-an-id' }],
+      ['userId', { userId: 'not-an-id' }],
+    ])('400 for a malformed %s, not a server error', async (field, bad) => {
+      const p = await paid();
+      await expectRefusal(
+        () => service.refund(requestFor(p, bad)),
+        BadRequestException,
+        invalid(field, 'must be a valid id'),
+      );
+    });
+
     it('400 for an amount above the amount paid', async () => {
       const p = await paid();
       await expectRefusal(
@@ -329,6 +364,39 @@ describe('PaymentsService refunds (PAY-03)', () => {
     await expect(
       service.getRefund('flight', new Types.ObjectId().toString()),
     ).resolves.toBeNull();
+  });
+
+  it('announces a refund once when the webhook arrives while Stripe is still answering', async () => {
+    const p = await paid();
+    let release: () => void = () => undefined;
+    gateway.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inFlight = service.refund(requestFor(p));
+    await vi.waitFor(() => expect(refundCalls()).toHaveLength(1));
+    const doc = await refunds.findOne().lean();
+    const event = {
+      id: 'evt_race',
+      type: 'refund.updated',
+      refund: {
+        id: 're_race',
+        status: 'succeeded',
+        metadata: { refundId: String(doc?._id) },
+      },
+    };
+    await t.moduleRef
+      .get(PaymentIntentsService)
+      .handleWebhook(Buffer.from(JSON.stringify(event)), FAKE_STRIPE_SIGNATURE);
+
+    release();
+    const view = await inFlight;
+
+    expect(view.status).toBe('refunded');
+    // The webhook announced it; the late `refund()` call must not announce it again.
+    expect(updated).toHaveBeenCalledTimes(1);
+    expect(updated).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'refunded' }),
+    );
   });
 
   it('refunds a hotel reservation too', async () => {

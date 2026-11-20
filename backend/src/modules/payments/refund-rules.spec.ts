@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import {
   assertRefundAmount,
+  assertRefundIds,
   checkRefundRequest,
   refundStatusAfter,
   refundStatusFromGateway,
@@ -53,6 +54,51 @@ describe('assertRefundAmount (PAY-03)', () => {
 
   it.each([1, 25_000, Number.MAX_SAFE_INTEGER])('accepts %s', (amount) => {
     expect(() => assertRefundAmount(amount)).not.toThrow();
+  });
+});
+
+describe('assertRefundIds (PAY-03)', () => {
+  const ID = '6553a1f0c2b4e8a9d0f1a2b3';
+
+  it.each([
+    ['not-an-id'],
+    [''],
+    ['6553a1f0c2b4e8a9d0f1a2b3a'],
+    // 12 characters: a driver would read it as 12 raw bytes, not as an id.
+    ['abcdefghijkl'],
+  ])('refuses the bookingId %j with 400 on bookingId', (bookingId) => {
+    const error = thrown(() => assertRefundIds({ bookingId, userId: ID }));
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual(
+      invalid('bookingId', 'must be a valid id'),
+    );
+  });
+
+  it.each([['not-an-id'], ['']])(
+    'refuses the userId %j with 400 on userId',
+    (userId) => {
+      const error = thrown(() => assertRefundIds({ bookingId: ID, userId }));
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toEqual(
+        invalid('userId', 'must be a valid id'),
+      );
+    },
+  );
+
+  it('checks the bookingId before the userId', () => {
+    const error = thrown(() =>
+      assertRefundIds({ bookingId: 'bad', userId: 'also-bad' }),
+    );
+
+    expect((error as BadRequestException).getResponse()).toEqual(
+      invalid('bookingId', 'must be a valid id'),
+    );
+  });
+
+  it.each([ID, ID.toUpperCase()])('accepts the id %s', (id) => {
+    expect(() => assertRefundIds({ bookingId: id, userId: id })).not.toThrow();
   });
 });
 

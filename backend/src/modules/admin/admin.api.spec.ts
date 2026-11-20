@@ -2837,6 +2837,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline1Id,
         moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
@@ -2850,6 +2851,9 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
       },
     ]);
 
+    const firstDeactivationId = fakeEvents.payloadsOf(
+      Events.ProviderDeactivated,
+    )[0]?.eventId;
     // 2) Repeated deactivate keeps isActive=false and emits one event pair.
     fakeEvents.clear();
     const repeatDeactAirline = await accApp!
@@ -2859,6 +2863,9 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect(repeatDeactAirline.status).toBe(204);
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toHaveLength(1);
+    expect(
+      fakeEvents.payloadsOf(Events.ProviderDeactivated)[0]?.eventId,
+    ).not.toBe(firstDeactivationId);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
         actorId: admin.id,
@@ -2880,6 +2887,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline1Id,
         moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
@@ -2903,6 +2911,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeFlights.getAirline(airline2Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.AIRLINE,
         providerId: airline2Id,
         moderatorIds: [],
@@ -2924,6 +2933,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.HOTEL,
         providerId: hotel1Id,
         moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
@@ -2947,6 +2957,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.any(String),
         providerType: ProviderType.HOTEL,
         providerId: hotel1Id,
         moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
@@ -2975,6 +2986,13 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     expect(repeatReactHotel.status).toBe(204);
     expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(true);
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toHaveLength(2);
+    expect(
+      new Set(
+        fakeEvents
+          .payloadsOf(Events.ProviderReactivated)
+          .map((event) => event.eventId),
+      ).size,
+    ).toBe(2);
 
     // 7) Verify moderators' account statuses, account events, and bookings remained untouched
     expect(suspendSpy).not.toHaveBeenCalled();

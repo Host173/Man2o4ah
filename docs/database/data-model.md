@@ -837,6 +837,8 @@ Handlers are **idempotent**: they use conditional updates, so handling the same 
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
 
+Repeatable notification changes carry a required, non-empty opaque `eventId`: generate it once for the committed source change and reuse it for every retry or redelivery. Different reschedules and account/provider state changes have different IDs. Notification deduplication never depends on `readAt` or the latest state; a distinct reschedule notifies even while an earlier alert is unread. Notification `_id` is derived from the recipient, event type, entity and event identity, using the existing unique `_id` index; no collection field or index is added.
+
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
 | `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
@@ -848,14 +850,14 @@ Names and payload types live in `backend/src/common/events/` (`Events`, `EventPa
 | `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
 | `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
 | `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
-| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight-booking.rescheduled` | `{ eventId, bookingId, userId }` | flight-bookings | notifications |
 | `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
 | `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
 | `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
-| `account.suspended` | `{ userId }` | accounts | notifications |
-| `account.reactivated` | `{ userId }` | accounts | notifications |
-| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
+| `account.suspended` | `{ eventId, userId }` | accounts | notifications |
+| `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
+| `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 ---

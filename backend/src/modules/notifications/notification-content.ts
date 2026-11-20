@@ -1,8 +1,11 @@
 import type { Events } from '../../common/events/events.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
-import type { ProviderType } from '../accounts/schemas/user.schema.js';
-import type { RefundStatus } from '../payments/schemas/refund.schema.js';
 import { NotificationType } from './schemas/notification.schema.js';
+
+type ProviderType = PayloadOf<
+  typeof Events.ProviderDeactivated
+>['providerType'];
+type RefundStatus = PayloadOf<typeof Events.RefundUpdated>['status'];
 
 /** A notification about to be stored; `userId` is a string as events carry it. */
 export interface NewNotification {
@@ -11,6 +14,7 @@ export interface NewNotification {
   title: string;
   message: string;
   entity?: { type: string; id: string };
+  eventId?: string;
 }
 
 export type BookingKind = 'flight' | 'hotel';
@@ -102,6 +106,7 @@ export function flightBookingRescheduled(
     {
       userId: payload.userId,
       type: NotificationType.FLIGHT_SCHEDULE_CHANGED,
+      eventId: payload.eventId,
       title: 'Flight schedule changed',
       message:
         'A flight in your booking has new times. Check your booking for the new schedule.',
@@ -118,6 +123,7 @@ export function accountSuspended(
     {
       userId: payload.userId,
       type: NotificationType.ACCOUNT_SUSPENDED,
+      eventId: payload.eventId,
       title: 'Account suspended',
       message: 'Your account was suspended by an administrator.',
     },
@@ -132,6 +138,7 @@ export function accountReactivated(
     {
       userId: payload.userId,
       type: NotificationType.ACCOUNT_REACTIVATED,
+      eventId: payload.eventId,
       title: 'Account reactivated',
       message: 'Your account is active again.',
     },
@@ -145,6 +152,7 @@ export function providerDeactivated(
   return payload.moderatorIds.map((userId) => ({
     userId,
     type: NotificationType.PROVIDER_DEACTIVATED,
+    eventId: payload.eventId,
     title: `${PROVIDER_TITLE[payload.providerType]} deactivated`,
     message: `Your ${payload.providerType} was deactivated by an administrator.`,
     entity: { type: payload.providerType, id: payload.providerId },
@@ -158,6 +166,7 @@ export function providerReactivated(
   return payload.moderatorIds.map((userId) => ({
     userId,
     type: NotificationType.PROVIDER_REACTIVATED,
+    eventId: payload.eventId,
     title: `${PROVIDER_TITLE[payload.providerType]} reactivated`,
     message: `Your ${payload.providerType} is active again.`,
     entity: { type: payload.providerType, id: payload.providerId },

@@ -1401,3 +1401,58 @@ true
 How the output was used:
 Authorized recording this session's actual request and publication approvals in Pierre's append-only prompt log.
 ================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first regressions and fixes for notification replay identity, distinct unread reschedules, string service IDs, compiled Swagger metadata and cross-module schema type imports. Updated shared event contracts, their documentation and the committed admin provider-event producer in an isolated worktree.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+event_contract=Approved: implement the recommended stable eventId contract and distinct-change notifications, publish=true
+
+How the output was used:
+Recorded approval for required stable event IDs, reused on delivery retries and renewed for genuine changes, independently of notification read state. Authorized fetching, merging current develop and incoming PR changes, committing, publishing and posting validation evidence.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+the pr is supposed to opened
+
+How the output was used:
+Checked GitHub's recorded state after discovering that PR #168 had merged without these fixes while validation was running; did not claim that the local fixes were already in develop.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+no the pr is opened
+
+How the output was used:
+Confirmed independently that #168 was merged and that the open matching #188 was a revert PR, not a notification-fix PR; requested clarification rather than publishing to the revert branch.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+ok re oopen it and the fixes
+
+How the output was used:
+Prepared an open follow-up fix PR because GitHub cannot reopen a merged PR, retaining the request to comment on #168. Integrated develop cd8cc24, preserved its complete committed prompt-log prefixes and added attribution corrections instead of rewriting merged history. The corrected original GEN-01 records remain available in commit 50a5518.
+================================================

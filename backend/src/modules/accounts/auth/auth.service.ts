@@ -19,6 +19,7 @@ import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
 import {
+  BCRYPT_ROUNDS,
   getSessionMaxAgeMs,
   LOCKOUT_MS,
   MAX_FAILED_LOGIN_ATTEMPTS,
@@ -26,9 +27,6 @@ import {
   SESSION_IDLE_MS,
 } from './auth.constants.js';
 import type { AccessTokenPayload } from './auth.types.js';
-
-/** bcrypt cost factor (auth.md §4). bcrypt adds a random salt to every hash. */
-const BCRYPT_ROUNDS = 12;
 
 /** MongoDB's duplicate-key error code. */
 const DUPLICATE_KEY = 11000;

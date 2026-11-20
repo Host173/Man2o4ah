@@ -5,6 +5,8 @@ import { PaymentsController } from './payments.controller.js';
 import { PaymentExpiryListener } from './payment-expiry.listener.js';
 import { PaymentIntentsService } from './payment-intents.service.js';
 import { PaymentsService } from './payments.service.js';
+import { PoliciesController } from './policies.controller.js';
+import { PolicyAcceptancesService } from './policy-acceptances.service.js';
 import { PayableBookingRegistry } from './ports/payable-booking.registry.js';
 import { Payment, PaymentSchema } from './schemas/payment.schema.js';
 import {
@@ -32,10 +34,11 @@ import { STRIPE_GATEWAY } from './stripe/stripe-gateway.js';
       { name: StripeWebhookEvent.name, schema: StripeWebhookEventSchema },
     ]),
   ],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PoliciesController],
   providers: [
     PaymentsService,
     PaymentIntentsService,
+    PolicyAcceptancesService,
     PaymentExpiryListener,
     PayableBookingRegistry,
     {

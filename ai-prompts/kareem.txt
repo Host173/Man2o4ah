@@ -1596,6 +1596,69 @@ How the output was used:
 Date: 2026-11-19
 Student: Kareem
 Tool: Claude Code
+Related Requirement: GEN-01
+
+Prompt:
+@"C:\Users\karee\Downloads\GEN01_EXECUTION.md"
+execute this and create a pr from develop to work on , i have 2 more exec fils should i gave it to you also , and you open new convo that will create there branches also
+
+[Attached: GEN01_EXECUTION.md]
+# Execution — GEN-01: In-app notifications
+
+Issue #19. Lane B of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+Build the `notifications` module: it **listens to events** other modules emit and stores one notification per recipient, and it gives every logged-in user four endpoints: their list, their unread count, mark one as read, mark all as read. Today the module only registers its schema.
+
+Done means:
+1. A listener for each of the 10 notification events in the table below.
+2. `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`.
+3. Integration tests for the listeners and API tests for the endpoints.
+
+**Out of scope:** emitting any event (bookings, payments, accounts and admin emit them in their own tickets), email (GEN-01b, issue #94), the frontend, CI, the data model.
+
+## Context you need
+
+**Requirement GEN-01 (verbatim):** "The system shall show in-app notifications (unread count, notification list, mark as read) for booking confirmation, cancellation and refund, flight schedule change, and account or provider suspension."
+
+**Rules from the docs:**
+- The module **listens to events**; no module calls it to notify (`domain-rules.md` §8, `data-model.md` §6.1: notifications calls no other module).
+- Events: `backend/src/common/events/events.ts` (`Events.X`) and `event-payloads.ts` (`PayloadOf<typeof Events.X>`). Listen with `@OnEvent(Events.X)` from `@nestjs/event-emitter`; never a string literal. IDs arrive as strings.
+- Lists are paginated, page size 10 (GEN-05): extend `PaginationQueryDto` usage and return `{ items, page, limit, total, totalPages }` (`backend/src/common/pagination/`: `paginate`, `toPage`, `Paginated`).
+- JSON: IDs keep the field name `_id` (24-hex string), instants are ISO strings, enum values lowercase (`api-contract.md` §3).
+- Access **User** = any logged-in account, every role (users, admins, moderators). Routes need no decorator: the global guards (from `AccountsModule`) already require a login. Read the user with `@CurrentUser() user: AuthUser` (`user.id` is the user's `_id`) from `backend/src/modules/accounts/auth/decorators.ts` / `auth.types.ts`.
+- `:id` params use `ParseObjectIdPipe` from `@nestjs/mongoose` (as `blog.controller.ts` does): a malformed id answers **400 `VALIDATION_FAILED`**.
+- Errors: `new NotFoundException({ code: ErrorCode.NotFound, message: 'Notification not found' })`.
+
+**The schema exists, don't change it** (`backend/src/modules/notifications/schemas/notification.schema.ts`):
+`userId` (ObjectId, recipient), `type` (`NotificationType` enum), `title` (≤ 100), `message` (≤ 500), `entity?` (`{ type, id }`, what to open), `readAt?` (null or absent = unread), timestamps; index `{ userId: 1, readAt: 1, createdAt: -1 }`. `{ readAt: null }` in a filter matches both null and a missing field, so it means "unread".
+
+**Event → notification (build exactly this):**
+
+| Event | Recipient(s) | `type` | `title` | `message` | `entity` |
+|---|---|---|---|---|---|
+| `FlightBookingConfirmed` `{ bookingId, userId, reference }` | `userId` | `booking_confirmed` | `Flight booking confirmed` | `Your flight booking ${reference} is confirmed.` | `{ type: 'flight_booking', id: bookingId }` |
+| `FlightBookingCancelled` (same payload) | `userId` | `booking_cancelled` | `Flight booking cancelled` | `Your flight booking ${reference} was cancelled.` | `{ type: 'flight_booking', id: bookingId }` |
+| `HotelReservationConfirmed` (same payload) | `userId` | `booking_confirmed` | `Hotel reservation confirmed` | `Your hotel reservation ${reference} is confirmed.` | `{ type: 'hotel_reservation', id: bookingId }` |
+| `HotelReservationCancelled` (same payload) | `userId` | `booking_cancelled` | `Hotel reservation cancelled` | `Your hotel reservation ${reference} was cancelled.` | `{ type: 'hotel_reservation', id: bookingId }` |
+| `RefundUpdated` `{ refundId, userId, status }` | `userId` | `refund_updated` | `Refund update` | `pending`: `Your refund is being processed.` · `refunded`: `Your refund is complete.` · `failed`: `Your refund failed. Please contact support.` | `{ type: 'refund', id: refundId }` |
+| `FlightBookingRescheduled` `{ bookingId, userId }` | `userId` | `flight_schedule_changed` | `Flight schedule changed` | `A flight in your booking has new times. Check your booking for the new schedule.` | `{ type: 'flight_booking', id: bookingId }` |
+| `AccountSuspended` `{ userId }` | `userId` | `account_suspended` | `Account suspended` | `Your account was suspended by an administrator.` | none |
+| `AccountReactivated` `{ userId }` | `userId` | `account_reactivated` | `Account reactivated` | `Your account is active again.` | none |
+| `ProviderDeactivated` `{ providerType, providerId, moderatorIds }` | **each** id in `moderatorIds` | `provider_deactivated` | `Airline deactivated` / `Hotel deactivated` | `Your airline was deactivated by an administrator.` / `Your hotel …` | `{ type: providerType, id: providerId }` |
+| `ProviderReactivated` (same payload) | each moderator | `provider_reactivated` | `Airline reactivated` / `Hotel reactivated` | `Your airline is active again.` / `Your hotel …` | `{ type: providerType, id: providerId }` |
+
+- `providerType` is `'airline' | 'hotel'` (`ProviderType` in `accounts/schemas/user.schema.ts`); `RefundStatus` is `'pending' | 'refunded' | 'failed'` (`payments/schemas/refund.schema.ts`).
+- The `flight_cancelled` type stays in the enum but no event produces it: a cancelled flight reaches users as `flight-booking.cancelled` per booking. Don't add an event.
+- **Duplicates:** don't deduplicate. Each emit happens once, after the emitter's own conditional update commits, so one emit = one notification.
+
+**Handler rules:**
+- A recipient id that isn't a 24-hex ObjectId is skipped with a `Logger` warning (no throw); the other recipients of the same event are still stored.
+- A handler never throws to the emitter: wrap its body in `try/catch` and log the error (`@nestjs/event-emitter` would swallow it anyway, but the log must say what failed).
+- Store with one `insertMany` per event.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages. Follow the existing controller style (see `backend/src/modules/blog/blog.controller.ts`, `backend/src/modules/reference-data/reference-data.controller.ts`): `@ApiTags`, `@ApiCookieAuth()`, `@ApiOperation({ summary: 'GEN-01 …' })` on every route, typed `@ApiOkResponse`, and `@ApiUnauthorizedResponse` / `@ApiBadRequestResponse` / `@ApiNotFoundResponse` where they apply.
 Related Requirement: ITN-18
 
 Prompt:
@@ -1654,6 +1717,104 @@ interface Converter { rateDate: string /* 'YYYY-MM-DD' */; convert(amountMinor: 
 ## Before you start
 
 1. In the main clone: `git fetch origin`.
+2. `git worktree add ../man2o4ah-GEN-01 -b feature/GEN-01-app-notifications origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/common/events` must pass (develop's admin test was broken until PR #166 merged). If not, stop and report.
+
+## Step 1: the content table (pure functions)
+
+New file `backend/src/modules/notifications/notification-content.ts`:
+```ts
+/** A notification about to be stored; `userId` is a string as events carry it. */
+export interface NewNotification {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  entity?: { type: string; id: string };
+}
+```
+One exported function per row group, each returning `NewNotification[]`, built **exactly** from the table: `bookingConfirmed(kind: 'flight' | 'hotel', p)`, `bookingCancelled(kind, p)`, `refundUpdated(p)`, `flightBookingRescheduled(p)`, `accountSuspended(p)`, `accountReactivated(p)`, `providerDeactivated(p)`, `providerReactivated(p)`. Payload parameter types come from `PayloadOf<typeof Events.X>`. No database code here.
+
+Tests `notification-content.spec.ts` (unit): every row of the table → the exact `type`, `title`, `message`, `entity`; all three refund statuses; a provider event with 3 moderators → 3 items with the right ids, with 0 → `[]`; with a 40-character reference every title is ≤ 100 and every message ≤ 500 characters.
+
+**Commit:** `feat(notifications): build notification texts from events (GEN-01)`
+
+## Step 2: service
+
+New file `notifications.service.ts`, `NotificationsService` (provided by the module, **not exported**: nobody else calls it):
+- `create(items: NewNotification[]): Promise<number>`: drops items whose `userId` isn't a valid 24-hex ObjectId (warn once per dropped id), `insertMany` the rest with `userId: new Types.ObjectId(item.userId)` and `readAt: null`; returns how many were stored. Empty input → 0 without a database call.
+- `list(userId: string, query: PaginationQueryDto): Promise<Paginated<NotificationView>>`: the user's notifications, newest first, sort `{ createdAt: -1, _id: -1 }` (the `_id` tie-break keeps pages stable).
+- `unreadCount(userId: string): Promise<number>`: `countDocuments({ userId, readAt: null })`.
+- `markRead(userId: string, id: Types.ObjectId): Promise<NotificationView>`:
+  1. `findOneAndUpdate({ _id: id, userId, readAt: null }, { $set: { readAt: new Date() } }, { new: true })`.
+  2. If nothing matched: `findOne({ _id: id, userId })`. Found → return it unchanged (already read: idempotent, the **first** `readAt` is kept). Not found (missing, or another user's) → 404 `NOT_FOUND`. Another user's notification is a 404, never a 403, so ids can't be probed.
+- `markAllRead(userId: string): Promise<number>`: `updateMany({ userId, readAt: null }, { $set: { readAt: new Date() } })`, returns `modifiedCount`.
+
+`NotificationView` (in `notifications.types.ts`) is the response shape: `{ _id: string; type; title; message; entity?: { type; id }; readAt: string | null; createdAt: string }`. Map every document through one `toView` function: `_id` and dates as strings, `readAt` absent → `null`, `entity` omitted when absent.
+
+**Commit:** `feat(notifications): list, count and mark notifications as read (GEN-01)`
+
+## Step 3: listener
+
+New file `notifications.listener.ts`, `NotificationsListener` (a provider of the module). One `@OnEvent(Events.X)` method per event in the table (10 methods), each `async`, each: build items with step 1's function → `await this.notifications.create(items)`, all inside `try/catch` that logs `Failed to store notifications for <event name>` with the error message.
+
+Register `NotificationsService` and `NotificationsListener` as providers in `notifications.module.ts` (keep the `MongooseModule.forFeature`).
+
+**Commit:** `feat(notifications): store notifications from booking, refund, account and provider events (GEN-01)`
+
+## Step 4: controller and DTOs
+
+New `dto/notification.response.dto.ts` (Swagger classes, same fields as `NotificationView`): `NotificationEntityDto`, `NotificationResponseDto` (`readAt` nullable, `type` with `enum: Object.values(NotificationType)`), `PaginatedNotificationsResponseDto` (`items` + page fields), `UnreadCountResponseDto` `{ count: number }`, `ReadAllResponseDto` `{ updated: number }`.
+
+New `notifications.controller.ts`, `@ApiTags('notifications') @ApiCookieAuth() @Controller('notifications')`. Declare the routes in this order:
+
+| Route | Returns |
+|---|---|
+| `GET /api/notifications?page&limit` | 200 `PaginatedNotificationsResponseDto` |
+| `GET /api/notifications/unread-count` | 200 `{ count }` |
+| `PATCH /api/notifications/read-all` | 200 `{ updated }` |
+| `PATCH /api/notifications/:id/read` | 200 `NotificationResponseDto`; 404 not yours / missing; 400 bad id |
+
+Add the controller to the module.
+
+**Commit:** `feat(notifications): add the notification endpoints (GEN-01)`
+
+## Step 5: tests
+
+Both specs use the real module on the in-memory database:
+```ts
+t = await createTestApp({ imports: [NotificationsModule] });
+emitter = t.moduleRef.get(EventEmitter2);   // emit with: await emitter.emitAsync(Events.X, payload)
+beforeEach(() => clearCollections(t.connection));
+```
+Get the model with `t.moduleRef.get<Model<Notification>>(getModelToken(Notification.name))`. Log in with `loginAs(t.connection, Role.USER)` (any role works; `backend/test/support/auth.ts`). Because `clearCollections` also deletes users and sessions, log in **inside** each test (or after the clear).
+
+**`notifications.listener.spec.ts` (integration):**
+- each of the 10 events stores exactly the row's document (`userId` as ObjectId, `type`, `title`, `message`, `entity`, `readAt` null);
+- `ProviderDeactivated` with 3 moderator ids → 3 documents, one per moderator; with `[]` → none;
+- an invalid `userId` (`'not-an-id'`) → no document and `emitAsync` resolves; a provider event with one invalid and two valid ids → 2 documents;
+- `RefundUpdated` for each status → the status's message.
+
+**`notifications.api.spec.ts`:**
+1. All 4 routes without a cookie → 401.
+2. **List:** create 12 notifications for user A (use the model directly, `createdAt` set through `collection.insertMany` with explicit dates so the order is known) and 2 for user B → A's page 1 has 10 items newest first, page 2 has 2, `total` 12, `totalPages` 2; none of B's appear; each item has `_id` (24-hex), `readAt: null`, ISO `createdAt`, and no `userId` field.
+3. `?limit=51` → 400 `VALIDATION_FAILED`; `?page=0` → 400.
+4. **Unread count:** 3 unread + 1 read for A → `{ count: 3 }`; B's don't count.
+5. **Mark one:** 200 with `readAt` set (ISO); the count drops by 1; marking it again → 200 with the **same** `readAt`.
+6. **Mark one, not yours:** B marks A's id → 404 `NOT_FOUND`, and A's stays unread; a random valid ObjectId → 404; `/api/notifications/abc/read` → 400 `VALIDATION_FAILED`.
+7. **Mark all:** A has 3 unread + 1 read, B has 2 unread → A's call returns `{ updated: 3 }`, A's count 0, B's count still 2; calling again → `{ updated: 0 }`.
+8. **Every role:** an admin and an airline moderator can list and count their own notifications (200).
+9. **Concurrency:** 5 parallel `PATCH /:id/read` on one unread notification → all 200, and all 5 bodies have the same `readAt`.
+10. **End to end through an event:** emit `FlightBookingConfirmed` for A's id, then `GET /api/notifications` as A shows it with the confirmed title.
+11. **Swagger:** `SwaggerModule.createDocument(t.app, new DocumentBuilder().build())` has the four paths (`/api/notifications`, `/api/notifications/unread-count`, `/api/notifications/read-all`, `/api/notifications/{id}/read`), each with a summary containing `GEN-01` and the tag `notifications`.
+
+**Commit:** `test(notifications): cover the listeners and the endpoints (GEN-01)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-01`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN01_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-01 prompt (GEN-01)`
 2. `git worktree add ../man2o4ah-ITN-18 -b feature/ITN-18-exchange-rates origin/develop`, then work only there. If the branch exists, stop and report.
 3. In `backend/`: `npm ci`.
 4. `npx vitest run src/modules/admin src/modules/fx src/modules/reference-data` must pass (develop's admin test was broken until PR #166 merged). If not, stop and report.
@@ -1814,6 +1975,19 @@ Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file say
 | Gate | Check | Expect |
 |---|---|---|
 | G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/notifications` | 3 spec files; 0 failed; at least 35 tests passed |
+| G3 | every event of the table has a handler: `grep -c "@OnEvent(Events\." backend/src/modules/notifications/notifications.listener.ts` | `10` |
+| G4 | `git diff --name-only origin/develop...HEAD` | only files under `backend/src/modules/notifications/` (the schema file unchanged) and `ai-prompts/kareem.txt` |
+| G5 | `git diff origin/develop...HEAD -- backend/src/modules/notifications/schemas backend/src/common` | empty |
+| G6 | Negative gate: in `markRead`, drop `userId` from both filters; run `npx vitest run src/modules/notifications/notifications.api.spec.ts` | case 6 fails; restore and it passes |
+| G7 | coverage line for `notifications.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-01)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- Don't change other modules, `common/` (events included), the schema, CI, the frontend or docs. No new packages. Don't emit any event.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
 | G2 | `cd backend && npx vitest run src/modules/fx src/config test/fakes/fx.fake.spec.ts src/modules/platform-contracts.api.spec.ts` | 0 failed; at least 45 tests passed |
 | G3 | `git grep -n "implemented in ITN-18" -- backend/src` | no output |
 | G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/fx/` (not `schemas/`), `backend/src/config/validate.ts` (and its spec if it exists), `backend/test/support/test-config.ts`, `.env.example`, `ai-prompts/kareem.txt` |
@@ -1839,6 +2013,11 @@ git log --reverse --format=%s origin/develop..HEAD | head -2
 ## Report
 
 - The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Built the GEN-01 notifications module (content table, service, listener, controller, listener and API specs) in backend/src/modules/notifications on branch feature/GEN-01-app-notifications (worktree man2o4ah-GEN-01), one commit per step.
 - Each gate's result in one line (G2 with the test count, G8 with the %).
 - Contract-adjacent changes to flag in the PR: new env variables `FXRATES_API_KEY` and `FX_AUTO_REFRESH`; `TEST_CONFIG` gains `FX_AUTO_REFRESH: 'false'`; `FxModule` now imports `ReferenceDataModule`.
 - Any decision this file didn't settle, with the reason.
@@ -1862,12 +2041,14 @@ Pushed feature/ITN-18-exchange-rates and opened the ITN-18 PR into develop; one 
 Date: 2026-11-19
 Student: Kareem
 Tool: Claude Code
+Related Requirement: GEN-01
 Related Requirement: ITN-18
 
 Prompt:
 you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
 
 How the output was used:
+Fixed review point 1-2 on PR #168: idempotent notification storing in notifications.service.ts with duplicate-delivery tests in notifications.listener.spec.ts (test commit first, then the fix), pushed to feature/GEN-01-app-notifications.
 Fixed review points 1-2 on PR #171 (exact half-up rounding and result overflow check in fx-conversion.ts, shared with test/fakes/fx.fake.ts) with tests committed first, pushed to feature/ITN-18-exchange-rates.
 ================================================
 
@@ -2430,4 +2611,312 @@ ok i will commit you go and do another fast commit to fix the typecheck, so just
 
 How the output was used:
 On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+@"C:\Users\karee\Downloads\PAY02_EXECUTION.md"
+ok, execute this now, but done't forget the branch from develop rule
+[Attached: PAY02_EXECUTION.md]
+# Execution — PAY-02: Policies and acceptance
+
+Issue #22. Second ticket of lane E (PAY-01 → **PAY-02** → PAY-03). PAY-01 (#183) is merged into `develop`. TDD is not required by the ticket, but step 1 still commits the rule tests before the rule code (cheap, and it pins the decision table).
+
+## Goal
+
+Before paying, the user sees the provider's policies for **their booking** and ticks a checkbox. The backend shows the booking's policy snapshot and stores the acceptance with a timestamp. PAY-01 already blocks payment without an acceptance (`409 POLICIES_NOT_ACCEPTED`); today nothing can create one except a test.
+
+Done means:
+1. `GET /api/bookings/:type/:id/policies`: the booking's policy snapshot plus whether it was accepted and when.
+2. `POST /api/bookings/:type/:id/accept-policies` `{ accepted: true }`: stores one `policy_acceptances` document per booking, idempotently, with the server's timestamp.
+3. Accepting is refused for a booking that is already paid or whose hold is over.
+4. Integration and API tests, including the end-to-end check "pay → 409, accept, pay → 201".
+
+**Out of scope:** the real `getPolicies` implementations (flight-bookings FLT-08 / hotel-bookings HTL-09 implement the port; tests use `FakePayableBooking`), payments and the webhook (PAY-01, done), refunds (PAY-03), the summary page and checkbox UI (M2), changing `PaymentIntentsService` (it already checks acceptances).
+
+## Context you need
+
+**Requirement PAY-02 (verbatim):** "Before payment, the system shall show the provider's policies (airline: cancellation and baggage policies; hotel: cancellation policy and check-in/check-out times) and require an acceptance checkbox. Payment is blocked until accepted, and acceptance is stored with a timestamp."
+
+**Rules (`docs/ai/skills/travel-platform/references/bookings-payments.md` §4):**
+- "`GET /api/bookings/:type/:id/policies` (payments module, via `PayableBooking.getPolicies`): the booking's **policy snapshot** (airline: tiers and baggage; hotel: tiers and check-in/out times)."
+- "`POST /api/bookings/:type/:id/accept-policies` `{ accepted: true }`: payments stores a `policy_acceptances` document with `acceptedAt` (PAY-02). The accepted policy is the booking's snapshot, so nothing is copied."
+- `endpoints.md`: both routes are **Own**, module **payments**.
+- Frontend flow (§9, for context only): hold → `accept-policies` → `POST /payments`.
+
+**Data model (`docs/database/data-model.md`, `policy_acceptances`):** `bookingType` (enum), `bookingId` (ObjectId), `userId` (ObjectId → users), `acceptedAt` (Date, "PAY-02 timestamp"). Unique index `{ bookingType: 1, bookingId: 1 }`. "The accepted policy is the booking's own snapshot, so it is not copied here."
+
+**Existing code (read it; reuse, don't duplicate):**
+- `backend/src/modules/payments/ports/payable-booking.port.ts`: `PayableBooking.getPolicies(bookingId, userId) → BookingPolicies` (404 `NOT_FOUND` if missing or not the user's), `getPayable(...) → Payable { amountMinor, currency, status, holdExpiresAt }`, and the types `BookingPolicies` (a union discriminated by `bookingType`: flight `{ segments: FlightSegmentPolicies[] }`, hotel `{ cancellationTiers, checkInTime, checkOutTime }`), `FlightSegmentPolicies`, `PolicyTier`, `PayableStatus`. **Don't change this file.**
+- `ports/payable-booking.registry.ts`: `PayableBookingRegistry.get(type)`.
+- `schemas/policy-acceptance.schema.ts`: `PolicyAcceptance` (already registered in `PaymentsModule`'s `MongooseModule.forFeature`). **Don't change it.**
+- `payment-rules.ts`: PAY-01's pure rules (`decidePaymentStart`, `paymentStatusAfter`) and the messages `'This booking is already paid'` and `'The hold has expired'`. **Don't change it**; PAY-02's rule goes in a new file.
+- `payment-intents.service.ts`: PAY-01's flow; it already reads `policy_acceptances` (`acceptances.exists({ bookingType, bookingId })`) to block payment. **Don't change it.**
+- `payments.controller.ts`: the style to copy (decorators, `@Roles(Role.USER)`, `@ApiCookieAuth()`, `@CurrentUser() user: AuthUser`, Swagger responses).
+- `payments.api.spec.ts`: the test setup to copy (`createTestApp` with `PaymentsModule` and `STRIPE_GATEWAY` overridden by `FakeStripeGateway`, two `FakePayableBooking`s registered in `PayableBookingRegistry`, `loginAs`, `clearCollections`, `MINUTE_MS`), and its access test for admin/moderators (case "403 for ADMIN, HOTEL_MODERATOR, AIRLINE_MODERATOR").
+- `backend/test/fakes/payable-booking.fake.ts`: `FakePayableBooking.set(bookingId, userId, payable, policies)`. **Don't change it.**
+- `PaymentsService` is the cross-module contract (`FakePaymentsService implements PublicApi<PaymentsService>`). **Don't add public methods to it.**
+- Error codes (`backend/src/common/errors/error-codes.ts`): `NotFound`, `HoldExpired`, `InvalidStatusTransition`, `ValidationFailed`. Exceptions are `new ConflictException({ code: ErrorCode.X, message })`.
+- Validation: the global `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`, `validationExceptionFactory`) turns any DTO failure into `400 VALIDATION_FAILED`, including a DTO bound with `@Param()`. An extra body field is a 400.
+- `hotels.controller.ts` (around line 259) shows the Swagger `@ApiExtraModels` + `oneOf` + `getSchemaPath` pattern for a union response.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. **No new package.**
+
+## Design (settled here; follow it exactly)
+
+1. **Where the logic lives:** a new internal service `PolicyAcceptancesService` (`policy-acceptances.service.ts`), provided by `PaymentsModule`, **not exported**, and a new controller `PoliciesController` (`policies.controller.ts`, `@ApiTags('payments') @Controller('bookings')`). Payments owns the routes even though the URL says `bookings`.
+2. **Who may call:** `@Roles(Role.USER)` on both routes, as in PAY-01 (moderators and admins don't book). Ownership comes from the port: someone else's booking is a **404**, never a 403.
+3. **GET works in every booking status** (the owner can re-read the policies of a confirmed or expired booking). It never writes.
+4. **Accepting is allowed only while the booking can still be paid**, checked by a pure rule, in this order:
+   | Booking status | Hold | Result |
+   |---|---|---|
+   | `confirmed` or `completed` | any | 409 `INVALID_STATUS_TRANSITION`, `'This booking is already paid'` |
+   | `expired` or `cancelled` | any | 409 `HOLD_EXPIRED`, `'The hold has expired'` |
+   | `pending_payment` | `holdExpiresAt` = now (exactly) | 409 `HOLD_EXPIRED` (the hold must be **after** now, as in PAY-01) |
+   | `pending_payment` | now − 1 ms | 409 `HOLD_EXPIRED` |
+   | `pending_payment` | now + 1 ms | allowed |
+5. **Idempotent, first timestamp wins:** one acceptance per booking (the unique index). A repeated or concurrent accept returns the **existing** acceptance with its original `acceptedAt`; it never moves the timestamp. Implementation: one atomic upsert with `$setOnInsert` (never `$set`), and a duplicate-key error (two upserts racing) means "already accepted": read it and return it.
+6. **The timestamp is the server's** (`new Date()` in the service). The body is exactly `{ accepted: true }`; `false`, a string, a missing field or any extra field is `400 VALIDATION_FAILED`. Ticking the box is the only thing the client says.
+7. **Status code:** `POST …/accept-policies` answers **200** both the first time and on repeats (`@HttpCode(HttpStatus.OK)`), because it's an idempotent action on the booking, not the creation of a resource the client addresses later.
+8. **Response shapes** (dates as ISO strings in JSON):
+   - GET: the port's `BookingPolicies` flattened, plus `bookingId`, `accepted`, `acceptedAt`:
+     - flight: `{ bookingType: 'flight', bookingId, segments: FlightSegmentPolicies[], accepted, acceptedAt }`
+     - hotel: `{ bookingType: 'hotel', bookingId, cancellationTiers: PolicyTier[], checkInTime, checkOutTime, accepted, acceptedAt }`
+     - `accepted: false` → `acceptedAt: null`.
+   - POST: `{ bookingType, bookingId, accepted: true, acceptedAt }`.
+   - Never return `userId` or the acceptance's `_id`.
+9. **Wiring guard:** if the implementer returns policies whose `bookingType` differs from the route's `:type`, throw a plain `Error('PayableBooking for "<type>" returned "<other>" policies')` (a 500: a wiring bug, not a client error).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`. Confirm PAY-01 is on develop: `git log --oneline origin/develop | grep -m1 "PAY-01"` prints a line. If not, stop and report.
+2. `git worktree add ../man2o4ah-PAY-02 -b feature/PAY-02-policies-acceptance origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/payments` must pass. If not, stop and report.
+5. `git grep -n "accept-policies\|PolicyAcceptancesService" -- backend/src` prints nothing (nothing exists yet). If it prints something, stop and report.
+
+## Step 1 (red): the acceptance rule
+
+New `backend/src/modules/payments/policy-rules.spec.ts` for a pure function that doesn't exist yet:
+
+```ts
+// policy-rules.ts
+import type { Payable } from './ports/payable-booking.port.js';
+/** Throws the right ConflictException when the booking can't be accepted any more; returns normally otherwise (PAY-02). */
+export function assertCanAcceptPolicies(payable: Payable, now: Date): void;
+```
+
+One test per row of the table in Design §4 (use `it.each`), with `amountMinor: 25000`, `currency: 'USD'`, and `holdExpiresAt` = now + 5 min unless the row says otherwise. For the refused rows assert the exception class (`ConflictException`) and `getResponse()` `{ code, message }` exactly. For the allowed row assert it doesn't throw. Add one more row: `pending_payment`, hold ok, `amountMinor: 0` → allowed (accepting is not paying; PAY-01 refuses the 0 amount at payment time).
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(payments): pin when a booking's policies can be accepted (PAY-02)`
+
+## Step 2 (green): the rule
+
+New `policy-rules.ts` implementing exactly the table. Statuses `confirmed`/`completed` first, then `expired`/`cancelled`, then the hold (`payable.holdExpiresAt.getTime() <= now.getTime()` → `HOLD_EXPIRED`). Step 1 passes; nothing else changes.
+**Commit:** `feat(payments): decide when a booking's policies can be accepted (PAY-02)`
+
+## Step 3: types, DTOs and the service
+
+**`payments.types.ts`** — add (don't change the existing types):
+```ts
+/** A booking's policy snapshot as its owner sees it, with the acceptance (PAY-02). */
+export type BookingPoliciesView = BookingPolicies & {
+  bookingId: string;
+  accepted: boolean;
+  acceptedAt: Date | null;
+};
+
+/** The stored acceptance of a booking's policies (PAY-02). */
+export interface PolicyAcceptanceView {
+  bookingType: BookingType;
+  bookingId: string;
+  accepted: true;
+  acceptedAt: Date;
+}
+```
+(`BookingPolicies` is a type import from `./ports/payable-booking.port.js`.)
+
+**`dto/booking-params.dto.ts`:**
+```ts
+/** `:type` and `:id` of `/api/bookings/:type/:id/...` (PAY-02). */
+export class BookingParamsDto {
+  @ApiProperty({ enum: Object.values(BookingType) }) @IsEnum(BookingType) type!: BookingType;
+  @ApiProperty({ example: '6553a1f0c2b4e8a9d0f1a2b3' }) @IsMongoId() id!: string;
+}
+```
+
+**`dto/accept-policies.dto.ts`:**
+```ts
+/** The acceptance checkbox (PAY-02): only `true` is accepted. */
+export class AcceptPoliciesDto {
+  @ApiProperty({ enum: [true], example: true })
+  @IsBoolean() @Equals(true, { message: 'accepted must be true' })
+  accepted!: true;
+}
+```
+
+**`dto/policies.response.dto.ts`** — Swagger classes (no logic):
+- `PolicyTierResponseDto { daysBefore: number; refundPercent: number }`
+- `FlightSegmentPoliciesResponseDto` mirroring `FlightSegmentPolicies` (`direction` enum `['outbound','return']`, `flightNumber`, `cancellationTiers: PolicyTierResponseDto[]`, `freeBags`, `maxBagWeightKg`, `extraBagPriceMinor` (description "Minor units"), `maxExtraBagsPerPassenger`)
+- `FlightPoliciesResponseDto { bookingType: 'flight' (enum ['flight']); bookingId; segments: FlightSegmentPoliciesResponseDto[]; accepted: boolean; acceptedAt: Date | null (nullable: true) }`
+- `HotelPoliciesResponseDto { bookingType: 'hotel' (enum ['hotel']); bookingId; cancellationTiers: PolicyTierResponseDto[]; checkInTime (example '14:00'); checkOutTime (example '11:00'); accepted; acceptedAt (nullable) }`
+- `PolicyAcceptanceResponseDto implements PolicyAcceptanceView { bookingType (enum); bookingId; accepted: true (enum [true]); acceptedAt: Date }`
+Use `type: () => X` and `isArray: true` for nested arrays.
+
+**`policy-acceptances.service.ts`, `PolicyAcceptancesService`** (`@Injectable()`): injects `@InjectModel(PolicyAcceptance.name) acceptances: Model<PolicyAcceptance>` and `PayableBookingRegistry`.
+
+`getPolicies(userId, bookingType, bookingId): Promise<BookingPoliciesView>`:
+1. `policies = await registry.get(bookingType).getPolicies(bookingId, userId)` (404 passes through).
+2. Wiring guard (Design §9).
+3. `acceptance = await acceptances.findOne({ bookingType, bookingId: new Types.ObjectId(bookingId) }).lean()`.
+4. Return `{ ...policies, bookingId, accepted: acceptance !== null, acceptedAt: acceptance?.acceptedAt ?? null }`.
+
+`accept(userId, bookingType, bookingId): Promise<PolicyAcceptanceView>`:
+1. `payable = await registry.get(bookingType).getPayable(bookingId, userId)` (404 passes through: this is the ownership check).
+2. `assertCanAcceptPolicies(payable, new Date())`.
+3. Atomic upsert, first timestamp wins:
+   ```ts
+   const filter = { bookingType, bookingId: new Types.ObjectId(bookingId) };
+   const doc = await this.acceptances.findOneAndUpdate(
+     filter,
+     { $setOnInsert: { userId: new Types.ObjectId(userId), acceptedAt: new Date() } },
+     { upsert: true, returnDocument: 'after' },
+   ).lean();
+   ```
+   A duplicate-key error (`code === 11000`, two upserts racing on the unique index) → `findOne(filter).lean()` and use that. Reuse a local `isDuplicateKey(error)` like the one in `payment-intents.service.ts` (copy the 6-line helper into this file; don't export it from PAY-01's file).
+4. Return `{ bookingType, bookingId, accepted: true, acceptedAt: doc.acceptedAt }`. A null `doc` after the fallback is impossible; throw a plain `Error` if it happens.
+
+**Commit:** `feat(payments): show a booking's policies and store their acceptance (PAY-02)`
+
+## Step 4: the controller
+
+`policies.controller.ts`, `@ApiTags('payments') @Controller('bookings')`, constructor `(private readonly acceptances: PolicyAcceptancesService)`:
+
+| Route | Decorators | Returns | Swagger errors |
+|---|---|---|---|
+| `GET :type/:id/policies` | `@Roles(Role.USER)`, `@ApiCookieAuth()` | 200, `oneOf` Flight/Hotel policies DTOs | 400 `VALIDATION_FAILED`, 401, 403 `FORBIDDEN_ROLE`, 404 `NOT_FOUND` |
+| `POST :type/:id/accept-policies` | `@Roles(Role.USER)`, `@HttpCode(HttpStatus.OK)`, `@ApiCookieAuth()` | 200 `PolicyAcceptanceResponseDto` | 400, 401, 403, 404, 409 `HOLD_EXPIRED` / `INVALID_STATUS_TRANSITION` |
+
+- Handlers: `getPolicies(@Param() params: BookingParamsDto, @CurrentUser() user: AuthUser)` and `accept(@Param() params: BookingParamsDto, @Body() _body: AcceptPoliciesDto, @CurrentUser() user: AuthUser)`. The body is validated, then only its presence matters (it can only be `{ accepted: true }`). If oxlint flags the unused `_body`, name it `body` and don't reference it beyond what lint accepts; never add a disable comment.
+- Summaries: `'PAY-02 Show the policies of one of your bookings'` and `'PAY-02 Accept the policies of one of your bookings'`. Descriptions: GET says it is the booking's snapshot (airline: cancellation tiers and baggage per segment; hotel: cancellation tiers and check-in/out times) and works in any status; POST says payment is blocked until this is called, the server stores the time, and repeating it returns the first acceptance unchanged.
+- GET's 200 response: `@ApiExtraModels(FlightPoliciesResponseDto, HotelPoliciesResponseDto)` and `@ApiOkResponse({ schema: { oneOf: [{ $ref: getSchemaPath(FlightPoliciesResponseDto) }, { $ref: getSchemaPath(HotelPoliciesResponseDto) }] } })`, as in `hotels.controller.ts`.
+
+In `payments.module.ts`: add `PoliciesController` to `controllers` and `PolicyAcceptancesService` to `providers`. **Exports unchanged.**
+
+**Commit:** `feat(payments): add the policies and accept-policies endpoints (PAY-02)`
+
+## Step 5: API tests
+
+New `backend/src/modules/payments/policies.api.spec.ts`. Same setup as `payments.api.spec.ts` (fresh `FakeStripeGateway` overriding `STRIPE_GATEWAY`, two `FakePayableBooking`s registered, `clearCollections` then `loginAs(t.connection, Role.USER)` in `beforeEach`, `gateway.calls.length = 0`). Helpers:
+- `flightBooking(userId, overrides?: Partial<Payable>)` → new 24-hex id; `flights.set(id, userId, { amountMinor: 25000, currency: 'USD', status: 'pending_payment', holdExpiresAt: now + 10 min, ...overrides }, FLIGHT_POLICIES)` where `FLIGHT_POLICIES` has **two** segments (outbound `MS 777` and return `MS 778`), each with two tiers (`{ daysBefore: 7, refundPercent: 100 }`, `{ daysBefore: 1, refundPercent: 50 }`), `freeBags: 1`, `maxBagWeightKg: 23`, `extraBagPriceMinor: 5000`, `maxExtraBagsPerPassenger: 2`.
+- `hotelBooking(userId, overrides?)` → same with `HOTEL_POLICIES` `{ bookingType: 'hotel', cancellationTiers: [{ daysBefore: 3, refundPercent: 100 }], checkInTime: '14:00', checkOutTime: '11:00' }`.
+- `getPolicies(type, id, who = user)` and `accept(type, id, body: unknown = { accepted: true }, who = user)` wrapping `t.http()` with the user's cookie.
+
+Cases:
+1. **Flight policies:** GET → 200, body equals `{ ...FLIGHT_POLICIES, bookingId, accepted: false, acceptedAt: null }` exactly (`toEqual`), so both segments, all tiers and the baggage fields pass through unchanged.
+2. **Hotel policies:** GET → 200, `{ ...HOTEL_POLICIES, bookingId, accepted: false, acceptedAt: null }`.
+3. **Any status:** GET on a `confirmed` and on an `expired` booking → 200 each.
+4. **Accept:** note `before = Date.now()`; POST → 200 `{ bookingType: 'flight', bookingId, accepted: true, acceptedAt }` with `acceptedAt` between `before` and now; exactly one `policy_acceptances` document `{ bookingType: 'flight', bookingId: ObjectId, userId: ObjectId(user.id), acceptedAt }`.
+5. **GET after accept:** `accepted: true`, `acceptedAt` equal to the one POST returned.
+6. **First timestamp wins:** POST, wait 20 ms, POST again → both 200 with the **same** `acceptedAt`; still one document.
+7. **Race:** 5 parallel POSTs for one booking → all 200, all the same `acceptedAt`, exactly one document.
+8. **Hotel accept:** POST on a hotel booking → 200 with `bookingType: 'hotel'`; the document has `bookingType: 'hotel'`.
+9. **Body validation** (`it.each`): `{ accepted: false }`, `{}`, `{ accepted: 'true' }`, `{ accepted: 1 }`, `{ accepted: true, acceptedAt: '2020-01-01T00:00:00Z' }` → 400 `VALIDATION_FAILED`; no document.
+10. **Params validation** (`it.each`, both routes): type `train`, id `abc` → 400 `VALIDATION_FAILED`.
+11. **Refusals to accept** (no document in each): another user's booking → 404 `NOT_FOUND`; a booking id nobody set → 404; `confirmed` → 409 `INVALID_STATUS_TRANSITION`; `completed` → 409 `INVALID_STATUS_TRANSITION`; `expired` → 409 `HOLD_EXPIRED`; `cancelled` → 409 `HOLD_EXPIRED`; `pending_payment` with `holdExpiresAt` 1 s ago → 409 `HOLD_EXPIRED`.
+12. **GET refusals:** another user's booking → 404 `NOT_FOUND`.
+13. **Access** (both routes): no cookie → 401; `Role.ADMIN`, `Role.HOTEL_MODERATOR`, `Role.AIRLINE_MODERATOR` → 403 (copy the `it.each` from `payments.api.spec.ts`).
+14. **Payment is blocked until accepted (end to end):** a pending flight booking → `POST /api/payments { bookingType: 'flight', bookingId }` → 409 `POLICIES_NOT_ACCEPTED` and no gateway call; POST `accept-policies` → 200; `POST /api/payments` again → 201 with a `clientSecret`.
+15. **No secrets or internals leak:** the GET and POST bodies have no `userId` and no `_id` keys.
+16. **Swagger:** `SwaggerModule.createDocument(t.app, new DocumentBuilder().build())` has `/api/bookings/{type}/{id}/policies` (get) and `/api/bookings/{type}/{id}/accept-policies` (post), each with a summary containing `PAY-02` and the tag `payments`; the components include `FlightPoliciesResponseDto`, `HotelPoliciesResponseDto` and `PolicyAcceptanceResponseDto`.
+
+Also a unit spec `policy-acceptances.service.spec.ts` for the wiring guard only: a registry with a `FakePayableBooking(BookingType.HOTEL)` whose `set(...)` stores **flight** policies → `getPolicies(user, 'hotel', id)` rejects with an `Error` whose message contains `returned "flight" policies`. (Use `createTestApp` with `PaymentsModule` like the API spec, then call the service from `t.moduleRef.get(PolicyAcceptancesService)`.)
+
+**Commit:** `test(payments): cover the policies, their acceptance and the payment block (PAY-02)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: PAY-02`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: PAY02_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the PAY-02 prompt (PAY-02)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/payments` | 0 failed; the three new spec files run; at least 40 new tests across them |
+| G3 | `git diff --name-only origin/develop...HEAD` | only: `backend/src/modules/payments/{policy-rules.ts,policy-rules.spec.ts,policy-acceptances.service.ts,policy-acceptances.service.spec.ts,policies.controller.ts,policies.api.spec.ts,payments.types.ts,payments.module.ts}`, `backend/src/modules/payments/dto/{booking-params.dto.ts,accept-policies.dto.ts,policies.response.dto.ts}`, `ai-prompts/kareem.txt` |
+| G4 | `git diff origin/develop...HEAD -- backend/src/modules/payments/schemas backend/src/modules/payments/ports backend/src/modules/payments/payment-rules.ts backend/src/modules/payments/payment-intents.service.ts backend/src/modules/payments/payments.service.ts backend/src/modules/payments/payments.controller.ts backend/test backend/src/common` | empty |
+| G5 | Rule-first order: `git log --reverse --format=%s origin/develop..HEAD \| head -2` | first `test(payments): pin when …`, then `feat(payments): decide when …` |
+| G6 | Red proof: `git show <sha of the first commit>:backend/src/modules/payments/policy-rules.ts` | "does not exist" error; and your step 1 run showed the spec failing |
+| G7 | Negative gate: in `accept`, change `$setOnInsert` to `$set`; run `npx vitest run src/modules/payments/policies.api.spec.ts` | case 6 fails (the timestamp moved); restore and it passes |
+| G8 | Negative gate: in `accept`, comment out the `assertCanAcceptPolicies(...)` call; run the same spec | case 11 fails; restore and it passes |
+| G9 | Negative gate: in `getPolicies`, return `acceptedAt: null` always; run the same spec | case 5 fails; restore and it passes |
+| G10 | coverage line for `policy-acceptances.service.ts` and `policy-rules.ts` in the G1 output | ≥ 90% lines each |
+| G11 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(PAY-02)` |
+| G12 | `git status --porcelain` | empty |
+
+In G5, `\|` is a shell pipe `|`; type it as `|`.
+
+## Constraints
+
+- Don't change the schemas, the port, the registry, `payment-rules.ts`, `payment-intents.service.ts`, `payments.service.ts`, `payments.controller.ts`, the fakes in `backend/test/fakes/`, `common/`, other modules, CI, the frontend or docs. **No new package.**
+- `PolicyAcceptancesService` is internal: not exported from `PaymentsModule`, not added to `PaymentsService`.
+- Never weaken, skip or delete a test to pass a gate. If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G10 with the %).
+- To flag in the PR: the two new routes; acceptance is idempotent and keeps the first timestamp; accepting is refused once the booking is paid or the hold is over; end to end once FLT-08 (#34) and HTL-09 (#44) implement `getPolicies` on the real booking modules (tests use the fake).
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented PAY-02 on feature/PAY-02-policies-acceptance in the man2o4ah-PAY-02 worktree (branched from the latest origin/develop): acceptance rule (tests first), PolicyAcceptancesService, PoliciesController, DTOs and the API and wiring specs; 5 commits before this log entry, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+didi you run the review md.file  ?
+
+How the output was used:
+Ran the self-review checks on PAY-02 (branch freshness, issue and requirement, diff checklist, 8 throwaway probes deleted afterwards); no code changed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+ok i want you to run it on another agent, isolated one that have no context of this convo , and make it a rule from now on in this convo: after each exec we will run the review in isolated agent
+
+How the output was used:
+Ran the PAY-02 self-review in an isolated subagent (no conversation context): no problems, no missing tests; no code changed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+push pay-02 and open a pr
+
+How the output was used:
+Checked there are no conflicts with origin/develop, pushed feature/PAY-02-policies-acceptance and opened the PAY-02 PR into develop.
 ================================================

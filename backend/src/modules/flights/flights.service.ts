@@ -5,7 +5,6 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
@@ -462,15 +461,16 @@ export class FlightsService {
   search(
     query: SearchFlightsQuery,
   ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult>;
-  search(
+  async search(
     query: SearchFlightsQuery,
   ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
     this.validateSearch(query);
     if (query.returnDate !== undefined) {
-      return Promise.all([
+      const [outbound, inbound] = await Promise.all([
         this.searchLeg(query, query.from, query.to, query.date),
         this.searchLeg(query, query.to, query.from, query.returnDate),
-      ]).then(([outbound, inbound]) => ({ outbound, inbound }));
+      ]);
+      return { outbound, inbound };
     }
     return this.searchLeg(query, query.from, query.to, query.date);
   }
@@ -584,7 +584,10 @@ export class FlightsService {
         airline as Airline & { _id: Types.ObjectId },
       ]),
     );
-    if (activeAirlines.size === 0) {
+    const airports = await this.referenceData.getAirports([from, to]);
+    const departureAirport = airports.get(from);
+    const arrivalAirport = airports.get(to);
+    if (activeAirlines.size === 0 || !departureAirport || !arrivalAirport) {
       return toPage([], 0, query.page, query.limit);
     }
 
@@ -630,26 +633,13 @@ export class FlightsService {
           maxBagWeightKg: cabin.maxBagWeightKg,
         }));
       if (matchingCabins.length === 0) continue;
-      const cancellationTiers = airline.cancellationPolicy.tiers.map(
-        (tier) => ({
-          daysBefore: tier.daysBefore,
-          refundPercent: tier.refundPercent,
-        }),
-      );
       items.push({
-        flight: this.toFlightView(flight),
-        airline: {
-          id: airline._id.toString(),
-          name: airline.name,
-          code: airline.code,
-          isActive: airline.isActive,
-          baggagePolicy: {
-            extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor,
-            maxExtraBagsPerPassenger:
-              airline.baggagePolicy.maxExtraBagsPerPassenger,
-          },
-          cancellationTiers,
-        },
+        flight: this.toFlightViewWithZones(
+          flight,
+          departureAirport.timeZone,
+          arrivalAirport.timeZone,
+        ),
+        airline: this.airlineView(airline),
         matchingCabins,
       });
     }
@@ -679,33 +669,6 @@ export class FlightsService {
       query.page,
       query.limit,
     );
-  }
-
-  private toFlightView(flight: FlightRecord): FlightSearchItem['flight'] {
-    return {
-      id: flight._id.toString(),
-      airlineId: flight.airlineId.toString(),
-      flightNumber: flight.flightNumber,
-      departureAirportId: flight.departureAirportId,
-      arrivalAirportId: flight.arrivalAirportId,
-      departureAt: new Date(flight.departureAt),
-      arrivalAt: new Date(flight.arrivalAt),
-      departureLocalDate: flight.departureLocalDate,
-      durationMinutes: flight.durationMinutes,
-      status: flight.status,
-      hasBookings: flight.hasBookings,
-      cabins: flight.cabins.map((cabin) => ({
-        id: cabin._id.toString(),
-        cabinClass: cabin.cabinClass,
-        totalSeats: cabin.totalSeats,
-        availableSeats: cabin.availableSeats,
-        heldSeats: cabin.heldSeats,
-        bookedSeats: cabin.bookedSeats,
-        priceMinor: cabin.priceMinor,
-        freeBags: cabin.freeBags,
-        maxBagWeightKg: cabin.maxBagWeightKg,
-      })),
-    };
   }
 
   /** One airline by ID, or `null` (FLT-01, ACC-13). */

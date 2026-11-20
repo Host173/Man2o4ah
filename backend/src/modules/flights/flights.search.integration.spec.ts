@@ -171,6 +171,103 @@ describe('Flight search integration (FLT-11, FLT-12, FLT-15)', () => {
     ).toEqual(['IN']);
   });
 
+  it('sorts by duration, shortest first, and includes both airport time zones', async () => {
+    const active = await airlines.create({
+      name: 'EgyptAir',
+      code: 'MS',
+      isActive: true,
+    });
+    await flights.create([
+      {
+        ...seed(active._id, 'MS-SLOW', '2026-11-20T06:00:00.000Z', [
+          cabin('economy', 5, 10000, 0, 0),
+        ]),
+        durationMinutes: 300,
+      },
+      {
+        ...seed(active._id, 'MS-FAST', '2026-11-20T12:00:00.000Z', [
+          cabin('economy', 5, 90000, 0, 0),
+        ]),
+        durationMinutes: 120,
+      },
+      {
+        ...seed(active._id, 'MS-MID', '2026-11-20T09:00:00.000Z', [
+          cabin('economy', 5, 50000, 0, 0),
+        ]),
+        durationMinutes: 200,
+      },
+    ]);
+    const page = await service.search({
+      from: 'CAI',
+      to: 'DXB',
+      date: '2026-11-20',
+      adults: 1,
+      children: 0,
+      infants: 0,
+      sortBy: 'duration',
+      page: 1,
+      limit: 10,
+    });
+    expect(page.items.map((item) => item.flight.flightNumber)).toEqual([
+      'MS-FAST',
+      'MS-MID',
+      'MS-SLOW',
+    ]);
+    expect(page.items[0].flight).toMatchObject({
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'Asia/Dubai',
+    });
+  });
+
+  it('returns an empty page when nothing matches', async () => {
+    const active = await airlines.create({
+      name: 'EgyptAir',
+      code: 'MS',
+      isActive: true,
+    });
+    await flights.create([
+      seed(active._id, 'MS-FULL', '2026-11-20T08:00:00.000Z', [
+        cabin('economy', 5, 30000, 3, 2),
+      ]),
+    ]);
+    const page = await service.search({
+      from: 'CAI',
+      to: 'DXB',
+      date: '2026-11-20',
+      adults: 1,
+      children: 0,
+      infants: 0,
+      sortBy: 'price',
+      page: 1,
+      limit: 10,
+    });
+    expect(page).toEqual({
+      items: [],
+      page: 1,
+      limit: 10,
+      total: 0,
+      totalPages: 0,
+    });
+  });
+
+  it('rejects invalid criteria with a rejected promise instead of throwing synchronously', async () => {
+    let promise: Promise<unknown> | undefined;
+    expect(() => {
+      promise = service.search({
+        from: 'CAI',
+        to: 'CAI',
+        date: '2026-11-20',
+        adults: 1,
+        children: 0,
+        infants: 0,
+        sortBy: 'price',
+        page: 1,
+        limit: 10,
+      });
+    }).not.toThrow();
+    await expect(promise).rejects.toMatchObject({ status: 400 });
+  });
+
   it('rejects invalid passenger counts and inverted or reversed prices/dates', async () => {
     let caught: unknown;
     try {

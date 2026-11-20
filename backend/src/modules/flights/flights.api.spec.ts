@@ -814,6 +814,29 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
     expect(
       response.body.items.map((item: any) => item.flight.flightNumber),
     ).toEqual(['MS-OPEN']);
+    const [item] = response.body.items;
+    expect(item.flight._id).toEqual(expect.any(String));
+    expect(item.flight).toMatchObject({
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'Asia/Dubai',
+    });
+    expect(item.flight.id).toBeUndefined();
+    expect(item.airline._id).toBe(String(active._id));
+    expect(item.matchingCabins[0]._id).toEqual(expect.any(String));
+    expect(item.matchingCabins[0].id).toBeUndefined();
+
+    const none = await t
+      .http()
+      .get('/api/flights/search')
+      .query({ from: 'CAI', to: 'DXB', date: '2027-03-15' })
+      .expect(200);
+    expect(none.body).toEqual({
+      items: [],
+      page: 1,
+      limit: 10,
+      total: 0,
+      totalPages: 0,
+    });
   });
 
   it('returns round-trip lists and validates price and passenger boundaries', async () => {

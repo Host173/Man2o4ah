@@ -2612,3 +2612,68 @@ ok i will commit you go and do another fast commit to fix the typecheck, so just
 How the output was used:
 On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile validation boundary tests and aligned the DTO with the frozen UTF-16 schema limit; integrated develop and concurrent PR updates, verified 2412 tests, and pushed 4addb1a before discovering that PR #140 had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Preserved the frozen schema and ModuleRef lookup, clarified Swagger, and merged develop without losing incoming changes or prompt-log content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+Attempted gh pr reopen 140; GitHub rejected reopening because the PR was already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created fix/ACC-09-profile-followup-d103853d from the merged develop head and cherry-picked the reproducing test commit before the validation fix.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Appended these request and approval entries to ai-prompts/kareem.txt without changing its existing content.
+================================================

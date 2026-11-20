@@ -59,6 +59,7 @@ classDiagram
     class posts
     class comments
     class likes
+    class post_image_cleanups
   }
   namespace moderation {
     class reports
@@ -94,6 +95,7 @@ classDiagram
   posts ..> itineraries_ : itineraryId (optional, BLG-13)
   comments --> posts
   likes --> posts
+  post_image_cleanups --> posts : deleted postId (parent may be absent)
   reports ..> posts : target (post, comment, review, itinerary)
 ```
 
@@ -511,6 +513,10 @@ classDiagram
       postId : ObjectId
       userId : ObjectId
     }
+    class PostImageCleanup {
+      postId : ObjectId
+      key : string (unique)
+    }
   }
   namespace moderation {
     class Report {
@@ -548,6 +554,7 @@ classDiagram
   Comment "*" --> "1" Post : postId
   Post "*" ..> "0..1" Itinerary : itineraryId (BLG-13)
   Like "*" --> "1" Post : postId (unique postId+userId)
+  PostImageCleanup "*" --> "0..1" Post : postId (survives deletion)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId
 ```

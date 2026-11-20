@@ -10,6 +10,7 @@ import type { Model, PipelineStage } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
+import { HH_MM } from '../../common/database/validators.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
@@ -21,7 +22,9 @@ import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import type { AddActivityDto } from './dto/add-activity.dto.js';
+import type { UpdateActivityDto } from './dto/update-activity.dto.js';
 import type {
+  ActivityCostView,
   ActivityView,
   BudgetEntryView,
   ItineraryDayView,
@@ -356,10 +359,14 @@ export class ItinerariesService {
       record.days[updatedIndex],
       updatedIndex,
       record.startDate,
-);
+    );
   }
 
-  /** ITN-10: adds an activity to a specific day of the owner's itinerary. */
+  /**
+   * ITN-10: adds an activity to one day of the owner's itinerary. The activity
+   * is appended inside the database (`$concatArrays` on the current array), so
+   * overlapping adds cannot lose each other (the day writes of ITN-05).
+   */
   async addActivity(
     itineraryId: string,
     dayId: string,
@@ -370,38 +377,336 @@ export class ItinerariesService {
     const ownerId = this.parseId(userId, 'userId');
     const targetDayId = this.parseId(dayId, 'dayId');
 
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+    if (
+      !(itinerary.days ?? []).some(
+        (day) => day._id.toHexString() === targetDayId.toHexString(),
+      )
+    ) {
+      throw this.notFound();
+    }
+
+    const changes = await this.activityChanges(dto, false);
     const activity: StoredActivity = {
       _id: new Types.ObjectId(),
-      name: dto.name.trim(),
-      description: dto.description,
-      time: dto.time,
-      cost: dto.cost ? { amountMinor: dto.cost, currency: 'EGP' } : undefined,
+      name: changes.name as string,
+      ...(changes.description !== undefined
+        ? { description: changes.description as string }
+        : {}),
+      ...(changes.time !== undefined ? { time: changes.time as string } : {}),
+      ...(changes.cost !== undefined
+        ? { cost: changes.cost as ActivityCostView }
+        : {}),
       images: [],
     };
 
-    // Append the activity inside the database so concurrent adds are preserved.
-    // Read the itinerary, modify the day in memory, and save.
-    const itinerary = await this.itineraryModel
-      .findOne({ _id: id, ownerId })
+    // Wrap user text in `$literal`: a name like "$100 for dinner" must be
+    // stored verbatim, not read as a MongoDB field path (like addDay does).
+    const storedActivity = {
+      _id: activity._id,
+      name: { $literal: activity.name },
+      ...(activity.description !== undefined
+        ? { description: { $literal: activity.description } }
+        : {}),
+      ...(activity.time !== undefined
+        ? { time: { $literal: activity.time } }
+        : {}),
+      ...(activity.cost !== undefined
+        ? {
+            cost: {
+              amountMinor: activity.cost.amountMinor,
+              currency: { $literal: activity.cost.currency },
+            },
+          }
+        : {}),
+      images: activity.images,
+    };
+
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            activities: {
+                              $concatArrays: [
+                                '$$day.activities',
+                                [storedActivity],
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
       .exec();
-    if (!itinerary) throw this.notFound();
+    if (!updated) throw this.notFound();
 
-    const day = itinerary.days.find(
+    const record = updated as ItineraryRecord;
+    const index = record.days.findIndex(
       (day) => day._id.toHexString() === targetDayId.toHexString(),
     );
-    if (!day) throw this.notFound();
+    return this.toDayView(record.days[index], index, record.startDate);
+  }
 
-    day.activities.push(activity);
-    await itinerary.save();
+  /**
+   * ITN-10: edits one activity, addressed by its own ID (endpoints.md). The
+   * `$map` reads the current array at write time, so a concurrent edit of a
+   * different activity on the same day is preserved.
+   */
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ItineraryDayView> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
 
-    const updatedIndex = itinerary.days.findIndex(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
+    const changes = await this.activityChanges(dto, true);
+    if (Object.keys(changes).length === 0) {
+      const current = await this.itineraryModel
+        .findOne({ ownerId, 'days.activities._id': id })
+        .lean()
+        .exec();
+      if (!current) throw this.activityNotFound();
+      return this.activityDayView(current as ItineraryRecord, id);
+    }
+
+    // `$literal` keeps user text such as "$100" from being read as a field path.
+    const literalChanges: Record<string, unknown> = {};
+    if (changes.name !== undefined) {
+      literalChanges.name = { $literal: changes.name };
+    }
+    if (changes.description !== undefined) {
+      literalChanges.description = { $literal: changes.description };
+    }
+    if (changes.time !== undefined) {
+      literalChanges.time = { $literal: changes.time };
+    }
+    if (changes.cost !== undefined) {
+      literalChanges.cost = {
+        amountMinor: (changes.cost as ActivityCostView).amountMinor,
+        currency: { $literal: (changes.cost as ActivityCostView).currency },
+      };
+    }
+
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { ownerId, 'days.activities._id': id },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $in: [id, '$$day.activities._id'] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            activities: {
+                              $map: {
+                                input: '$$day.activities',
+                                as: 'activity',
+                                in: {
+                                  $cond: [
+                                    { $eq: ['$$activity._id', id] },
+                                    {
+                                      $mergeObjects: [
+                                        '$$activity',
+                                        literalChanges,
+                                      ],
+                                    },
+                                    '$$activity',
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.activityNotFound();
+    return this.activityDayView(updated as ItineraryRecord, id);
+  }
+
+  /** ITN-10: deletes one activity of the owner's itinerary. */
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { ownerId, 'days.activities._id': id },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $in: [id, '$$day.activities._id'] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            activities: {
+                              $filter: {
+                                input: '$$day.activities',
+                                as: 'activity',
+                                cond: { $ne: ['$$activity._id', id] },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true, runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.activityNotFound();
+  }
+
+  /** ITN-10: validates and normalises the activity fields in a fixed order. */
+  private async activityChanges(
+    dto: AddActivityDto | UpdateActivityDto,
+    partial: boolean,
+  ): Promise<Record<string, unknown>> {
+    const changes: Record<string, unknown> = {};
+    if (!partial || dto.name !== undefined) {
+      changes.name = this.normalizeActivityName(dto.name);
+    }
+    if (dto.description !== undefined) {
+      if (typeof dto.description !== 'string') {
+        throw this.invalidField('description', 'description must be a string');
+      }
+      if (Array.from(dto.description).length > 1000) {
+        throw this.invalidField(
+          'description',
+          'description must have at most 1000 characters',
+        );
+      }
+      changes.description = dto.description;
+    }
+    if (dto.time !== undefined) {
+      if (typeof dto.time !== 'string' || !HH_MM.test(dto.time)) {
+        throw this.invalidField('time', 'time must be HH:mm');
+      }
+      changes.time = dto.time;
+    }
+    if (dto.cost !== undefined) {
+      changes.cost = await this.resolveActivityCost(dto.cost);
+    }
+    return changes;
+  }
+
+  private normalizeActivityName(name: unknown): string {
+    if (typeof name !== 'string') {
+      throw this.invalidField('name', 'name must be a string');
+    }
+    const trimmed = name.trim();
+    const length = Array.from(trimmed).length;
+    if (length < 1 || length > 100) {
+      throw this.invalidField(
+        'name',
+        'name must be between 1 and 100 characters',
+      );
+    }
+    return trimmed;
+  }
+
+  /** ITN-10/14: the cost is an integer in a supported currency's minor units. */
+  private async resolveActivityCost(
+    cost: ActivityCostView,
+  ): Promise<ActivityCostView> {
+    if (
+      typeof cost !== 'object' ||
+      cost === null ||
+      Array.isArray(cost) ||
+      !Number.isInteger(cost.amountMinor) ||
+      cost.amountMinor < 0
+    ) {
+      throw this.invalidField(
+        'cost.amountMinor',
+        'cost.amountMinor must be a non-negative integer',
+      );
+    }
+    if (typeof cost.currency !== 'string' || cost.currency.trim() === '') {
+      throw this.invalidField('cost.currency', 'cost.currency must be a code');
+    }
+    const currency = cost.currency.trim();
+    if (!(await this.referenceData.getCurrency(currency))) {
+      throw this.invalidField('cost.currency', `Unknown currency: ${currency}`);
+    }
+    return { amountMinor: cost.amountMinor, currency };
+  }
+
+  /** The day view containing an activity, with its derived number and date. */
+  private activityDayView(
+    itinerary: ItineraryRecord,
+    activityId: Types.ObjectId,
+  ): ItineraryDayView {
+    const index = itinerary.days.findIndex((day) =>
+      (day.activities ?? []).some(
+        (activity) => activity._id.toHexString() === activityId.toHexString(),
+      ),
     );
-    return this.toDayView(
-      day,
-      updatedIndex,
-      itinerary.startDate,
-    );
+    return this.toDayView(itinerary.days[index], index, itinerary.startDate);
+  }
+
+  private activityNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary activity not found',
+    });
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */

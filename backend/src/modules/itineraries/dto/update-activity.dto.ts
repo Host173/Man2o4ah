@@ -1,31 +1,38 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
-  IsString,
+  IsObject,
   IsOptional,
-  IsNumber,
-  Min,
-  MinLength,
+  IsString,
+  Matches,
   MaxLength,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { HH_MM } from '../../../common/database/validators.js';
+import type { UpdateActivityInput } from '../itineraries.types.js';
+import { ActivityCostDto } from './activity-cost.dto.js';
 
 /**
  * Partial update payload for an activity (ITN-10).
- * Omitted fields stay unchanged; `null` is rejected.
+ * Omitted fields stay unchanged; the service rejects explicit nulls.
  */
-export class UpdateActivityDto {
+export class UpdateActivityDto implements UpdateActivityInput {
   @ApiPropertyOptional({
     minLength: 1,
+    maxLength: 100,
     example: 'Pyramids of Giza',
     description: 'Optional new activity name (trimmed).',
   })
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @MaxLength(100)
   name?: string;
 
   @ApiPropertyOptional({
     maxLength: 1000,
-    example: 'Guided tour of the pyramids',
+    example: 'Guided tour',
     description: 'Optional new description.',
   })
   @IsOptional()
@@ -35,18 +42,21 @@ export class UpdateActivityDto {
 
   @ApiPropertyOptional({
     example: '09:30',
+    pattern: HH_MM.source,
     description: 'Optional new time in HH:mm format.',
   })
   @IsOptional()
   @IsString()
+  @Matches(HH_MM)
   time?: string;
 
   @ApiPropertyOptional({
-    example: 2000,
-    description: 'Optional new cost in minor units.',
+    type: ActivityCostDto,
+    description: 'Optional new cost in minor units and a supported currency.',
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  cost?: number;
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ActivityCostDto)
+  cost?: ActivityCostDto;
 }

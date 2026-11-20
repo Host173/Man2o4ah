@@ -381,21 +381,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
         this.toDetail(found.itinerary).days[found.dayIndex],
       );
     }
-    const activity = found.itinerary.days[found.dayIndex].activities[
-      found.activityIndex
-    ];
+    const activity =
+      found.itinerary.days[found.dayIndex].activities[found.activityIndex];
     Object.assign(activity, changes);
     found.itinerary.updatedAt = new Date();
-    return structuredClone(
-      this.toDetail(found.itinerary).days[found.dayIndex],
-    );
+    return structuredClone(this.toDetail(found.itinerary).days[found.dayIndex]);
   }
 
   /** ITN-10: deletes one activity, addressed by its own ID (endpoints.md). */
-  async deleteActivity(
-    activityId: string,
-    userId: string,
-  ): Promise<void> {
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
     const found = this.findActivity(activityId, userId);
     found.itinerary.days[found.dayIndex].activities.splice(
       found.activityIndex,
@@ -460,7 +454,10 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
         );
       }
       if (typeof cost.currency !== 'string' || cost.currency.trim() === '') {
-        throw this.invalidField('cost.currency', 'cost.currency must be a code');
+        throw this.invalidField(
+          'cost.currency',
+          'cost.currency must be a code',
+        );
       }
       const currency = cost.currency.trim();
       if (!(await this.referenceData.getCurrency(currency))) {

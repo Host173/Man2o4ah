@@ -692,4 +692,108 @@ describe('FakeItinerariesService owner-only methods', () => {
       expect(response.details[0].field).toBe('notes');
     });
   });
+
+  describe('activity methods (ITN-10)', () => {
+    async function trip() {
+      const itineraries = new FakeItinerariesService();
+      const created = await itineraries.create(createDto(), 'user-1');
+      const day = await itineraries.addDay(
+        created._id,
+        { cityId: 'cairo' },
+        'user-1',
+      );
+      return { itineraries, id: created._id, dayId: day._id };
+    }
+
+    it('adds, edits and deletes an activity with the owner’s view shape', async () => {
+      const { itineraries, id, dayId } = await trip();
+
+      const added = await itineraries.addActivity(
+        id,
+        dayId,
+        {
+          name: '  Pyramids  ',
+          description: 'Guided tour',
+          time: '09:30',
+          cost: { amountMinor: 2000, currency: 'EGP' },
+        },
+        'user-1',
+      );
+      expect(added.activities).toMatchObject([
+        {
+          name: 'Pyramids',
+          description: 'Guided tour',
+          time: '09:30',
+          cost: { amountMinor: 2000, currency: 'EGP' },
+          images: [],
+        },
+      ]);
+      const activityId = added.activities[0]._id;
+
+      const edited = await itineraries.updateActivity(
+        activityId,
+        { time: '14:00' },
+        'user-1',
+      );
+      expect(edited.activities[0]).toMatchObject({
+        name: 'Pyramids',
+        time: '14:00',
+        cost: { amountMinor: 2000, currency: 'EGP' },
+      });
+
+      await itineraries.deleteActivity(activityId, 'user-1');
+      const detail = await itineraries.getById(id, 'user-1');
+      expect(detail.days[0].activities).toEqual([]);
+    });
+
+    it('scopes activities to their owner with 404, like the real service', async () => {
+      const { itineraries, id, dayId } = await trip();
+
+      await expect(
+        itineraries.addActivity(id, dayId, { name: 'Mine' }, 'user-2'),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+
+      const added = await itineraries.addActivity(
+        id,
+        dayId,
+        { name: 'Mine' },
+        'user-1',
+      );
+      const activityId = added.activities[0]._id;
+      await expect(
+        itineraries.updateActivity(activityId, { name: 'Stolen' }, 'user-2'),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+      await expect(
+        itineraries.deleteActivity(activityId, 'user-2'),
+      ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
+    });
+
+    it('uses the real service’s 400 VALIDATION_FAILED errors for bad fields', async () => {
+      const { itineraries, id, dayId } = await trip();
+
+      for (const dto of [
+        { name: '' },
+        { name: 'x'.repeat(101) },
+        { name: 'Tour', time: '25:00' },
+        { name: 'Tour', description: 'd'.repeat(1001) },
+        { name: 'Tour', cost: { amountMinor: -1, currency: 'EGP' } },
+        { name: 'Tour', cost: { amountMinor: 10, currency: 'XXX' } },
+      ]) {
+        const error = await itineraries
+          .addActivity(id, dayId, dto as never, 'user-1')
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        const response = (error as BadRequestException).getResponse() as {
+          code: string;
+          message: string;
+          details: { field: string; message: string }[];
+        };
+        expect(response.code).toBe(ErrorCode.ValidationFailed);
+        expect(response.message).toBe('Validation failed');
+        expect(response.details[0].field).toMatch(
+          /^(name|description|time|cost)/,
+        );
+      }
+    });
+  });
 });

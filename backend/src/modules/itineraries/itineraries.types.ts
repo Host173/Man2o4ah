@@ -35,6 +35,24 @@ export interface ActivityView {
   attractionId?: string;
 }
 
+/** ITN-10: the accepted payload when adding an activity to a day. */
+export interface AddActivityInput {
+  name: string;
+  description?: string;
+  /** `HH:mm`. */
+  time?: string;
+  cost?: ActivityCostView;
+}
+
+/** ITN-10: the accepted payload when editing an activity; omitted fields stay. */
+export interface UpdateActivityInput {
+  name?: string;
+  description?: string;
+  /** `HH:mm`. */
+  time?: string;
+  cost?: ActivityCostView;
+}
+
 /** A budget entry of an itinerary day (ITN-14). */
 export interface BudgetEntryView {
   _id: string;

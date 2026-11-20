@@ -31,6 +31,7 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser } from '../accounts/auth/decorators.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import { AddActivityDto } from './dto/add-activity.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
 import { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import {
@@ -204,6 +205,30 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDayView> {
     return this.itinerariesService.addDay(id.toHexString(), dto, user.id);
+  }
+
+  @Post(':id/days/:dayId/activities')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'ITN-10 Add an activity to my itinerary day' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'dayId', type: String })
+  @ApiCreatedResponse({ type: ItineraryDayResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid IDs or activity fields' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary or day not found, or owned by another user',
+  })
+  addActivity(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('dayId', ParseObjectIdPipe) dayId: Types.ObjectId,
+    @Body() dto: AddActivityDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDayView> {
+    return this.itinerariesService.addActivity(
+      id.toHexString(),
+      dayId.toHexString(),
+      dto,
+      user.id,
+    );
   }
 
   /**

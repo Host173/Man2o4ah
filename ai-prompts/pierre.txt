@@ -105,3 +105,1202 @@ can you fix it and push the commenting on his comment
 How the output was used:
 Added a failing availability error-precedence regression in hotels.fake.spec.ts, committed first as e85228a, then moved range normalization before room lookup in room-night-inventory.fake.ts; all 51 fake tests passed and isolated tracked-PR npm run verify passed all gates with 1116 tests across 94 files; main-workspace verification stopped at unrelated untracked profile type errors, whose files were left untouched; prepared the fix and validation evidence for PR #152 and a reply to Kareem's review.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok fix them and remove the sentence of ai retrospective
+
+How the output was used:
+Added fake profile/rating validation and inactive-hotel API regression tests (test-first commit 853371b), matched fake validation to the production schema, and passed backend verify (1235 tests); preserved the earlier log entry under the append-only rule.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+so remove the whole prompt of the ai retrospective only
+
+How the output was used:
+Removed only the generated HTL-01 entry dated 2026-11-16 after Pierre confirmed Kareem explicitly approved this exception; preserved all other existing entries and made no source-code changes.
+================================================
+
+Historical backfill appended on 2026-11-18 from this session's stored original user messages (turns 13-46 and 49). Dates below are the original recorded days in UTC+02:00, not the recovery date. Prompt text is copied verbatim, including spelling and trailing spaces. Outcomes describe the recorded responses; an absent response is stated explicitly. These are recovered messages, not replacement task briefs. The two already-logged requests (turns 47-48) are not duplicated. Unavailable attachment contents and form responses are not reconstructed or claimed recovered.
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+now i want to start in the tickets assigned to me in sprint 2
+
+How the output was used:
+Answer only, no files changed.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+lets begain in htl-01 but before you begain i want to share with me step by step what you do to be understand
+
+How the output was used:
+Answer only, no files changed; explained the planned HTL-01 implementation steps.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok
+
+How the output was used:
+Created the HTL-01 branch and hotel create/update DTOs with validation tests; local tests were dependency-blocked.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+we have already shared database i will provide it
+
+How the output was used:
+Answer only, no files changed; explained private environment configuration and isolated test databases.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is the solution for the npm depeddencies
+
+How the output was used:
+Answer only, no files changed; explained the registry blocker and GitHub Actions validation.
+================================================
+
+================================================
+Date: 2026-11-15
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok
+
+How the output was used:
+Implemented the core hotel-profile service and tests, pushed draft PR #122, and verified 668 tests in CI.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+#121 is now merged
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why pr check fails ?
+
+How the output was used:
+Answer only, no files changed; identified the missing prompt-log entry as the failing PR check.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+for every ticket we made after we fifnish make a professional and realistic prompt for what you made
+
+How the output was used:
+Answer only, no files changed; discussed a labelled retrospective rather than an original prompt.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+do you add the prompt
+
+How the output was used:
+Answer only, no files changed.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is lacks this pr to publish or complete
+
+How the output was used:
+Answer only, no files changed; listed remaining photo support, verification, logging and review work.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what should i made to comlplete it
+
+How the output was used:
+Answer only, no files changed; explained the remaining HTL-01 work.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you make them ?
+
+How the output was used:
+Implemented photo upload/removal, cleanup and retry handling, tests and Swagger documentation; pushed PR #122 with 968 CI tests passing.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what is remain fir the pr
+
+How the output was used:
+Answer only, no files changed; listed prompt logging, integration, manual evidence and review.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+add the prompt
+
+How the output was used:
+Added a local prompt-log entry and a labelled task brief; not committed or pushed in this turn.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i daont mean add my prompts i mean make you a professional prompt and add it
+
+How the output was used:
+Changed the uncommitted local HTL-01 entry to a labelled generated task brief; that brief was later removed in 2314b9d.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+commit and push and the tell me what is lacks this pr 
+
+How the output was used:
+Committed and pushed the then-approved log entry as 63093c8 and updated PR #122; CI passed 968 tests.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what i shoukd make in 1 and 2
+
+How the output was used:
+Answer only, no files changed; explained shared-service coordination and manual Swagger verification.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you make 2 ?
+
+How the output was used:
+Attempted Swagger access, found the backend unavailable, and reported blockers without saving or using supplied credentials.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why the swaggar isnt opening
+
+How the output was used:
+Answer only, no files changed; explained the missing running backend, dependencies and environment configuration.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i will do it in another laptop so writ to me a prompt to makr e the test you didnt made and edit them in pr description and make step2 and take the scrreenshots and put in
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+i will do it in another laptop so writ to me a prompt to makr e the test you didnt made and edit them in pr description and make step2 and take the scrreenshots and put in make the prompt general for any ticket
+
+How the output was used:
+Answer only, no files changed; supplied a reusable verification and PR-evidence handoff prompt.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+is the provet run with docker or what ?
+
+How the output was used:
+No assistant response is recorded for this turn; no file changes are attributed to it in this backfill.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+is the project run with docker or what ?
+
+How the output was used:
+Answer only, no files changed; explained the Node/npm runtime and optional local database container.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+if we use docker does the problem of the blocked dependincies will be solved ?
+
+How the output was used:
+Answer only, no files changed; explained that Docker does not inherently bypass npm registry restrictions.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+ok now pull the last changes of the project and then review the htl 01 ticket branch and pr 
+
+How the output was used:
+Merged develop as 952d746, restored dependencies, ran 981 tests, and recorded hotel contract and screenshot review findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what you have changed in the code
+
+How the output was used:
+Answer only, no files changed; clarified that the preceding turn merged develop but did not fix the review findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+what are the issues
+
+How the output was used:
+Answer only, no files changed; explained the fake-ID, HTTP-ID, photo-limit and screenshot findings.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+can you fix them
+
+How the output was used:
+Committed regressions in 0899656 and fixes in 4b98104; pushed to PR #122 with 983 tests passing and corrected unsafe screenshot evidence.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+does the pr is ready to be published ?
+
+How the output was used:
+Answer only, no files changed; checked PR readiness and explained remaining real-integration verification.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+why gen 8 and gen 12 should be finished first before i open my pr
+
+How the output was used:
+Answer only, no files changed; corrected the distinction between opening a PR and completing real-integration verification.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+are the screenshots correct
+
+How the output was used:
+Answer only, no repository files changed; inspected nine PR images and reported historical ID fields and missing success evidence.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+does this pr is linked with its work item >
+
+How the output was used:
+Answer only, no files changed; confirmed PR #122 is linked to issue #43.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+read the last comment on this ticket
+
+How the output was used:
+Answer only, no files changed; read Kareem's review requesting fake-validation fixes, an inactive-edit test and original prompt records.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+read the last comment in the pr
+
+How the output was used:
+Answer only, no files changed; read Kareem's review confirming the code fixes and requesting original prompts or an explicit loss statement.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-01
+
+Prompt:
+fix the prompts issues
+
+How the output was used:
+Appended recovered original HTL-01 session prompts and their recorded outcomes to ai-prompts/pierre.txt without changing earlier entries or application code.
+================================================
+
+Follow-up during the same 2026-11-18 recovery request: newer develop changes caused merge conflicts after the log-only push. Preserved the complete incoming INV-02 prompt log and the complete recovered HTL-01 suffix. Combined shared date-rule imports and canonical inventory fixtures while retaining profile validation and both features' regression tests; removed obsolete inventory-stub assertions now covered by the merged real-inventory tests. Backend npm run verify passed 1285 tests across 100 files, 98.36% line coverage, service gates and build. The local production-audit attempt was blocked by the managed mirror with HTTP 429; this is not a successful audit result.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-09
+
+Prompt:
+implemnet this tickect and the make pr linked with this work item
+
+How the output was used:
+Changed the hotels policy DTO, service, controller, tests and hotels fake; commit: feat(hotels): implement hotel policies (HTL-09).
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+NO MAKE PROMPT INSTRUCTION I TOLD TO YOU AND START IN IMPLMENTING
+
+How the output was used:
+Implemented HTL-03 on feature/HTL-03-rooms in an isolated worktree from latest develop: added create-room.dto.ts and room.response.dto.ts; updated hotels.service.ts, hotels.controller.ts, hotels.contract.spec.ts, hotels.service.spec.ts, hotels.api.spec.ts, hotels.fake.ts and hotels.fake.spec.ts for moderator-scoped room creation, paginated listing, transaction-aware getRooms, trimmed-name uniqueness and contract parity; appended ai-prompts/pierre.txt. Focused tests passed 146 cases; backend npm run verify passed formatting, lint, typecheck, all 1301 tests across 100 files, per-service coverage gates and build; HotelsService line coverage was 100%. Original worktree files were preserved; no commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+make a pr
+
+How the output was used:
+Reviewed and staged the HTL-03 implementation and tests, appended ai-prompts/pierre.txt, and prepared commit and pull request publication against develop using the repository template; npm run build passed, with the implementation already validated by npm run verify (1301 tests, all service coverage gates, and build).
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+does the pr lacks somthing?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; checked PR #159 against HTL-03 and the completion rules, confirmed all applicable CI checks passed with no merge conflicts, and identified the remaining manual Swagger validation, required approval, and failed Copilot review configuration; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+is Test: Manually exercise the endpoints in Swagger—success, invalid input, wrong role and another hotel’s resource—as required by the completion checklist. This has not been done.  needed in every ticket ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that the current completion checklist requires Swagger checks for affected backend endpoints, including HTL-03, rather than manually retesting the whole API for every ticket; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+should i add screenshots ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended representative Swagger screenshots for HTL-03, distinguished screenshot evidence from the required manual checks, and warned against exposing credentials; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+cna you review the last comment on the pr  and give your opinion
+
+How the output was used:
+Appended ai-prompts/pierre.txt; read Kareem's latest review and approval on PR #159, checked the DTO, numeric validators, data-model money rules and existing tests, and confirmed with class-validator that unsafe integers are accepted; recommended safe-integer input bounds plus booking-total overflow checks, retaining case-sensitive room names, and treating the extra API boundary cases as optional; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what u reccomend we fix then ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recommended a focused safe-integer validation fix with test-first regression coverage and Swagger limits, leaving case sensitivity unchanged and booking-total overflow protection to the booking owner; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+fix that + fix the case-sesitive names make it non-sensitve
+
+How the output was used:
+Added safe-integer regression cases to hotels.api.spec.ts and appended ai-prompts/pierre.txt; three new tests reproduced unsafe values receiving 201 instead of 400, while the maximum-safe boundary passed. Case-insensitive uniqueness remains pending Kareem's approval and the required separate data-model/index change process.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+why it si changes the frozen database index and conflicts ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained that the existing case-sensitive unique index cannot enforce case-insensitive uniqueness under concurrency, clarified that HTL-03 itself does not prohibit case-insensitive names, and continued the safe-integer fix without altering the frozen schema or index.
+================================================
+
+Follow-up for the same 2026-11-18 numeric-fix request: committed the failing regression tests first as 75197a1, then added Number.MAX_SAFE_INTEGER bounds and matching Swagger maxima to all three numeric inputs in create-room.dto.ts. The hotel API suite passed all 35 tests; after correcting DTO formatting, backend npm run verify passed all gates, 1305 tests across 100 files, service coverage thresholds and build. No name-uniqueness, schema or index changes; no push.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+case-insenstive names problem does it has a simplier solution like a simple condiotin without reaching to the database level or what ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; clarified that canonical lowercase storage can reuse the existing unique index without changing its definition, but changes displayed names and needs existing-data normalization and collision handling; explained that a condition-only duplicate lookup is unsafe under concurrency and preserving original capitalization calls for database-backed case-insensitive uniqueness; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+i didnt understand the simpler solution
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained lowercase storage with a concrete Room A example, its displayed-name tradeoff, and the need to normalize existing names before relying on the current unique index; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+ok make this solution the push these all fixes
+
+How the output was used:
+Added and updated test-first lowercase-name regressions in hotels.service.spec.ts, hotels.api.spec.ts and hotels.fake.spec.ts, and appended ai-prompts/pierre.txt; seven selected cases failed as expected before implementation, covering lowercase responses, concurrent case variants and literal legacy mixed-case collisions. Prepared the existing numeric commits and the approved naming fix for publication to PR #159.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+Kareem approved lowercase storage; implement it and push the fixes
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded the user's confirmation of Kareem's approval for lowercase storage and proceeded with service/API/fake regressions without changing schema definitions, indexes or shared database records.
+================================================
+
+Follow-up for the same 2026-11-18 approved implementation request: committed failing naming regressions first as 920b754, then implemented trimmed lowercase storage and escaped exact case-insensitive legacy-name collision checks in hotels.service.ts and hotels.fake.ts; updated create-room.dto.ts, room.response.dto.ts and hotels.types.ts to document the approved behavior. Focused hotel tests passed 153 cases; backend npm run verify passed all gates, 1308 tests across 100 files, coverage thresholds and build. Existing mixed-case records are not rewritten; schemas and indexes are unchanged. Prepared both numeric-fix commits and naming-fix commits for the requested push and PR #159 description update.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+what you change in lowercase fix ?
+
+How the output was used:
+Appended ai-prompts/pierre.txt; explained the pushed lowercase-storage normalization, literal case-insensitive legacy-name collision check, existing unique-index concurrency protection, unchanged old records and matching fake/documentation/tests; no implementation changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+please rebase this branch with the updated main to merge without conflicts
+
+How the output was used:
+Appended ai-prompts/pierre.txt; fetched origin, confirmed PR #159 conflicts with its develop target and already contains main, and explained that repository rules require merging develop rather than rebasing; prepared the topic branch for the confirmed merge and conflict resolution.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-03
+
+Prompt:
+true
+
+How the output was used:
+Appended ai-prompts/pierre.txt; recorded confirmation to merge origin/develop into feature/HTL-03-rooms, preserve the room and policy features, run backend verification and push the resolution.
+================================================
+
+Follow-up for the same 2026-11-18 approved synchronization request: resolved all seven conflicts while merging develop at 44f62f5, preserving HTL-03 rooms, upstream HTL-09 policies and all incoming blog/CI changes. Verified that the merged prompt log retains the exact upstream prefix and complete local append-only suffix, and that all 12 incoming policy methods/tests in conflicted TypeScript files are unchanged. Focused hotel tests passed 223 cases across eight files. Backend npm run verify passed formatting, lint, typecheck, 1339 tests across 102 files, coverage gates and build; overall line coverage was 98.42%, and HotelsService covered 106/106 lines. One pre-existing reference-data lint warning remains. No rebase or force-push was used; prepared the verified merge for the authorized push to PR #159.
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-04
+
+Prompt:
+ok start impleminting then make a pr
+
+How the output was used:
+Implemented HTL-04/HTL-05 room availability and numeric edits in hotel DTOs, service, controller and fakes on an isolated branch from develop; committed failing tests first as 1e7eacd; backend npm run verify passed 1363 tests, coverage gates and build, with HotelsService at 137/137 covered lines; Swagger Try it out verified success, validation, wrong-role and other-hotel responses; prepared the implementation commit and pull request for issue #47. Production dependency audit was blocked by the registry's HTTP 429 rate limit.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-04
+
+Prompt:
+ok add the clarifications
+
+How the output was used:
+Clarified Swagger descriptions in room-availability.dto.ts and hotels.controller.ts: past availability ranges are allowed without permitting past check-in dates, and beds/occupancy edits do not revalidate or invalidate existing reservations; no runtime behavior changed. Backend npm run verify passed formatting, lint, typecheck, 1363 tests across 102 files, coverage gates and build; prepared the documentation commit for PR #162.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-06
+
+Prompt:
+ok start impleminting it then make a pr
+
+How the output was used:
+Implemented HTL-06 in the hotels controller, service, room-management DTOs and shared operation parser; updated hotel fakes and integration/API/contract tests; backend npm run verify passed all gates with 1363 tests across 102 files, HotelsService line coverage was 132/133, and the production dependency audit found no vulnerabilities; prepared the isolated feature branch for commit and a develop-targeted PR without changing existing uncommitted work.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-06
+
+Prompt:
+can you review the last comment in the pr
+[Attached: Browser Pages]
+The following browser pages are currently shared with you and can be interacted with using the browser tools:
+- [4c0da90f-d53e-423e-8232-ac1acf63befb] HTL-04 Swagger verification (http://127.0.0.1:52741/api/docs) (active)
+
+How the output was used:
+Appended ai-prompts/pierre.txt; reviewed Kareem's latest PR #161 feedback against HTL-06 and PR #162, safely confirmed the reported extreme range passes parsing with 354285 nights without database writes, confirmed the overlapping PATCH routes, and distinguished required fixes from optional past-date/reactivation behavior; no application changes, commit or push.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-06
+
+Prompt:
+fix them and push
+[Attached: Browser Pages]
+The following browser pages are currently shared with you and can be interacted with using the browser tools:
+- [4c0da90f-d53e-423e-8232-ac1acf63befb] HTL-04 Swagger verification (http://127.0.0.1:52741/api/docs) (active)
+
+How the output was used:
+Committed failing oversized-block regressions first as 8cce2cb, then limited parseRoomBlockOperation to 365 inclusive nights with 400 VALIDATION_FAILED and toDate details; updated Swagger descriptions and API boundary tests; backend npm run verify passed all gates with 1369 tests across 103 files; prepared the fix for push to PR #161 and documented a #161-first merge plan requiring combined DTOs/routes and both suites on still-open PR #162; left optional past-date and reactivation behavior unchanged.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+ik start implening it the make a pr
+
+How the output was used:
+Implemented HTL-11/12 in backend/src/modules/hotels/hotels.service.ts and hotels.controller.ts, added search request/response DTOs, added integration/API tests, replaced the implemented search stub assertion and improved stay-date validation details; backend npm run verify passed with 1705 tests across 115 files; prepared feature/HTL-11-hotel-search for commit and a pull request into develop, preserving the original working tree.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+Review my pull requests in host173/man2o4ah: this pr
+
+REVIEW ONLY
+Do not implement fixes, commit, push, merge, approve, or post comments unless I explicitly ask. Preserve my working tree and unrelated changes.
+
+1. ESTABLISH THE REQUIREMENTS
+- Fetch each PR's metadata, diff, commits, linked ticket, CI results, and previous reviews.
+- Identify the ticket key from its branch and title. Read its acceptance criteria, required test levels, dependencies, and TDD requirements.
+- Read:
+  - README.md: "Team rules".
+  - docs\ai\skills\travel-platform\SKILL.md and its relevant references.
+  - .github\copilot-instructions.md.
+- Check against these sources, in order:
+  1. docs\ai\skills\travel-platform\references\requirements.md.
+  2. docs\DECISIONS.md.
+  3. docs\database\data-model.md.
+  4. The project skill and its references.
+- State conflicts. Never invent project rules.
+
+2. CHECK DEPENDENCIES BEFORE TESTING
+- Distinguish missing implementation prerequisites from integration-only dependencies.
+- An unavailable import, export, schema field, decorator, or required unmerged ticket is a hard blocker. Report "Waiting", identify the dependency, and stop testing that PR.
+- An existing contract whose implementation still throws NotImplementedException is not automatically a blocker when the feature can be tested against the prescribed fake.
+- Inspect current base-branch code and linked PRs. Do not assume a closed issue proves implementation has merged.
+- List integration-only dependencies as "End to end after: ...".
+- Do not report expected placeholder 501 responses as feature bugs; test those paths using the prescribed fake.
+
+3. CHECK CORRECTNESS AND PROJECT RULES
+Report only concrete problems introduced by the PR or required work it omits:
+- Module ownership and collection boundaries. No cross-module schema/model imports, populate, or schema ref.
+- Cross-module access through exported services, ports, or events.
+- Plain-view contracts with string IDs, valid stub requirement/ticket references, contract-compatible fakes, and registry wiring.
+- Events through Events.X and AppEvents, emitted after commit; idempotent handlers.
+- Inventory changes only through SeatInventory or RoomNightInventory, with required caller sessions.
+- Atomic conditional status changes with checked update results.
+- Integer money, booking snapshots, UTC instants, validated calendar dates, and schema/index agreement.
+- DTO validation, documented roles, ownership, error codes, pagination, response shapes, and escaped user-supplied regex input.
+- Ticket-required tests, per-service 80% line coverage, TDD commit order, append-only prompt logs, and truthful documentation.
+- No contract or feature descriptions added to README files.
+- For UI changes, follow DESIGN.md. If it is missing, report that rather than inventing a design.
+
+Skip formatting issues already enforced by tooling and unrelated pre-existing defects. Never reproduce secrets or .env values.
+
+4. VERIFY BEHAVIOR
+- Use a separate disposable worktree at the exact PR head.
+- Run npm run verify in each affected app. Restore dependencies only when required by manifest changes or missing-dependency failures.
+- Map every acceptance criterion to implementation and tests. Identify missing required coverage.
+- Exercise at least 15 distinct, relevant edge cases: boundaries, malformed input, impossible dates, duplicate requests, error paths, and applicable 401/403/404 checks.
+- Inventory and hold changes require concurrent requests using Promise.allSettled, asserting invariants rather than which request wins.
+- Use repository test helpers, in-memory MongoDB, and appropriate fakes. Never access Atlas or real payment services.
+- Recheck earlier findings against the current code. Where feasible, prove regression tests fail without the fix in isolation.
+- Remove temporary probes and worktrees. Never weaken existing tests.
+- Report exact commands and actual outcomes. If validation is blocked, explain why. Never claim an unexecuted check passed.
+
+5. RETURN A CONCISE REVIEW
+For each PR:
+- Status: Changes needed / Waiting / No findings / Validation blocked.
+- Up to five findings, highest impact first.
+- Start each finding with Bug, Rule, Test, or Docs.
+- Include the changed file and line, what is wrong, its impact, the violated requirement or rule, and the smallest appropriate fix.
+- Summarize validation results, missing required tests, and integration dependencies.
+- Put genuinely undecided matters under "For Kareem" rather than presenting assumptions as defects.
+
+"No findings" is not merge approval: CI must be green and the team leader must approve.
+
+How the output was used:
+Reviewed PR #172 at 2f797a0 in a disposable exact-head worktree; confirmed HTL-04/06 merge ancestry and green CI, ran backend npm run verify (1705 tests, 217/218 hotel service lines) and 34 additional passing in-memory probes, mapped acceptance criteria and identified a cheapest-qualifying-room interpretation for Kareem; no application fixes, commits or GitHub writes; appended this log only in the HTL-11 worktree, preserving the original workspace.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+comment on the pr
+
+How the output was used:
+Posted and verified review comment https://github.com/Host173/Man2o4ah/pull/172#issuecomment-7018295854 with validation results, integration dependency and the pricing clarification for Kareem; appended this prompt log only; no application changes, commit, push or approval.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+check the last cooment on the pr
+
+How the output was used:
+Read Aya's latest review on PR #172 and rechecked HTL-11/12/16, domain search rules and current real/fake price calculations; explained the occupancy-qualified pricing correction and missing regression test, correcting the earlier ambiguity assessment; appended this log only, with no application fixes, commit, push or GitHub reply.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-11
+
+Prompt:
+fix it and push
+
+How the output was used:
+Committed failing occupancy-qualified price regressions first as 47f5cc8 (six demonstrated failures); shared capacity-qualified nightly pricing between HotelsService and FakeHotelsService, clarified Swagger/type comments and covered one/multiple-room capacity boundaries, inclusive filters, sorting and pagination; targeted tests passed 360 cases and backend npm run verify passed 1717 tests across 115 files plus build; independently matched 99517 exhaustive combinations against brute-force selections; prepared the verified fix and prompt logs for commit/push to PR #172.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-05
+
+Prompt:
+ok make the pr updated make rebase
+
+How the output was used:
+After approval to merge and push instead of rebasing, merged origin/develop into an isolated worktree for PR #154 without conflicts; backend npm run verify passed 1900 tests across 125 files and build, and npm audit --omit=dev --audit-level=high found zero vulnerabilities; prepared the validated merge and this prompt log for push, with no manual application changes.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-02
+
+Prompt:
+ok start making it then run this self review on the pr and insure that it has no issues and attach the report of it in comments
+
+
+
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Make sure my branch is current: `git fetch origin`, then `git merge-base --is-ancestor origin/develop HEAD`. If it isn't, tell me to merge develop first (merge, never rebase) and stop.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Implemented hotel details and free-room endpoints, shared stay validation and inventory reads, response DTOs, HotelsService/FakeHotelsService methods and integration/API/fake tests for HTL-02/HTL-15; prepared the feature PR and its requested self-review.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+ok start making itn-28 then run this self review on the pr and insure that it has no issues and attach the report of it in comments
+Related Requirement: BLG-13
+
+Prompt:
+ok start making blg-13 then run this self review on the pr SELF_REVIEW_PROMPT.md which is and insure that it has no issues and attach the report of it in comments
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Implemented the owner-only PDF endpoint, bundled fonts, API tests, dependency/runtime setup and CI wiring on the ITN-28 branch; prepared its PR and requested self-review.
+Prepared the separate BLG-13 schema prerequisite: optional post itinerary reference, coordinated data-model/class diagrams/SVGs and schema regressions; feature API deferred until this prerequisite merges.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Mokhtar/Kareem has approved me implementing ITN-28; proceed
+
+How the output was used:
+Confirmed cross-package approval and created the isolated ITN-28 worktree from origin/develop.
+Related Requirement: BLG-13
+
+Prompt:
+Approved by Mostafa and Kareem — proceed
+
+How the output was used:
+Recorded cross-package approval for Pierre to prepare the blog schema prerequisite; no other owner's collections are accessed.
+================================================
+================================================
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfmake and its TypeScript types; proceed
+
+How the output was used:
+Evaluated pdfmake with real PDF tests; replaced it after discovering Arabic shaping limitations.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfjs-dist for PDF validation; proceed
+
+How the output was used:
+Added the development-only PDF parser and verified actual output text and page counts in the API tests.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Approve bundled fallback fonts for Arabic, CJK and emoji; preserve unsupported characters explicitly
+
+How the output was used:
+Bundled open-licensed Noto fonts and glyph validation; unsupported graphemes are printed as explicit Unicode code points.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves switching to Playwright/Chromium, including browser setup and CI wiring; proceed
+
+How the output was used:
+Switched PDF generation to isolated Chromium rendering with blocked scripts/network, added runtime setup instructions and CI provisioning.
+Related Requirement: BLG-13
+
+Prompt:
+schema_approval=Create a separate prerequisite schema PR first, visibility=Public and private — store only the ID; keep itinerary access checks unchanged
+
+How the output was used:
+Split schema preparation from feature implementation as requested; documented that owned public/private itineraries may be referenced without publishing or embedding their contents.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+and read also the last comment on the pr
+
+How the output was used:
+Read the latest comment on PR #173 and distinguished its reported cleanup bug from the current pinned merge conflict.
+Related Requirement: ACC-06
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first session-deadline and idempotent-logout fixes for PR #138, synchronized approved contract documentation and diagrams, and passed backend verify with 2078 tests.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+ok fix all these and push then comment on the pr
+
+How the output was used:
+Merged pinned develop preserving both author-log histories (b1bc81c), committed failing cleanup regressions (0a97f9c), implemented transactional cleanup records and a retry job with model/diagram/index documentation, and passed backend verify (2049 tests) and production audit (0 vulnerabilities).
+Related Requirement: ACC-06
+
+Prompt:
+contract_approval=i dont unsestand what is the problem and what do you want and what is the ticket even, logout_policy=idempotent-refresh-capable
+
+How the output was used:
+Explained ticket #27 and requested approval for the frozen session-schema change; recorded the selected idempotent, refresh-cookie-capable logout behavior.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+Kareem and Mostafa approve this approach and including it in #173
+
+How the output was used:
+Implemented the requester-approved blog-owned durable cleanup collection and scheduled job in PR #173, including the matching data-model, diagrams and index tests.
+Related Requirement: ACC-06
+
+Prompt:
+approved
+
+How the output was used:
+Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first password-session fixes, cookie revocation and Swagger evidence for PR #139.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+sessionBehavior=Revoke every session and require login again, pushFixes=true
+
+How the output was used:
+Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
+================================================

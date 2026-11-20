@@ -1530,3 +1530,904 @@ ok fix it and add it to the pr
 How the output was used:
 Merged develop into the ITN-01 branch, stubbed the reference-data models in the blog module setup test (BlogModule now reaches ReferenceDataModule through ItinerariesModule), and made the fake's empty-update test move the clock so it fails without the fix. Checked both tests and ran the full verify before pushing.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-01
+
+Prompt:
+ok check the plg-09 pr and check if all the problem we had through out the pr are solved, and solve see why the pr is  not running and just fix it because i think it's a small thing
+
+How the output was used:
+Checked BLG-09 (#144) against every review point. Found its red "Prompt log entry" check was a false failure: mostafa.txt on develop had no final newline, so appending made the last line look changed. Fixed the append-only check in .github/workflows/pr-checks.yml to ignore a newline-only change on the last line, tested it on the real diff and six synthetic cases, and opened this PR.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: HTL-06
+
+Prompt:
+#161 in this pr resolve conflict (mostly accept both) and  use lint,.
+make the auto review every 4 hour
+
+How the output was used:
+Merged develop into HTL-06 (#161). Kept both sides, except the two routes both sides defined: PATCH rooms/:roomId and PATCH rooms/:roomId/availability now have one handler each, as endpoints.md specifies (numeric edits or isActive: false; SET_RANGES, BLOCK or UNBLOCK), with tests for mixed bodies. Removed duplicate imports and helpers from the merge; npm run verify passed. Review task set to every 4 hours.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: ACC-17
+
+Prompt:
+1. yes go
+2. yes and it was ok for that time
+3. they have requested changes 
+
+about my issues which issues can be done in parrelel so i finish quickly and which want work other than cod like setting up a tool or somehtng ,
+
+How the output was used:
+While running the full suite for the NUL fix, found develop's CI red: after #148 (HTL-16) and #149 (ACC-17) merged together, the AdminModule test built the module with fake models only, and HotelHoldService now injects the Mongoose connection. The test now builds AdminModule on the in-memory database (createTestApp); unused imports removed. npm run verify passed.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: PLT-05
+
+Prompt:
+1. yes go
+2. yes and it was ok for that time
+3. they have requested changes 
+
+about my issues which issues can be done in parrelel so i finish quickly and which want work other than cod like setting up a tool or somehtng ,
+
+How the output was used:
+"1. yes go" approved the shared search fix: escapeRegex now writes a NUL character as \x00, so q=a%00b no longer answers 500 (BLG-09 search and the reference-data lists). Test commit first (TDD), then the fix; also removed the lint warning in the reference-data API test. Answer to the rest given in chat.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-18
+
+Prompt:
+@"C:\Users\karee\Downloads\ITN18_EXECUTION.md"
+do this now on  a new branch
+[Attached: ITN18_EXECUTION.md]
+# Execution — ITN-18: Exchange rates
+
+Issue #18. Lane D of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4. **TDD is required** for this ticket: the conversion tests are committed, failing, before the conversion code.
+
+## Goal
+
+Implement the `fx` module: fetch rates from FXRatesAPI once a day, cache them in `exchange_rates`, convert amounts between currencies in minor units, and expose the latest rates publicly. Today `FxService.getConverter` and `FxService.convert` throw `NotImplementedException('… implemented in ITN-18')`; Mokhtar's itinerary budgets (ITN-14) need them.
+
+Done means:
+1. A pure conversion function (minor units, half-up rounding), test-first.
+2. An adapter for FXRatesAPI that tests replace (no test ever touches the network).
+3. A daily refresh (and one at start-up if today's rates are missing) that never throws and keeps the last rates on failure.
+4. `FxService.getConverter()` / `convert()` implemented, and `GET /api/exchange-rates/latest` (public).
+
+**Out of scope:** converting booking prices or anything outside the fx module (the multi-currency booking work agreed with the TAs comes after M1), the budget summary itself (ITN-14), the frontend, CI.
+
+## Context you need
+
+**Requirement ITN-18 (verbatim):** "The system shall convert all itinerary budget amounts to the user's preferred currency (from the supported currency list) using exchange rates fetched once per day from a configured public exchange-rate API and cached in the database, and show the rate date. If the API is unavailable, the last cached rates are used. Booking prices are not converted (PAY-04)."
+
+**Rules (`domain-rules.md` §2, `data-model.md` §1.3 and §3.9):**
+- FXRatesAPI: `GET https://api.fxratesapi.com/latest?base=USD&currencies=EGP,AED,...` (`api_key` **only if** `FXRATES_API_KEY` is set). Success: `{ success: true, date, base, rates }`. Failure: `{ success: false, error, description }`. Only the backend calls it; the key never leaves the server and never appears in a log or an error message.
+- The refresh runs daily, and at start-up if today's document is missing. It inserts `exchange_rates { rateDate, base, rates, fetchedAt, source: 'fxratesapi' }` and **never throws to callers**: on any failure it logs and keeps the old data.
+- Conversion uses the **newest** document: `amount × rates[to] / rates[from]`, adjusted for each currency's `minorUnits` (JPY has 0, the others 2), **rounded half up** (`Math.round` on non-negative values). Unknown currency → `400 UNSUPPORTED_CURRENCY`. No rates at all → `503 RATES_UNAVAILABLE`.
+- Supported currencies = the `currencies` collection (reference-data): `ReferenceDataService.listCurrencies()` returns `CurrencyView { code, name, minorUnits }[]` sorted by code (today AED, EGP, EUR, GBP, JPY, SAR, USD). `data-model.md` §6.1 allows fx → reference-data.
+- Testing (`testing.md` §5): FXRatesAPI sits behind an adapter class; tests swap the adapter and never call the network. Time: `vi.useFakeTimers({ toFake: ['Date'] })` + `vi.setSystemTime(...)` (fake **only** `Date`: faking timers breaks the MongoDB driver), and `vi.useRealTimers()` in `afterEach`.
+
+**The schema exists, don't change it** (`backend/src/modules/fx/schemas/exchange-rate.schema.ts`): `rateDate` (DateOnly, **unique** index), `base`, `rates` (Map of positive numbers, must contain `base` = 1), `fetchedAt`, `source`. One document per UTC day.
+
+**The contract stays exactly as it is** (`fx.service.ts`, `fx.types.ts`):
+```ts
+getConverter(): Promise<Converter>   // loads the newest rates once; 503 RATES_UNAVAILABLE if none
+convert(amountMinor: number, from: string, to: string): Promise<{ amountMinor: number; rateDate: string }>
+interface Converter { rateDate: string /* 'YYYY-MM-DD' */; convert(amountMinor: number, from: string, to: string): number }
+```
+`FakeFxService` (`backend/test/fakes/fx.fake.ts`) `implements PublicApi<FxService>`, so **don't add public methods to `FxService`**: the refresh and the latest-rates read go in a separate internal class (step 4). The fake computes `Math.round((amountMinor * rateTo * 10^minorTo) / (rateFrom * 10^minorFrom))`; the real conversion must use the same formula so they agree.
+
+**Existing code to reuse:**
+- `backend/src/common/money/money.ts`: `assertMinor(n)` (non-negative safe integer, else a plain `Error` → 500: a bad amount is a programming error).
+- `backend/src/common/dates/date-only.ts`: `toDateOnly('YYYY-MM-DD')`. Today's UTC date: `toDateOnly(new Date().toISOString().slice(0, 10))`; a DateOnly back to text: `date.toISOString().slice(0, 10)`.
+- Errors: `ErrorCode.UnsupportedCurrency` (400), `ErrorCode.RatesUnavailable` (503) in `backend/src/common/errors/error-codes.ts`: `new BadRequestException({ code, message: \`Unsupported currency: ${code}\` })`, `new ServiceUnavailableException({ code, message: 'Exchange rates are unavailable' })`.
+- `@Public()` from `backend/src/modules/accounts/auth/decorators.ts`. `@Cron` from `@nestjs/schedule` (already installed; `ScheduleModule.forRoot()` is in `AppModule`, not in `createTestApp`, so crons never fire in tests).
+- `ReferenceDataSeedService.run()` (`backend/src/modules/reference-data/seed/reference-data-seed.service.ts`) loads the real currencies in tests.
+- `ConfigModule` is global; `createTestApp` serves `TEST_CONFIG` (`backend/test/support/test-config.ts`).
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages (use the global `fetch` of Node).
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files. Run the full `npm run verify` once, at the end (G1).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. `git worktree add ../man2o4ah-ITN-18 -b feature/ITN-18-exchange-rates origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/modules/fx src/modules/reference-data` must pass (develop's admin test was broken until PR #166 merged). If not, stop and report.
+
+## Step 1 (TDD, red): conversion tests
+
+New file `backend/src/modules/fx/fx-conversion.spec.ts`, for a function that doesn't exist yet:
+```ts
+// fx-conversion.ts (step 2)
+export interface ConverterInput { rateDate: string; rates: Record<string, number>; minorUnits: Record<string, number> }
+export function buildConverter(input: ConverterInput): Converter
+```
+Use these rates (per 1 USD) and minor units in the tests: `USD 1`, `EGP 50`, `EUR 0.9`, `JPY 150`, `AED 3.6725`; minor units `USD 2, EGP 2, EUR 2, JPY 0, AED 2`.
+
+Decision table, one `it` per row:
+
+| amountMinor | from → to | Expect | Why |
+|---|---|---|---|
+| 10000 | USD → EGP | 500000 | $100 = 5000 EGP |
+| 500000 | EGP → USD | 10000 | the reverse |
+| 10000 | USD → JPY | 15000 | $100 = ¥15000, JPY has no minor units |
+| 15000 | JPY → USD | 10000 | the reverse |
+| 1 | USD → EUR | 1 | 0.9 rounds half up to 1 |
+| 1 | EUR → USD | 1 | 1.111… rounds down to 1 |
+| 3 | EUR → EGP | 167 | 3 × 50 / 0.9 = 166.67 rounds up |
+| 0 | USD → EGP | 0 | zero stays zero |
+| 12345 | EGP → EGP | 12345 | same currency: unchanged, no rounding |
+| 10000 | USD → AED | 36725 | non-round rate |
+
+Plus:
+- half up exactly: with rates `{ USD: 1, XXX: 0.5 }` and minor units 2 for both, `1 USD → XXX` = 1 (0.5 → 1), `3 USD → XXX` = 2 (1.5 → 2);
+- `rateDate` is passed through unchanged;
+- unknown `from` or `to` (`'ZZZ'`) → `BadRequestException` with `code: 'UNSUPPORTED_CURRENCY'`;
+- a currency in `rates` but missing from `minorUnits`, or the reverse → the same 400;
+- `'constructor'` and `'toString'` as a currency → the same 400 (look codes up with `Object.hasOwn`, never `in` or plain indexing);
+- a negative or fractional `amountMinor` (`-1`, `1.5`) → throws (a plain `Error` from `assertMinor`).
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(fx): pin minor-unit conversion and half-up rounding (ITN-18)`
+
+## Step 2 (TDD, green): the conversion
+
+New `backend/src/modules/fx/fx-conversion.ts` with `ConverterInput` and `buildConverter`:
+- `convert(amountMinor, from, to)`: `assertMinor(amountMinor)`; both codes must exist (own property) in `rates` and in `minorUnits`, else 400 `UNSUPPORTED_CURRENCY` naming the unknown code; `from === to` → return `amountMinor`; else `Math.round((amountMinor * rates[to] * 10 ** minorUnits[to]) / (rates[from] * 10 ** minorUnits[from]))`.
+- `rateDate` copied from the input.
+
+Step 1's tests pass now; nothing else changes.
+**Commit:** `feat(fx): convert amounts between currencies in minor units (ITN-18)`
+
+## Step 3: the FXRatesAPI adapter
+
+New `backend/src/modules/fx/fx-rates.client.ts`:
+```ts
+/** Fetches the latest rates per 1 `base`; throws on any failure (FxRatesService catches). */
+export interface FxRatesClient { fetchLatest(base: string, currencies: string[]): Promise<Record<string, number>> }
+export const FX_RATES_CLIENT = Symbol('FX_RATES_CLIENT');
+@Injectable() export class FxRatesApiClient implements FxRatesClient { … }
+```
+`FxRatesApiClient` (injects `ConfigService`):
+- URL `https://api.fxratesapi.com/latest` with `URLSearchParams({ base, currencies: currencies.join(',') })`, plus `api_key` only when `FXRATES_API_KEY` is a non-empty string.
+- `fetch(url, { signal: AbortSignal.timeout(10_000) })`.
+- Not `res.ok` → throw `Error(\`FXRatesAPI answered ${res.status}\`)`. A body that isn't an object, has `success === false`, or has no `rates` object → throw `Error(\`FXRatesAPI error: ${description ?? 'unexpected response'}\`)`.
+- Return only the `rates` entries whose value is a finite number (others are dropped; the service decides what is missing).
+- **Never put the URL (it may contain the key) in an error or a log.**
+
+Tests `fx-rates.client.spec.ts` (unit; `vi.stubGlobal('fetch', vi.fn())`, `vi.unstubAllGlobals()` in `afterEach`; build the client with `new FxRatesApiClient({ get: (k: string) => values[k] } as unknown as ConfigService)`):
+- the URL has `base=USD` and `currencies=EGP%2CJPY` (or `EGP,JPY`), and **no** `api_key` when the key is unset or `''`; with a key, `api_key=<key>` is present;
+- a `signal` is passed;
+- 200 `{ success: true, rates: { EGP: 50, JPY: 150, BAD: 'x' } }` → `{ EGP: 50, JPY: 150 }`;
+- 500 → throws `FXRatesAPI answered 500`; `{ success: false, description: 'Invalid key' }` → throws, message contains `Invalid key`; `{ success: true }` (no rates) → throws; `fetch` rejecting → rejects;
+- with a key set, no thrown error message contains the key.
+
+**Commit:** `feat(fx): add the FXRatesAPI adapter (ITN-18)`
+
+## Step 4: refresh, latest rates and the converter
+
+**Config.** In `backend/src/config/validate.ts` accept two optional variables: `FXRATES_API_KEY` (any string) and `FX_AUTO_REFRESH` (if set, must be `'true'` or `'false'`, else throw a clear message). If `backend/src/config/validate.spec.ts` exists, add one test per rule. In `backend/test/support/test-config.ts` add `FX_AUTO_REFRESH: 'false'` to `TEST_CONFIG` (no app built by any test may call the network at start-up). In `.env.example` (repository root), under `# backend/.env`, add:
+```
+# Exchange rates (ITN-18). Optional: FXRatesAPI works without a key at low volume.
+FXRATES_API_KEY=
+# false = no fetch at start-up or by the daily job (offline development)
+FX_AUTO_REFRESH=true
+```
+
+**New internal class `backend/src/modules/fx/fx-rates.service.ts`, `FxRatesService`** (provided by `FxModule`, **not exported**). Injects the `ExchangeRate` model, `ReferenceDataService`, `@Inject(FX_RATES_CLIENT) client: FxRatesClient`, `ConfigService`; has a `Logger`. `export const FX_BASE = 'USD';` (the base every document stores; the platform currency).
+
+- `async refresh(): Promise<'inserted' | 'exists' | 'failed'>`, never throws:
+  1. `today` = today's UTC DateOnly. If a document with `rateDate: today` exists → `'exists'` (the API is called at most once a day).
+  2. `codes` = the supported currency codes from `listCurrencies()`. None → warn `No supported currencies; run npm run seed:reference` → `'failed'` (don't call the API).
+  3. `rates = await client.fetchLatest(FX_BASE, codes without FX_BASE)`.
+  4. Build the stored map: `FX_BASE → 1`, then every other supported code → `rates[code]`. If any supported code is missing or not a finite number > 0 → treat the whole fetch as failed (`missing or invalid rate for <code>`), store nothing. Extra currencies in the answer are ignored.
+  5. `create({ rateDate: today, base: FX_BASE, rates: map, fetchedAt: new Date(), source: 'fxratesapi' })` → `'inserted'`.
+  6. Any error in 3–5: a duplicate-key error (`code === 11000`, another refresh won the race) → `'exists'`; anything else → `logger.warn(\`Exchange-rate refresh failed: ${message}\`)` → `'failed'`.
+- `async latest(): Promise<ExchangeRatesView>`: the newest document (`sort({ rateDate: -1 })`, `.lean()`), or 503 `RATES_UNAVAILABLE`. `ExchangeRatesView = { base: string; rateDate: string; fetchedAt: string; source: string; rates: Record<string, number> }` (in `fx.types.ts`; `rates` keys sorted). A lean `Map` field can come back as a plain object or a `Map`: handle both (`value instanceof Map ? Object.fromEntries(value) : value`).
+- `onApplicationBootstrap(): void`: if `FX_AUTO_REFRESH` isn't `'false'`, start `void this.refresh()` **without awaiting** (start-up never waits for, or fails because of, the API).
+- `@Cron('5 0 * * *', { name: 'fx-daily-refresh', timeZone: 'UTC' }) async dailyRefresh(): Promise<void>`: same flag check, then `await this.refresh()`.
+
+**`FxService` (`fx.service.ts`, the contract):** inject the `ExchangeRate` model and `ReferenceDataService`.
+- `getConverter()`: newest document or 503; `minorUnits` from `listCurrencies()` (`code → minorUnits`); return `buildConverter({ rateDate, rates, minorUnits })`. Rates load **once per call**, so a budget summary converts many amounts with one read.
+- `convert(amountMinor, from, to)`: `const c = await this.getConverter(); return { amountMinor: c.convert(amountMinor, from, to), rateDate: c.rateDate };`.
+- Update the JSDoc, removing "Implemented in ITN-18".
+
+**Controller `fx.controller.ts`:** `@ApiTags('exchange-rates') @Controller('exchange-rates')`, `@Public() @Get('latest')` → `FxRatesService.latest()`. `@ApiOperation({ summary: 'ITN-18 Latest cached exchange rates (per 1 USD) and their date' })`, `@ApiOkResponse({ type: ExchangeRatesResponseDto })` (new `dto/exchange-rates.response.dto.ts`; `rates` as `{ type: 'object', additionalProperties: { type: 'number' }, example: { USD: 1, EGP: 50.12 } }`), `@ApiServiceUnavailableResponse({ description: 'RATES_UNAVAILABLE: no rates fetched yet' })`.
+
+**`fx.module.ts`:** import `ReferenceDataModule` too; providers `FxService`, `FxRatesService`, `{ provide: FX_RATES_CLIENT, useClass: FxRatesApiClient }`; controller `FxController`; export `FxService` only.
+
+**Commit:** `feat(fx): refresh rates daily, keep the last ones on failure, and expose them (ITN-18)`
+
+## Step 5: integration, API and parity tests
+
+Replace `backend/src/modules/fx/fx.service.spec.ts` (its tests assert the stub throws; that behaviour is gone).
+
+Shared setup for the specs below:
+```ts
+const client = { fetchLatest: vi.fn<FxRatesClient['fetchLatest']>() };
+t = await createTestApp({
+  imports: [FxModule],
+  override: (b) => b.overrideProvider(FX_RATES_CLIENT).useValue(client),
+});
+await t.moduleRef.get(ReferenceDataSeedService).run();   // real currencies
+// beforeEach: client.fetchLatest.mockReset(); delete all exchange_rates documents (keep the currencies);
+// afterEach: vi.useRealTimers();
+```
+A helper returns a good answer: `{ AED: 3.6725, EGP: 50, EUR: 0.9, GBP: 0.8, JPY: 150, SAR: 3.75 }`.
+
+**`fx-rates.service.spec.ts` (integration):**
+1. **first refresh:** returns `'inserted'`; the client was called once with `('USD', ['AED','EGP','EUR','GBP','JPY','SAR'])`; one document with `rateDate` = today 00:00Z, `base: 'USD'`, 7 rates including `USD: 1`, `source: 'fxratesapi'`.
+2. **once a day:** a second refresh the same day → `'exists'`, the client wasn't called again, still 1 document.
+3. **next day:** `vi.setSystemTime` one day later → `'inserted'`, 2 documents.
+4. **API failures keep the old rates:** with yesterday's document stored, the client rejects → `'failed'`, no new document, no throw; `FxService.getConverter()` still works and its `rateDate` is yesterday's.
+5. **bad answers:** a missing `SAR`, `EGP: 0`, `EGP: -1` → `'failed'` each, nothing stored.
+6. **no currencies:** delete the `currencies` collection's documents first (re-seed afterwards) → `'failed'` and the client wasn't called.
+7. **race:** two `refresh()` calls at once (`Promise.all`) → exactly 1 document; each result is `'inserted'` or `'exists'`.
+8. **start-up flag:** after `createTestApp` (flag `'false'`) the client was never called. `onApplicationBootstrap()` of a `FxRatesService` built by hand with a config whose flag is `'true'` (`new FxRatesService(model, referenceData, client, { get: () => 'true' } as unknown as ConfigService)`) calls the client once (`await vi.waitFor(() => expect(client.fetchLatest).toHaveBeenCalledTimes(1))`).
+
+**`fx.service.spec.ts` (integration, replaces the stub test):**
+- no documents → `getConverter()` and `convert()` reject with `code: 'RATES_UNAVAILABLE'` (503);
+- with a document: `convert(10000, 'USD', 'EGP')` → `{ amountMinor: 500000, rateDate: 'YYYY-MM-DD' of that document }`; `JPY` uses 0 minor units (`convert(10000, 'USD', 'JPY')` → 15000);
+- with two documents, the newest `rateDate` is used;
+- an unknown code → `code: 'UNSUPPORTED_CURRENCY'`.
+
+**`fx.api.spec.ts`:**
+- `GET /api/exchange-rates/latest` with no cookie and no rates → 503 `RATES_UNAVAILABLE`;
+- after a refresh → 200 `{ base: 'USD', rateDate: today, fetchedAt: ISO string, source: 'fxratesapi', rates: { AED…USD } }`, no login needed;
+- Swagger: the path has a `get` whose summary contains `ITN-18`.
+
+**`fx.parity.spec.ts`:** the real `FxService` (with a stored document whose rates are `USD 1, EGP 50, EUR 0.9, JPY 150, AED 3.6725, GBP 0.8, SAR 3.75`) and `new FakeFxService({ rates: <same>, rateDate: <same> })` give equal results for at least 8 conversions (each pair of the decision table in step 1, valid amounts only).
+
+**Commit:** `test(fx): cover the refresh, the fallback, the endpoint and the fake (ITN-18)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: ITN-18`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: ITN18_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the ITN-18 prompt (ITN-18)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/fx src/config test/fakes/fx.fake.spec.ts src/modules/platform-contracts.api.spec.ts` | 0 failed; at least 45 tests passed |
+| G3 | `git grep -n "implemented in ITN-18" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/fx/` (not `schemas/`), `backend/src/config/validate.ts` (and its spec if it exists), `backend/test/support/test-config.ts`, `.env.example`, `ai-prompts/kareem.txt` |
+| G5 | TDD order: the command below the table | first `test(fx): pin …`, then `feat(fx): convert …` |
+| G6 | TDD red: `git show <sha of the test(fx) commit>:backend/src/modules/fx/fx-conversion.ts` | an error that the path does not exist in that commit (the tests came before the code); and your step 1 run showed the spec failing |
+| G7 | no network in tests: `git grep -n "api.fxratesapi.com" -- backend/src ':!backend/src/modules/fx/fx-rates.client.ts' ':!*.spec.ts'` | no output, and every spec that builds `FxModule` overrides `FX_RATES_CLIENT` or runs with `FX_AUTO_REFRESH: 'false'` |
+| G8 | coverage lines for `fx.service.ts` and `fx-rates.service.ts` in the G1 output | ≥ 90% each |
+| G9 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(ITN-18)` |
+| G10 | `git status --porcelain` | empty |
+
+G5, from the repository root:
+```bash
+git log --reverse --format=%s origin/develop..HEAD | head -2
+```
+
+## Constraints
+
+- Don't change the `exchange_rates` schema, the `FxService` / `Converter` contract, `FakeFxService`, `common/`, other modules, CI, the frontend or docs. No new packages.
+- Never log or return the API key or the request URL.
+- Never weaken, skip or delete a test to pass a gate (the stub test in step 5 is replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G8 with the %).
+- Contract-adjacent changes to flag in the PR: new env variables `FXRATES_API_KEY` and `FX_AUTO_REFRESH`; `TEST_CONFIG` gains `FX_AUTO_REFRESH: 'false'`; `FxModule` now imports `ReferenceDataModule`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented the fx module (ITN-18) on feature/ITN-18-exchange-rates: conversion function (tests first), FXRatesAPI adapter, FxRatesService refresh, FxService, public GET /api/exchange-rates/latest, config validation and specs; 5 commits before this log entry, not pushed.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-18
+
+Prompt:
+every thing is fine open a pr
+
+How the output was used:
+Pushed feature/ITN-18-exchange-rates and opened the ITN-18 PR into develop; one prompt-log commit added.
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-18
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review points 1-2 on PR #171 (exact half-up rounding and result overflow check in fx-conversion.ts, shared with test/fakes/fx.fake.ts) with tests committed first, pushed to feature/ITN-18-exchange-rates.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+execute this and be aware that it will be reviewed using this self_review_prompt.
+i didn't add the stripe env values yet so work and don't test unitl i till you i'm finished
+make sure to branch from the leatst develop.
+[Attached: PAY01_EXECUTION.md]
+# Execution — PAY-01: Payments and Stripe webhook
+
+Issue #21. First ticket of lane E (PAY-01 → PAY-02 → PAY-03, one after the other). **TDD is required**: the payment rule tests are committed, failing, before the rule code.
+
+## Goal
+
+A user pays for a `pending_payment` booking with Stripe (test mode). The backend creates or reuses one PaymentIntent per booking, the browser pays with the client secret (card data never reaches us), and **only Stripe's verified webhook** marks the payment succeeded and tells the booking modules (`payment.succeeded`). When a hold expires, the PaymentIntent is cancelled. Today the gateway bound to `STRIPE_GATEWAY` is a stub that throws `… implemented in PAY-01`, and there are no payment endpoints.
+
+Done means:
+1. A real `StripeGateway` (the only code that talks to Stripe), using the `stripe` package.
+2. `POST /api/payments`, `POST /api/payments/:id/retry`, `GET /api/payments/:id`, `POST /api/payments/webhook`.
+3. Webhook handling that is idempotent (a repeated or concurrent Stripe event is processed once), emits `payment.succeeded`, and records failures.
+4. A listener that cancels the PaymentIntent when a flight booking or hotel reservation expires.
+5. Unit, integration and API tests; no test ever calls Stripe.
+
+**Out of scope:** the policies endpoints and storing acceptances (PAY-02; PAY-01 only *checks* that an acceptance exists), refunds and the `refund.*` webhook events (PAY-03; `createRefund` in the gateway is implemented now because the stub names PAY-01, but nothing calls it yet), confirming bookings (FLT-23, HTL-17 listen to `payment.succeeded`), multi-currency charging (after M1; every amount is the booking's currency, USD today), the frontend payment page (M2).
+
+## Context you need
+
+**Requirement PAY-01 (verbatim):** "The system shall allow a registered user to pay for a Pending Payment flight booking or hotel reservation within its hold period using Stripe in test mode (Stripe Elements / PaymentIntents), so that card details never reach the backend. The booking is confirmed only after the backend verifies that the PaymentIntent succeeded (via Stripe webhook). On failure an error is shown and the user may retry until the hold expires; when the hold expires the PaymentIntent is cancelled. Only the Stripe payment ID, amount, currency and status are stored."
+**PAY-04 (verbatim):** "All flight and hotel prices, payments and refunds shall use a single platform currency."
+
+**Rules (`bookings-payments.md` §4–§6, quoted where they matter):**
+- `POST /api/payments { bookingType, bookingId }`: "the booking belongs to the user, is `pending_payment`, `holdExpiresAt > now` (else `409 HOLD_EXPIRED`). An acceptance must exist (else `409 POLICIES_NOT_ACCEPTED`). If a payment exists for the booking with status `pending` or `failed`, return its PaymentIntent's `client_secret` (retries reuse it; one payment per booking). Otherwise create the PaymentIntent (amount = `totalMinor`, currency `usd`, `metadata: { bookingType, bookingId }`, idempotency key `pi-<type>-<bookingId>`), save `payments { stripePaymentIntentId, amountMinor, currency, status: 'pending' }`, return `{ paymentId, clientSecret, amountMinor, currency, holdExpiresAt }`."
+- "`POST /api/payments/:id/retry` sets `failed → pending` and returns the same client secret. `GET /api/payments/:id` returns the status to the owner."
+- "The client secret is the only Stripe value the browser sees. … **A booking is confirmed only by the verified webhook**, never by a frontend call."
+- Webhook: `@Public()`, raw body, signature checked with `stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret)`; a bad signature → `400 BAD_SIGNATURE`. "**Idempotency:** insert `stripe_webhook_events { _id: event.id }`. A duplicate-key error means already processed: return 200." `payment_intent.succeeded` → payment `succeeded`, then emit `payment.succeeded { bookingType, bookingId }`. `payment_intent.payment_failed` → payment `failed`; "the booking stays pending so the user can retry until the hold expires". Other types: ignore, return 200 quickly.
+- Expiry: the booking modules' jobs emit `flight-booking.expired` / `hotel-reservation.expired` after commit; "payments listens: cancels the PaymentIntent (if pending/failed), sets the payment canceled. Ignore 'already succeeded' errors: the late-payment path refunds those."
+
+**Existing code (read it; reuse, don't duplicate):**
+- `backend/src/modules/payments/stripe/stripe-gateway.ts`: the `StripeGateway` interface, `STRIPE_GATEWAY` token, `CreatePaymentIntentInput`, `GatewayPaymentIntent { id, clientSecret, status }`, `CreateRefundInput`, `GatewayRefund`, `GatewayRefundStatus`, `GatewayEvent` (already reduced to what payments uses). **Don't change this file.**
+- `stripe/stripe-gateway.stub.ts` (+ spec): the stub. Step 4 deletes both.
+- `backend/test/fakes/stripe-gateway.fake.ts`: `FakeStripeGateway` (idempotent by key like Stripe, a `calls` log, `failNext(method)`, accepts only `FAKE_STRIPE_SIGNATURE`, and its `parseWebhook` reads the raw body as a `GatewayEvent` JSON). All tests use it. **Don't change it.**
+- `ports/payable-booking.port.ts`: `PayableBooking.getPayable(bookingId, userId) → Payable { amountMinor, currency, status, holdExpiresAt }` (404 `NOT_FOUND` if missing or not the user's). `ports/payable-booking.registry.ts`: `PayableBookingRegistry.get(type)`. `backend/test/fakes/payable-booking.fake.ts`: `FakePayableBooking` (`set(bookingId, userId, payable, policies)`).
+- Schemas (don't change): `schemas/payment.schema.ts` (`Payment`, `PaymentStatus` = `pending | failed | succeeded | canceled`; unique `{ stripePaymentIntentId }` and unique `{ bookingType, bookingId }`), `schemas/policy-acceptance.schema.ts` (`PolicyAcceptance`, unique `{ bookingType, bookingId }`), `schemas/stripe-webhook-event.schema.ts` (`_id` = Stripe event id, `type`, `receivedAt`, 30-day TTL).
+- `PaymentsService` (`payments.service.ts`) is the **contract** other modules call for refunds (PAY-03). `FakePaymentsService implements PublicApi<PaymentsService>`, so **don't add public methods to `PaymentsService`**: PAY-01's logic goes in a new internal class (step 5).
+- Events: `Events.PaymentSucceeded` (payload `{ bookingType, bookingId }`), `Events.FlightBookingExpired` / `Events.HotelReservationExpired` (payload `{ bookingId, userId }`) in `backend/src/common/events/`. Emit with `AppEvents.emit(Events.X, payload)` (global `EventsModule`), **after** the database write commits. Listen with `@OnEvent(Events.X)`.
+- `BookingType` (`'flight' | 'hotel'`) in `backend/src/common/database/booking-type.js`. Error codes in `backend/src/common/errors/error-codes.ts`: `NOT_FOUND`, `HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `POLICIES_NOT_ACCEPTED`, `BAD_SIGNATURE`, `VALIDATION_FAILED`.
+- Raw body: `main.ts` and `createTestApp` already create the app with `{ rawBody: true }`; read it with `@Req() req: RawBodyRequest<Request>` → `req.rawBody` (a `Buffer`).
+- Auth: `@Public()`, `@Roles(Role.USER)`, `@CurrentUser() user: AuthUser` (`user.id`) from `backend/src/modules/accounts/auth/`. `:id` params use `ParseObjectIdPipe` from `@nestjs/mongoose` (malformed → 400 `VALIDATION_FAILED`). Another user's payment is a **404**, never a 403.
+
+**The `stripe` package:** install exactly `stripe@23.1.0` in `backend/` (`npm install stripe@23.1.0`). It ships its own types and supports ESM: `import Stripe from 'stripe';`. Don't pass `apiVersion` (the package pins its own). Facts you can rely on (checked with 23.1.0): `new Stripe(key)` makes no network call; `stripe.webhooks.constructEvent(rawBody, header, secret)` throws `StripeSignatureVerificationError` on a bad signature; `stripe.webhooks.generateTestHeaderString({ payload, secret })` builds a valid header offline (use it in tests); `Stripe.errors.StripeInvalidRequestError` has a `code` such as `'payment_intent_unexpected_state'`.
+
+**Config (backend `.env`, never committed):** `STRIPE_SECRET_KEY` (`sk_test_…`) and `STRIPE_WEBHOOK_SECRET` (`whsec_…`, printed by `stripe listen`). Tests never need them: they override `STRIPE_GATEWAY` with the fake.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. The only new package is `stripe@23.1.0`. Never log a key, a client secret or a full webhook body.
+
+## Before you start
+
+1. In the main clone: `git fetch origin`. If `ITN-18` (#171) is merged, good; if not, expect a small conflict later in `.env.example` and `backend/src/config/validate.ts` (both tickets add lines there; keep both).
+2. `git worktree add ../man2o4ah-PAY-01 -b feature/PAY-01-payments-stripe-webhook origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/payments src/modules/platform-contracts.api.spec.ts` must pass. If not, stop and report.
+5. `git grep -n "implemented in PAY-01" -- backend/src` lists the four stub methods. If not, stop and report.
+
+## Step 1 (TDD, red): the payment rules
+
+New `backend/src/modules/payments/payment-rules.spec.ts` for pure functions that don't exist yet (step 2):
+
+```ts
+// payment-rules.ts
+export type StartDecision = { action: 'create' } | { action: 'reuse'; paymentId: string };
+/** Throws the right HttpException, or says whether to create a PaymentIntent or reuse the booking's. */
+export function decidePaymentStart(input: {
+  payable: Payable; now: Date; policiesAccepted: boolean;
+  existing: { id: string; status: PaymentStatus } | null;
+}): StartDecision;
+
+/** The status a webhook event moves the payment to, or null to leave it. */
+export function paymentStatusAfter(event: 'payment_intent.succeeded' | 'payment_intent.payment_failed', current: PaymentStatus): PaymentStatus | null;
+```
+
+`decidePaymentStart` decision table (checked **in this order**; `holdExpiresAt` = now + 5 min unless the row says otherwise):
+
+| Booking status | Hold | Accepted | Existing payment | Result |
+|---|---|---|---|---|
+| `confirmed` or `completed` | any | any | any | 409 `INVALID_STATUS_TRANSITION` ("already paid") |
+| `expired` or `cancelled` | any | any | any | 409 `HOLD_EXPIRED` |
+| `pending_payment` | `holdExpiresAt` = now (exactly) | yes | none | 409 `HOLD_EXPIRED` (the hold must be **after** now) |
+| `pending_payment` | now − 1 ms | yes | none | 409 `HOLD_EXPIRED` |
+| `pending_payment` | now + 1 ms | yes | none | `create` |
+| `pending_payment` | ok | **no** | none | 409 `POLICIES_NOT_ACCEPTED` |
+| `pending_payment` | ok | yes | `pending` | `reuse` |
+| `pending_payment` | ok | yes | `failed` | `reuse` |
+| `pending_payment` | ok | yes | `succeeded` | 409 `INVALID_STATUS_TRANSITION` |
+| `pending_payment` | ok | yes | `canceled` | 409 `HOLD_EXPIRED` |
+| `pending_payment` with `amountMinor` 0 | ok | yes | none | 409 `INVALID_STATUS_TRANSITION` ("nothing to pay"; Stripe rejects 0) |
+
+`paymentStatusAfter` table:
+
+| Event | pending | failed | succeeded | canceled |
+|---|---|---|---|---|
+| `payment_intent.succeeded` | `succeeded` | `succeeded` | null | `succeeded` (a late payment must still be recorded, so the booking module can refund it) |
+| `payment_intent.payment_failed` | `failed` | null | null | null |
+
+Assert each exception's class (`ConflictException`) and `getResponse()` `code`.
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(payments): pin the payment start and webhook status rules (PAY-01)`
+
+## Step 2 (TDD, green): the rules
+
+New `payment-rules.ts` implementing exactly the two tables. Exceptions: `new ConflictException({ code: ErrorCode.X, message })` with messages `'This booking is already paid'`, `'The hold has expired'`, `'Accept the policies before paying'`, `'There is nothing to pay'`. Step 1's tests pass; nothing else changes.
+**Commit:** `feat(payments): decide when a payment starts and how webhooks move it (PAY-01)`
+
+## Step 3: install stripe and the config
+
+- `npm install stripe@23.1.0` in `backend/` (updates `package.json` and `package-lock.json`).
+- `backend/src/config/validate.ts`: both variables stay **optional** (the app and tests run without Stripe), but if set: `STRIPE_SECRET_KEY` must start with `sk_test_` or `rk_test_` (the course requires test mode; a live key must never be accepted) → else throw `'STRIPE_SECRET_KEY must be a test-mode key (sk_test_… or rk_test_…).'`; `STRIPE_WEBHOOK_SECRET` must start with `whsec_` → else a matching message. Add one test per rule (accepted, rejected) to `validate.spec.ts`.
+- `.env.example`, under `# backend/.env`:
+```
+# Stripe, test mode only (PAY-01). Dashboard → Developers → API keys (sandbox).
+STRIPE_SECRET_KEY=sk_test_...
+# Printed by: stripe listen --forward-to localhost:4000/api/payments/webhook
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+and under `# frontend/.env.local` (used in M2): `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...`.
+
+**Commit:** `chore(payments): add the stripe package and its test-mode config (PAY-01)`
+
+## Step 4: the real gateway
+
+New `backend/src/modules/payments/stripe/stripe-api.gateway.ts`:
+```ts
+/** The Stripe client, or null when STRIPE_SECRET_KEY isn't set (tests, offline development). */
+export const STRIPE_CLIENT = Symbol('STRIPE_CLIENT');
+export function createStripeClient(config: ConfigService): Stripe | null  // new Stripe(key) or null
+
+@Injectable()
+export class StripeApiGateway implements StripeGateway {
+  constructor(@Inject(STRIPE_CLIENT) private readonly stripe: Stripe | null, private readonly config: ConfigService) {}
+}
+```
+- A private `client()` returns `this.stripe` or throws `Error('Stripe is not configured: set STRIPE_SECRET_KEY in backend/.env')` (a 500: a setup problem, not a user error).
+- `createPaymentIntent(input)`: `paymentIntents.create({ amount: input.amountMinor, currency: input.currency.toLowerCase(), metadata: input.metadata, automatic_payment_methods: { enabled: true } }, { idempotencyKey: input.idempotencyKey })` → `{ id, clientSecret: client_secret, status }`. A missing `client_secret` → throw `Error`.
+- `cancelPaymentIntent(id)`: `paymentIntents.cancel(id)`. If Stripe throws a `StripeInvalidRequestError` with code `'payment_intent_unexpected_state'`, `retrieve(id)`: status `canceled` → resolve (already done); anything else (e.g. `succeeded`) → rethrow the original error.
+- `createRefund(input)`: `refunds.create({ payment_intent: input.paymentIntentId, amount: input.amountMinor, metadata: input.metadata }, { idempotencyKey: input.idempotencyKey })` → `{ id, status }`, status narrowed to `GatewayRefundStatus` (an unknown status → `'pending'`).
+- `parseWebhook(rawBody, signature)`: no `STRIPE_WEBHOOK_SECRET` → throw `Error('STRIPE_WEBHOOK_SECRET is not set')`. `constructEvent` throws → `400 BAD_SIGNATURE` (`'Invalid webhook signature'`). Then reduce: `payment_intent.succeeded` / `payment_intent.payment_failed` → `{ id, type, paymentIntent: { id, metadata } }`; `refund.updated` / `refund.failed` → `{ id, type, refund: { id, status, metadata } }`; anything else → `{ id, type: 'ignored', originalType }`. Metadata values that aren't strings are dropped.
+
+In `payments.module.ts`: providers `{ provide: STRIPE_CLIENT, useFactory: createStripeClient, inject: [ConfigService] }` and `{ provide: STRIPE_GATEWAY, useClass: StripeApiGateway }`. Delete `stripe-gateway.stub.ts` and `stripe-gateway.stub.spec.ts`. In `backend/src/modules/platform-contracts.api.spec.ts` the test "binds STRIPE_GATEWAY to the stub" becomes "binds STRIPE_GATEWAY to StripeApiGateway" (`toBeInstanceOf(StripeApiGateway)`): the binding is the specified change.
+
+Tests `stripe/stripe-api.gateway.spec.ts` (unit, no network):
+- `createPaymentIntent`, `cancelPaymentIntent`, `createRefund` with a stub client (`{ paymentIntents: { create: vi.fn(), cancel: vi.fn(), retrieve: vi.fn() }, refunds: { create: vi.fn() } } as unknown as Stripe`): exact params (amount, lowercase currency, metadata, `automatic_payment_methods`, the idempotency key in the second argument) and the mapped result; cancel when Stripe says unexpected state and `retrieve` says `canceled` → resolves; says `succeeded` → rejects; any other error → rejects.
+- `parseWebhook` with a **real** client (`new Stripe('sk_test_dummy')`) and `generateTestHeaderString({ payload, secret: 'whsec_test' })`: each of the four event types maps to the right `GatewayEvent`; `customer.created` → `ignored` with `originalType`; a tampered body or wrong secret → `BadRequestException` with `code: 'BAD_SIGNATURE'`; no webhook secret configured → throws.
+- a `null` client → every Stripe call throws "Stripe is not configured".
+
+**Commit:** `feat(payments): talk to Stripe through the real gateway (PAY-01)`
+
+## Step 5: the payments flow
+
+New internal class `backend/src/modules/payments/payment-intents.service.ts`, `PaymentIntentsService` (provided by `PaymentsModule`, **not exported**). Injects the `Payment`, `PolicyAcceptance` and `StripeWebhookEvent` models, `@InjectConnection() connection`, `PayableBookingRegistry`, `@Inject(STRIPE_GATEWAY) gateway: StripeGateway`, `AppEvents`, a `Logger`.
+
+`idempotencyKey(type, bookingId)` = `` `pi-${type}-${bookingId}` ``.
+
+**`start(userId, bookingType, bookingId): Promise<PaymentSession>`** (`PaymentSession = { paymentId, clientSecret, amountMinor, currency, holdExpiresAt }`):
+1. `payable = await registry.get(bookingType).getPayable(bookingId, userId)` (404 passes through).
+2. `policiesAccepted` = a `PolicyAcceptance` exists for `{ bookingType, bookingId }`; `existing` = the `Payment` for `{ bookingType, bookingId }`.
+3. `decidePaymentStart(...)`.
+4. `intent = await gateway.createPaymentIntent({ amountMinor: payable.amountMinor, currency: payable.currency, metadata: { bookingType, bookingId }, idempotencyKey })`. For `reuse` this is the same call with the same key: Stripe (and the fake) return **the same** PaymentIntent and client secret, so the client secret is never stored (PAY-01: only id, amount, currency, status).
+5. `create`: insert `Payment { bookingType, bookingId, userId, stripePaymentIntentId: intent.id, amountMinor, currency, status: 'pending' }`. A duplicate-key error (another request for the same booking won the race) → load that payment and continue as `reuse`.
+6. Return the session (`holdExpiresAt` from the payable).
+
+**`retry(userId, paymentId): Promise<PaymentSession>`**, in this order:
+1. The payment must be the user's (else 404 `'Payment not found'`).
+2. Get the payable and run `decidePaymentStart` with this payment as `existing` and the acceptance check, **before** changing anything: `succeeded` → 409 `INVALID_STATUS_TRANSITION`, `canceled` or an expired hold → 409 `HOLD_EXPIRED`.
+3. Only then: `failed` → conditional update `{ _id, status: 'failed' }` → `pending`; `pending` stays.
+4. Return the session through `createPaymentIntent` with the same key.
+
+**`get(userId, paymentId): Promise<PaymentView>`**: `{ _id, bookingType, bookingId, amountMinor, currency, status, createdAt }` of the user's payment, else 404.
+
+**`handleWebhook(rawBody: Buffer | undefined, signature: string | undefined): Promise<void>`**:
+1. Missing raw body or signature → 400 `BAD_SIGNATURE`. `event = gateway.parseWebhook(rawBody, signature)`.
+2. `ignored`, `refund.updated`, `refund.failed` → return (PAY-03 handles refunds; log the type at debug level).
+3. For `payment_intent.*`: in **one transaction** (`connection.transaction(async (session) => …)`): insert `StripeWebhookEvent { _id: event.id, type: event.type, receivedAt: now }` (`create([doc], { session })`), find the payment by `stripePaymentIntentId`, compute `next = paymentStatusAfter(event.type, payment.status)`, and if `next` isn't null update it conditionally on the status it was read with. No payment for that PaymentIntent → log a warning and finish (the event is still recorded as processed).
+4. A duplicate-key error on the event (`code === 11000`) → already processed: return without doing anything (also on the retry the transaction helper makes after a write conflict).
+5. **After the commit**, if the update moved the payment to `succeeded`, emit `Events.PaymentSucceeded { bookingType, bookingId }` (from the payment document, never from the event's metadata). Emit nothing otherwise.
+
+Why the transaction: if the server crashes between "event recorded" and "payment updated", Stripe's retry would be treated as a duplicate and the payment lost. Recording both together, or neither, makes the retry safe.
+
+**Expiry listener `payment-expiry.listener.ts`, `PaymentExpiryListener`** (a provider): `@OnEvent(Events.FlightBookingExpired)` and `@OnEvent(Events.HotelReservationExpired)`, each `async`, each inside `try/catch` that logs and never rethrows:
+- find the payment for `{ bookingType, bookingId }`; none, or status `succeeded`/`canceled` → nothing;
+- `pending`/`failed` → `await gateway.cancelPaymentIntent(id)`, then conditional update to `canceled` from the status it had;
+- the gateway throws (e.g. the payment succeeded at the last second) → log a warning and leave the status: the `payment_intent.succeeded` webhook records it and the booking module refunds the late payment.
+
+**Commit:** `feat(payments): start, retry and confirm payments through the Stripe webhook (PAY-01)`
+
+## Step 6: endpoints
+
+New `dto/create-payment.dto.ts` (`bookingType` `@IsEnum(BookingType)`, `bookingId` `@IsMongoId()`), `dto/payment.response.dto.ts` (`PaymentSessionResponseDto`, `PaymentResponseDto` with `status` enum `Object.values(PaymentStatus)`, `WebhookAckResponseDto { received: true }`).
+
+`payments.controller.ts`, `@ApiTags('payments') @Controller('payments')`:
+
+| Route | Access | Returns | Errors |
+|---|---|---|---|
+| `POST /api/payments` | `@Roles(Role.USER)` | 201 `PaymentSessionResponseDto` | 400 body, 401, 403, 404 booking, 409 `HOLD_EXPIRED` / `POLICIES_NOT_ACCEPTED` / `INVALID_STATUS_TRANSITION` |
+| `POST /api/payments/webhook` | `@Public()`, `@HttpCode(200)` | 200 `{ received: true }` | 400 `BAD_SIGNATURE` |
+| `POST /api/payments/:id/retry` | `@Roles(Role.USER)`, `@HttpCode(200)` | 200 `PaymentSessionResponseDto` | 400 id, 401, 403, 404, 409 |
+| `GET /api/payments/:id` | `@Roles(Role.USER)` | 200 `PaymentResponseDto` | 400 id, 401, 403, 404 |
+
+Declare `webhook` **before** `:id/retry`. The webhook handler takes `@Req() req: RawBodyRequest<Request>` and `@Headers('stripe-signature') signature?: string`. Every route has `@ApiOperation({ summary: 'PAY-01 …' })`, typed `@ApiOkResponse`/`@ApiCreatedResponse` and the error responses above; the webhook's description says it is called by Stripe, not by the frontend. Register the controller and `PaymentIntentsService` and `PaymentExpiryListener` in `PaymentsModule` (exports unchanged).
+
+**Commit:** `feat(payments): add the payment endpoints and the Stripe webhook (PAY-01)`
+
+## Step 7: integration and API tests
+
+Shared setup (both spec files):
+```ts
+const gateway = new FakeStripeGateway();   // fresh one per file
+t = await createTestApp({ imports: [PaymentsModule], override: (b) => b.overrideProvider(STRIPE_GATEWAY).useValue(gateway) });
+const flights = new FakePayableBooking(BookingType.FLIGHT); const hotels = new FakePayableBooking(BookingType.HOTEL);
+const registry = t.moduleRef.get(PayableBookingRegistry); registry.register(flights); registry.register(hotels);
+// beforeEach: clearCollections(t.connection); gateway.calls.length = 0;
+```
+Log in **after** each clear: `user = await loginAs(t.connection, Role.USER)`. A helper `pending(bookingId, userId, overrides?)` calls `flights.set(...)` with `{ amountMinor: 25000, currency: 'USD', status: 'pending_payment', holdExpiresAt: now + 10 min }` and minimal flight policies; a helper `accept(type, bookingId, userId)` inserts a `PolicyAcceptance`. A webhook helper posts `JSON.stringify(event)` with `Content-Type: application/json` and `stripe-signature: FAKE_STRIPE_SIGNATURE`. To watch emits: `const succeeded = vi.fn(); t.moduleRef.get(EventEmitter2).on(Events.PaymentSucceeded, succeeded)`.
+
+**`payments.api.spec.ts`:**
+1. **Start:** 201 `{ paymentId (24-hex), clientSecret: 'pi_fake_1_secret', amountMinor: 25000, currency: 'USD', holdExpiresAt }`; one `payments` document `{ status: 'pending', stripePaymentIntentId: 'pi_fake_1', amountMinor, currency, userId }` and **no** client secret field anywhere in it; the gateway got `idempotencyKey: 'pi-flight-<id>'`, `metadata { bookingType: 'flight', bookingId }`.
+2. **Reuse:** a second `POST` → the same `paymentId` and `clientSecret`; still one document.
+3. **Race:** 5 parallel `POST`s for one booking → all 201 with one `paymentId`; exactly one document.
+4. **Hotel:** the same flow for a hotel booking uses `pi-hotel-<id>`.
+5. **Refusals:** another user's booking → 404 `NOT_FOUND`; not accepted → 409 `POLICIES_NOT_ACCEPTED`; hold expired (`holdExpiresAt` 1 s ago) → 409 `HOLD_EXPIRED`; status `expired` → 409 `HOLD_EXPIRED`; status `confirmed` → 409 `INVALID_STATUS_TRANSITION`. No document and no gateway call in each.
+6. **Validation and access:** `bookingType: 'train'`, `bookingId: 'abc'`, a missing field, an extra field → 400 `VALIDATION_FAILED`; no cookie → 401; admin and hotel moderator → 403.
+7. **Webhook succeeded:** after a start, post `{ id: 'evt_1', type: 'payment_intent.succeeded', paymentIntent: { id: 'pi_fake_1', metadata: {} } }` → 200 `{ received: true }`; the payment is `succeeded`; `succeeded` was called once with `{ bookingType: 'flight', bookingId }`; one `stripe_webhook_events` document `_id: 'evt_1'`.
+8. **Webhook idempotency:** the same event again → 200, still one emit; 5 parallel deliveries of a new event id for another booking → one emit for it.
+9. **Webhook failed, then retry:** `payment_intent.payment_failed` → `failed`, no emit; `POST /api/payments/:id/retry` → 200 with the same `clientSecret`, status back to `pending`; then `succeeded` → `succeeded` + one emit.
+10. **Bad webhooks:** a wrong `stripe-signature` → 400 `BAD_SIGNATURE`; no header → 400 `BAD_SIGNATURE`; no document written. An unknown PaymentIntent id → 200, nothing changes. `{ id: 'evt_x', type: 'ignored', originalType: 'customer.created' }` → 200, no `stripe_webhook_events` document needed.
+11. **Late payment is still recorded:** a `canceled` payment receiving `payment_intent.succeeded` → `succeeded` and one emit (the booking module refunds it).
+12. **Retry refusals:** another user's payment → 404; `succeeded` → 409 `INVALID_STATUS_TRANSITION`; hold expired → 409 `HOLD_EXPIRED`; `abc` → 400.
+13. **Get:** the owner → 200 `{ _id, bookingType, bookingId, amountMinor, currency, status, createdAt }` with no Stripe ids or secrets; another user → 404.
+14. **Swagger:** the four paths exist with a summary containing `PAY-01`, tag `payments`.
+
+**`payment-expiry.listener.spec.ts` (integration):** emit with `await t.moduleRef.get(EventEmitter2).emitAsync(Events.FlightBookingExpired, { bookingId, userId })`:
+- a `pending` payment → `cancelPaymentIntent('pi_fake_1')` called once and the payment `canceled`; the same for `failed` and for `HotelReservationExpired`;
+- `succeeded` or `canceled` → no gateway call, unchanged;
+- no payment → nothing, no throw;
+- `gateway.failNext('cancelPaymentIntent')` → status unchanged, `emitAsync` resolves.
+
+Replace `payments.service.spec.ts`? **No**: it tests `PaymentsService`'s PAY-03 stubs, which stay until PAY-03. Leave it.
+
+**Commit:** `test(payments): cover payments, the webhook and hold expiry (PAY-01)`
+
+## Step 8: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: PAY-01`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: PAY01_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the PAY-01 prompt (PAY-01)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/payments src/modules/platform-contracts.api.spec.ts src/config test/fakes/stripe-gateway.fake.spec.ts test/fakes/payable-booking.fake.spec.ts` | 0 failed; at least 70 tests passed |
+| G3 | `git grep -n "implemented in PAY-01" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/payments/` (not `schemas/`, not `stripe/stripe-gateway.ts`), `backend/src/modules/platform-contracts.api.spec.ts`, `backend/src/config/validate.ts`, `backend/src/config/validate.spec.ts`, `backend/package.json`, `backend/package-lock.json`, `.env.example`, `ai-prompts/kareem.txt` |
+| G5 | TDD order: the command below the table | first `test(payments): pin …`, then `feat(payments): decide …` |
+| G6 | TDD red: `git show <sha of the test(payments) commit>:backend/src/modules/payments/payment-rules.ts` | an error that the path does not exist in that commit; and your step 1 run showed the spec failing |
+| G7 | Negative gate: in `handleWebhook`, remove the event insert (keep the update); run `npx vitest run src/modules/payments/payments.api.spec.ts` | case 8 fails (two emits); restore and it passes |
+| G8 | Negative gate: in `start`, skip the `policiesAccepted` check (pass `true`); run the same spec | case 5 fails; restore and it passes |
+| G9 | secrets: `git grep -nE "sk_(test\|live)_[A-Za-z0-9]{10,}\|whsec_[A-Za-z0-9]{10,}" -- . ':!*.md'` | no output (only placeholders like `sk_test_...` exist) |
+| G10 | coverage lines for `payment-intents.service.ts` and `stripe-api.gateway.ts` in the G1 output | ≥ 90% each |
+| G11 | `git log --format=%s origin/develop..HEAD` | 8 commits, Conventional Commits, each ending in `(PAY-01)` |
+| G12 | `git status --porcelain` | empty |
+
+G5, from the repository root:
+```bash
+git log --reverse --format=%s origin/develop..HEAD | head -2
+```
+In G9, `\|` means the regex alternation `|`; type it as `|` when you run it.
+
+## Optional manual check (Kareem, with Stripe set up)
+
+With `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in `backend/.env`, the backend running and `stripe listen --forward-to localhost:4000/api/payments/webhook` open: `stripe trigger payment_intent.succeeded` → the backend log shows the event and a warning that no payment matches it (the trigger's PaymentIntent isn't ours), and the CLI shows `[200]`. That proves the signature check and the route work end to end.
+
+## Constraints
+
+- Don't change the schemas, `stripe-gateway.ts`, the fakes in `backend/test/fakes/`, `PaymentsService`'s public methods, `common/`, other modules, CI, the frontend or docs. The only new package is `stripe@23.1.0`.
+- Never put a real key, client secret or webhook secret in code, tests, logs or commits.
+- Never weaken, skip or delete a test to pass a gate (the stub spec in step 4 goes with the stub; the platform-contracts assertion changes because the binding is the specified change). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G10 with the %).
+- To flag in the PR: the new package `stripe@23.1.0`; `STRIPE_GATEWAY` now binds the real gateway (the stub is gone); the new env variables; `validate` rejects live Stripe keys.
+- Any decision this file didn't settle, with the reason.
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say so which rule and quote it instead of guessing.
+
+How the output was used:
+Implemented PAY-01 on feature/PAY-01-payments-stripe-webhook in the man2o4ah-PAY-01 worktree (branched from the latest origin/develop): payment rules (tests first), stripe@23.1.0 and test-mode config validation, StripeApiGateway replacing the stub, PaymentIntentsService, PaymentExpiryListener, payments controller and DTOs, API and listener specs; 7 commits before this log entry, not pushed; tests not run yet because the Stripe env values are not set.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+make sure to remeber what we are doing , read my prompt again
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+continue
+
+How the output was used:
+Wrote the PaymentIntentsService, expiry listener, controller, DTOs and the API and listener specs of PAY-01 (see the commits on the branch).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+make sure to sure to use super powers skill/plugin
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+use it only if needed
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok the needed values are in the .env , you can go now
+
+How the output was used:
+Ran verify and the payments gates; fixed parseWebhook so a missing Stripe client is a setup error, not BAD_SIGNATURE (stripe-api.gateway.ts); G7 and G8 negative gates failed as expected and were restored.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok test the real strip service
+
+How the output was used:
+Ran a throwaway live check (deleted afterwards) of the real StripeApiGateway against Stripe test mode with stripe listen; no code changed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+did you run the review prompt, on the real stripe  ?,
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok do it, and as extra thing i want them to be installed when ever anyone use npm ci after pulling
+
+How the output was used:
+Installed the Playwright Chromium browser; added a postinstall script to backend/package.json (commit 4af7edc); ran the self-review checks and 8 throwaway probes (deleted afterwards).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+and report this in the same pr as extras
+
+How the output was used:
+Answer only: the postinstall change stays on this branch and is listed as an extra in the report.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok just make sure there is no conflicts with the current develop then push and open a pr
+
+How the output was used:
+Checked there are no conflicts with origin/develop, pushed feature/PAY-01-payments-stripe-webhook and opened the PAY-01 PR into develop.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+Task: add `npm run dev:stripe` to the backend (PAY-01 local dev). Work on the PAY-01 branch
+(feature/PAY-01-payments-stripe-webhook). Read README "Team rules" and the project skill first.
+
+Goal
+`cd backend && npm run dev:stripe` starts the backend in watch mode (the same as `npm run start:dev`)
+AND the Stripe CLI webhook forwarder, in one terminal, so local test payments confirm bookings.
+
+Requirements
+1. No new npm package (no `concurrently`, no `@stripe/cli`). Write a small Node ESM script,
+   `backend/scripts/dev-stripe.mjs`, using `node:child_process` only, and add
+   `"dev:stripe": "node scripts/dev-stripe.mjs"` to backend/package.json scripts.
+2. The script:
+   a. Checks that the `stripe` CLI is installed (`stripe --version`). If not, it exits with a clear
+      message: install it with `winget install Stripe.StripeCLI` (or Scoop), then run `stripe login`.
+      It never installs anything itself.
+   b. Gets the webhook secret with `stripe listen --print-secret` and passes it to the backend
+      process as STRIPE_WEBHOOK_SECRET in its env, so it always matches the running listener.
+      Never print the full secret; log at most "webhook secret loaded (whsec_…last4)".
+   c. Starts `stripe listen --forward-to localhost:4000/api/payments/webhook` and
+      `npm run start:dev` side by side, with each output line prefixed ([stripe] / [api]).
+   d. Ctrl+C or either process exiting stops both (no orphan processes). It must work on
+      Windows (spawn with shell where needed), macOS and Linux.
+   e. Uses port 4000 from the project; don't hard-code anything else.
+3. `npm run start:dev` keeps working exactly as before for teammates without the Stripe CLI.
+4. README: in the backend run/start section, add `npm run dev:stripe` with 3-4 lines: what it
+   does, that it needs the Stripe CLI installed and `stripe login` done once, that the
+   STRIPE_SECRET_KEY (sk_test_) still comes from backend/.env, and that plain `npm run start:dev`
+   is enough when you're not testing payments. No secrets or real keys in the README.
+5. No secrets anywhere in committed files, chat output or logs.
+
+Checks before you finish
+- `cd backend && npm run verify` passes.
+- `node scripts/dev-stripe.mjs` with `stripe` missing from PATH prints the install message and
+  exits non-zero (simulate by running with a PATH that excludes it).
+- Format with Prettier (the script and README).
+
+Commits (Conventional Commits ending in the ID, stage files by name):
+- `chore(payments): add dev:stripe to run the backend with the Stripe webhook forwarder (PAY-01)`
+- `docs(readme): document npm run dev:stripe (PAY-01)`
+- Append this prompt to ai-prompts/kareem.txt in the course format, then
+  `chore(ai): log the dev:stripe prompt (PAY-01)`.
+
+Don't push, don't open a PR. Report: files changed, the commits, and the result of each check.
+If anything above isn't possible (for example `--print-secret` isn't supported by the installed
+CLI version), stop and tell me instead of working around it.
+
+How the output was used:
+Added backend/scripts/dev-stripe.mjs (Node built-ins only) and the dev:stripe script: it checks the Stripe CLI, reads the webhook secret with `stripe listen --print-secret` and passes it to the backend as STRIPE_WEBHOOK_SECRET, runs `stripe listen` and `npm run start:dev` with [stripe]/[api] prefixes, masks any whsec_ value in the output, and stops both process trees on Ctrl+C or when either exits. Documented it in the root README Run section. npm run verify passes; with stripe missing from PATH the script prints the install message and exits 1. Committed on the PAY-01 branch; not pushed.
+
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+i don't thing it's working
+[pasted npm run dev:stripe output: "[stripe] must specify events to forward using --events, --all-snapshot, or --all-thin", then "[stripe] exited (code 1), stopping both"]
+
+How the output was used:
+Stripe CLI 1.55 needs the events to forward. dev-stripe.mjs now runs stripe listen with --events for the four events the webhook handles (payment_intent.succeeded, payment_intent.payment_failed, refund.updated, refund.failed). Committed on the PAY-01 branch; not pushed.
+
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok resolve confilcts with the current develop then push and open a pr ,
+
+How the output was used:
+The PAY-01 PR (#183) was already merged into develop, so the dev:stripe commits went on a new branch from the latest develop, chore/PAY-01-dev-stripe-script (cherry-picked, no conflicts). npm run verify passes. Pushed it and opened a PR into develop.
+Related Requirement: ACC-08
+
+Prompt:
+ok i will commit you go and do another fast commit to fix the typecheck, so just npm run lint and format ig. do t fast
+
+How the output was used:
+On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
+================================================

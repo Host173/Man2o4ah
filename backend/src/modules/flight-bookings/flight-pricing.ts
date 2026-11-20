@@ -10,6 +10,8 @@ const INFANT_FARE_PERCENT = 10;
 
 /** What pricing needs from one segment, snapshotted at quote/hold time. */
 export interface PricedSegment {
+  /** The segment airline's ID; extra bags are charged once per airline (FLT-19). */
+  airlineId: string;
   /** The cabin's price per seat. */
   fareMinor: number;
   /** That segment airline's price per extra bag (0 if it sells none). */
@@ -33,8 +35,9 @@ export interface FlightPrice {
 
 /**
  * Prices a flight booking on the server (FLT-12, FLT-19). Per segment:
- * fares = seats × fare + infants × round(fare × 10%); baggage = extra bags × that
- * airline's price. Passenger and baggage limits are checked before this is called.
+ * fares = seats × fare + infants × round(fare × 10%). Extra-bag fees are charged
+ * once per unique airline across the booking (FLT-19). Passenger and baggage limits
+ * are checked before this is called.
  */
 export function priceFlightBooking(
   segments: readonly PricedSegment[],
@@ -53,8 +56,15 @@ export function priceFlightBooking(
       ),
     ),
   );
-  const baggage = segments.map((segment) =>
-    multiplyMinor(segment.extraBagPriceMinor, extraBags),
+
+  const priceByAirline = new Map<string, number>();
+  for (const segment of segments) {
+    if (!priceByAirline.has(segment.airlineId)) {
+      priceByAirline.set(segment.airlineId, segment.extraBagPriceMinor);
+    }
+  }
+  const baggage = Array.from(priceByAirline.values()).map((price) =>
+    multiplyMinor(price, extraBags),
   );
 
   const fareTotalMinor = sumMinor(...fares);

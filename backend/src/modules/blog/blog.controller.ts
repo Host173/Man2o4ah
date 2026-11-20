@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
@@ -20,6 +21,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -28,6 +30,8 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { ImageUpload } from '../storage/image-upload.decorator.js';
 import { BlogService } from './blog.service.js';
 import type {
   AuthorPageView,
@@ -77,7 +81,7 @@ export class BlogController {
   @Public()
   @Get('posts')
   @ApiOperation({
-    summary: 'BLG-02 Browse paginated published posts filterable by tag',
+    summary: 'BLG-02 / BLG-09 Browse or search paginated published posts',
   })
   @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid query parameters' })
@@ -262,6 +266,53 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<PostLikeView> {
     return this.blogService.unlikePost(id.toHexString(), user.id);
+  }
+
+  @Post('posts/:id/images')
+  @ImageUpload()
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Attach an image to own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: PostResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'Missing image, invalid post ID, invalid image file, or LIMIT_EXCEEDED: post already has 5 images',
+  })
+  @ApiPayloadTooLargeResponse({ description: 'Image exceeds 5 MB' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or owned by another user',
+  })
+  addImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @UploadedFile() file: UploadedImage | undefined,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostView> {
+    return this.blogService.addImage(id.toHexString(), file, user.id);
+  }
+
+  @Delete('posts/:id/images/:imageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Remove an image from own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'imageId', type: String })
+  @ApiNoContentResponse({ description: 'Image removed from post' })
+  @ApiBadRequestResponse({ description: 'Invalid post ID or image ID' })
+  @ApiNotFoundResponse({
+    description: 'Post or image not found, or post owned by another user',
+  })
+  async removeImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('imageId', ParseObjectIdPipe) imageId: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.blogService.removeImage(
+      id.toHexString(),
+      imageId.toHexString(),
+      user.id,
+    );
   }
 
   @Public()

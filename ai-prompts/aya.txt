@@ -1531,3 +1531,100 @@ no remove the to do for kareem and push that change
 How the output was used:
 Removed the "To do for Kareem" section from the description of PR #210 and pushed the branch (DECISIONS.md commit and log entries); commit chore(ai): log the PR to-do removal prompt (FLT-25)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+start on flt 26
+
+How the output was used:
+Created branch feature/FLT-26-cancel-flight-booking from develop; read the HTL-21 hotel cancellation as the pattern; drafted the 4-step plan; committed the pending FLT-25 re-review log entry on the FLT-25 branch first (chore(ai): log the FLT-25 re-review prompt (FLT-25), not pushed); no other files changed; this entry not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+kareem said yes to all three, start step 1
+
+How the output was used:
+Wrote the failing FLT-26 tests first (flight-cancellation.service.spec.ts, 25 tests), the FlightRefundPreview and CancelledFlightBooking types and a FlightCancellationService stub registered in the module; commits test(flight-bookings): add the cancellation tests (FLT-26) and chore(ai): log the FLT-26 step 1 prompts (FLT-26)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+flt 25 is now merged , so fix upon it and then continue the steps
+
+How the output was used:
+Merged develop into the FLT-26 branch (resolved conflicts in aya.txt, flight-bookings.module.ts and flight-bookings.types.ts by keeping both sides); implemented FlightCancellationService (step 2, 25 tests green), added the refund-preview and cancel routes with DTOs, body pipe and API tests (step 3); npm run verify passed (175 files, 2918 tests); commits feat(flight-bookings): cancel a confirmed flight booking (FLT-26), feat(flight-bookings): add the cancellation routes (FLT-26), chore(ai): log the FLT-26 steps 2 and 3 prompt (FLT-26); not pushed, no PR yet
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+push it and open the PR but i will do the self review
+
+How the output was used:
+Pushed feature/FLT-26-cancel-flight-booking and opened the PR "FLT-26: Cancel a flight booking" against develop; self-review left to Aya; commit chore(ai): log the FLT-26 PR prompt (FLT-26)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+adapt the seed script for flt 26
+
+How the output was used:
+Wrote a throwaway seed-flt26.cjs in the session scratchpad (outside the repo, not committed) that inserts flights with consistent seat counters plus 8 bookings for the FLT-26 Swagger checks; only the dry run was executed; this entry not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+do the self review for flt 26
+
+How the output was used:
+Answer only, no files changed (self-review of FLT-26; probes written and deleted)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+[Attached: self-review text for FLT-26 (pasted checklist: missing FLT-06 flight.cancelled handler, missing FLT-05 flight.rescheduled handler, PR text says FLT-06 is a separate ticket; open question about refunds after commit)]
+fix the problems of the self review first
+
+How the output was used:
+Checked issue #56 (it includes FLT-06 bookings side and FLT-05); wrote the failing tests first (flight-provider-cancellation.service.spec.ts, flight-reschedule-sync.service.spec.ts, shared test/support/flight-booking-fixtures.ts), then FlightProviderCancellationService and FlightRescheduleSyncService (@OnEvent handlers, idempotent, one transaction per booking); npm run verify passed; commits test(flight-bookings): add the provider cancellation and reschedule tests (FLT-26), feat(flight-bookings): cancel and expire bookings when a flight is cancelled (FLT-26), feat(flight-bookings): sync booking times when a flight is rescheduled (FLT-26), chore(ai): log the self-review fixes prompt (FLT-26); not pushed, PR text not yet updated
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+you decide on the open question, make the the new fixes a comment instead and then commit and push
+
+How the output was used:
+Decided the refund-after-commit gap stays consistent with HTL-21 and is recorded as code comments (flight-cancellation.service.ts, flight-provider-cancellation.service.ts) instead of a fix; committed docs(flight-bookings): note the refund gap after a committed cancellation (FLT-26) and chore(ai): log the refund gap decision prompt (FLT-26); pushed the branch and posted a comment on PR #213 describing the new commits
+================================================

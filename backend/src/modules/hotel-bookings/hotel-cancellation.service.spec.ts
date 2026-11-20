@@ -76,7 +76,7 @@ describe('HotelCancellationService (HTL-21)', () => {
     const reservation = await reservations.create({
       userId: USER,
       hotelId: HOTEL,
-      reference: 'HRABCDEFG'.slice(0, 8),
+      reference: 'HRABCDEF',
       status: HotelReservationStatus.CONFIRMED,
       checkInDate: toDateOnly('2027-03-10'),
       checkOutDate: toDateOnly('2027-03-12'),
@@ -140,16 +140,35 @@ describe('HotelCancellationService (HTL-21)', () => {
       kind: 'reservation',
       reservationId: unrelated,
     });
-    const release = vi.spyOn(inventory, 'release');
+    const release = vi
+      .spyOn(inventory, 'release')
+      .mockImplementation(async (id, options) => {
+        if (!options) throw new Error('Cancellation must pass its transaction');
+        expect(options?.session.inTransaction()).toBe(true);
+        expect((await reservations.findById(id).lean())?.status).toBe(
+          'confirmed',
+        );
+        expect(
+          (await reservations.findById(id).session(options.session).lean())
+            ?.status,
+        ).toBe('cancelled');
+        return FakeRoomNightInventory.prototype.release.call(
+          inventory,
+          id,
+          options,
+        );
+      });
     const refund = vi
       .spyOn(payments, 'refund')
       .mockImplementation(async (request) => {
         expect(
           (await reservations.findById(reservation.id).lean())?.status,
         ).toBe('cancelled');
-        expect(hotels.data.roomNights.map((n) => n.reservationId)).toEqual([
-          unrelated,
-        ]);
+        expect(
+          hotels.data.roomNights.map((n) =>
+            n.kind === 'reservation' ? n.reservationId : n.blockId,
+          ),
+        ).toEqual([unrelated]);
         return FakePaymentsService.prototype.refund.call(payments, request);
       });
 
@@ -179,7 +198,7 @@ describe('HotelCancellationService (HTL-21)', () => {
       userId: USER,
       amountMinor: 6173,
       currency: 'USD',
-      reason: 'user_cancel',
+      reason: 'user_cancellation',
     });
     expect(events.payloadsOf(Events.HotelReservationCancelled)).toEqual([
       {
@@ -288,6 +307,20 @@ describe('HotelCancellationService (HTL-21)', () => {
     const saved = await reservations.findById(reservation.id).lean();
     expect(saved?.status).toBe('confirmed');
     expect(saved?.cancellation).toBeUndefined();
+    expect(hotels.data.roomNights).toHaveLength(4);
+    expect(payments.refunds).toHaveLength(0);
+    expect(events.emitted).toHaveLength(0);
+  });
+
+  it('reports a missing confirmation reference without releasing rooms or refunding', async () => {
+    const reservation = await seed({ reference: undefined });
+    await expect(service.cancel(reservation.id, USER)).rejects.toMatchObject({
+      status: 500,
+      response: { code: ErrorCode.InternalError },
+    });
+    expect((await reservations.findById(reservation.id).lean())?.status).toBe(
+      'confirmed',
+    );
     expect(hotels.data.roomNights).toHaveLength(4);
     expect(payments.refunds).toHaveLength(0);
     expect(events.emitted).toHaveLength(0);

@@ -177,9 +177,26 @@ describe('hotel cancellation endpoints (HTL-21)', () => {
     );
   });
 
+  it('rejects an empty array instead of treating it as confirmation', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const reservation = await seed(user.id);
+    const result = await t
+      .http()
+      .post(`${URL}/${reservation.id}/cancel`)
+      .set('Cookie', user.cookie)
+      .send([]);
+    expect(result.status).toBe(400);
+    expect(result.body.code).toBe(ErrorCode.ValidationFailed);
+    expect((await reservations.findById(reservation.id).lean())?.status).toBe(
+      'confirmed',
+    );
+    expect(payments.refunds).toHaveLength(0);
+  });
+
   it.each(['refund-preview', 'cancel'])(
     '%s blocks check-in day and already-cancelled reservations',
     async (action) => {
+      vi.setSystemTime(new Date('2027-03-09T23:59:59.999Z'));
       const user = await loginAs(t.connection, UserRole.USER);
       const reservation = await seed(user.id);
       const call = () =>
@@ -191,7 +208,7 @@ describe('hotel cancellation endpoints (HTL-21)', () => {
       let result = await call();
       expect(result.status).toBe(409);
       expect(result.body.code).toBe(ErrorCode.InvalidStatusTransition);
-      vi.setSystemTime(new Date('2027-03-07T00:00:00Z'));
+      vi.setSystemTime(new Date('2027-03-09T23:59:59.999Z'));
       await reservations.updateOne(
         { _id: reservation.id },
         { $set: { status: 'cancelled' } },

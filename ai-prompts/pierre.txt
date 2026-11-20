@@ -1327,6 +1327,7 @@ approved
 How the output was used:
 Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
 ================================================
+
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
@@ -1341,6 +1342,13 @@ Added test-first password-session fixes, cookie revocation and Swagger evidence 
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: GEN-10
+
+Prompt:
+fix and push
+
+How the output was used:
+Resolved PR #176's develop conflicts in an isolated worktree, preserving admin account/moderation routes and both test suites; integrated develop through 2f38c8e, reused durable blog image cleanup for admin deletion and added an integration regression; final format, lint and typecheck passed, full verify had two unrelated PDF timeouts, bounded test:cov passed all 2113 tests across 133 files and build passed; production audit was blocked by proxy rate limiting and an alternate TLS failure; prepared the validated merge for push without rebasing or force-pushing.
 Related Requirement: ACC-08
 
 Prompt:
@@ -1348,4 +1356,216 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first activity CRUD, validation, supported-currency costs, atomic writes and fake/API tests for the findings on PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+merge-and-publish
+
+How the output was used:
+Preserved the incoming PR history and prompt entry while reconciling activity conflicts with the tested fixes.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+follow-up-pr
+
+How the output was used:
+Authorized a follow-up fix PR targeting develop and a comment on already-merged PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+true
+
+How the output was used:
+Authorized recording this session's actual request and publication approvals in Pierre's append-only prompt log.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first regressions and fixes for notification replay identity, distinct unread reschedules, string service IDs, compiled Swagger metadata and cross-module schema type imports. Updated shared event contracts, their documentation and the committed admin provider-event producer in an isolated worktree.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+event_contract=Approved: implement the recommended stable eventId contract and distinct-change notifications, publish=true
+
+How the output was used:
+Recorded approval for required stable event IDs, reused on delivery retries and renewed for genuine changes, independently of notification read state. Authorized fetching, merging current develop and incoming PR changes, committing, publishing and posting validation evidence.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+the pr is supposed to opened
+
+How the output was used:
+Checked GitHub's recorded state after discovering that PR #168 had merged without these fixes while validation was running; did not claim that the local fixes were already in develop.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+no the pr is opened
+
+How the output was used:
+Confirmed independently that #168 was merged and that the open matching #188 was a revert PR, not a notification-fix PR; requested clarification rather than publishing to the revert branch.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01
+
+Prompt:
+ok re oopen it and the fixes
+
+How the output was used:
+Prepared an open follow-up fix PR because GitHub cannot reopen a merged PR, retaining the request to comment on #168. Integrated develop cd8cc24, preserved its complete committed prompt-log prefixes and added attribution corrections instead of rewriting merged history. The corrected original GEN-01 records remain available in commit 50a5518.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile boundary tests and UTF-16 DTO validation; preserved incoming updates, verified 2412 tests, and prepared follow-up PR #192 after #140 merged during verification.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Kept the frozen schema and ModuleRef lookup, documented UTF-16 counting, and preserved upstream history while integrating develop.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+GitHub rejected reopening #140 because it had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created the explicitly authorized follow-up PR #192 with test commit 1aa5673 before fix commit c223d4a.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Initially appended the authorized entries to kareem.txt under an incorrect GitHub-account assumption; the subsequent correction records Pierre as the actual PR author without deleting history.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Authorized these correctly attributed Pierre entries and an append-only correction in kareem.txt to fix the PR #192 prompt-log check.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Implemented owner-approved ITN-16 transport-cost CRUD, DTO validation and API/fake tests in an isolated worktree; full backend verification passed with VITEST_MAX_WORKERS=2.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+implement htl21 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Added hotel cancellation endpoints, service, refund tiers and DTOs with unit, integration and API tests; failing tests committed as 1a1d991 before implementation.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+Yes, Aya approved this work
+
+How the output was used:
+Authorized hotel-bookings changes with Aya's agreement and created the isolated feature/HTL-21-hotel-cancellations branch from latest develop.
 ================================================

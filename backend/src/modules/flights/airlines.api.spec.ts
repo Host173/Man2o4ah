@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -239,7 +240,7 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       .http()
       .post(`/api/airlines/${airline.id}/logo`)
       .set('Cookie', moderator.cookie)
-      .attach('file', Buffer.from('logo image'), {
+      .attach('file', imageBytes('png'), {
         filename: 'logo.png',
         contentType: 'image/png',
       });
@@ -290,7 +291,7 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       testApp!
         .http()
         .post(`/api/airlines/${airline.id}/logo`)
-        .attach('file', Buffer.from('logo image'), {
+        .attach('file', imageBytes('png'), {
           filename: 'logo.png',
           contentType: 'image/png',
         });
@@ -324,7 +325,7 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
           .http()
           .post(`/api/airlines/${airline.id}/logo`)
           .set('Cookie', moderator.cookie)
-          .attach('file', Buffer.from(`logo image ${index}`), {
+          .attach('file', imageBytes('png'), {
             filename: `logo-${index}.png`,
             contentType: 'image/png',
           }),
@@ -413,10 +414,10 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       const withLogo = await airlines.updateLogo(
         airline.id,
         {
-          buffer: Buffer.from('logo image'),
+          buffer: imageBytes('png'),
           originalname: 'logo.png',
           mimetype: 'image/png',
-          size: 10,
+          size: 32,
         },
         moderator,
       );

@@ -276,7 +276,7 @@ Indexes: `{ code: 1 }` unique · `{ isActive: 1 }`
 | `freeBags` | int | ≥ 0, free bag count per passenger |
 | `maxBagWeightKg` | number | > 0, per bag (also the limit for extra bags, FLT-08) |
 
-**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
+**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) initializes or changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
 
 Indexes
 - `{ airlineId: 1, flightNumber: 1, departureLocalDate: 1 }` **unique** (FLT-03; cancelled flights keep their number for that date)
@@ -507,7 +507,7 @@ Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 
 | `stripeRefundId` | string | | set once Stripe accepts the request |
 | `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
 | `currency` | string | ✓ | |
-| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = payment succeeded after the hold expired |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation |
 | `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
 
 Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
@@ -709,12 +709,17 @@ Indexes: `{ userId: 1, readAt: 1, createdAt: -1 }`
 #### `audit_logs`
 Append-only: no update or delete anywhere in the code (GEN-07). `createdAt` only (`timestamps: { createdAt: true, updatedAt: false }`).
 
+The listener derives `_id` from the first 12 bytes of SHA-256 of `admin.action.eventId`.
+The existing unique `_id` index makes repeated or concurrent delivery insert only once;
+a duplicate never changes an existing entry. Distinct actions have distinct event IDs,
+even when their actor, action and target are identical. No additional field or index is needed.
+
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `actorId` | ObjectId → users | ✓ | the admin |
 | `action` | enum (below) | ✓ | |
 | `target` | `{ type: string, id: string }` | ✓ | e.g. `{ type: 'user', id }` |
-| `details` | object | | small, no secrets (never passwords) |
+| `details` | object | | small, no secrets (never passwords); retain only plain objects, arrays and primitive JSON values, omitting unsupported nested objects |
 
 `action`: `account_suspended`, `account_reactivated`, `moderator_created`, `password_reset`, `provider_deactivated`, `provider_reactivated`, `report_resolved`, `content_hidden`, `content_deleted`.
 
@@ -731,11 +736,14 @@ These classes are the **only** code that changes inventory. Each method takes th
 
 | Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
 |---|---|---|---|
+| `addCabin(flightId, input, moderatorAirlineId)` | flight belongs to the moderator's airline, `status: scheduled`, no cabin of `input.cabinClass` | atomically append a cabin with `totalSeats = availableSeats = input.totalSeats`, `heldSeats = bookedSeats = 0` | `NotFound`, `InvalidStatusTransition` or `Conflict` |
 | `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
 | `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
 | `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+`addCabin` takes the plain `AddCabinInput` fields (class, total seats, price in minor units, free bags and per-bag weight) and required `InventoryOptions { session }`, like the other inventory methods. `FlightsService.addCabin` owns its transaction and reads the resulting flight in the same session. This extends the inventory contract without changing the schema or indexes.
 
 Example (`hold`, one item):
 ```js
@@ -779,7 +787,7 @@ pending_payment ──payment succeeded──▶ confirmed ──end of trip/sta
 |---|---|---|
 | create `pending_payment` | user proceeds to payment | `SeatInventory.hold` / `RoomNightInventory.reserve` |
 | → `confirmed` | event `payment.succeeded` | `SeatInventory.confirm` / nothing (nights stay) |
-| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06) | `SeatInventory.release` / `RoomNightInventory.release` |
+| → `expired` | expiry job when `holdExpiresAt ≤ now`; also flight cancelled (FLT-06), or payment confirmation after account deactivation (ACC-12, approved decision §3) | `SeatInventory.release` / `RoomNightInventory.release` |
 | → `cancelled` | user (FLT-26, HTL-21) or flight cancelled (FLT-06) | `SeatInventory.returnBooked` / `RoomNightInventory.release` |
 | → `completed` | job: flight `lastDepartureAt ≤ now`; hotel `checkOutDate < today` | none |
 
@@ -825,14 +833,19 @@ A URL path does not decide the module. Endpoints that combine provider data with
 |---|---|---|
 | `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)` → `{ amountMinor, currency, status, holdExpiresAt }`; `getPolicies(bookingId, userId)` |
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
-| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` (blocks ACC-12) |
+| `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId, { session? })` (blocks ACC-12; caller transaction used when supplied) |
+
+**ACC-12 serialization.** Before confirming a pending booking, the booking owner calls `AccountsService.tryLockForBookingConfirmation(userId, { session })` with its active transaction. Accounts conditionally increments the existing Mongoose `users.__v` for active or suspended accounts; false means missing/deactivated. Deactivation writes the same user document, then reads both booking checks sequentially with its caller session before deleting sessions. A conflicting transaction retries against current account/booking state. If deactivation wins, hotel confirmation expires the pending reservation and releases its nights together, then requests the full `late_payment` refund after commit. A duplicate event reuses payments' one-refund-per-booking contract. Future flight confirmation must use this same fence and release its held seats when expiry wins.
 
 **Wiring.** The owning module exports a registry; each implementer injects it and calls `registry.register(this)` in `onModuleInit`. The owner never imports the implementers, so there is no cycle. Payments: `PayableBookingRegistry` (`payments/ports/`). Moderation: `ReportableContentRegistry` (`moderation/ports/`).
 
 ### 6.3 Events (in-process, `@nestjs/event-emitter`)
-Handlers are **idempotent**: they use conditional updates, so handling the same event twice changes nothing.
+Handlers are **idempotent**: conditional writes make handling the same event twice change nothing.
+Audit uses insert-only writes with an event-derived `_id`, never updates or deletes.
 
 Names and payload types live in `backend/src/common/events/` (`Events`, `EventPayloads`); emit through `AppEvents`, never with a string literal. IDs travel as strings, times as `Date`.
+
+Repeatable notification changes carry a required, non-empty opaque `eventId`: generate it once for the committed source change and reuse it for every retry or redelivery. Different reschedules and account/provider state changes have different IDs. Notification deduplication never depends on `readAt` or the latest state; a distinct reschedule notifies even while an earlier alert is unread. Notification `_id` is derived from the recipient, event type, entity and event identity, using the existing unique `_id` index; no collection field or index is added.
 
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
@@ -845,15 +858,19 @@ Names and payload types live in `backend/src/common/events/` (`Events`, `EventPa
 | `hotel-reservation.cancelled` | `{ bookingId, userId, reference }` | hotel-bookings | notifications |
 | `refund.updated` | `{ refundId, userId, status }` | payments | notifications |
 | `flight.rescheduled` | `{ flightId, departureAt, arrivalAt }` | flights | flight-bookings → sync copies, then emits `flight-booking.rescheduled` |
-| `flight-booking.rescheduled` | `{ bookingId, userId }` | flight-bookings | notifications |
+| `flight-booking.rescheduled` | `{ eventId, bookingId, userId }` | flight-bookings | notifications |
 | `flight.cancelled` | `{ flightId }` | flights | flight-bookings → cancel confirmed (100 % refund), expire pending |
 | `user.deactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: true` |
 | `user.reactivated` | `{ userId }` | accounts | blog, itineraries → set `authorDeactivated: false` |
-| `account.suspended` | `{ userId }` | accounts | notifications |
-| `account.reactivated` | `{ userId }` | accounts | notifications |
-| `provider.deactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `provider.reactivated` | `{ providerType, providerId, moderatorIds }` | admin | notifications |
-| `admin.action` | `{ actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
+| `account.suspended` | `{ eventId, userId }` | accounts | notifications |
+| `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
+| `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `admin.action` | `{ eventId, actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
+
+`admin.action.eventId` is a non-empty string generated once per committed action and
+reused on every delivery retry. A later action gets a new identity, including repeated
+password resets or suspension/reactivation cycles.
 
 ---
 

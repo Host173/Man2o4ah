@@ -375,6 +375,206 @@ Moderator sets extra-bag price and maximum, and cancellation tiers with unique d
 How the output was used:
 Added airline-moderator-only baggage and cancellation policy replacement endpoints with boundary validation, persistence, API and unit tests, plus a contract-shaped fake assertion and typed Swagger response tiers.
 ================================================
+
+
+
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-04
+
+Prompt:
+**Expected output**
+Moderator adds cabins from the fixed set, at most once each, with seats, price and free baggage.
+
+**Requirements:** FLT-04
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit; API
+**TDD required:** No
+
+**Branch:** `feature/FLT-04-cabins`
+**PR title:** `FLT-04: Cabins`
+
+**Depends on:** [#35](https://github.com/Host173/Man2o4ah/issues/35) (FLT-03)
+**Blocks:** [#38](https://github.com/Host173/Man2o4ah/issues/38) (FLT-05), [#41](https://github.com/Host173/Man2o4ah/issues/41) (FLT-11), [#42](https://github.com/Host173/Man2o4ah/issues/42) (FLT-17), [#89](https://github.com/Host173/Man2o4ah/issues/89) (PLT-08)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure to cover all test cases and implement according to contracts and fakes
+
+How the output was used:
+Added the FLT-04 cabin endpoint, validation, service implementation and fake parity, with DTO unit, API and fake tests; no commit.
+================================================
+
+
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-04
+
+Prompt:
+its now merged on flt-04 do it
+
+How the output was used:
+Continued the FLT-04 implementation on its feature branch; no separate changes.
+================================================
+
+
+
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-06
+
+Prompt:
+# FLT-06: Cancel flights #39
+
+Open
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/39#issue-6313316251)
+
+Owner
+
+**Expected output**
+Moderator cancels a scheduled flight after confirmation; it disappears from search; emits flight.cancelled.
+
+**Requirements:** FLT-06 (flight side)
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Integration; API
+**TDD required:** No
+
+**Branch:** `feature/FLT-06-cancel-flights`
+**PR title:** `FLT-06: Cancel flights`
+
+**Depends on:** [#35](https://github.com/Host173/Man2o4ah/issues/35) (FLT-03), [#8](https://github.com/Host173/Man2o4ah/issues/8) (PLT-06)
+**Blocks:** —
+**Works end to end once these merge:** [#56](https://github.com/Host173/Man2o4ah/issues/56) (FLT-26)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure to include all test cases and follow the contract and fakes
+
+[Attached: main.ts]
+import { readFileSync } from 'node:fs';
+import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module.js';
+import { configureApp, setupSwagger } from './app.setup.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
+  const config = app.get(ConfigService);
+
+  configureApp(app, {
+    uploadDir: config.get<string>('UPLOAD_DIR', 'uploads'),
+    frontendUrl: config.get<string>('FRONTEND_URL', 'http://localhost:3000'),
+  });
+
+  const { version } = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ) as { version: string };
+  setupSwagger(app, version);
+
+  await app.listen(config.get<number>('PORT', 4000));
+}
+await bootstrap();
+
+How the output was used:
+Created the FLT-06 branch from develop; no source changes because the FLT-03 code dependency is not merged into develop.
+================================================
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-17
+
+Prompt:
+# FLT-17: Flight details #42
+
+Open
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/42#issue-6313318479)
+
+Owner
+
+**Expected output**
+Flight details with local times, duration, cabins with price, seats left and baggage allowance.
+
+**Requirements:** FLT-17
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** API
+**TDD required:** No
+
+**Branch:** `feature/FLT-17-flight-details`
+**PR title:** `FLT-17: Flight details`
+
+**Depends on:** [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04), [#34](https://github.com/Host173/Man2o4ah/issues/34) (FLT-08)
+**Blocks:** —
+**Needed end to end by:** [#52](https://github.com/Host173/Man2o4ah/issues/52) (FLT-19), [#53](https://github.com/Host173/Man2o4ah/issues/53) (FLT-22), [#57](https://github.com/Host173/Man2o4ah/issues/57) (FLT-29)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket flt-04 is merged now so you should do the branch from develop and IMPORTANT FOR FLT-17
+
+Read and use the existing flights contract types before making changes.
+
+This ticket implements flight details and getFlightsForBooking().
+
+Downstream consumers (including e-ticket generation) need airport-local time information. The current FlightManagementView exposes:
+
+- departureTimeZone
+- arrivalTimeZone
+
+but FlightWithAirline currently only exposes:
+
+{
+  flight: FlightView;
+  airline: AirlineView;
+}
+
+When implementing FLT-17, ensure the booking-facing contract returned by getFlightsForBooking() exposes enough timezone information for consumers to display departure and arrival times in airport local time.
+
+Do not leave timezone information only in FlightManagementView if getFlightsForBooking() is expected to support local-time display.
+
+Verify the final contract, implementation, fake, API tests, Swagger docs, and all dependent types remain consistent.
+
+How the output was used:
+Implemented FLT-17 public details and booking-facing flight lookup, promoted airport IANA zones into FlightView/getFlightsForBooking, updated the fake and e-ticket consumer, added API/integration coverage, and passed full backend verification before commit 626af97.
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-17
+
+Prompt:
+now fix those issues and rereview do not delete and reinstall any dependencies
+
+How the output was used:
+Updated the flight-details airline response mapping and malformed-ID API error-code assertion; reran formatting, lint, typecheck and focused tests.
+================================================
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-17
+
+Prompt:
+if the package your talking about belongs to me jana change it if not DONT
+
+How the output was used:
+Confirmed package 5 is owned by Aya; left its files unchanged and retained the ownership note for the PR.
 ================================================
 Date: 2026-11-20
 Student: Jana

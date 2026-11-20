@@ -420,3 +420,34 @@ its now merged on flt-04 do it
 How the output was used:
 Continued the FLT-04 implementation on its feature branch; no separate changes.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-11
+
+Prompt:
+**Expected output**
+Search by airports, local date and passengers; round trip returns outbound and return; price filter and sorting; only bookable flights with enough seats.
+
+**Requirements:** FLT-11, FLT-12 (round-trip search), FLT-15
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Integration (filters, edge cases); API
+**Test rule (dependency circle 2):** test held and booked seats by setting the inventory directly (seed the cabin's seat counters, or call `SeatInventory.hold()` from INV-01), never through the hold endpoint (`POST /api/flight-bookings/hold`, FLT-22). Search only reads the counters, so it must be testable without FLT-22.
+**TDD required:** No
+
+**Branch:** `feature/FLT-11-flight-search`
+**PR title:** `FLT-11: Flight search`
+
+**Depends on:** [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04)
+**Blocks:** [#97](https://github.com/Host173/Man2o4ah/issues/97) (FLT-28)
+**Works end to end once these merge:** [#16](https://github.com/Host173/Man2o4ah/issues/16) (GEN-12)
+**Needed end to end by:** [#75](https://github.com/Host173/Man2o4ah/issues/75) (ITN-26)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket this should also be a stacvked pr from flt-04 branch
+
+How the output was used:
+Implemented public FLT-11/12/15 flight search with DTO validation, active-airline/route/date/status filtering, direct inventory-seat checks, price/cabin/sort/pagination and round trips; added integration/API coverage and full backend verification, committed in 368e17d.
+================================================

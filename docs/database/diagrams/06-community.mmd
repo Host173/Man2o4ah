@@ -28,6 +28,10 @@ classDiagram
       postId : ObjectId
       userId : ObjectId
     }
+    class PostImageCleanup {
+      postId : ObjectId
+      key : string (unique)
+    }
   }
   namespace moderation {
     class Report {
@@ -65,5 +69,6 @@ classDiagram
   Comment "*" --> "1" Post : postId
   Post "*" ..> "0..1" Itinerary : itineraryId (BLG-13)
   Like "*" --> "1" Post : postId (unique postId+userId)
+  PostImageCleanup "*" --> "0..1" Post : postId (survives deletion)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId

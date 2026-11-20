@@ -8,6 +8,7 @@ import type {
 import { FakeHotelsService, FakeRoomNightInventory } from './index.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+import { imageBytes } from '../support/image-fixtures.js';
 
 const checkIn = toDateOnly('2026-11-15');
 const checkOut = toDateOnly('2026-11-17');
@@ -676,10 +677,10 @@ describe('FakeHotelsService', () => {
       storage,
     );
     const image = {
-      buffer: Buffer.from('image'),
+      buffer: imageBytes('jpg'),
       originalname: 'hotel.jpg',
       mimetype: 'image/jpeg',
-      size: 5,
+      size: 32,
     };
     const results = await Promise.allSettled(
       Array.from({ length: 7 }, () =>
@@ -714,10 +715,10 @@ describe('FakeHotelsService', () => {
 
   it('applies photo scope and validation before changing stored data', async () => {
     const image = {
-      buffer: Buffer.from('image'),
+      buffer: imageBytes('jpg'),
       originalname: 'hotel.jpg',
       mimetype: 'image/jpeg',
-      size: 5,
+      size: 32,
     };
     const photo = (await hotels.addPhoto(ids.hotel1, image, ids.hotel1))
       .photos[0]!;

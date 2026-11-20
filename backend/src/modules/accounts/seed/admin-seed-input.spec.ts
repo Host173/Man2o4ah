@@ -25,14 +25,20 @@ describe('parseAdminSeedInput (ACC-18)', () => {
     },
   );
 
-  it.each(['admin', 'admin@', '@example.com', 'admin example@x.com'])(
-    'rejects the invalid email %j',
-    (value) => {
-      expect(() =>
-        parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
-      ).toThrow(/SEED_ADMIN_EMAIL must be a valid email/);
-    },
-  );
+  it.each([
+    'admin',
+    'admin@',
+    '@example.com',
+    'admin example@x.com',
+    // Accepted by isEmail but not by the users.email schema rule, so they
+    // must fail here, before bcrypt and the insert.
+    "o'brien@example.com",
+    'a!b@example.com',
+  ])('rejects the invalid email %j', (value) => {
+    expect(() =>
+      parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
+    ).toThrow(/SEED_ADMIN_EMAIL must be a valid email/);
+  });
 
   it.each([undefined, ''])(
     'rejects a missing SEED_ADMIN_PASSWORD %j',

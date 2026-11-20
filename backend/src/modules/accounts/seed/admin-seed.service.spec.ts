@@ -117,14 +117,22 @@ describe('admin seed (ACC-18)', { timeout: 30_000 }, () => {
     expect(await storedHash()).toBe('existing-hash');
   });
 
-  it('two runs at the same time still create exactly one admin', async () => {
-    const results = await Promise.all([seed.run(INPUT), seed.run(INPUT)]);
+  it('five runs at the same time all succeed and leave exactly one admin', async () => {
+    // testing.md §4: fire with allSettled and assert the invariant, never
+    // which run won.
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => seed.run(INPUT)),
+    );
 
-    expect(results.map((r) => r.status).sort()).toEqual([
-      'created',
-      'unchanged',
-    ]);
-    expect(results[0].userId).toBe(results[1].userId);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    expect(fulfilled).toHaveLength(5);
+    const admins = await users.find({ role: UserRole.ADMIN }).lean();
+    expect(admins).toHaveLength(1);
     expect(await users.countDocuments()).toBe(1);
+    const ids = new Set(fulfilled.map((r) => r.value.userId));
+    expect([...ids]).toEqual([admins[0]._id.toString()]);
+    expect(
+      fulfilled.filter((r) => r.value.status === 'created').length,
+    ).toBeLessThanOrEqual(1);
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
@@ -21,11 +22,16 @@ import {
   UserRole,
   UserStatus,
 } from '../accounts/schemas/user.schema.js';
-import { AuditAction } from '../audit/schemas/audit-log.schema.js';
+import { AuditAction } from '../audit/audit.types.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { ListReportsQueryDto } from '../moderation/dto/list-reports-query.dto.js';
+import type { ResolveReportDto } from '../moderation/dto/resolve-report.dto.js';
+import { ModerationService } from '../moderation/moderation.service.js';
+import type { ReportView } from '../moderation/moderation.types.js';
+import type { ReportTargetType } from '../moderation/schemas/report.schema.js';
 import type { AdminBookingView } from './admin.types.js';
 import type { CreateModeratorDto } from './dto/create-moderator.dto.js';
 import { ListAdminAccountsQueryDto } from './dto/list-admin-accounts-query.dto.js';
@@ -42,7 +48,8 @@ const VALID_PROVIDER_TYPES = new Set<string>(Object.values(ProviderType));
 
 /**
  * Admin read-only booking list, account management, provider moderation, and
- * delegation workflows (`ACC-07a`, `ACC-13`, `ACC-14`, `ACC-15`, `ACC-16`, `ACC-17`).
+ * moderation delegation (`ACC-07a`, `ACC-13`, `ACC-14`, `ACC-15`, `ACC-16`,
+ * `ACC-17`, `GEN-10`).
  * Reads and mutates external data solely through exported module contracts (`CTR-01`..`CTR-04`).
  */
 @Injectable()
@@ -50,6 +57,7 @@ export class AdminService {
   constructor(
     private readonly flightBookingsService: FlightBookingsService,
     private readonly hotelBookingsService: HotelBookingsService,
+    private readonly moderationService: ModerationService,
     private readonly accountsService: AccountsService,
     private readonly flightsService: FlightsService,
     private readonly hotelsService: HotelsService,
@@ -168,6 +176,40 @@ export class AdminService {
     };
   }
 
+  /** GEN-10: delegates paginated report listing to `ModerationService`. */
+  listReports(
+    query: ListReportsQueryDto = new ListReportsQueryDto(),
+  ): Promise<Paginated<ReportView>> {
+    return this.moderationService.listReports(query);
+  }
+
+  /** GEN-10: delegates report resolution to `ModerationService`. */
+  resolveReport(
+    reportId: string,
+    dto: ResolveReportDto,
+    adminId: string,
+  ): Promise<ReportView> {
+    return this.moderationService.resolveReport(reportId, dto, adminId);
+  }
+
+  /** GEN-10: delegates direct content hiding to `ModerationService`. */
+  hideContent(
+    targetType: ReportTargetType,
+    targetId: string,
+    adminId: string,
+  ): Promise<void> {
+    return this.moderationService.hideContent(targetType, targetId, adminId);
+  }
+
+  /** GEN-10: delegates direct content deletion to `ModerationService`. */
+  deleteContent(
+    targetType: ReportTargetType,
+    targetId: string,
+    adminId: string,
+  ): Promise<void> {
+    return this.moderationService.deleteContent(targetType, targetId, adminId);
+  }
+
   /**
    * ACC-14: delegates paginated, searchable, filterable account listing to
    * `AccountsService.listAccounts` (`CTR-01`).
@@ -265,6 +307,7 @@ export class AdminService {
         : ProviderType.HOTEL);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.MODERATOR_CREATED,
       target: { type: 'user', id: created.id },
@@ -293,6 +336,7 @@ export class AdminService {
     await this.accountsService.resetPassword(userId, dto.temporaryPassword);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.PASSWORD_RESET,
       target: { type: 'user', id: userId },
@@ -308,6 +352,7 @@ export class AdminService {
     await this.accountsService.suspend(userId);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.ACCOUNT_SUSPENDED,
       target: { type: 'user', id: userId },
@@ -323,6 +368,7 @@ export class AdminService {
     await this.accountsService.reactivate(userId);
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: AuditAction.ACCOUNT_REACTIVATED,
       target: { type: 'user', id: userId },
@@ -385,6 +431,7 @@ export class AdminService {
     this.events.emit(
       isActive ? Events.ProviderReactivated : Events.ProviderDeactivated,
       {
+        eventId: randomUUID(),
         providerType: type,
         providerId,
         moderatorIds,
@@ -392,6 +439,7 @@ export class AdminService {
     );
 
     this.events.emit(Events.AdminAction, {
+      eventId: randomUUID(),
       actorId: adminId,
       action: isActive
         ? AuditAction.PROVIDER_REACTIVATED

@@ -2920,3 +2920,843 @@ push pay-02 and open a pr
 How the output was used:
 Checked there are no conflicts with origin/develop, pushed feature/PAY-02-policies-acceptance and opened the PAY-02 PR into develop.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+@"C:\Users\karee\Downloads\PAY03_EXECUTION.md"
+ok now do this
+[Attached: PAY03_EXECUTION.md]
+# Execution — PAY-03: Refunds
+
+Issue #23. Third ticket of lane E (PAY-01 → PAY-02 → **PAY-03**). PAY-01 (#183) and GEN-01 (#168) are merged into `develop`. **TDD is required**: the refund rule tests are committed, failing, before the rule code.
+
+## Goal
+
+When a confirmed booking is cancelled with a positive refund (the user per the provider's tiers, the provider at 100%), or a payment arrives after the hold expired (`late_payment`, 100%), the booking module calls `PaymentsService.refund(...)` after its own transaction commits. Payments records one refund per booking, asks Stripe for it, follows its status through Stripe's webhook (`pending → refunded | failed`), shows it to the owner, and emits `refund.updated` so the user gets an in-app notification (GEN-01 already listens). Today both `PaymentsService` methods throw `… implemented in PAY-03`, and refund webhook events are ignored.
+
+Done means:
+1. `PaymentsService.refund` and `PaymentsService.getRefund` work (same public signatures; `FakePaymentsService` stays valid).
+2. `refund.updated` / `refund.failed` webhook events update the refund, idempotently, in the same style as PAY-01's payment events.
+3. `GET /api/refunds/:id` shows a refund to its owner.
+4. `refund.updated { refundId, userId, status }` is emitted after every stored status, so the user is notified.
+5. Unit, integration and API tests; no test calls Stripe.
+
+**Out of scope:** computing refund amounts or tiers (each booking module owns its tier rule, `DECISIONS.md` §3), cancelling bookings (FLT-26, FLT-06, HTL-21), deciding a payment is late (FLT-23, HTL-17 already call `refund` with `reason: 'late_payment'`), showing the refund on booking details (the booking modules call `getRefund`), retrying a failed refund automatically, partial or multiple refunds per booking, the frontend.
+
+## Context you need
+
+**Requirement PAY-03 (verbatim):** "For every cancellation with a positive refund amount (user cancellations per the provider's tiers; provider-initiated cancellations at 100%), the system shall issue a refund through the Stripe Refunds API, record it, and show its status (Pending, Refunded, Failed) on the booking details. The user receives an in-app notification."
+
+**Rules (`docs/ai/skills/travel-platform/references/bookings-payments.md`):**
+- §7: "After commit: if `refundAmountMinor > 0`, call `PaymentsService.refund(...)` (creates `refunds { status: 'pending' }`, calls Stripe with idempotency key `refund-<refundId>`, maps the result). Then emit `…cancelled`. A Stripe failure leaves the booking cancelled and the refund `failed`, visible on the booking (PAY-03), never lost."
+- §6 webhook step 4: "`refund.updated` / `refund.failed`: map Stripe's status (`succeeded` → `refunded`, `failed`/`canceled` → `failed`), emit `refund.updated`."
+- §6 late payment: the booking module "asks payments for a full refund with `reason: 'late_payment'`".
+- `endpoints.md`: `GET /api/refunds/:id` — PAY-03, **Own**, module payments.
+
+**Data model (`refunds`):** `paymentId` → payments, `bookingType`, `bookingId`, `userId` → users, `stripeRefundId` ("set once Stripe accepts the request"; unique partial index), `amountMinor` (int, **> 0**, "a 0 refund creates no document"), `currency`, `reason` (`user_cancellation | provider_cancellation | late_payment`), `status` (`pending | refunded | failed`). Indexes: `{ bookingType, bookingId }` **unique** (one refund per booking), `{ stripeRefundId }` unique partial, `{ userId }`.
+
+**Existing code (read it; reuse, don't duplicate):**
+- `backend/src/modules/payments/payments.service.ts`: the contract other modules call. Its doc comments are the contract: `refund` "Creates the refund (status `pending`) and asks Stripe for it. Call after your transaction commits. One refund per booking: a second call for the same booking returns the existing one. Throws 400 `VALIDATION_FAILED` if `amountMinor <= 0`." and `getRefund` "The booking's refund, for showing its status". Both bodies are stubs today. **Keep both signatures and doc comments; replace only the bodies.**
+- `payments.types.ts`: `RefundRequest { bookingType, bookingId, userId, amountMinor, currency, reason }`, `RefundView { refundId, bookingType, bookingId, amountMinor, currency, reason, status }`. **Don't change them.**
+- `payments.service.spec.ts`: tests that the two methods throw `NotImplementedException`. It goes with the stubs (step 5 replaces it).
+- `backend/test/fakes/payments.fake.ts`: `FakePaymentsService` — rejects `amountMinor <= 0` with 400 `VALIDATION_FAILED` and `details: [{ field: 'amountMinor', message: 'must be greater than 0' }]`; returns the existing refund on a second call; `getRefund` → view or `null`. The real service must behave the same way on those points (step 7 has a parity test). **Don't change the fake.**
+- `stripe/stripe-gateway.ts`: `createRefund({ paymentIntentId, amountMinor, idempotencyKey, metadata: { refundId } }) → { id, status: GatewayRefundStatus }`; `GatewayRefundStatus = 'pending' | 'requires_action' | 'succeeded' | 'failed' | 'canceled'`; the refund branch of `GatewayEvent` is `{ id, type: 'refund.updated' | 'refund.failed', refund: { id, status, metadata } }`. **Don't change it.** `StripeApiGateway.createRefund` and its `parseWebhook` refund mapping are already implemented and tested (PAY-01).
+- `backend/test/fakes/stripe-gateway.fake.ts`: `FakeStripeGateway` — `createRefund` is idempotent by key, returns `re_fake_<n>` with status `nextRefundStatus` (default `'pending'`); `failNext('createRefund')` makes the next call throw; `calls` log; webhook bodies are `GatewayEvent` JSON signed with `FAKE_STRIPE_SIGNATURE`. **Don't change it.**
+- `payment-intents.service.ts` (PAY-01): `handleWebhook` verifies the signature, then for non-payment events logs "Refund events belong to PAY-03; anything else is not ours." and returns. Its payment branch shows the pattern to copy: one `connection.transaction`, insert `stripe_webhook_events { _id: event.id, type, receivedAt }` first, a duplicate key (`11000`) means already processed, conditional update on the status it was read with, emit **after** the commit. It also has the `isDuplicateKey` helper and the `PaymentRecord` interface.
+- `schemas/payment.schema.ts`: `Payment` (`bookingType`, `bookingId`, `userId`, `stripePaymentIntentId`, `amountMinor`, `currency`, `status`), unique `{ bookingType, bookingId }`.
+- Events: `Events.RefundUpdated` with payload `RefundUpdatedEvent { refundId: string; userId: string; status: RefundStatus }` (`backend/src/common/events/`). Emit with `AppEvents.emit(Events.RefundUpdated, payload)`. GEN-01's `NotificationsListener` turns it into a notification (one per refund and status).
+- Error codes: `ValidationFailed`, `InvalidStatusTransition`, `NotFound`. Validation-style errors use `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Invalid refund', details: [{ field, message }] })`, the shape the fake uses.
+- `payments.controller.ts`, `policies.controller.ts` (if PAY-02 is merged): the controller style to copy. `:id` uses `ParseObjectIdPipe` from `@nestjs/mongoose` (malformed → 400 `VALIDATION_FAILED`). Another user's refund is a **404**.
+- `backend/src/modules/hotel-bookings/hotel-confirmation.service.ts` (`refundIfLate`): a real caller, for context (it passes `userId`, `totalMinor`, `currency` and `reason: 'late_payment'` from the reservation).
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. **No new package.** Never log a key, a client secret or a full webhook body.
+
+## Design (settled here; follow it exactly)
+
+1. **Where the logic lives:** a new internal `RefundsService` (`refunds.service.ts`), provided by `PaymentsModule`, **not exported**. `PaymentsService` gets a constructor that injects it, and its two methods just delegate (`return this.refunds.refund(request)` / `return this.refunds.getRefund(bookingType, bookingId)`). The public API, and so `FakePaymentsService`, doesn't change. A new `RefundsController` (`refunds.controller.ts`, `@ApiTags('payments') @Controller('refunds')`) serves `GET /api/refunds/:id`.
+
+2. **`refund(request)` order** (each step only if the previous passed):
+   1. `amountMinor` must be a safe integer > 0 → else 400 `VALIDATION_FAILED`, field `amountMinor`, message `'must be greater than 0'` (the fake's exact details). No database read happens before this check.
+   2. A refund already exists for `{ bookingType, bookingId }` → return its view. **No other check, no Stripe call, no emit.** (The contract: "a second call for the same booking returns the existing one", whatever the new arguments are.)
+   3. Load the booking's payment (`{ bookingType, bookingId }`) and run the pure check of Design §3.
+   4. Insert `Refund { paymentId, bookingType, bookingId, userId, amountMinor, currency, reason, status: 'pending' }`. A duplicate key (another call won the race) → load that refund and return its view: **no Stripe call, no emit** from the loser.
+   5. `gateway.createRefund({ paymentIntentId: payment.stripePaymentIntentId, amountMinor, idempotencyKey: `refund-${refundId}`, metadata: { refundId } })`.
+      - Success → `status = refundStatusFromGateway(result.status)`; conditional update `{ _id, status: 'pending' }` → `$set { stripeRefundId: result.id, status }`. (If the update matches nothing, a webhook already moved it: reload and use the stored status.)
+      - The gateway throws → conditional update `{ _id, status: 'pending' }` → `failed`; log a warning with the refund id and the error message only; **don't rethrow**. The caller's cancellation is already committed; the refund is visible as `failed`, never lost.
+   6. Emit `Events.RefundUpdated { refundId, userId, status }` with the stored status, **after** the writes, exactly once per `refund()` call that created the document.
+   7. Return the view (`RefundView`).
+
+3. **The pure request check** (`refund-rules.ts`, TDD), in this order:
+   | Case | Result |
+   |---|---|
+   | no payment for the booking | 409 `INVALID_STATUS_TRANSITION`, `'The booking has no succeeded payment'` |
+   | payment status `pending`, `failed` or `canceled` | the same 409 |
+   | payment `succeeded`, `request.amountMinor > payment.amountMinor` | 400 `VALIDATION_FAILED`, field `amountMinor`, `'must not exceed the amount paid'` |
+   | `request.amountMinor === payment.amountMinor` | allowed (a 100% refund) |
+   | `request.currency !== payment.currency` | 400 `VALIDATION_FAILED`, field `currency`, `'must match the payment currency'` |
+   | `request.userId !== payment.userId` (as strings) | 400 `VALIDATION_FAILED`, field `userId`, `'must be the payer'` |
+   | everything matches | allowed |
+   A late payment needs no special case: PAY-01 records a late `payment_intent.succeeded` on a canceled payment as `succeeded`.
+
+4. **Gateway status → our status** (`refundStatusFromGateway`, TDD): `succeeded` → `refunded`; `failed`, `canceled` → `failed`; `pending`, `requires_action` → `pending`.
+
+5. **Webhook transitions** (`refundStatusAfter(gatewayStatus, current) → RefundStatus | null`, TDD; null = leave it):
+   | Gateway status \ current | `pending` | `refunded` | `failed` |
+   |---|---|---|---|
+   | `succeeded` | `refunded` | null | `refunded` |
+   | `failed`, `canceled` | `failed` | `failed` (Stripe can fail a refund after it succeeded) | null |
+   | `pending`, `requires_action` | null | null | null |
+
+6. **Webhook handling** (`RefundsService.handleWebhookEvent(event)` for the refund branch of `GatewayEvent`):
+   - In **one** `connection.transaction`: insert `stripe_webhook_events { _id: event.id, type: event.type, receivedAt }`; find the refund by `stripeRefundId: event.refund.id`, else (Stripe's event can arrive before step 2.5's update is stored) by `_id: event.refund.metadata.refundId` when that is a 24-hex string; none → log a warning and finish (the event stays recorded). `next = refundStatusAfter(event.refund.status, refund.status)`. Conditional update `{ _id, status: <read status> }` → `$set { status: next, stripeRefundId: event.refund.id }` when `next` isn't null; when `next` is null but `stripeRefundId` is missing, set only `stripeRefundId`.
+   - A duplicate key on the event → already processed: return (also on the helper's retry after a write conflict, as PAY-01 does).
+   - After the commit, if the status changed: emit `Events.RefundUpdated { refundId, userId, status: next }` (ids from the refund document, never from the event).
+   - In `PaymentIntentsService.handleWebhook`, the only change: where it now returns for non-payment events, call `await this.refunds.handleWebhookEvent(event)` for `refund.updated` / `refund.failed` and keep the debug log + return for `ignored`. Inject `RefundsService` into `PaymentIntentsService`. Nothing else in that file changes.
+
+7. **`GET /api/refunds/:id`:** `@Roles(Role.USER)`; the refund must have `userId` = the caller, else 404 `'Refund not found'`. Returns `RefundView` (never `paymentId`, `userId`, `stripeRefundId`).
+
+8. **No automatic retry of a failed refund** in PAY-03. A second `refund()` call returns the failed one unchanged (Design §2.2). Flag this in the report and the PR.
+
+## Before you start
+
+1. In the main clone: `git fetch origin`. Confirm with `gh pr view 183 --json mergedAt` and `gh pr view 168 --json mergedAt` that PAY-01 and GEN-01 are merged. If not, stop and report. If PAY-02 isn't merged yet, expect small conflicts later in `payments.module.ts` (both add providers and a controller; keep both).
+2. `git worktree add ../man2o4ah-PAY-03 -b feature/PAY-03-refunds origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/payments test/fakes/payments.fake.spec.ts test/fakes/stripe-gateway.fake.spec.ts` must pass. If not, stop and report.
+5. `git grep -n "implemented in PAY-03" -- backend/src` lists exactly the two `PaymentsService` stubs. If not, stop and report.
+
+## Step 1 (TDD, red): the refund rules
+
+New `backend/src/modules/payments/refund-rules.spec.ts` for pure functions that don't exist yet:
+
+```ts
+// refund-rules.ts
+import type { RefundRequest } from './payments.types.js';
+import type { PaymentStatus } from './schemas/payment.schema.js';
+import type { RefundStatus } from './schemas/refund.schema.js';
+import type { GatewayRefundStatus } from './stripe/stripe-gateway.js';
+
+/** What the check needs from the booking's payment (ids as strings). */
+export interface PaidPayment { status: PaymentStatus; amountMinor: number; currency: string; userId: string }
+
+/** Throws 400 when the amount isn't a positive integer (checked before anything is read). */
+export function assertRefundAmount(amountMinor: number): void;
+/** Throws the right HttpException when the booking's payment can't be refunded with this request (Design §3). */
+export function checkRefundRequest(request: RefundRequest, payment: PaidPayment | null): void;
+/** Stripe's refund status as ours (Design §4). */
+export function refundStatusFromGateway(status: GatewayRefundStatus): RefundStatus;
+/** The status a webhook moves a refund to, or null to leave it (Design §5). */
+export function refundStatusAfter(gatewayStatus: GatewayRefundStatus, current: RefundStatus): RefundStatus | null;
+```
+
+Tests (decision tables with `it.each`; boundary values):
+- `assertRefundAmount`: `0`, `-1`, `1.5`, `NaN`, `Number.MAX_SAFE_INTEGER + 1` → `BadRequestException` with `getResponse()` equal to `{ code: 'VALIDATION_FAILED', message: 'Invalid refund', details: [{ field: 'amountMinor', message: 'must be greater than 0' }] }`; `1` and `25000` → no throw.
+- `checkRefundRequest`: every row of Design §3, with a succeeded payment `{ amountMinor: 25000, currency: 'USD', userId: U }` as the base; amount boundaries `24999` and `25000` allowed, `25001` refused. Assert the class (`ConflictException` / `BadRequestException`) and the full `getResponse()`.
+- `refundStatusFromGateway`: all five gateway statuses.
+- `refundStatusAfter`: all 15 cells of Design §5.
+
+Run it: it must fail (the module doesn't exist).
+**Commit:** `test(payments): pin the refund request check and refund status rules (PAY-03)`
+
+## Step 2 (TDD, green): the rules
+
+New `refund-rules.ts` implementing exactly the tables. Step 1 passes; nothing else changes.
+**Commit:** `feat(payments): check refund requests and map refund statuses (PAY-03)`
+
+## Step 3 (TDD, red): the refund flow
+
+New `backend/src/modules/payments/refunds.service.spec.ts` (integration) for `RefundsService`, which doesn't exist yet. Setup like `payments.api.spec.ts`: a fresh `FakeStripeGateway` overriding `STRIPE_GATEWAY`, `createTestApp({ imports: [PaymentsModule], override })`, `clearCollections` in `beforeEach`, `gateway.calls.length = 0`, `gateway.nextRefundStatus = 'pending'`, and `const updated = vi.fn(); t.moduleRef.get(EventEmitter2).on(Events.RefundUpdated, updated)` (clear it in `beforeEach`). A helper `paid(overrides?)` inserts a `Payment { bookingType: 'flight', bookingId, userId, stripePaymentIntentId: 'pi_test_1', amountMinor: 25000, currency: 'USD', status: 'succeeded' }` directly through the model and returns its ids; a helper `request(overrides?)` builds the matching `RefundRequest` (`reason: 'user_cancellation'`, `amountMinor: 10000`).
+
+Call through `t.moduleRef.get(PaymentsService)` (the contract), not `RefundsService` directly, so the delegation is covered too. Cases:
+1. **Pending:** `refund(request)` → view `{ refundId (24-hex), bookingType, bookingId, amountMinor: 10000, currency: 'USD', reason: 'user_cancellation', status: 'pending' }`; one document with `stripeRefundId: 're_fake_1'`, `paymentId` = the payment's `_id`, `userId`; the gateway got exactly `{ paymentIntentId: 'pi_test_1', amountMinor: 10000, idempotencyKey: 'refund-<refundId>', metadata: { refundId } }`; `updated` called once with `{ refundId, userId, status: 'pending' }`.
+2. **Immediate success:** `nextRefundStatus = 'succeeded'` → status `refunded` stored and returned; one emit with `refunded`.
+3. **Immediate failure:** `nextRefundStatus = 'failed'` → `failed`; one emit with `failed`.
+4. **Stripe throws:** `failNext('createRefund')` → `refund()` **resolves** with status `failed`; the document is `failed` with no `stripeRefundId`; one emit with `failed`.
+5. **One refund per booking:** a second call (even with `amountMinor: 5000`) → the same view as the first; still one document; one `createRefund` call; still one emit.
+6. **Race:** 5 parallel `refund()` calls for one booking → all resolve with the same `refundId`; exactly one document; exactly one `createRefund` call; exactly one emit.
+7. **Refusals** (no document, no gateway call, no emit in each): `amountMinor` 0 → 400 (the exact fake details); no payment → 409 `INVALID_STATUS_TRANSITION`; payment `pending` → 409; payment `canceled` → 409; `amountMinor: 25001` → 400 field `amountMinor`; currency `EUR` → 400 field `currency`; another `userId` → 400 field `userId`.
+8. **Full and late refunds:** `amountMinor: 25000, reason: 'provider_cancellation'` → allowed; a payment that went `canceled → succeeded` (insert it as `succeeded`) with `reason: 'late_payment'` → allowed and stored with that reason.
+9. **getRefund:** after case 1's call → the same view; for a booking without a refund → `null`.
+10. **Hotel:** the same flow with `bookingType: 'hotel'` stores `bookingType: 'hotel'`.
+
+Run it: it must fail (`refunds.service.ts` doesn't exist, and `PaymentsService` still throws).
+**Commit:** `test(payments): pin creating refunds through Stripe (PAY-03)`
+
+## Step 4 (TDD, green): the service
+
+New `refunds.service.ts`, `RefundsService` (`@Injectable()`): injects the `Refund` and `Payment` models (`@InjectModel(...)`), `@InjectConnection() connection`, `@Inject(STRIPE_GATEWAY) gateway: StripeGateway`, `AppEvents`, and a `Logger`. Methods:
+- `refund(request: RefundRequest): Promise<RefundView>` — Design §2, using `assertRefundAmount`, `checkRefundRequest`, `refundStatusFromGateway`.
+- `getRefund(bookingType, bookingId): Promise<RefundView | null>`.
+- `getOwn(userId, refundId): Promise<RefundView>` — 404 `'Refund not found'` unless `{ _id, userId }` matches (for the controller, step 6).
+- `handleWebhookEvent(event: Extract<GatewayEvent, { refund: unknown }>): Promise<void>` — Design §6 (implemented now, tested in step 7).
+- A private `toView(doc)` → `RefundView` (`refundId: doc._id.toString()`, `bookingId: doc.bookingId.toString()`).
+Copy the 6-line `isDuplicateKey` helper locally (don't export it from PAY-01's file).
+
+`payments.service.ts`: replace the two stub bodies with the delegation (Design §1); keep the signatures and the doc comments, and drop "Implemented in PAY-03." from them. `payments.module.ts`: add `RefundsService` to `providers` (exports unchanged). Delete `payments.service.spec.ts` (it tests the stubs; step 3's spec now covers the real methods through `PaymentsService`).
+
+Step 3's spec passes.
+**Commit:** `feat(payments): create refunds through Stripe, one per booking (PAY-03)`
+
+## Step 5: refund webhook events
+
+In `payment-intents.service.ts`: inject `RefundsService`, and route `refund.updated` / `refund.failed` to `this.refunds.handleWebhookEvent(event)` (Design §6, last bullet). Update the comment there. Nothing else in that file changes.
+**Commit:** `feat(payments): follow refund status through the Stripe webhook (PAY-03)`
+
+## Step 6: the refund endpoint
+
+New `dto/refund.response.dto.ts`: `RefundResponseDto implements RefundView` (`refundId`, `bookingType` enum, `bookingId`, `amountMinor` "Minor units", `currency`, `reason` enum `Object.values(RefundReason)`, `status` enum `Object.values(RefundStatus)`).
+
+`refunds.controller.ts`, `@ApiTags('payments') @Controller('refunds')`, constructor `(private readonly refunds: RefundsService)`:
+
+| Route | Decorators | Returns | Swagger errors |
+|---|---|---|---|
+| `GET :id` | `@Roles(Role.USER)`, `@ApiCookieAuth()` | 200 `RefundResponseDto` | 400 `VALIDATION_FAILED` (malformed id), 401, 403 `FORBIDDEN_ROLE`, 404 `NOT_FOUND` |
+
+`@ApiOperation({ summary: 'PAY-03 Get the status of one of your refunds', description: 'Pending until Stripe confirms it; then Refunded or Failed.' })`. Handler: `get(@Param('id', ParseObjectIdPipe) id: Types.ObjectId, @CurrentUser() user: AuthUser)` → `this.refunds.getOwn(user.id, id.toString())`. Register the controller in `PaymentsModule`.
+**Commit:** `feat(payments): add the refund status endpoint (PAY-03)`
+
+## Step 7: API, webhook and parity tests
+
+**`refunds.api.spec.ts`** (same setup as step 3, plus `loginAs(t.connection, Role.USER)` after each clear; create refunds through `PaymentsService.refund` for a payment of the logged-in user). A webhook helper posts `JSON.stringify(event)` to `/api/payments/webhook` with `Content-Type: application/json` and `stripe-signature: FAKE_STRIPE_SIGNATURE`; a refund event is `{ id: 'evt_r1', type: 'refund.updated', refund: { id: 're_fake_1', status: 'succeeded', metadata: { refundId } } }`.
+1. **Get:** the owner → 200, exactly the `RefundView` keys (no `paymentId`, `userId`, `stripeRefundId`, `_id`); another user → 404 `NOT_FOUND`; an unknown id → 404; `abc` → 400 `VALIDATION_FAILED`; no cookie → 401; `Role.ADMIN`, `Role.HOTEL_MODERATOR`, `Role.AIRLINE_MODERATOR` → 403.
+2. **Webhook succeeded:** a pending refund + `refund.updated` `succeeded` → 200 `{ received: true }`; the refund is `refunded`; `updated` called once more with `{ refundId, userId, status: 'refunded' }`; one `stripe_webhook_events` document `_id: 'evt_r1'`.
+3. **Idempotent:** the same event again → 200, no further change or emit; 5 parallel deliveries of a new event id (`refund.failed` on a refunded refund) → exactly one change to `failed` and one emit.
+4. **Failed:** `refund.failed` with `failed` on a pending refund → `failed`, one emit.
+5. **No change:** `refund.updated` with `pending` → 200, status unchanged, no emit, the event recorded.
+6. **Lookup by our id:** a refund document **without** `stripeRefundId` (insert it directly, status `pending`) + an event whose `refund.id` is `re_other` and `metadata.refundId` is the document's id → `refunded`, and `stripeRefundId` is now `re_other`.
+7. **Unknown refund:** `re_nope` with empty metadata → 200, nothing changes, no emit.
+8. **Payments still work:** a `payment_intent.succeeded` event after a `POST /api/payments` still marks the payment succeeded (one case, so the routing change can't break PAY-01).
+9. **Swagger:** `/api/refunds/{id}` (get) has a summary containing `PAY-03` and the tag `payments`.
+
+**`refund-notifications.spec.ts`** (integration, end to end with GEN-01): `createTestApp({ imports: [PaymentsModule, NotificationsModule], override })` with the fake gateway; a succeeded payment; `PaymentsService.refund(...)` → one `notifications` document for the user with type `refund_updated` and message `'Your refund is being processed.'`; then the `succeeded` webhook (call `t.moduleRef.get(PaymentIntentsService).handleWebhook(Buffer.from(JSON.stringify(event)), FAKE_STRIPE_SIGNATURE)`) → a second notification `'Your refund is complete.'`. (`emitAsync` isn't used here: wait for the listener with `await vi.waitFor(...)` on the notifications count.)
+
+**`payments.parity.spec.ts`** (the real service and `FakePaymentsService` agree on the contract): with the setup of step 3 and a succeeded payment, for both `real = t.moduleRef.get(PaymentsService)` and `fake = new FakePaymentsService()`:
+- `amountMinor: 0` → both reject with `BadRequestException` whose `getResponse()` is equal;
+- two calls for one booking → both return the same `refundId` twice;
+- `getRefund` for a booking without a refund → both `null`;
+- the first view of each has `status: 'pending'` (fake gateway default) and the same `bookingType`, `bookingId`, `amountMinor`, `currency`, `reason`.
+
+**Commit:** `test(payments): cover the refund webhook, the endpoint, notifications and the fake's parity (PAY-03)`
+
+## Step 8: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: PAY-03`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: PAY03_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the PAY-03 prompt (PAY-03)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/payments test/fakes/payments.fake.spec.ts test/fakes/stripe-gateway.fake.spec.ts` | 0 failed; at least 70 new tests across the new spec files |
+| G3 | `git grep -n "implemented in PAY-03" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/payments/` (not `schemas/`, not `stripe/`, not `ports/`, not `payment-rules.ts`), and `ai-prompts/kareem.txt`. Within `payment-intents.service.ts` only the refund routing and the injected `RefundsService` change (check with `git diff origin/develop...HEAD -- backend/src/modules/payments/payment-intents.service.ts`). |
+| G5 | TDD order: `git log --reverse --format=%s origin/develop..HEAD \| head -4` | `test(…refund request check…)`, `feat(…check refund requests…)`, `test(…creating refunds…)`, `feat(…create refunds…)` |
+| G6 | TDD red: `git show <sha of commit 1>:backend/src/modules/payments/refund-rules.ts` and `git show <sha of commit 3>:backend/src/modules/payments/refunds.service.ts` | both "does not exist"; your step 1 and step 3 runs showed the specs failing |
+| G7 | Negative gate: in `refund`, drop the duplicate-key fallback (rethrow instead); run `npx vitest run src/modules/payments/refunds.service.spec.ts` | case 6 fails; restore and it passes |
+| G8 | Negative gate: in `refund`, rethrow the gateway error instead of storing `failed`; run the same spec | case 4 fails; restore and it passes |
+| G9 | Negative gate: in `handleWebhookEvent`, remove the `stripe_webhook_events` insert; run `npx vitest run src/modules/payments/refunds.api.spec.ts` | case 3 fails; restore and it passes |
+| G10 | secrets: `git grep -nE "sk_(test\|live)_[A-Za-z0-9]{10,}\|whsec_[A-Za-z0-9]{10,}\|re_[A-Za-z0-9]{14,}" -- . ':!*.md'` | no output |
+| G11 | coverage lines for `refunds.service.ts` and `refund-rules.ts` in the G1 output (or a targeted coverage run) | ≥ 90% each |
+| G12 | `git log --format=%s origin/develop..HEAD` | 8 commits, Conventional Commits, each ending in `(PAY-03)` |
+| G13 | `git status --porcelain` | empty |
+
+In G5 and G10, `\|` is a shell pipe or regex `|`; type it as `|`.
+
+## Constraints
+
+- Don't change the schemas, `stripe/` (gateway interface and real gateway), `ports/`, `payment-rules.ts`, `payments.types.ts`, the public signatures of `PaymentsService`, the fakes in `backend/test/fakes/`, `common/`, other modules (booking modules, notifications), CI, the frontend or docs. **No new package.**
+- In `payment-intents.service.ts`, change only what Design §6 says.
+- `RefundsService` is internal: not exported from `PaymentsModule`.
+- Never put a real key, secret or Stripe id in code, tests, logs or commits.
+- Never weaken, skip or delete a test to pass a gate (the stub spec `payments.service.spec.ts` goes with the stubs). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G11 with the %).
+- To flag in the PR: `PaymentsService.refund` / `getRefund` are real now (callers: FLT-23/HTL-17 late payments, FLT-26, FLT-06, HTL-21); one refund per booking, a second call returns the first; a Stripe failure stores `failed` and doesn't throw; no automatic retry of a failed refund; `refund.updated` is emitted for every stored status, so GEN-01 notifies the user; the new route `GET /api/refunds/:id`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Implemented PAY-03 on feature/PAY-03-refunds in the man2o4ah-PAY-03 worktree (branched from the latest origin/develop): refund rules (tests first), RefundsService, PaymentsService delegation, refund webhook routing, GET /api/refunds/:id and the API, notification and parity specs; 7 commits before this log entry, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok give me a report of what the review agent says , and what you say and  i will decide what to do.
+
+How the output was used:
+Answer only, no files changed
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok option A
+
+How the output was used:
+Fixed the two review findings test-first on feature/PAY-03-refunds: the refund update is announced once when a webhook arrives first, and malformed ids are a 400; two commits, not pushed.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+ok we will continue but first why did this call used all this tokens ??
+
+How the output was used:
+Answer only, no files changed: measured the review agent's transcript and explained the token use.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-03
+
+Prompt:
+push pay-03 and open a pr
+
+How the output was used:
+Checked there are no conflicts with origin/develop, pushed feature/PAY-03-refunds and opened the PAY-03 PR into develop.
+================================================
+Date: 2026-11-20
+Correction recorded by: Pierre
+Related Requirement: GEN-01
+
+Historical attribution correction:
+The GEN-01 implementation and review-fix prompt blocks interleaved with ITN-18 records earlier in this merged log belong to in-app notification listeners and endpoints, not ITN-18. Their complete, separately attributed original records were reconstructed in commit 50a5518. After PR #168 merged, its historical content is retained verbatim for append-only integrity; this note corrects the attribution without changing an existing line.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile validation boundary tests and aligned the DTO with the frozen UTF-16 schema limit; integrated develop and concurrent PR updates, verified 2412 tests, and pushed 4addb1a before discovering that PR #140 had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Preserved the frozen schema and ModuleRef lookup, clarified Swagger, and merged develop without losing incoming changes or prompt-log content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+Attempted gh pr reopen 140; GitHub rejected reopening because the PR was already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created fix/ACC-09-profile-followup-d103853d from the merged develop head and cherry-picked the reproducing test commit before the validation fix.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Appended these request and approval entries to ai-prompts/kareem.txt without changing its existing content.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Attribution correction: the preceding five ACC-09 entries were recorded as Kareem because the assistant incorrectly assumed the GitHub account was Host173. The actual PR #192 author is pierreofficial (Pierre); correctly attributed request entries are appended to ai-prompts/pierre.txt, and the earlier kareem.txt entries remain unchanged.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-08
+
+Prompt:
+execute this file , branch a new branch from develop
+[Attached: GEN08_EXECUTION.md]
+# Execution — GEN-08: Image uploads (StorageService)
+
+Issue #17. Lane A of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+Implement `StorageService` (module `storage`) so images are really saved on the server's disk, served under `/uploads/<key>`, deleted and copied. Today every method throws `NotImplementedException('… implemented in GEN-08')`, so every image feature (hotel photos, airline logo, activity images, blog images, itinerary clones) answers 501 outside tests.
+
+Done means:
+1. `save(file)` validates the image (type, size **and real content**) and writes it under a random file name.
+2. `delete(key)` removes the file; a missing file is not an error.
+3. `copy(key)` writes a new copy under a new key (itinerary clones).
+4. Tests run on a real temporary folder, and the upload rejections are tested over HTTP.
+
+**Out of scope:** any controller or endpoint in another module, the per-item image counts (≤ 5 per post/activity/hotel, 1 logo: the feature services enforce them), the frontend, CI, the data model docs, cloud storage.
+
+## Context you need
+
+**Requirement GEN-08 (verbatim):** "The system shall accept image uploads in JPG or PNG format, up to 5 MB each, with up to 5 images per post, activity or hotel and 1 logo per airline, stored on the server and served by URL. Uploads outside these limits are rejected with an error."
+
+**Data model §1.6:** files are stored on the server's disk and served by URL. Documents store `ImageRef = { _id: ObjectId, key: string }`; `key` is the stored file name. The URL is computed, never stored. Removing an image deletes the file.
+
+**The contract (`backend/src/modules/storage/storage.service.ts`) stays exactly as it is:**
+```ts
+export interface StoredImage { _id: Types.ObjectId; key: string; }
+save(file: UploadedImage): Promise<StoredImage>   // validates, saves under a random key
+delete(key: string): Promise<void>                // a missing file is not an error
+copy(key: string): Promise<StoredImage>           // new file, new key (ITN-21 clones)
+urlOf(key: string): string                        // `/uploads/${key}`, unchanged
+```
+Don't rename, add or remove a public method: `FakeStorageService` (`backend/test/fakes/storage.fake.ts`) `implements PublicApi<StorageService>`, and other members' tests use that fake.
+
+**Existing code to reuse, not duplicate:**
+- `backend/src/modules/storage/image-rules.ts`: `MAX_IMAGE_BYTES` (5 MB), `ALLOWED_IMAGE_TYPES` (`image/jpeg → jpg`, `image/png → png`), `UploadedImage`, `assertImageAllowed(file)` (400 `VALIDATION_FAILED`, `details: [{ field: 'file', message }]` for a wrong type, > 5 MB, or 0 bytes). **Don't change `assertImageAllowed`'s behaviour**: the fake calls it, and other members' tests upload dummy bytes such as `Buffer.from('x')` through the fake.
+- `backend/src/modules/storage/image-upload.decorator.ts`: `@ImageUpload()` (Multer in memory, `fileSize` limit 5 MB, 1 file). A file over 5 MB is cut off by Multer before it reaches the service and answers **413 `REQUEST_FAILED`** (the hotels API tests already pin this). Don't change the decorator.
+- `backend/src/app.setup.ts`: `configureApp` serves `resolve(uploadDir)` at `/uploads/`. `backend/src/main.ts` passes `UPLOAD_DIR` (default `'uploads'`). `ConfigModule` is global, so any provider can inject `ConfigService`.
+- `backend/test/support/test-app.ts`: `createTestApp` makes a temporary upload folder (`t.uploadDir`) and passes it to `configureApp`, **but not to the config**: `ConfigService.get('UPLOAD_DIR')` is undefined in tests today. Step 1 fixes that.
+- Error shape: `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Invalid image', details: [{ field: 'file', message }] })`, `new NotFoundException({ code: ErrorCode.NotFound, message: 'File not found' })` (`ErrorCode` from `backend/src/common/errors/error-codes.ts`).
+- `@Public()` is in `backend/src/modules/accounts/auth/decorators.ts`.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style (single quotes, trailing commas). No new npm packages: use `node:fs/promises`, `node:path`, `node:crypto`.
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files (`npx vitest run <paths>`). Run the full `npm run verify` once, at the end (G1).
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. Create your own folder and branch: `git worktree add ../man2o4ah-GEN-08 -b feature/GEN-08-image-uploads origin/develop`, then work only in `../man2o4ah-GEN-08`. If the branch already exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. Check that develop is green for this run: `npx vitest run src/modules/admin src/modules/storage`. If anything fails, stop and report (develop's admin test was broken until PR #166 merged).
+5. Confirm the stub: `git grep -n "implemented in GEN-08" -- backend/src` lists `save`, `delete` and `copy`. If not, stop and report.
+
+## Step 1: the test app passes its upload folder to the config
+
+In `backend/test/support/test-app.ts`, the `ConfigModule.forRoot` call loads `TEST_CONFIG`. Change its `load` to:
+```ts
+load: [() => ({ ...TEST_CONFIG, UPLOAD_DIR: uploadDir })],
+```
+(`uploadDir` is already created above the builder.) Nothing else in that file changes.
+
+In `backend/test/support/test-app.spec.ts` add one test: after `createTestApp()`, `t.moduleRef.get(ConfigService).get('UPLOAD_DIR')` equals `t.uploadDir`.
+
+**Commit:** `test(support): give the test config the temporary upload folder (GEN-08)`
+
+## Step 2: check the real file content
+
+In `image-rules.ts` add, below `assertImageAllowed`:
+
+```ts
+/** The image type a file's first bytes show, or undefined if it is neither JPG nor PNG (GEN-08). */
+export function detectImageType(bytes: Buffer): keyof typeof ALLOWED_IMAGE_TYPES | undefined
+```
+- JPEG: the first 3 bytes are `FF D8 FF` → `'image/jpeg'`.
+- PNG: the first 8 bytes are `89 50 4E 47 0D 0A 1A 0A` → `'image/png'`.
+- Anything else, including a buffer shorter than the signature → `undefined`.
+
+```ts
+/** Throws 400 VALIDATION_FAILED (field `file`) unless the bytes are a JPG or PNG of the declared type (GEN-08). Called by StorageService.save only, never by the fake. */
+export function assertImageContent(file: UploadedImage): void
+```
+- `detectImageType(file.buffer)` is `undefined` → message `'the file is not a JPG or PNG image'`.
+- Detected type ≠ `file.mimetype` → message `'the file content does not match its type'`.
+- Same exception shape as `assertImageAllowed` (`message: 'Invalid image'`, `details: [{ field: 'file', message }]`).
+
+Why only in the real service: the type in the request is only what the browser claims. A renamed `.exe` sent as `image/png` must not end up served from our server. The fake skips it so other members' tests can keep using dummy bytes.
+
+Tests in `image-rules.spec.ts` (add, don't change existing ones):
+- `detectImageType`: a JPEG signature (+ padding) → `image/jpeg`; a PNG signature → `image/png`; `GIF89a…` → `undefined`; an empty buffer → `undefined`; `FF D8` only (2 bytes) → `undefined`; the PNG signature missing its last byte → `undefined`.
+- `assertImageContent`: PNG bytes + `image/png` passes; JPEG bytes + `image/jpeg` passes; JPEG bytes + `image/png` → 400 with the "does not match" detail; text bytes + `image/png` → 400 with the "not a JPG or PNG" detail. Assert `getResponse()` has `code: 'VALIDATION_FAILED'` and `details[0].field === 'file'`.
+
+**Commit:** `feat(storage): check an image's real content by its signature (GEN-08)`
+
+## Step 3: implement StorageService
+
+Rewrite the body of `storage.service.ts` (keep the `StoredImage` interface and the method signatures; update the JSDoc, removing "Implemented in GEN-08").
+
+```ts
+/** Keys this service creates: a random name plus `.jpg` or `.png`. Anything else (`../x.png`, `a/b.png`) is never a stored file. */
+const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*\.(jpg|png)$/;
+```
+(The pattern also accepts the fake's ObjectId-style keys, so a key written by either works.)
+
+- **Constructor:** inject `ConfigService`; `this.dir = resolve(config.get<string>('UPLOAD_DIR') ?? 'uploads')`. Same default and the same `resolve` as `main.ts`/`configureApp`, so the service writes exactly where the static route reads. Change `import type { Types }` to a value import (`new Types.ObjectId()` is needed). Add a `Logger` (`new Logger(StorageService.name)`).
+- **`save(file)`:**
+  1. If `file` is missing (a controller passed `undefined` because the request had no file) → 400 `VALIDATION_FAILED`, `details: [{ field: 'file', message: 'an image file is required' }]`.
+  2. `assertImageAllowed(file)`, then `assertImageContent(file)`.
+  3. The extension comes from `ALLOWED_IMAGE_TYPES[file.mimetype]` (now proven to match the content).
+  4. Write through the private `write` below.
+- **`delete(key)`:** if `key` doesn't match `KEY_PATTERN` → log a warning (`Ignored delete of an invalid image key`; don't log the key's full content if longer than 100 characters) and return. Otherwise `unlink(join(this.dir, key))`; ignore an error whose `code` is `'ENOENT'` (already gone, retrying is safe); rethrow any other error.
+- **`copy(key)`:** invalid key → `NotFoundException` (`code: NOT_FOUND`, `'File not found'`), same as the fake for an unknown key. Read the file; `ENOENT` → the same 404; other errors rethrow. The extension is the source key's extension. Write through `write`.
+- **`urlOf(key)`:** unchanged.
+- **private `write(bytes, extension)`:** `await mkdir(this.dir, { recursive: true })`; `key = \`${randomUUID()}.${extension}\``; `await writeFile(join(this.dir, key), bytes, { flag: 'wx' })` (`wx` = fail rather than overwrite); return `{ _id: new Types.ObjectId(), key }`.
+
+Never build a path from client text: `join(this.dir, key)` is only ever called with a key that matched `KEY_PATTERN`.
+
+In `backend/test/fakes/storage.fake.ts` change only the class JSDoc: add that the fake does **not** check the file's real content (magic bytes), so tests may use any bytes. No code change.
+
+**Commit:** `feat(storage): save, delete and copy image files on disk (GEN-08)`
+
+## Step 4: integration tests
+
+Replace `backend/src/modules/storage/storage.service.spec.ts` (today's "(stub)" tests assert the methods throw; that behaviour is gone, so they are replaced, not kept).
+
+Setup:
+```ts
+let t: TestApp;
+let storage: StorageService;
+beforeAll(async () => {
+  t = await createTestApp({ imports: [StorageModule] });
+  storage = t.moduleRef.get(StorageService);
+}, HOOK_TIMEOUT);
+afterAll(() => t.close(), HOOK_TIMEOUT);
+```
+Helpers in the spec: `png(size)` = the PNG signature followed by zero bytes up to `size`; `jpeg(size)` = `FF D8 FF` + zeros; `image(bytes, mimetype, name)` returns an `UploadedImage` (`size: bytes.length`). To read a served file as bytes with Supertest:
+```ts
+const res = await t.http().get(`/uploads/${key}`).buffer(true)
+  .parse((r, done) => { const chunks: Buffer[] = []; r.on('data', (c: Buffer) => chunks.push(c)); r.on('end', () => done(null, Buffer.concat(chunks))); });
+```
+(`/uploads` is not under `/api`.) Use `readdir(t.uploadDir)` to check what is on disk. Before each test, empty `t.uploadDir` (`rm` each entry), so tests don't depend on each other.
+
+Cases (one `it` each unless grouped):
+1. **save PNG:** key matches `/^[0-9a-f-]{36}\.png$/`; `_id` is a `Types.ObjectId`; the file at `join(t.uploadDir, key)` has exactly the uploaded bytes; `GET /uploads/<key>` → 200, `content-type` starts with `image/png`, body equals the bytes.
+2. **save JPEG:** key ends in `.jpg`.
+3. **random names:** saving the same bytes twice gives two different keys and two files.
+4. **size boundaries:** exactly `MAX_IMAGE_BYTES` → saved; `MAX_IMAGE_BYTES + 1` → 400, `details[0].field === 'file'`; 0 bytes → 400. After the rejections only the accepted file is on disk.
+5. **wrong content:** `image/gif` → 400; JPEG bytes declared `image/png` → 400; text bytes declared `image/png` → 400. Nothing written.
+6. **missing file:** `save(undefined as unknown as UploadedImage)` → 400 with message `'an image file is required'` in details.
+7. **delete:** removes the file and `GET /uploads/<key>` → 404 afterwards; a second delete resolves; deleting a valid but never-saved key resolves.
+8. **delete never leaves the folder:** write a sentinel file in a separate temp folder (`mkdtempSync(join(tmpdir(), 'outside-'))`); call `delete` with `'../' + basename(sentinelDir) + '/sentinel.png'` style keys and with `'a/b.png'`, `''`, `'x.gif'`: each resolves and the sentinel still exists. Clean the temp folder up in `finally`.
+9. **copy:** new key ≠ old key, same extension, same bytes; delete the original → the copy is still on disk and served.
+10. **copy failures:** a never-saved valid key → rejects with `NotFoundException` whose response has `code: 'NOT_FOUND'`; `'../x.png'` → the same 404.
+11. **concurrency:** 20 parallel `save` calls (`Promise.all`) → 20 distinct keys and 20 files.
+12. **urlOf:** `'a.png'` → `'/uploads/a.png'`.
+
+**Commit:** `test(storage): cover save, delete and copy on a real folder (GEN-08)`
+
+## Step 5: API rejections
+
+New file `backend/src/modules/storage/storage.api.spec.ts`. There is no storage endpoint, so the spec declares a tiny test-only controller that uses the real decorator, exactly as feature modules do:
+```ts
+@Controller('test-uploads')
+class UploadTestController {
+  constructor(private readonly storage: StorageService) {}
+  @Public()
+  @Post()
+  @ImageUpload()
+  upload(@UploadedFile() file: UploadedImage): Promise<StoredImage> {
+    return this.storage.save(file);
+  }
+}
+// createTestApp({ imports: [StorageModule], controllers: [UploadTestController] })
+```
+Cases (`POST /api/test-uploads`, `.attach('file', bytes, { filename, contentType })`):
+- a valid PNG → 201 `{ _id: <24-hex string>, key }`, and `GET /uploads/<key>` → 200;
+- exactly 5 MB PNG → 201 (if Multer answers 413 here, stop and report; don't change the decorator);
+- 5 MB + 1 → **413** with `code: 'REQUEST_FAILED'` (Multer's limit), and nothing on disk;
+- a GIF (`image/gif`) → 400 `VALIDATION_FAILED`;
+- text bytes sent as `photo.png`, `image/png` → 400 `VALIDATION_FAILED`;
+- no file at all (`.field('x', 'y')` only) → 400 `VALIDATION_FAILED`;
+- two files in one request → 400 `VALIDATION_FAILED`.
+After the test, only the accepted files are in `t.uploadDir`.
+
+**Commit:** `test(storage): reject bad uploads over HTTP (GEN-08)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-08`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN08_EXECUTION.md]` plus its full content), `How the output was used` (one line: what was built, the commits). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-08 prompt (GEN-08)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/storage test/support/test-app.spec.ts test/fakes/storage.fake.spec.ts` | 0 failed; at least 35 tests passed |
+| G3 | `git grep -n "implemented in GEN-08" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: `backend/src/modules/storage/*` (image-rules.ts, image-rules.spec.ts, storage.service.ts, storage.service.spec.ts, storage.api.spec.ts), `backend/test/support/test-app.ts`, `backend/test/support/test-app.spec.ts`, `backend/test/fakes/storage.fake.ts`, `ai-prompts/kareem.txt` |
+| G5 | Negative gate: in `storage.service.ts`, comment out the `assertImageContent(file)` call; run `npx vitest run src/modules/storage` | at least 2 tests fail; restore the line and the same run passes |
+| G6 | Negative gate: replace the `KEY_PATTERN` check in `delete` with `if (false)`; run case 8 | it fails (or the sentinel is gone); restore and it passes |
+| G7 | coverage line for `storage.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-08)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- Don't change any other module, `common/`, CI, the frontend, or docs. No new packages.
+- Don't change `assertImageAllowed`, `@ImageUpload` or the public signatures.
+- Never weaken, skip or delete a test to pass a gate (the stub tests in step 4 are replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Any decision this file didn't settle, with the reason.
+
+develop is green now
+
+How the output was used:
+Built StorageService on disk (random keys, JPG/PNG type, size and magic-byte checks, safe delete and copy) on feature/GEN-08-image-uploads; test app passes its upload folder to the config; real-folder and HTTP upload tests; commits: test(support), feat(storage) x2, test(storage) x2, chore(ai).
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude (claude.ai)
+Related Requirement: GEN-07
+
+Prompt:
+do this now in a new branch from develop
+[Attached: GEN07_EXECUTION.md]
+# Execution — GEN-07: Audit log
+
+Issue #20. Lane C of four lanes that run **at the same time** in separate folders. Stay inside the files listed in G4.
+
+## Goal
+
+The audit module stores every admin action (append-only) and the admin can read them, newest first, filtered by action and date. Today `AuditService.list` throws `NotImplementedException('list: implemented in GEN-07')` and nothing listens to `admin.action`.
+
+Done means:
+1. A listener for `admin.action` that stores one `audit_logs` document per event.
+2. `AuditService.list(query)` implemented (paginated, filters, newest first).
+3. `GET /api/admin/audit-logs` (admin only) in the **admin** module.
+4. Integration and API tests.
+
+**Out of scope:** emitting `admin.action` (admin and moderation emit it in ACC-13, ACC-15, ACC-16, GEN-10 and ACC-07a), any update or delete of audit entries, the frontend, CI.
+
+## Context you need
+
+**Requirement GEN-07 (verbatim):** "The system shall keep an audit log of admin actions (suspensions, deletions)."
+
+**Rules from the docs:**
+- `domain-rules.md` §7: admin and moderation emit `admin.action { actorId, action, target, details }` after each suspend, reactivate, moderator creation, password reset, provider (de)activation, report resolution, hide or delete. The audit module stores it (append-only). `GET /api/admin/audit-logs` is paginated and filterable by action and date.
+- `data-model.md` §3.13 `audit_logs`: **append-only, no update or delete anywhere in the code**. Fields `actorId` (ObjectId, the admin), `action` (enum), `target { type, id }`, `details?` (small, **no secrets, never passwords**), `createdAt` only. The schema already exists (`backend/src/modules/audit/schemas/audit-log.schema.ts`, with `AuditAction`); don't change it.
+- `endpoints.md`: `GET /api/admin/audit-logs | GEN-07 | Adm | module admin`. The URL's module is **admin**: the route goes in `AdminController` (`backend/src/modules/admin/admin.controller.ts`), which calls `AuditService`. `data-model.md` §6.1 allows admin → audit.
+- Event: `Events.AdminAction` (`backend/src/common/events/events.ts`), payload `AdminActionEvent { actorId: string; action: AuditAction; target: { type: string; id: string }; details?: Record<string, unknown> }` (`event-payloads.ts`). Listen with `@OnEvent(Events.AdminAction)`; never a string literal.
+- JSON: IDs keep the field name `_id` (24-hex string), instants are ISO strings (`api-contract.md` §3). Lists: `{ items, page, limit, total, totalPages }`, page size 10 by default, max 50 (`backend/src/common/pagination/`).
+
+**The contract (`audit.service.ts`, `audit.types.ts`) stays:**
+```ts
+list(query: AuditLogQueryDto): Promise<Paginated<AuditLogView>>
+interface AuditLogView { id: string; actorId: string; action: AuditAction; target: { type: string; id: string }; details?: Record<string, unknown>; createdAt: Date }
+```
+`FakeAuditService` (`backend/test/fakes/audit.fake.ts`) `implements PublicApi<AuditService>`: don't add public methods to `AuditService` (the listener is a separate class). The HTTP response maps `id` → `_id` (step 4).
+
+**`AuditLogQueryDto` today** (`audit.types.ts`): `page`, `limit`, `action?` (enum), `from?` and `to?` as `Date` via `@Type(() => Date)` + `@IsDate()`, both inclusive. Problem: `to=2026-11-19` becomes `2026-11-19T00:00:00Z`, which **drops the rest of that day**, and JS turns `2026-02-30` into 2 March instead of rejecting it. Step 2 fixes both without changing the field names or types.
+
+**Existing code to reuse:**
+- `backend/src/common/dates/date-only.ts`: `toDateOnly('YYYY-MM-DD')` (strict: throws on `2026-02-30`), `addDays`.
+- `backend/src/common/pagination/paginate.ts`: `paginate(model, filter, { page, limit }, { sort })`.
+- Errors: `new BadRequestException({ code: ErrorCode.ValidationFailed, message: 'Validation failed', details: [{ field, message }] })` (`backend/src/common/errors/error-codes.ts`).
+- Auth: `@Roles(Role.ADMIN)` is already on `AdminController` (class level), so the new route is admin-only.
+
+**Code rules:** ESM (relative imports end in `.js`); `import type` for type-only imports; no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments; Prettier style. No new npm packages.
+
+**Machine note:** three other agents run backend tests on this computer at the same time. While working, run only your own spec files. Run the full `npm run verify` once, at the end (G1).
+
+**Merge note:** Mostafa's open admin PRs also edit `admin.controller.ts` and `admin.module.ts`. Keep your changes there small (one import, one constructor parameter, one route) so the later merge is easy.
+
+## Before you start
+
+1. In the main clone: `git fetch origin`.
+2. `git worktree add ../man2o4ah-GEN-07 -b feature/GEN-07-audit-log origin/develop`, then work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`.
+4. `npx vitest run src/modules/admin src/modules/audit` must pass. If the admin test "provides and exports AdminService from AdminModule" fails, PR #166 isn't merged yet: stop and report.
+
+## Step 1: the listener (append-only writes)
+
+New file `backend/src/modules/audit/audit.listener.ts`, class `AuditListener` (a provider of `AuditModule`, injects the `AuditLog` model, has a `Logger`).
+
+`@OnEvent(Events.AdminAction) async onAdminAction(payload: PayloadOf<typeof Events.AdminAction>): Promise<void>`:
+1. **Validate** (events come from our own code, but a bad one must not crash anything): `actorId` is a 24-hex ObjectId string; `action` is one of `Object.values(AuditAction)`; `target.type` and `target.id` are non-empty strings. Any failure → `logger.warn('Ignored an invalid admin.action event: <which field>')` and return. Never log `details`.
+2. **Sanitize `details`:** if it is a plain object, keep a shallow copy **without** any key matching `/pass(word)?|token|secret|hash/i`; if it isn't a plain object (array, string, null), store no `details`. If nothing is left, store no `details`.
+3. `await this.model.create({ actorId: new Types.ObjectId(actorId), action, target: { type, id }, details })` (omit `details` when there is none).
+4. Wrap 1–3 in `try/catch`; log `Failed to store an audit entry: <error message>`; never rethrow.
+
+No deduplication: an audit log is append-only and every emit is one admin action.
+
+Add `AuditListener` to `AuditModule` providers (keep `AuditService` exported).
+
+**Commit:** `feat(audit): store every admin action from the admin.action event (GEN-07)`
+
+## Step 2: the query DTO accepts calendar days
+
+In `audit.types.ts`, keep the names `from`/`to` and their type `Date`, but replace `@Type(() => Date)` on each with a `@Transform` (class-transformer) that:
+- for a string matching `/^\d{4}-\d{2}-\d{2}$/` (a calendar day): `from` → `toDateOnly(value)` (00:00:00.000Z of that day); `to` → `new Date(addDays(toDateOnly(value), 1).getTime() - 1)` (23:59:59.999Z of that day). If `toDateOnly` throws (`2026-02-30`), return `new Date(NaN)` so `@IsDate()` rejects it;
+- for any other string: `new Date(value)` (the current behaviour, ISO date-times);
+- anything else: unchanged.
+Keep `@IsOptional()` and `@IsDate()`. Update the `@ApiPropertyOptional` descriptions: "`YYYY-MM-DD` (that whole UTC day, inclusive) or an ISO date-time (inclusive)".
+
+Update `audit.types.spec.ts`: keep every existing test (they use date-times and still pass), and add: `from=2026-11-01` → `2026-11-01T00:00:00.000Z`; `to=2026-11-30` → `2026-11-30T23:59:59.999Z`; `from=2026-02-30` → error on `from`; `to=2026-13-01` → error on `to`.
+
+**Commit:** `feat(audit): accept calendar days in the audit date filter (GEN-07)`
+
+## Step 3: AuditService.list
+
+Implement in `audit.service.ts` (inject the `AuditLog` model; update the JSDoc, removing "Implemented in GEN-07"):
+1. If both `from` and `to` are set and `from > to` → 400 `VALIDATION_FAILED`, `details: [{ field: 'from', message: 'from must be on or before to' }]`.
+2. Filter: `action` if set; `createdAt: { $gte: from, $lte: to }` with only the bounds that are set.
+3. `paginate(model, filter, query, { sort: { createdAt: -1, _id: -1 } })` (the `_id` tie-break keeps pages stable when two entries share a millisecond).
+4. Map each document to `AuditLogView`: `id: _id.toString()`, `actorId: actorId.toString()`, `action`, `target: { type, id }`, `details` only when present, `createdAt`.
+
+Make `FakeAuditService.list` (`backend/test/fakes/audit.fake.ts`) throw the same 400 for `from > to`, and add that case to `test/fakes/audit.fake.spec.ts`, so the fake keeps matching the real service.
+
+**Commit:** `feat(audit): list audit entries newest first with filters (GEN-07)`
+
+## Step 4: the admin endpoint
+
+New `backend/src/modules/admin/dto/audit-log.response.dto.ts`: `AuditLogTargetDto { type; id }`, `AuditLogResponseDto { _id; actorId; action (enum: Object.values(AuditAction)); target; details? (type: 'object', additionalProperties: true); createdAt (date-time) }` with a `static fromView(view: AuditLogView): AuditLogResponseDto`, and `PaginatedAuditLogsResponseDto` (`items` + page fields).
+
+In `admin.module.ts` import `AuditModule`. In `admin.controller.ts` inject `AuditService` and add:
+```ts
+@Get('audit-logs')
+@ApiOperation({ summary: 'GEN-07 List admin actions (newest first, by action and date)' })
+@ApiOkResponse({ type: PaginatedAuditLogsResponseDto })
+@ApiBadRequestResponse({ description: 'Invalid action, date or pagination, or from after to' })
+// + the 401 / 403 responses the existing route documents
+async listAuditLogs(@Query() query: AuditLogQueryDto): Promise<Paginated<AuditLogResponseDto>> {
+  const page = await this.audit.list(query);
+  return { ...page, items: page.items.map((item) => AuditLogResponseDto.fromView(item)) };
+}
+```
+Nothing else in the admin module changes.
+
+**Commit:** `feat(admin): add the audit log endpoint (GEN-07)`
+
+## Step 5: tests
+
+Replace `backend/src/modules/audit/audit.service.spec.ts` (its only test asserts the stub throws; that behaviour is gone).
+
+**`audit.listener.spec.ts` (integration)** with `t = await createTestApp({ imports: [AuditModule] })`, `emitter = t.moduleRef.get(EventEmitter2)`, emit with `await emitter.emitAsync(Events.AdminAction, payload)`, `beforeEach(() => clearCollections(t.connection))`:
+- a valid event → exactly 1 document: `actorId` an ObjectId equal to the id, `action`, `target`, `createdAt` set, no `updatedAt`;
+- `details: { reason: 'spam', password: 'x', resetToken: 'y', passwordHash: 'z', note: 'ok' }` → stored `details` is `{ reason: 'spam', note: 'ok' }`;
+- `details: { password: 'x' }` → no `details` field; `details: ['a']` → no `details`;
+- invalid `actorId` (`'nope'`), unknown `action` (`'made_coffee'`), empty `target.id` → no document, and `emitAsync` resolves;
+- the same event emitted twice → 2 documents (append-only, no dedupe).
+
+**`audit.service.spec.ts` (integration)** with the same app. Insert entries with known times through `model.collection.insertMany([...])` (it bypasses Mongoose timestamps, so `createdAt` is exactly what you set; use `new Types.ObjectId()` for `_id` and `actorId`). Build queries with `plainToInstance(AuditLogQueryDto, {...})` so the transforms run.
+- newest first; two entries with the same `createdAt` come out in `_id` descending order;
+- `action` filter;
+- date-time bounds are inclusive: an entry exactly at `from` and one exactly at `to` are included; 1 ms outside each is excluded;
+- calendar days: `to=2026-11-19` includes `2026-11-19T23:59:59.999Z` and excludes `2026-11-20T00:00:00.000Z`; `from=2026-11-19` includes `2026-11-19T00:00:00.000Z` and excludes `2026-11-18T23:59:59.999Z`;
+- `from` after `to` → `BadRequestException` with `code: 'VALIDATION_FAILED'`;
+- 11 entries → page 1 has 10, page 2 has 1, `total` 11, `totalPages` 2; page 3 → `items: []`;
+- view mapping: `id` and `actorId` are 24-hex strings; no `details` key when the document has none.
+
+**`backend/src/modules/admin/admin.audit-logs.api.spec.ts` (API)** with `t = await createTestApp({ imports: [AdminModule] })`, logging in with `loginAs(t.connection, Role.X)` **after** each `clearCollections`:
+- no cookie → 401; `user`, `airline_moderator`, `hotel_moderator` → 403 each; `admin` → 200;
+- an entry inserted through the listener (emit `AdminAction`) appears with `_id` (24-hex), `actorId`, `action`, `target`, ISO `createdAt`, and no `id` field;
+- `?action=account_suspended` filters; `?from=2026-11-19&to=2026-11-19` returns only that day's entries;
+- 400 `VALIDATION_FAILED` for `?action=nope`, `?from=2026-02-30`, `?limit=51`, `?from=2026-11-20&to=2026-11-19`;
+- Swagger (`SwaggerModule.createDocument(t.app, new DocumentBuilder().build())`): `/api/admin/audit-logs` has a `get` whose summary contains `GEN-07`, tag `admin`, and `PaginatedAuditLogsResponseDto` in the schemas.
+
+**Commit:** `test(audit): cover the listener, the filters and the admin endpoint (GEN-07)`
+
+## Step 6: prompt log
+
+Append one entry for this run to `ai-prompts/kareem.txt`, as your agent file says. If this folder has no agent file, use the course format: `Date`, `Student: Kareem`, `Tool`, `Related Requirement: GEN-07`, `Prompt` (Kareem's message copied exactly; this file goes in as `[Attached: GEN07_EXECUTION.md]` plus its full content), `How the output was used` (one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the GEN-07 prompt (GEN-07)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` (alone, at the end) | exit 0 |
+| G2 | `cd backend && npx vitest run src/modules/audit src/modules/admin test/fakes/audit.fake.spec.ts` | 0 failed; at least 40 tests passed |
+| G3 | `git grep -n "implemented in GEN-07" -- backend/src` | no output |
+| G4 | `git diff --name-only origin/develop...HEAD` | only: files under `backend/src/modules/audit/` (not `schemas/`), `backend/src/modules/admin/admin.controller.ts`, `backend/src/modules/admin/admin.module.ts`, `backend/src/modules/admin/dto/audit-log.response.dto.ts`, `backend/src/modules/admin/admin.audit-logs.api.spec.ts`, `backend/test/fakes/audit.fake.ts`, `backend/test/fakes/audit.fake.spec.ts`, `ai-prompts/kareem.txt` |
+| G5 | append-only: the command below the table | no output |
+| G6 | Negative gate: in the DTO, make the calendar-day `to` return `toDateOnly(value)` (start of day); run `npx vitest run src/modules/audit` | the calendar-day `to` tests fail; restore and they pass |
+| G7 | coverage line for `audit.service.ts` in the G1 output | ≥ 90% lines |
+| G8 | `git log --format=%s origin/develop..HEAD` | 6 commits, Conventional Commits, each ending in `(GEN-07)` |
+| G9 | `git status --porcelain` | empty |
+
+G5, from the repository root:
+```bash
+git grep -nE "updateOne|updateMany|findOneAndUpdate|findByIdAndUpdate|replaceOne|deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete" -- backend/src/modules/audit ':!*.spec.ts'
+```
+
+## Constraints
+
+- Don't change the audit schema, `common/` (events included), other modules beyond the three admin files in G4, CI, the frontend or docs. No new packages. Don't emit any event outside tests.
+- Never weaken, skip or delete a test to pass a gate (the stub test in step 5 is replaced because the stub is gone). If a gate fails and the fix isn't clear, stop and report.
+- Stage files by name. Don't push. Don't open or merge a PR.
+
+## Report
+
+- The branch, the worktree folder and the commit list.
+- Each gate's result in one line (G2 with the test count, G7 with the %).
+- Contract changes to flag in the PR: `AuditLogQueryDto` now accepts calendar days; `FakeAuditService` rejects `from > to`.
+- Any decision this file didn't settle, with the reason.
+
+How the output was used:
+Built the audit log on feature/GEN-07-audit-log: an admin.action listener (append-only, secrets stripped from details), calendar-day date filters, AuditService.list, GET /api/admin/audit-logs, and integration and API tests; commits: feat(audit) x3, feat(admin), test(audit), chore(ai).
+================================================
+Date: 2026-11-19
+Student: Kareem
+Tool: Claude Code
+Related Requirement: GEN-07
+
+Prompt:
+you will find my 4 pr (host173 prs) the last review found some errers, fix them and then push the changes( it's ok to do it as aya so dw) this is 4 parts task so take you time and work in order .
+
+How the output was used:
+Fixed review points 1-4 on PR #170 (nested secret stripping and whole-word key matching in audit.listener.ts, ISO-only date bounds in audit.types.ts, id tie-break in test/fakes/audit.fake.ts) with tests committed first, pushed to feature/GEN-07-audit-log.
+================================================

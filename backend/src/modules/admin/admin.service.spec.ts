@@ -32,6 +32,10 @@ import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { ListReportsQueryDto } from '../moderation/dto/list-reports-query.dto.js';
+import { ReportResolutionAction } from '../moderation/dto/resolve-report.dto.js';
+import { ModerationService } from '../moderation/moderation.service.js';
+import { ReportTargetType } from '../moderation/schemas/report.schema.js';
 import { AdminModule } from './admin.module.js';
 import { AdminService } from './admin.service.js';
 import { AdminProviderParamsDto } from './dto/admin-provider-params.dto.js';
@@ -48,11 +52,13 @@ function createAdminService(
     flights?: FakeFlightsService;
     hotels?: FakeHotelsService;
     events?: FakeEvents;
+    moderation?: Partial<ModerationService>;
   } = {},
 ): AdminService {
   return new AdminService(
     flightBookings as unknown as FlightBookingsService,
     hotelBookings as unknown as HotelBookingsService,
+    (deps.moderation ?? {}) as ModerationService,
     (deps.accounts ?? new FakeAccountsService()) as unknown as AccountsService,
     (deps.flights ?? new FakeFlightsService()) as unknown as FlightsService,
     (deps.hotels ?? new FakeHotelsService()) as unknown as HotelsService,
@@ -463,6 +469,69 @@ describe('AdminService', () => {
     }
   });
 
+  it('delegates moderation methods (listReports, resolveReport, hideContent, deleteContent) to ModerationService (GEN-10)', async () => {
+    const listResult = {
+      items: [],
+      page: 1,
+      limit: 10,
+      total: 0,
+      totalPages: 0,
+    };
+    const resolvedView = {
+      _id: 'report-1',
+      reporterId: 'user-1',
+      targetType: ReportTargetType.POST,
+      targetId: 'post-1',
+      reason: 'Spam',
+      status: 'dismissed',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const moderationStub = {
+      listReports: vi.fn().mockResolvedValue(listResult),
+      resolveReport: vi.fn().mockResolvedValue(resolvedView),
+      hideContent: vi.fn().mockResolvedValue(undefined),
+      deleteContent: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = createAdminService(
+      new FakeFlightBookingsService([]),
+      new FakeHotelBookingsService([]),
+      { moderation: moderationStub },
+    );
+
+    const query = new ListReportsQueryDto();
+    expect(await service.listReports(query)).toBe(listResult);
+    expect(moderationStub.listReports).toHaveBeenCalledWith(query);
+
+    const dto = { action: ReportResolutionAction.DISMISS };
+    expect(await service.resolveReport('report-1', dto, 'admin-1')).toBe(
+      resolvedView,
+    );
+    expect(moderationStub.resolveReport).toHaveBeenCalledWith(
+      'report-1',
+      dto,
+      'admin-1',
+    );
+
+    await service.hideContent(ReportTargetType.POST, 'post-1', 'admin-1');
+    expect(moderationStub.hideContent).toHaveBeenCalledWith(
+      ReportTargetType.POST,
+      'post-1',
+      'admin-1',
+    );
+
+    await service.deleteContent(
+      ReportTargetType.COMMENT,
+      'comment-1',
+      'admin-1',
+    );
+    expect(moderationStub.deleteContent).toHaveBeenCalledWith(
+      ReportTargetType.COMMENT,
+      'comment-1',
+      'admin-1',
+    );
+  });
+
   it('delegates listAccounts cleanly, strips unexpected fields, and validates role/status on direct calls (ACC-14)', async () => {
     const accounts = new FakeAccountsService([
       {
@@ -802,6 +871,9 @@ describe('AdminService', () => {
     expect((await fakeFlights.getAirline(airlineId))?.isActive).toBe(false);
     expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
       {
+        eventId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
         providerType: ProviderType.AIRLINE,
         providerId: airlineId,
         moderatorIds: [modA1, modA2],
@@ -809,6 +881,7 @@ describe('AdminService', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: adminId,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airlineId },
@@ -828,6 +901,9 @@ describe('AdminService', () => {
     expect(setAirlineSpy).not.toHaveBeenCalled();
     expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
       {
+        eventId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
         providerType: ProviderType.HOTEL,
         providerId: hotelId,
         moderatorIds: [],
@@ -835,6 +911,7 @@ describe('AdminService', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: adminId,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotelId },

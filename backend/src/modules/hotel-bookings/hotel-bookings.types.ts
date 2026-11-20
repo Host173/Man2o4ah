@@ -1,4 +1,28 @@
+import type { CancelledBy } from '../../common/database/cancellation.schema.js';
 import type { HotelReservationStatus } from './schemas/hotel-reservation.schema.js';
+import type { RefundView } from '../payments/payments.types.js';
+
+/** HTL-21: the snapshot tiers applied to the whole reservation total. */
+export interface HotelRefundPreview {
+  percent: number;
+  amountMinor: number;
+  currency: string;
+}
+
+/** HTL-21: a whole-reservation cancellation; PAY-03 supplies the refund status. */
+export interface CancelledHotelReservation {
+  _id: string;
+  reference: string;
+  status: 'cancelled';
+  cancellation: {
+    cancelledAt: Date;
+    cancelledBy: 'user';
+    refundPercent: number;
+    refundAmountMinor: number;
+  };
+  /** Null when no positive refund is due. A recorded gateway failure is `failed`. */
+  refund: RefundView | null;
+}
 
 /**
  * Internal service input for the admin booking list (ACC-17), not an HTTP DTO.
@@ -65,4 +89,61 @@ export interface HotelHold {
   };
   /** When the hold ends if unpaid: 10 minutes after the reservation was created. */
   holdExpiresAt: Date;
+}
+
+export const HotelReservationGroup = {
+  UPCOMING: 'upcoming',
+  PAST: 'past',
+  CANCELLED: 'cancelled',
+} as const;
+export type HotelReservationGroup =
+  (typeof HotelReservationGroup)[keyof typeof HotelReservationGroup];
+
+export interface ListMyHotelReservationsQuery {
+  group?: HotelReservationGroup;
+  page?: number;
+  limit?: number;
+}
+
+export interface HotelReservationPolicyView {
+  cancellationTiers: { daysBefore: number; refundPercent: number }[];
+  checkInTime: string;
+  checkOutTime: string;
+}
+
+export interface HotelReservationCancellationView {
+  cancelledAt: Date;
+  cancelledBy: CancelledBy;
+  refundPercent: number;
+  refundAmountMinor: number;
+}
+
+/** One item in the owner's paginated reservation list (HTL-20). */
+export interface HotelReservationSummaryView {
+  _id: string;
+  /** Set only on confirmation (HTL-17); never generated on read. */
+  reference?: string;
+  status: HotelReservationStatus;
+  hotelId: string;
+  hotelName: string;
+  /** `YYYY-MM-DD`. */
+  checkInDate: string;
+  /** `YYYY-MM-DD`. */
+  checkOutDate: string;
+  nights: number;
+  rooms: HeldRoom[];
+  totalMinor: number;
+  currency: string;
+}
+
+/** Full customer-facing details for a single reservation (HTL-20). */
+export interface HotelReservationDetailView extends HotelReservationSummaryView {
+  policy: HotelReservationPolicyView;
+  holdExpiresAt: Date;
+  confirmedAt?: Date;
+  expiredAt?: Date;
+  completedAt?: Date;
+  cancellation?: HotelReservationCancellationView;
+  createdAt: Date;
+  updatedAt: Date;
 }

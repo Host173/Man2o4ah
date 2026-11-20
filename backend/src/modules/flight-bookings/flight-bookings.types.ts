@@ -1,4 +1,5 @@
 import type { CabinClass } from '../../common/database/cabin-class.js';
+import type { RefundView } from '../payments/payments.types.js';
 import type {
   FlightBookingStatus,
   PassengerType,
@@ -97,4 +98,26 @@ export interface FlightHold extends FlightQuote {
   status: 'pending_payment';
   /** When the hold ends if unpaid: 10 minutes after the booking was created. */
   holdExpiresAt: Date;
+}
+
+/** FLT-26: what cancelling would refund right now. Nothing is saved. */
+export interface FlightRefundPreview {
+  percent: number;
+  amountMinor: number;
+  currency: string;
+}
+
+/** FLT-26: a whole-booking cancellation; PAY-03 supplies the refund status. */
+export interface CancelledFlightBooking {
+  _id: string;
+  reference: string;
+  status: 'cancelled';
+  cancellation: {
+    cancelledAt: Date;
+    cancelledBy: 'user';
+    refundPercent: number;
+    refundAmountMinor: number;
+  };
+  /** Null when no positive refund is due. A recorded gateway failure is `failed`. */
+  refund: RefundView | null;
 }

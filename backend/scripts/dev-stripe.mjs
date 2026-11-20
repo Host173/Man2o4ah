@@ -135,9 +135,18 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => stopAll(0));
 }
 
+// The Stripe CLI requires the events to forward. These are the ones the
+// webhook handles (stripe-api.gateway.ts); every other event is ignored there.
+const webhookEvents = [
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
+  'refund.updated',
+  'refund.failed',
+].join(',');
+
 start(
   '[stripe]',
-  `stripe listen --forward-to localhost:${port}/api/payments/webhook`,
+  `stripe listen --events ${webhookEvents} --forward-to localhost:${port}/api/payments/webhook`,
   process.env,
 );
 start('[api]', 'npm run start:dev', {

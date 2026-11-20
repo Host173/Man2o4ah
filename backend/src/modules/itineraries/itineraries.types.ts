@@ -15,6 +15,7 @@ import type {
 export interface ActivityImageView {
   _id: string;
   key: string;
+  url: string;
 }
 
 /** An activity's own cost; counted under Activities in the budget (ITN-14). */

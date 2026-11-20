@@ -41,4 +41,26 @@ describe('AuditLogQueryDto', () => {
     const { errors } = await check({ from: 'yesterday' });
     expect(errors.map((error) => error.property)).toEqual(['from']);
   });
+
+  it('turns a from calendar day into the start of that UTC day', async () => {
+    const { dto, errors } = await check({ from: '2026-11-01' });
+    expect(errors).toHaveLength(0);
+    expect(dto.from).toEqual(new Date('2026-11-01T00:00:00.000Z'));
+  });
+
+  it('turns a to calendar day into the last millisecond of that UTC day', async () => {
+    const { dto, errors } = await check({ to: '2026-11-30' });
+    expect(errors).toHaveLength(0);
+    expect(dto.to).toEqual(new Date('2026-11-30T23:59:59.999Z'));
+  });
+
+  it('rejects a from day that does not exist', async () => {
+    const { errors } = await check({ from: '2026-02-30' });
+    expect(errors.map((error) => error.property)).toEqual(['from']);
+  });
+
+  it('rejects a to day that does not exist', async () => {
+    const { errors } = await check({ to: '2026-13-01' });
+    expect(errors.map((error) => error.property)).toEqual(['to']);
+  });
 });

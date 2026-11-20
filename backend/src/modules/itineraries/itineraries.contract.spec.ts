@@ -2,8 +2,9 @@ import { NotImplementedException } from '@nestjs/common';
 import { ItinerariesService } from './itineraries.service.js';
 
 describe('itineraries contract (stubs)', () => {
-  // The stub throws before touching either dependency.
+  // The stub throws before touching any dependency.
   const itineraries = new ItinerariesService(
+    null as never,
     null as never,
     null as never,
     null as never,

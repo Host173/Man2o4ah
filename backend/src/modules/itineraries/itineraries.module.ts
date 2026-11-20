@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AccountsModule } from '../accounts/accounts.module.js';
 import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
 import { BudgetsController } from './budgets.controller.js';
+import { StorageModule } from '../storage/storage.module.js';
+import { ActivitiesController } from './activities.controller.js';
 import { ItinerariesController } from './itineraries.controller.js';
 import { TransportCostsController } from './transport-costs.controller.js';
 import { ItinerariesService } from './itineraries.service.js';
@@ -20,9 +22,11 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     // model (see ItinerariesService.fx()).
     AccountsModule,
     ReferenceDataModule,
+    StorageModule,
   ],
   controllers: [
     ItinerariesController,
+    ActivitiesController,
     TransportCostsController,
     BudgetsController,
   ],

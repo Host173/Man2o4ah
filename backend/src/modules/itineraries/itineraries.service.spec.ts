@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -11,6 +12,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import { ItinerariesModule } from './itineraries.module.js';
@@ -48,12 +50,17 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   let itineraries: ItinerariesService;
   let itineraryModel: Model<Itinerary>;
   const referenceData = new FakeReferenceDataService();
+  const storage = new FakeStorageService();
 
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
       override: (builder) =>
-        builder.overrideProvider(ReferenceDataService).useValue(referenceData),
+        builder
+          .overrideProvider(ReferenceDataService)
+          .useValue(referenceData)
+          .overrideProvider(StorageService)
+          .useValue(storage),
     });
     itineraries = t.moduleRef.get(ItinerariesService);
     itineraryModel = t.moduleRef.get<Model<Itinerary>>(
@@ -63,6 +70,90 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
 
   beforeEach(async () => {
     await clearCollections(t.connection);
+    for (const key of storage.keys()) await storage.delete(key);
+  });
+
+  describe('activity writes (ITN-10)', () => {
+    it('targets activity IDs while day reordering and other activity writes overlap', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const first = await itineraries.addDay(created._id, dayDto(), owner.id);
+      const second = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+      const added = await itineraries.addActivity(
+        created._id,
+        first._id,
+        { name: 'Edit me' },
+        owner.id,
+      );
+      const other = await itineraries.addActivity(
+        created._id,
+        second._id,
+        { name: 'Delete me' },
+        owner.id,
+      );
+      const results = await Promise.allSettled([
+        itineraries.reorderDays(
+          created._id,
+          { dayIds: [second._id, first._id] },
+          owner.id,
+        ),
+        itineraries.updateActivity(
+          added.activities[0]._id,
+          { name: '$$ROOT' },
+          owner.id,
+        ),
+        itineraries.addActivity(
+          created._id,
+          first._id,
+          { name: 'New' },
+          owner.id,
+        ),
+        itineraries.deleteActivity(other.activities[0]._id, owner.id),
+      ]);
+      expect(results.map((result) => result.status)).toEqual(
+        Array(4).fill('fulfilled'),
+      );
+      const stored = await itineraries.getById(created._id, owner.id);
+      expect(stored.days.map((day) => day._id)).toEqual([
+        second._id,
+        first._id,
+      ]);
+      expect(stored.days[0].activities).toEqual([]);
+      expect(
+        stored.days[1].activities.map((activity) => activity.name).sort(),
+      ).toEqual(['$$ROOT', 'New']);
+      expect(stored).toMatchObject({ dayCount: 2 });
+    });
+
+    it('keeps every valid concurrent addition on the target day', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(created._id, dayDto(), owner.id);
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, index) =>
+          itineraries.addActivity(
+            created._id,
+            day._id,
+            { name: `Activity ${index}` },
+            owner.id,
+          ),
+        ),
+      );
+      expect(results.map((result) => result.status)).toEqual(
+        Array(10).fill('fulfilled'),
+      );
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].activities).toHaveLength(10);
+      expect(
+        new Set(stored?.days[0].activities.map((activity) => activity.name))
+          .size,
+      ).toBe(10);
+      expect(stored).toMatchObject({ dayCount: 1, cityIds: ['cairo'] });
+    });
   });
 
   afterAll(async () => {
@@ -417,7 +508,13 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
               description: 'Guided tour',
               time: '09:30',
               cost: { amountMinor: 2000, currency: 'EGP' },
-              images: [{ _id: imageId.toHexString(), key: 'pyramids.jpg' }],
+              images: [
+                {
+                  _id: imageId.toHexString(),
+                  key: 'pyramids.jpg',
+                  url: '/uploads/pyramids.jpg',
+                },
+              ],
               attractionId: 'att-1',
             },
           ],

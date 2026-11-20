@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
 import type { Model } from 'mongoose';
@@ -16,13 +21,12 @@ import {
 
 const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
 
-/** Types that undo each other; a repeat is the same type as the latest of its pair. */
-const TOGGLE_PAIRS: readonly (readonly NotificationType[])[] = [
-  [NotificationType.ACCOUNT_SUSPENDED, NotificationType.ACCOUNT_REACTIVATED],
-  [
-    NotificationType.PROVIDER_DEACTIVATED,
-    NotificationType.PROVIDER_REACTIVATED,
-  ],
+const REPEATABLE_TYPES: readonly NotificationType[] = [
+  NotificationType.FLIGHT_SCHEDULE_CHANGED,
+  NotificationType.ACCOUNT_SUSPENDED,
+  NotificationType.ACCOUNT_REACTIVATED,
+  NotificationType.PROVIDER_DEACTIVATED,
+  NotificationType.PROVIDER_REACTIVATED,
 ];
 
 /** The schema class plus the timestamps Mongoose adds (`timestamps: true`). */
@@ -50,10 +54,8 @@ export class NotificationsService {
    * Idempotent, because an event can be delivered twice (`modules.md`):
    * - booking confirmed/cancelled and each refund status: once per user and
    *   entity (and message, so each refund status counts once);
-   * - flight schedule changed: skipped while an unread one for the same
-   *   booking exists (the payload has no times, so a repeat can't be told apart);
-   * - suspended/reactivated pairs: skipped when the user's latest notification
-   *   of the pair already has the same type, so a later real change still notifies.
+   * - reschedules and account/provider changes: once per eventId, independent
+   *   of read state and any intervening changes. Each genuine change has a new ID.
    * Repeated recipients in one call are stored once.
    * Concurrent deliveries use the same deterministic ObjectId; the existing
    * unique _id index prevents duplicate inserts without a schema change.
@@ -72,6 +74,7 @@ export class NotificationsService {
         item.entity?.type,
         item.entity?.id,
         item.message,
+        item.eventId,
       ]);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -92,38 +95,32 @@ export class NotificationsService {
 
   /** Stores one notification unless it is a repeat; true when stored. */
   private async store(item: NewNotification): Promise<boolean> {
+    if (
+      REPEATABLE_TYPES.includes(item.type) &&
+      (typeof item.eventId !== 'string' || item.eventId.trim().length === 0)
+    ) {
+      throw new Error(`A non-empty eventId is required for ${item.type}`);
+    }
     const userId = new Types.ObjectId(item.userId);
     const entityFilter = item.entity
       ? { 'entity.type': item.entity.type, 'entity.id': item.entity.id }
       : { entity: { $exists: false } };
 
-    const pair = TOGGLE_PAIRS.find((types) => types.includes(item.type));
-    const unreadOnly = item.type === NotificationType.FLIGHT_SCHEDULE_CHANGED;
     const latest = await this.notificationModel
       .findOne({
         userId,
         ...entityFilter,
-        ...(pair
-          ? { type: { $in: [...pair] } }
-          : { type: item.type, message: item.message }),
       })
       .sort({ createdAt: -1, _id: -1 })
       .lean();
-    if (
-      latest &&
-      (pair ? latest.type === item.type : !unreadOnly || latest.readAt == null)
-    ) {
-      return false;
-    }
 
-    // The previous alert distinguishes a new toggle/reschedule from its retries.
     const identity = JSON.stringify([
       userId.toHexString(),
       item.type,
       item.entity?.type,
       item.entity?.id,
-      item.message,
-      latest?._id.toHexString(),
+      item.eventId ?? item.message,
+      null,
     ]);
     const id = new Types.ObjectId(
       createHash('sha256').update(identity).digest().subarray(0, 12),
@@ -200,14 +197,19 @@ export class NotificationsService {
    * unchanged, the first `readAt` is kept. Missing or another user's: 404, so
    * ids cannot be probed.
    */
-  async markRead(
-    userId: string,
-    id: Types.ObjectId,
-  ): Promise<NotificationView> {
+  async markRead(userId: string, id: string): Promise<NotificationView> {
+    if (!OBJECT_ID_PATTERN.test(id)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Invalid notification id',
+        details: [{ field: 'id', message: 'must be a 24-character hex ID' }],
+      });
+    }
+    const notificationId = new Types.ObjectId(id);
     const owner = new Types.ObjectId(userId);
     const updated = await this.notificationModel
       .findOneAndUpdate(
-        { _id: id, userId: owner, readAt: null },
+        { _id: notificationId, userId: owner, readAt: null },
         { $set: { readAt: new Date() } },
         { returnDocument: 'after' },
       )
@@ -215,7 +217,7 @@ export class NotificationsService {
     if (updated) return this.toView(updated);
 
     const existing = await this.notificationModel
-      .findOne({ _id: id, userId: owner })
+      .findOne({ _id: notificationId, userId: owner })
       .lean();
     if (!existing) {
       throw new NotFoundException({

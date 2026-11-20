@@ -19,11 +19,13 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiNoContentResponse,
+  ApiExtraModels,
   ApiOperation,
   ApiOkResponse,
   ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -36,6 +38,11 @@ import { CreateFlightDto } from './dto/create-flight.dto.js';
 import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
 import { UpdateFlightDto } from './dto/update-flight.dto.js';
 import { UpdateFlightCabinDto } from './dto/update-flight-cabin.dto.js';
+import {
+  PaginatedFlightSearchResponseDto,
+  RoundTripFlightSearchResponseDto,
+} from './dto/flight-search.response.dto.js';
+import { SearchFlightsDto } from './dto/search-flights.dto.js';
 import {
   FlightResponseDto,
   PaginatedFlightsResponseDto,
@@ -51,6 +58,35 @@ import { FlightsService } from './flights.service.js';
 @Controller()
 export class FlightsController {
   constructor(private readonly flights: FlightsService) {}
+
+  @Get('flights/search')
+  @Public()
+  @ApiOperation({ summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights' })
+  @ApiExtraModels(
+    PaginatedFlightSearchResponseDto,
+    RoundTripFlightSearchResponseDto,
+  )
+  @ApiOkResponse({
+    description:
+      'One-way: a page of flights. Round trip (returnDate given): { outbound, inbound } pages',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(PaginatedFlightSearchResponseDto) },
+        { $ref: getSchemaPath(RoundTripFlightSearchResponseDto) },
+      ],
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid search criteria' })
+  async search(
+    @Query() query: SearchFlightsDto,
+  ): Promise<
+    PaginatedFlightSearchResponseDto | RoundTripFlightSearchResponseDto
+  > {
+    const result = await this.flights.search(query);
+    return 'outbound' in result
+      ? RoundTripFlightSearchResponseDto.fromView(result)
+      : PaginatedFlightSearchResponseDto.fromView(result);
+  }
 
   @Get('flights/:id')
   @Public()

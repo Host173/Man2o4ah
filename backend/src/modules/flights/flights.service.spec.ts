@@ -1,4 +1,4 @@
-import { ConflictException, NotImplementedException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -218,29 +218,6 @@ describe('FlightsService', () => {
 
   afterAll(async () => {
     await moduleRef?.close();
-  });
-
-  const search = {
-    from: 'CAI',
-    to: 'DXB',
-    date: '2026-11-20',
-    adults: 1,
-    children: 0,
-    infants: 0,
-    sortBy: 'price' as const,
-    page: 1,
-    limit: 10,
-  };
-
-  // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
-  it.each([
-    ['search (one way)', () => service.search(search)],
-    [
-      'search (round trip)',
-      () => service.search({ ...search, returnDate: '2026-11-27' }),
-    ],
-  ])('%s throws NotImplementedException', (_name, call) => {
-    expect(call).toThrow(NotImplementedException);
   });
 
   it('delegates public airline operations to the profile service', async () => {

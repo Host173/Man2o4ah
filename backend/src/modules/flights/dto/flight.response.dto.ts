@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import type { Paginated } from '../../../common/pagination/paginated.js';
 import type { CabinView, FlightManagementView } from '../flights.types.js';
 
-class CabinResponseDto implements Omit<CabinView, 'id'> {
+export class CabinResponseDto implements Omit<CabinView, 'id'> {
   @ApiProperty()
   _id!: string;
 

@@ -2,6 +2,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
@@ -9,6 +10,7 @@ import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { FlightsService } from '../flights/flights.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
@@ -37,6 +39,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
   let itineraryModel: Model<Itinerary>;
   const referenceData = new FakeReferenceDataService();
   const storage = new FakeStorageService();
+  const fakeFlights = new FakeFlightsService();
 
   beforeAll(async () => {
     testApp = await createTestApp({
@@ -46,7 +49,9 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
           .overrideProvider(ReferenceDataService)
           .useValue(referenceData)
           .overrideProvider(StorageService)
-          .useValue(storage),
+          .useValue(storage)
+          .overrideProvider(FlightsService)
+          .useValue(fakeFlights),
     });
     itineraryModel = testApp.moduleRef.get<Model<Itinerary>>(
       getModelToken(Itinerary.name),
@@ -1744,6 +1749,101 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(document.components?.schemas?.ActivityCostDto).toMatchObject({
         required: ['amountMinor', 'currency'],
       });
+    });
+  });
+
+  describe('GET /api/itineraries/:id/flights (ITN-26)', () => {
+    it('rejects unauthenticated requests with 401', async () => {
+      const id = new Types.ObjectId().toHexString();
+      const response = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights?origin=DXB`);
+      expect(response.status).toBe(401);
+      expect(response.body.code).toBe(ErrorCode.NotAuthenticated);
+    });
+
+    it('returns 404 for a foreign or missing itinerary', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const other = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      const foreign = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights?origin=DXB`)
+        .set('Cookie', other.cookie);
+      expect(foreign.status).toBe(404);
+      expect(foreign.body.code).toBe(ErrorCode.NotFound);
+
+      const missing = await testApp
+        .http()
+        .get(
+          `/api/itineraries/${new Types.ObjectId().toHexString()}/flights?origin=DXB`,
+        )
+        .set('Cookie', owner.cookie);
+      expect(missing.status).toBe(404);
+      expect(missing.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('rejects malformed ids and missing origins with 400', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+
+      const badId = await testApp
+        .http()
+        .get(`/api/itineraries/not-an-id/flights?origin=DXB`)
+        .set('Cookie', owner.cookie);
+      expect(badId.status).toBe(400);
+      expect(badId.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const missingOrigin = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights`)
+        .set('Cookie', owner.cookie);
+      expect(missingOrigin.status).toBe(400);
+      expect(missingOrigin.body.code).toBe(ErrorCode.ValidationFailed);
+
+      const noDays = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights?origin=DXB`)
+        .set('Cookie', owner.cookie);
+      expect(noDays.status).toBe(400);
+      expect(noDays.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+
+    it('returns a one-way result for a valid itinerary and registers in Swagger', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+
+      const response = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights?origin=DXB&tripType=one_way`)
+        .set('Cookie', owner.cookie);
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+
+      const document = SwaggerModule.createDocument(
+        testApp.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      expect(
+        document.paths['/api/itineraries/{id}/flights']?.get,
+      ).toBeDefined();
     });
   });
 });

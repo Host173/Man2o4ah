@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { FlightsModule } from '../flights/flights.module.js';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
 import { StorageModule } from '../storage/storage.module.js';
@@ -14,6 +15,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
     ]),
+    FlightsModule,
     ReferenceDataModule,
     StorageModule,
   ],

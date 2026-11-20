@@ -69,6 +69,12 @@ export class ReferenceDataService {
     return new Map(found.map((a) => [a._id, toAirport(a)]));
   }
 
+  /** All airports in a city (ITN-26); empty when the city has none. */
+  async getAirportsByCity(cityId: string): Promise<AirportView[]> {
+    const found = await this.airports.find({ cityId }).lean<Airport[]>();
+    return found.map(toAirport);
+  }
+
   async getCity(id: string): Promise<CityView | null> {
     const city = await this.cities.findById(id).lean<City>();
     return city ? toCity(city) : null;

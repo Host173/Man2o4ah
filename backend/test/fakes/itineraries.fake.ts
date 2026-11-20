@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  NotImplementedException,
 } from '@nestjs/common';
 import { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
 import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
@@ -35,6 +36,11 @@ import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/creat
 import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
+import type { ItineraryFlightsQueryDto } from '../../src/modules/itineraries/dto/itinerary-flights-query.dto.js';
+import type {
+  FlightSearchItem,
+  RoundTripSearchResult,
+} from '../../src/modules/flights/flights.types.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
   ActivityView,
@@ -106,6 +112,16 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     this.itineraries = structuredClone(itineraries);
     this.referenceData = referenceData;
     this.storage = storage;
+  }
+
+  getFlightsForItinerary(
+    _itineraryId: string,
+    _query: ItineraryFlightsQueryDto,
+    _userId: string,
+  ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
+    throw new NotImplementedException(
+      'getFlightsForItinerary: implemented in ITN-26',
+    );
   }
 
   listPublicByAuthor(

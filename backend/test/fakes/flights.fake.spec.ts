@@ -422,5 +422,79 @@ describe('FakeFlightsService', () => {
         response: { code: 'NOT_FOUND' },
       });
     });
+
+    describe('flight management', () => {
+      const input = {
+        flightNumber: 'ms 123',
+        departureAirportId: 'JFK',
+        arrivalAirportId: 'CAI',
+        departureLocal: '2027-03-14T03:30',
+        arrivalLocal: '2027-03-14T10:00',
+      };
+
+      it('creates a normalized flight and returns it in the own-airline page with zones', async () => {
+        const { flights } = setup();
+        const created = await flights.createFlight(input, 'a1');
+
+        expect(created).toMatchObject({
+          airlineId: 'a1',
+          flightNumber: 'MS 123',
+          departureAt: new Date('2027-03-14T07:30:00.000Z'),
+          arrivalAt: new Date('2027-03-14T08:00:00.000Z'),
+          departureTimeZone: 'America/New_York',
+          arrivalTimeZone: 'Africa/Cairo',
+        });
+
+        const page = await flights.listAirlineFlights('a1', 'a1', {
+          page: 1,
+          limit: 10,
+        });
+        expect(page.items).toContainEqual(created);
+        expect(page.total).toBe(6);
+        expect(page.items.every((flight) => flight.airlineId === 'a1')).toBe(
+          true,
+        );
+      });
+
+      it('does not list another airline without its assigned moderator ID', async () => {
+        const { flights } = setup();
+        await expect(
+          flights.listAirlineFlights('a2', 'a1', { page: 1, limit: 10 }),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+      });
+
+      it('rejects duplicate numbers for the same airline and local date', async () => {
+        const { flights } = setup();
+        await flights.createFlight(input, 'a1');
+        await expect(
+          flights.createFlight({ ...input, flightNumber: 'MS 123' }, 'a1'),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'CONFLICT' },
+        });
+      });
+
+      it('returns 404 for an unknown airline and 400 for an unknown airport', async () => {
+        const { flights } = setup();
+        await expect(
+          flights.createFlight(input, 'unknown'),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: { code: 'NOT_FOUND' },
+        });
+        await expect(
+          flights.createFlight({ ...input, departureAirportId: 'ZZZ' }, 'a1'),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: 'VALIDATION_FAILED',
+            details: [{ field: 'departureAirportId' }],
+          },
+        });
+      });
+    });
   });
 });

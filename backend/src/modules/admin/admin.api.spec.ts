@@ -9,19 +9,35 @@ import {
   it,
   vi,
 } from 'vitest';
+import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeFlightBookingsService } from '../../../test/fakes/flight-bookings.fake.js';
+import { FakeFlightsData } from '../../../test/fakes/flights-data.fake.js';
+import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { FakeHotelBookingsService } from '../../../test/fakes/hotel-bookings.fake.js';
+import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { clearCollections } from '../../../test/support/clear-collections.js';
+import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
 import { BookingType } from '../../common/database/booking-type.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
-import { UserRole } from '../accounts/schemas/user.schema.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import {
+  ProviderType,
+  UserRole,
+  UserStatus,
+} from '../accounts/schemas/user.schema.js';
+import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { FlightBookingsService } from '../flight-bookings/flight-bookings.service.js';
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
+import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
+import { HotelsService } from '../hotels/hotels.service.js';
 import { AdminModule } from './admin.module.js';
 
 const ALLOWED_KEYS_WITH_REFERENCE = [
@@ -1015,5 +1031,916 @@ describe('Admin Bookings API (ACC-17)', () => {
         }
       }
     });
+  });
+});
+
+describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => {
+  let accApp: TestApp | undefined;
+  const fakeAccounts = new FakeAccountsService();
+  const fakeFlights = new FakeFlightsService();
+  const fakeHotels = new FakeHotelsService();
+  const fakeEvents = new FakeEvents();
+
+  const airline1Id = '6736f0b2c5a1b2c3d4e51001';
+  const inactiveHotelId = '6736f0b2c5a1b2c3d4e52001';
+  const userActiveId = '6736f0b2c5a1b2c3d4e53001';
+  const userSuspendedId = '6736f0b2c5a1b2c3d4e53002';
+  const userDeactivatedId = '6736f0b2c5a1b2c3d4e53003';
+  const modHotelId = '6736f0b2c5a1b2c3d4e53004';
+  const adminAccountId = '6736f0b2c5a1b2c3d4e53005';
+  const regexUserId = '6736f0b2c5a1b2c3d4e53006';
+
+  function resetFakes(): void {
+    const seededAccounts = new FakeAccountsService([
+      {
+        id: userActiveId,
+        name: 'Aisha Al Rawahi',
+        email: 'aisha@example.com',
+        role: UserRole.USER,
+        status: UserStatus.ACTIVE,
+        createdAt: new Date('2026-11-01T10:00:00.000Z'),
+      },
+      {
+        id: userSuspendedId,
+        name: 'Omar Said',
+        email: 'omar@example.com',
+        role: UserRole.USER,
+        status: UserStatus.SUSPENDED,
+        createdAt: new Date('2026-11-02T10:00:00.000Z'),
+      },
+      {
+        id: userDeactivatedId,
+        name: 'Former Traveler',
+        email: 'former@example.com',
+        role: UserRole.USER,
+        status: UserStatus.DEACTIVATED,
+        createdAt: new Date('2026-11-03T10:00:00.000Z'),
+      },
+      {
+        id: modHotelId,
+        name: 'Nile Hotel Mod',
+        email: 'mod@nile.example',
+        role: UserRole.HOTEL_MODERATOR,
+        status: UserStatus.ACTIVE,
+        moderatorOf: {
+          providerType: ProviderType.HOTEL,
+          providerId: inactiveHotelId,
+        },
+        createdAt: new Date('2026-11-04T10:00:00.000Z'),
+      },
+      {
+        id: adminAccountId,
+        name: 'Platform Admin',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+        createdAt: new Date('2026-11-05T10:00:00.000Z'),
+      },
+      {
+        id: regexUserId,
+        name: 'vip+user (north).*',
+        email: 'vip+tag@north.example',
+        role: UserRole.AIRLINE_MODERATOR,
+        status: UserStatus.SUSPENDED,
+        moderatorOf: {
+          providerType: ProviderType.AIRLINE,
+          providerId: airline1Id,
+        },
+        createdAt: new Date('2026-11-06T10:00:00.000Z'),
+      },
+    ]);
+    Object.assign(fakeAccounts, seededAccounts);
+
+    const flightsData = new FakeFlightsData();
+    flightsData.addAirline({ id: airline1Id, code: 'MS', name: 'EgyptAir' });
+    Object.assign(fakeFlights, new FakeFlightsService(flightsData));
+
+    const hotelsSeed = new FakeHotelsService({
+      hotels: [
+        {
+          id: inactiveHotelId,
+          name: 'Nile Hotel',
+          address: '1 Nile St',
+          cityId: 'cairo',
+          countryCode: 'EG',
+          photos: [],
+          amenities: [],
+          checkInTime: '14:00',
+          checkOutTime: '12:00',
+          cancellationPolicy: { tiers: [] },
+          isActive: false,
+          ratingSummary: { average: null, count: 0 },
+        },
+      ],
+    });
+    Object.assign(fakeHotels, hotelsSeed);
+
+    fakeEvents.clear();
+  }
+
+  beforeAll(async () => {
+    resetFakes();
+    accApp = await createTestApp({
+      imports: [AdminModule],
+      override: (builder) =>
+        builder
+          .overrideProvider(FlightBookingsService)
+          .useValue(new FakeFlightBookingsService([]))
+          .overrideProvider(HotelBookingsService)
+          .useValue(new FakeHotelBookingsService([]))
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(FlightsService)
+          .useValue(fakeFlights)
+          .overrideProvider(HotelsService)
+          .useValue(fakeHotels)
+          .overrideProvider(AppEvents)
+          .useValue(fakeEvents),
+    });
+  }, HOOK_TIMEOUT);
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    await clearCollections(accApp!.connection);
+    resetFakes();
+  });
+
+  afterAll(async () => {
+    await accApp?.close();
+  }, HOOK_TIMEOUT);
+
+  it('registers Swagger metadata for all ACC-07a, ACC-13, ACC-14, and ACC-16 admin routes', () => {
+    const document = SwaggerModule.createDocument(
+      accApp!.app,
+      new DocumentBuilder()
+        .setTitle('Man2o4ah API')
+        .setVersion('0.0.1')
+        .addCookieAuth('access_token')
+        .build(),
+    );
+
+    const accountsList = document.paths['/api/admin/accounts']?.get;
+    expect(accountsList).toBeDefined();
+    expect(accountsList?.tags).toContain('admin');
+    expect(accountsList?.summary).toContain('ACC-14');
+    expect(accountsList?.security).toBeDefined();
+    expect(accountsList?.responses?.['200']).toBeDefined();
+
+    const createMod = document.paths['/api/admin/moderators']?.post;
+    expect(createMod).toBeDefined();
+    expect(createMod?.tags).toContain('admin');
+    expect(createMod?.summary).toContain('ACC-13');
+    expect(createMod?.security).toBeDefined();
+    expect(createMod?.responses?.['201']).toBeDefined();
+    expect(createMod?.responses?.['404']).toBeDefined();
+    expect(createMod?.responses?.['409']).toBeDefined();
+
+    const resetPw =
+      document.paths['/api/admin/users/{id}/reset-password']?.post;
+    expect(resetPw).toBeDefined();
+    expect(resetPw?.tags).toContain('admin');
+    expect(resetPw?.summary).toContain('ACC-07a');
+    expect(resetPw?.security).toBeDefined();
+    expect(resetPw?.responses?.['204']).toBeDefined();
+
+    const suspendOp = document.paths['/api/admin/accounts/{id}/suspend']?.patch;
+    expect(suspendOp).toBeDefined();
+    expect(suspendOp?.tags).toContain('admin');
+    expect(suspendOp?.security).toBeDefined();
+    expect(suspendOp?.responses?.['204']).toBeDefined();
+    expect(suspendOp?.responses?.['409']).toBeDefined();
+
+    const reactivateOp =
+      document.paths['/api/admin/accounts/{id}/reactivate']?.patch;
+    expect(reactivateOp).toBeDefined();
+    expect(reactivateOp?.tags).toContain('admin');
+    expect(reactivateOp?.security).toBeDefined();
+    expect(reactivateOp?.responses?.['204']).toBeDefined();
+    expect(reactivateOp?.responses?.['409']).toBeDefined();
+  });
+
+  it('rejects unauthenticated requests (401) and non-admin roles (403) across all five endpoints', async () => {
+    const calls: (() => Promise<{
+      status: number;
+      body: { code?: string };
+    }>)[] = [
+      () => accApp!.http().get('/api/admin/accounts'),
+      () =>
+        accApp!.http().post('/api/admin/moderators').send({
+          name: 'New Mod',
+          email: 'newmod@airline.example',
+          role: UserRole.AIRLINE_MODERATOR,
+          providerId: airline1Id,
+          temporaryPassword: 'Password1',
+        }),
+      () =>
+        accApp!
+          .http()
+          .post(`/api/admin/users/${userActiveId}/reset-password`)
+          .send({ temporaryPassword: 'Password1' }),
+      () => accApp!.http().patch(`/api/admin/accounts/${userActiveId}/suspend`),
+      () =>
+        accApp!
+          .http()
+          .patch(`/api/admin/accounts/${userSuspendedId}/reactivate`),
+    ];
+
+    for (const call of calls) {
+      const res = await call();
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe(ErrorCode.NotAuthenticated);
+    }
+
+    for (const role of [
+      UserRole.USER,
+      UserRole.AIRLINE_MODERATOR,
+      UserRole.HOTEL_MODERATOR,
+    ]) {
+      const actor = await loginAs(accApp!.connection, role, {
+        providerId: new Types.ObjectId().toHexString(),
+      });
+
+      const listRes = await accApp!
+        .http()
+        .get('/api/admin/accounts')
+        .set('Cookie', actor.cookie);
+      expect(listRes.status).toBe(403);
+      expect(listRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const modRes = await accApp!
+        .http()
+        .post('/api/admin/moderators')
+        .set('Cookie', actor.cookie)
+        .send({
+          name: 'New Mod',
+          email: 'newmod@airline.example',
+          role: UserRole.AIRLINE_MODERATOR,
+          providerId: airline1Id,
+          temporaryPassword: 'Password1',
+        });
+      expect(modRes.status).toBe(403);
+      expect(modRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const resetRes = await accApp!
+        .http()
+        .post(`/api/admin/users/${userActiveId}/reset-password`)
+        .set('Cookie', actor.cookie)
+        .send({ temporaryPassword: 'Password1' });
+      expect(resetRes.status).toBe(403);
+      expect(resetRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const suspendRes = await accApp!
+        .http()
+        .patch(`/api/admin/accounts/${userActiveId}/suspend`)
+        .set('Cookie', actor.cookie);
+      expect(suspendRes.status).toBe(403);
+      expect(suspendRes.body.code).toBe(ErrorCode.ForbiddenRole);
+
+      const reactivateRes = await accApp!
+        .http()
+        .patch(`/api/admin/accounts/${userSuspendedId}/reactivate`)
+        .set('Cookie', actor.cookie);
+      expect(reactivateRes.status).toBe(403);
+      expect(reactivateRes.body.code).toBe(ErrorCode.ForbiddenRole);
+    }
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+  });
+
+  it('lists, searches (including literal regex chars), filters, and paginates accounts without leaking sensitive fields (ACC-14)', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+
+    const defaultRes = await accApp!
+      .http()
+      .get('/api/admin/accounts')
+      .set('Cookie', admin.cookie);
+    expect(defaultRes.status).toBe(200);
+    expect(defaultRes.body).toMatchObject({
+      page: 1,
+      limit: 10,
+      total: 6,
+      totalPages: 1,
+    });
+    expect(
+      defaultRes.body.items.map((item: { id: string }) => item.id),
+    ).toEqual([
+      regexUserId,
+      adminAccountId,
+      modHotelId,
+      userDeactivatedId,
+      userSuspendedId,
+      userActiveId,
+    ]);
+    for (const item of defaultRes.body.items as Record<string, unknown>[]) {
+      expect(item).not.toHaveProperty('passwordHash');
+      expect(item).not.toHaveProperty('temporaryPassword');
+      expect(item).not.toHaveProperty('mustChangePassword');
+      expect(item).not.toHaveProperty('sessionsRevoked');
+    }
+    const modRow = (defaultRes.body.items as Record<string, unknown>[]).find(
+      (item) => item.id === modHotelId,
+    );
+    expect(Object.keys(modRow ?? {}).sort()).toEqual([
+      'createdAt',
+      'email',
+      'id',
+      'moderatorOf',
+      'name',
+      'role',
+      'status',
+    ]);
+    const userRow = (defaultRes.body.items as Record<string, unknown>[]).find(
+      (item) => item.id === userActiveId,
+    );
+    expect(Object.keys(userRow ?? {}).sort()).toEqual([
+      'createdAt',
+      'email',
+      'id',
+      'name',
+      'role',
+      'status',
+    ]);
+
+    // Pagination & boundaries
+    const page2 = await accApp!
+      .http()
+      .get('/api/admin/accounts?page=2&limit=2')
+      .set('Cookie', admin.cookie);
+    expect(page2.status).toBe(200);
+    expect(page2.body).toMatchObject({
+      page: 2,
+      limit: 2,
+      total: 6,
+      totalPages: 3,
+    });
+    expect(page2.body.items.map((item: { id: string }) => item.id)).toEqual([
+      modHotelId,
+      userDeactivatedId,
+    ]);
+
+    const maxLimit = await accApp!
+      .http()
+      .get('/api/admin/accounts?limit=50')
+      .set('Cookie', admin.cookie);
+    expect(maxLimit.status).toBe(200);
+    expect(maxLimit.body.items).toHaveLength(6);
+
+    const pastEnd = await accApp!
+      .http()
+      .get('/api/admin/accounts?page=4&limit=2')
+      .set('Cookie', admin.cookie);
+    expect(pastEnd.status).toBe(200);
+    expect(pastEnd.body).toEqual({
+      items: [],
+      page: 4,
+      limit: 2,
+      total: 6,
+      totalPages: 3,
+    });
+
+    // Search by name/email (case-insensitive & literal regex chars) + empty results
+    const byName = await accApp!
+      .http()
+      .get('/api/admin/accounts?q=%20%20RAWAHI%20')
+      .set('Cookie', admin.cookie);
+    expect(byName.status).toBe(200);
+    expect(byName.body.items.map((item: { id: string }) => item.id)).toEqual([
+      userActiveId,
+    ]);
+
+    const byEmail = await accApp!
+      .http()
+      .get('/api/admin/accounts?q=OMAR%40EXAMPLE.COM')
+      .set('Cookie', admin.cookie);
+    expect(byEmail.status).toBe(200);
+    expect(byEmail.body.items.map((item: { id: string }) => item.id)).toEqual([
+      userSuspendedId,
+    ]);
+
+    const literalRegex = await accApp!
+      .http()
+      .get(`/api/admin/accounts?q=${encodeURIComponent('vip+user (north).*')}`)
+      .set('Cookie', admin.cookie);
+    expect(literalRegex.status).toBe(200);
+    expect(
+      literalRegex.body.items.map((item: { id: string }) => item.id),
+    ).toEqual([regexUserId]);
+
+    // Wildcard regex without matching literal characters returns 0 items.
+    const regexWildcard = await accApp!
+      .http()
+      .get(`/api/admin/accounts?q=${encodeURIComponent('vip.*north')}`)
+      .set('Cookie', admin.cookie);
+    expect(regexWildcard.status).toBe(200);
+    expect(regexWildcard.body.items).toEqual([]);
+
+    // Role, status, and combined filters
+    const byRole = await accApp!
+      .http()
+      .get(`/api/admin/accounts?role=${UserRole.HOTEL_MODERATOR}`)
+      .set('Cookie', admin.cookie);
+    expect(byRole.status).toBe(200);
+    expect(byRole.body.items.map((item: { id: string }) => item.id)).toEqual([
+      modHotelId,
+    ]);
+
+    const byStatus = await accApp!
+      .http()
+      .get(`/api/admin/accounts?status=${UserStatus.SUSPENDED}`)
+      .set('Cookie', admin.cookie);
+    expect(byStatus.status).toBe(200);
+    expect(byStatus.body.items.map((item: { id: string }) => item.id)).toEqual([
+      regexUserId,
+      userSuspendedId,
+    ]);
+
+    const combined = await accApp!
+      .http()
+      .get(
+        `/api/admin/accounts?q=north&role=${UserRole.AIRLINE_MODERATOR}&status=${UserStatus.SUSPENDED}`,
+      )
+      .set('Cookie', admin.cookie);
+    expect(combined.status).toBe(200);
+    expect(combined.body.items.map((item: { id: string }) => item.id)).toEqual([
+      regexUserId,
+    ]);
+
+    // Invalid queries -> 400 VALIDATION_FAILED
+    for (const badQuery of [
+      'role=superadmin',
+      'status=archived',
+      'limit=51',
+      'limit=0',
+      'page=0',
+      'unknown=1',
+    ]) {
+      const invalidRes = await accApp!
+        .http()
+        .get(`/api/admin/accounts?${badQuery}`)
+        .set('Cookie', admin.cookie);
+      expect(invalidRes.status).toBe(400);
+      expect(invalidRes.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+
+    // Listing never emits audit events
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+  });
+
+  it('creates airline and hotel moderators after verifying providers, rejects missing/wrong providers and invalid/duplicate inputs (ACC-13)', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+    const getAirlineSpy = vi.spyOn(fakeFlights, 'getAirline');
+    const getHotelSpy = vi.spyOn(fakeHotels, 'getHotel');
+    const createModSpy = vi.spyOn(fakeAccounts, 'createModerator');
+
+    // 1) Create airline_moderator
+    const airlineModRes = await accApp!
+      .http()
+      .post('/api/admin/moderators')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: '  EgyptAir Mod  ',
+        email: 'Airline.Mod@Example.COM',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+      });
+    expect(airlineModRes.status).toBe(201);
+    expect(
+      Object.keys(airlineModRes.body as Record<string, unknown>).sort(),
+    ).toEqual([
+      'createdAt',
+      'email',
+      'id',
+      'moderatorOf',
+      'name',
+      'role',
+      'status',
+    ]);
+    expect(airlineModRes.body).toMatchObject({
+      name: 'EgyptAir Mod',
+      email: 'airline.mod@example.com',
+      role: UserRole.AIRLINE_MODERATOR,
+      status: UserStatus.ACTIVE,
+      moderatorOf: {
+        providerType: ProviderType.AIRLINE,
+        providerId: airline1Id,
+      },
+    });
+    expect(airlineModRes.body).not.toHaveProperty('temporaryPassword');
+    expect(airlineModRes.body).not.toHaveProperty('passwordHash');
+    expect(airlineModRes.body).not.toHaveProperty('mustChangePassword');
+    expect(getAirlineSpy).toHaveBeenCalledWith(airline1Id);
+    expect(getHotelSpy).not.toHaveBeenCalled();
+
+    const storedAirlineMod = fakeAccounts.get(airlineModRes.body.id as string);
+    expect(storedAirlineMod).toMatchObject({
+      mustChangePassword: true,
+      temporaryPassword: 'TempPass1',
+      moderatorOf: {
+        providerType: ProviderType.AIRLINE,
+        providerId: airline1Id,
+      },
+    });
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.MODERATOR_CREATED,
+        target: { type: 'user', id: airlineModRes.body.id },
+        details: {
+          role: UserRole.AIRLINE_MODERATOR,
+          providerType: ProviderType.AIRLINE,
+          providerId: airline1Id,
+        },
+      },
+    ]);
+
+    // 2) Create second hotel_moderator even for an inactive hotel that already has another moderator
+    fakeEvents.clear();
+    getAirlineSpy.mockClear();
+    getHotelSpy.mockClear();
+    const hotelModRes = await accApp!
+      .http()
+      .post('/api/admin/moderators')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Second Nile Mod',
+        email: 'second.mod@nile.example',
+        role: UserRole.HOTEL_MODERATOR,
+        providerId: inactiveHotelId,
+        temporaryPassword: 'HotelPass9',
+      });
+    expect(hotelModRes.status).toBe(201);
+    expect(hotelModRes.body.moderatorOf).toEqual({
+      providerType: ProviderType.HOTEL,
+      providerId: inactiveHotelId,
+    });
+    expect(getHotelSpy).toHaveBeenCalledWith(inactiveHotelId);
+    expect(getAirlineSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(1);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)[0]).toEqual({
+      actorId: admin.id,
+      action: AuditAction.MODERATOR_CREATED,
+      target: { type: 'user', id: hotelModRes.body.id },
+      details: {
+        role: UserRole.HOTEL_MODERATOR,
+        providerType: ProviderType.HOTEL,
+        providerId: inactiveHotelId,
+      },
+    });
+
+    // 3) Missing or wrong-type providers -> 404 NOT_FOUND without calling createModerator or emitting events
+    fakeEvents.clear();
+    createModSpy.mockClear();
+    const unknownId = new Types.ObjectId().toHexString();
+    for (const [role, providerId] of [
+      [UserRole.AIRLINE_MODERATOR, unknownId],
+      [UserRole.HOTEL_MODERATOR, unknownId],
+      [UserRole.AIRLINE_MODERATOR, inactiveHotelId],
+      [UserRole.HOTEL_MODERATOR, airline1Id],
+    ] as const) {
+      const notFoundRes = await accApp!
+        .http()
+        .post('/api/admin/moderators')
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Orphan Mod',
+          email: `orphan.${providerId}@example.com`,
+          role,
+          providerId,
+          temporaryPassword: 'TempPass1',
+        });
+      expect(notFoundRes.status).toBe(404);
+      expect(notFoundRes.body.code).toBe(ErrorCode.NotFound);
+    }
+    expect(createModSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+
+    // 4) Duplicate email -> 409 EMAIL_TAKEN, no audit event
+    const duplicateRes = await accApp!
+      .http()
+      .post('/api/admin/moderators')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Duplicate',
+        email: 'AISHA@EXAMPLE.COM',
+        role: UserRole.HOTEL_MODERATOR,
+        providerId: inactiveHotelId,
+        temporaryPassword: 'TempPass1',
+      });
+    expect(duplicateRes.status).toBe(409);
+    expect(duplicateRes.body.code).toBe(ErrorCode.EmailTaken);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+
+    // 5) Validation errors -> 400 VALIDATION_FAILED, no audit event
+    const invalidPayloads: Record<string, unknown>[] = [
+      {},
+      {
+        name: '   ',
+        email: 'valid@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+      },
+      {
+        name: 'Bad Email',
+        email: 'not-an-email',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+      },
+      {
+        name: 'Wrong Role User',
+        email: 'u@example.com',
+        role: UserRole.USER,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+      },
+      {
+        name: 'Wrong Role Admin',
+        email: 'adm@example.com',
+        role: UserRole.ADMIN,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+      },
+      {
+        name: 'Bad Provider ID',
+        email: 'badid@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: 'not-an-object-id',
+        temporaryPassword: 'TempPass1',
+      },
+      {
+        name: 'Short PW',
+        email: 'shortpw@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'Pass1',
+      },
+      {
+        name: 'No Digit PW',
+        email: 'nodigit@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'PasswordOnly',
+      },
+      {
+        name: 'No Letter PW',
+        email: 'noletter@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: '12345678',
+      },
+      {
+        name: 'Extra Field',
+        email: 'extra@example.com',
+        role: UserRole.AIRLINE_MODERATOR,
+        providerId: airline1Id,
+        temporaryPassword: 'TempPass1',
+        mustChangePassword: false,
+      },
+    ];
+    createModSpy.mockClear();
+    for (const payload of invalidPayloads) {
+      const res = await accApp!
+        .http()
+        .post('/api/admin/moderators')
+        .set('Cookie', admin.cookie)
+        .send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+    expect(createModSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+  });
+
+  it('resets temporary password (204), updates fake state and sessions, emits clean audit event, and rejects invalid inputs (ACC-07a)', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+
+    const resetUserRes = await accApp!
+      .http()
+      .post(`/api/admin/users/${userActiveId}/reset-password`)
+      .set('Cookie', admin.cookie)
+      .send({ temporaryPassword: 'NewTemp99' });
+    expect(resetUserRes.status).toBe(204);
+    expect(resetUserRes.text).toBe('');
+
+    expect(fakeAccounts.get(userActiveId)).toMatchObject({
+      mustChangePassword: true,
+      temporaryPassword: 'NewTemp99',
+      sessionsRevoked: 1,
+    });
+
+    const resetModRes = await accApp!
+      .http()
+      .post(`/api/admin/users/${modHotelId}/reset-password`)
+      .set('Cookie', admin.cookie)
+      .send({ temporaryPassword: 'ModTemp88' });
+    expect(resetModRes.status).toBe(204);
+    expect(fakeAccounts.get(modHotelId)).toMatchObject({
+      mustChangePassword: true,
+      temporaryPassword: 'ModTemp88',
+      sessionsRevoked: 1,
+    });
+
+    const resetEvents = fakeEvents.payloadsOf(Events.AdminAction);
+    expect(resetEvents).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PASSWORD_RESET,
+        target: { type: 'user', id: userActiveId },
+      },
+      {
+        actorId: admin.id,
+        action: AuditAction.PASSWORD_RESET,
+        target: { type: 'user', id: modHotelId },
+      },
+    ]);
+    expect(JSON.stringify(resetEvents)).not.toContain('NewTemp99');
+    expect(JSON.stringify(resetEvents)).not.toContain('ModTemp88');
+
+    fakeEvents.clear();
+    const unknownRes = await accApp!
+      .http()
+      .post(
+        `/api/admin/users/${new Types.ObjectId().toHexString()}/reset-password`,
+      )
+      .set('Cookie', admin.cookie)
+      .send({ temporaryPassword: 'NewTemp99' });
+    expect(unknownRes.status).toBe(404);
+    expect(unknownRes.body.code).toBe(ErrorCode.NotFound);
+
+    const badIdRes = await accApp!
+      .http()
+      .post('/api/admin/users/not-an-id/reset-password')
+      .set('Cookie', admin.cookie)
+      .send({ temporaryPassword: 'NewTemp99' });
+    expect(badIdRes.status).toBe(400);
+    expect(badIdRes.body.code).toBe(ErrorCode.ValidationFailed);
+
+    for (const badBody of [
+      {},
+      { temporaryPassword: 'short1a' },
+      { temporaryPassword: 'NoDigitsHere' },
+      { temporaryPassword: '12345678' },
+      { temporaryPassword: 'ValidPass1', extraField: true },
+    ]) {
+      const badPwRes = await accApp!
+        .http()
+        .post(`/api/admin/users/${userActiveId}/reset-password`)
+        .set('Cookie', admin.cookie)
+        .send(badBody);
+      expect(badPwRes.status).toBe(400);
+      expect(badPwRes.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
+  });
+
+  it('suspends and reactivates user and moderator accounts (204), rejects invalid transitions (409) and deactivated reactivation (ACC-15, ACC-16)', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+
+    // 1) Suspend active user -> 204, status=suspended, sessionsRevoked incremented
+    const suspendUserRes = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userActiveId}/suspend`)
+      .set('Cookie', admin.cookie);
+    expect(suspendUserRes.status).toBe(204);
+    expect(suspendUserRes.text).toBe('');
+    expect(fakeAccounts.get(userActiveId)).toMatchObject({
+      status: UserStatus.SUSPENDED,
+      sessionsRevoked: 1,
+    });
+
+    // 2) Reactivate suspended user -> 204, status=active
+    const reactivateUserRes = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userActiveId}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactivateUserRes.status).toBe(204);
+    expect(reactivateUserRes.text).toBe('');
+    expect(fakeAccounts.get(userActiveId)?.status).toBe(UserStatus.ACTIVE);
+
+    // 3) Suspend & reactivate moderator account too
+    const suspendModRes = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${modHotelId}/suspend`)
+      .set('Cookie', admin.cookie);
+    expect(suspendModRes.status).toBe(204);
+    expect(fakeAccounts.get(modHotelId)).toMatchObject({
+      status: UserStatus.SUSPENDED,
+      sessionsRevoked: 1,
+    });
+
+    const reactivateModRes = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${modHotelId}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactivateModRes.status).toBe(204);
+    expect(fakeAccounts.get(modHotelId)?.status).toBe(UserStatus.ACTIVE);
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.ACCOUNT_SUSPENDED,
+        target: { type: 'user', id: userActiveId },
+      },
+      {
+        actorId: admin.id,
+        action: AuditAction.ACCOUNT_REACTIVATED,
+        target: { type: 'user', id: userActiveId },
+      },
+      {
+        actorId: admin.id,
+        action: AuditAction.ACCOUNT_SUSPENDED,
+        target: { type: 'user', id: modHotelId },
+      },
+      {
+        actorId: admin.id,
+        action: AuditAction.ACCOUNT_REACTIVATED,
+        target: { type: 'user', id: modHotelId },
+      },
+    ]);
+    // Admin must not duplicate account.suspended / account.reactivated owned by accounts.
+    expect(fakeEvents.payloadsOf(Events.AccountSuspended)).toHaveLength(0);
+    expect(fakeEvents.payloadsOf(Events.AccountReactivated)).toHaveLength(0);
+
+    // 4) Invalid status transitions (409 INVALID_STATUS_TRANSITION) including deactivated account
+    fakeEvents.clear();
+    const suspendAlreadySuspended = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userSuspendedId}/suspend`)
+      .set('Cookie', admin.cookie);
+    expect(suspendAlreadySuspended.status).toBe(409);
+    expect(suspendAlreadySuspended.body.code).toBe(
+      ErrorCode.InvalidStatusTransition,
+    );
+
+    const reactivateAlreadyActive = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userActiveId}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactivateAlreadyActive.status).toBe(409);
+    expect(reactivateAlreadyActive.body.code).toBe(
+      ErrorCode.InvalidStatusTransition,
+    );
+
+    const suspendDeactivated = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userDeactivatedId}/suspend`)
+      .set('Cookie', admin.cookie);
+    expect(suspendDeactivated.status).toBe(409);
+    expect(suspendDeactivated.body.code).toBe(
+      ErrorCode.InvalidStatusTransition,
+    );
+
+    const reactivateDeactivated = await accApp!
+      .http()
+      .patch(`/api/admin/accounts/${userDeactivatedId}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactivateDeactivated.status).toBe(409);
+    expect(reactivateDeactivated.body.code).toBe(
+      ErrorCode.InvalidStatusTransition,
+    );
+    expect(fakeAccounts.get(userDeactivatedId)?.status).toBe(
+      UserStatus.DEACTIVATED,
+    );
+
+    // 5) Missing account -> 404, malformed id -> 400
+    const missingId = new Types.ObjectId().toHexString();
+    expect(
+      (
+        await accApp!
+          .http()
+          .patch(`/api/admin/accounts/${missingId}/suspend`)
+          .set('Cookie', admin.cookie)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await accApp!
+          .http()
+          .patch(`/api/admin/accounts/${missingId}/reactivate`)
+          .set('Cookie', admin.cookie)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await accApp!
+          .http()
+          .patch('/api/admin/accounts/not-an-id/suspend')
+          .set('Cookie', admin.cookie)
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await accApp!
+          .http()
+          .patch('/api/admin/accounts/not-an-id/reactivate')
+          .set('Cookie', admin.cookie)
+      ).status,
+    ).toBe(400);
+
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
   });
 });

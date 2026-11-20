@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
 import { ItinerariesController } from './itineraries.controller.js';
 import { ItinerariesService } from './itineraries.service.js';
+import { ItineraryPdf } from './itinerary-pdf.js';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
 
 @Module({
@@ -13,7 +14,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     ReferenceDataModule,
   ],
   controllers: [ItinerariesController],
-  providers: [ItinerariesService],
+  providers: [ItinerariesService, ItineraryPdf],
   exports: [ItinerariesService],
 })
 export class ItinerariesModule {}

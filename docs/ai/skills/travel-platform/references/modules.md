@@ -101,7 +101,9 @@ Ports are registered with injection tokens defined in the owning module; impleme
 
 ## 6. Events (`@nestjs/event-emitter`, in-process)
 
-Handlers must be **idempotent** (conditional updates), because an event can be handled twice.
+Handlers must be **idempotent** (conditional writes), because an event can be handled twice.
+Audit derives its insert-only entry's `_id` from the stable `admin.action.eventId`;
+duplicate delivery never inserts twice or modifies the original entry.
 
 | Event | Emitted by | Handled by |
 |---|---|---|
@@ -114,7 +116,7 @@ Handlers must be **idempotent** (conditional updates), because an event can be h
 | `user.deactivated`, `user.reactivated` | accounts | blog, itineraries → set `authorDeactivated` |
 | `account.suspended`, `account.reactivated` | accounts | notifications |
 | `provider.deactivated`, `provider.reactivated` | admin | notifications |
-| `admin.action` | admin, moderation | audit |
+| `admin.action { eventId, actorId, action, target, details? }` | admin, moderation | audit |
 
 Events carry the recipients' user IDs, so listeners don't look them up. Emit after the transaction commits.
 

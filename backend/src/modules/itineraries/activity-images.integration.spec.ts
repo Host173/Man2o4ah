@@ -4,6 +4,7 @@ import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fak
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
@@ -15,10 +16,10 @@ import { ItinerariesService } from './itineraries.service.js';
 import { Itinerary } from './schemas/itinerary.schema.js';
 
 const image = (name = 'pyramids.jpg'): UploadedImage => ({
-  buffer: Buffer.from('not-a-real-jpeg-but-non-empty'),
+  buffer: imageBytes(name.endsWith('.png') ? 'png' : 'jpg'),
   originalname: name,
   mimetype: name.endsWith('.png') ? 'image/png' : 'image/jpeg',
-  size: 30,
+  size: 32,
 });
 
 describe('ITN-12 activity images (integration, storage fake)', () => {

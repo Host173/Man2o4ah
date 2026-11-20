@@ -53,6 +53,7 @@ Infrastructure (not domain modules):
 - **Notification change identity (GEN-01, 20 Nov):** with Kareem/affected owners' approval, reschedule and account/provider notification events require a stable `eventId`, reused on redelivery. Different committed changes have different IDs. Read state and intervening opposite changes never identify an event; distinct reschedules notify even when earlier alerts are unread. No collection schema or index changes.
 - **Booking rules are implemented in each booking module.** The GEN-11 lifecycle (allowed status moves) and the FLT-09/HTL-10 refund tiers are needed by both flight-bookings and hotel-bookings. Each module has its own copy, with its own tests; neither imports the other, and they don't go in `common/` (no business logic there). The two copies must follow the same rule (HTL-10 uses FLT-09's selection rule); only the start date differs (flight: outbound departure; hotel: check-in at 00:00 UTC). Why: each module owns all of its logic, there's no coupling between the booking modules, and one owner (Bookings) keeps both copies in step. Decided 17 Nov (PR #130).
 - **Endpoints that combine provider and booking data live in the booking module** (FLT-29 in flight-bookings; HTL-08 and HTL-22 in hotel-bookings), whatever their URL.
+- **"My flight bookings" groups (FLT-25, 20 Nov):** Kareem approved this rule, confirmed by the requester. `GET /api/flight-bookings?group=upcoming|past|cancelled` lists the user's own bookings, one group per request, in the standard paged list. **Upcoming** = `confirmed` with `firstDepartureAt > now`, soonest first (the same rule as `ActiveBookingsCheck`). **Past** = `completed`, or `confirmed` whose first departure has passed (a round trip in progress, or a trip the completion job hasn't reached yet), most recent first. **Cancelled** = `cancelled`, most recent departure first. `pending_payment` and `expired` bookings are in no group; the owner can still open them with `GET /api/flight-bookings/:id`. The 15-minute completion job moves `confirmed` bookings to `completed` once `lastDepartureAt` has passed.
 - **New features:** if a feature fits an existing module's data and rules, it extends that module. A new module is created only for a feature totally different from all current modules (new data no existing module owns).
 - Bonus features that would likely become new modules: favourites, admin analytics. Email notifications would be a channel inside notifications.
 
@@ -218,6 +219,13 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 - **Keys:** the requirement ID where one fits; otherwise `CTR` (contract), `INV` (inventory), `PLT` (platform), `TST` (cross-module tests). Branch `<type>/<KEY>-<slug>`, PR title `<KEY>: <title>`.
 - Tickets say **what** to build, the test levels, TDD, branch, PR title and dependencies; **how** is up to the owner. Dates are set by Kareem.
 - Frontend tickets (M2) come later, once `DESIGN.md` is decided.
+
+## 20. Audit event identity (GEN-07)
+
+- `admin.action` requires a non-empty `eventId`, generated once per committed action and retained on delivery retries. Separate actions always receive new IDs.
+- Audit derives its ObjectId `_id` from the first 12 bytes of SHA-256 of the event ID. The existing unique `_id` index deduplicates concurrent inserts without changing the frozen schema or indexes; an existing entry is never updated or deleted.
+- Audit details retain only plain objects, arrays and primitive JSON values, with secret-looking keys stripped recursively. Unsupported nested objects are omitted rather than handed to BSON serialization with potentially secret-bearing fields or serialization hooks.
+- This deduplication does not make in-process event delivery durable; an outbox or delivery retry mechanism is not introduced by GEN-07.
 
 ## Open items to discuss
 

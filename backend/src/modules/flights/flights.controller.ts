@@ -32,6 +32,7 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
+import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
 import { SearchFlightsDto } from './dto/search-flights.dto.js';
 import {
   FlightResponseDto,
@@ -56,6 +57,23 @@ export class FlightsController {
   @ApiBadRequestResponse({ description: 'Invalid search criteria' })
   async search(@Query() query: SearchFlightsDto) {
     return this.flights.search(query);
+  }
+
+  @Get('flights/:id')
+  @Public()
+  @ApiOperation({ summary: 'FLT-17 Get flight details' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: FlightDetailsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiNotFoundResponse({ description: 'Flight or airline not found' })
+  async getDetails(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<FlightDetailsResponseDto> {
+    const details = await this.flights.getFlightDetails(id.toHexString());
+    return FlightDetailsResponseDto.fromDetails(
+      details.flight,
+      details.airline,
+    );
   }
 
   @Post('flights')

@@ -220,14 +220,6 @@ describe('FlightsService', () => {
     await moduleRef?.close();
   });
 
-  // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
-  it.each([
-    ['getFlightsForBooking', () => service.getFlightsForBooking(['f1'])],
-    ['checkBookable', () => service.checkBookable('f1', 'c1', 1)],
-  ])('%s throws NotImplementedException', (_name, call) => {
-    expect(call).toThrow(NotImplementedException);
-  });
-
   it('delegates public airline operations to the profile service', async () => {
     airlineProfiles.getAirline.mockResolvedValue(null);
     airlineProfiles.setAirlineActive.mockResolvedValue({ id: 'a1' });

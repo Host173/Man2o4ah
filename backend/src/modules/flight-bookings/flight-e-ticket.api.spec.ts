@@ -45,11 +45,14 @@ function seedFlights(withTimeZones: boolean): FakeFlightsData {
     ],
   });
   if (withTimeZones) {
-    // What getFlightsForBooking returns once flights adds the airports' zones
-    // to FlightView (asked of the flights owner; FlightManagementView has them).
     Object.assign(data.flight(FLIGHT)!, {
       departureTimeZone: 'Africa/Cairo',
       arrivalTimeZone: 'Asia/Dubai',
+    });
+  } else {
+    Object.assign(data.flight(FLIGHT)!, {
+      departureTimeZone: undefined,
+      arrivalTimeZone: undefined,
     });
   }
   return data;

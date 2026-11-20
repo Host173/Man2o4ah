@@ -25,7 +25,9 @@ import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
-import type { AddActivityDto } from './dto/add-activity.dto.js';
+import { AddActivityDto } from './dto/add-activity.dto.js';
+import { UpdateActivityDto } from './dto/update-activity.dto.js';
+import { validateActivityInput } from './activity-input.js';
 import type {
   ActivityView,
   BudgetEntryView,
@@ -397,35 +399,184 @@ export class ItinerariesService {
     const id = this.parseId(itineraryId, 'itineraryId');
     const ownerId = this.parseId(userId, 'userId');
     const targetDayId = this.parseId(dayId, 'dayId');
+    const input = await validateActivityInput(
+      AddActivityDto,
+      dto,
+      this.referenceData,
+    );
 
     const activity: StoredActivity = {
       _id: new Types.ObjectId(),
-      name: dto.name.trim(),
-      description: dto.description,
-      time: dto.time,
-      cost: dto.cost ? { amountMinor: dto.cost, currency: 'EGP' } : undefined,
+      name: input.name,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
       images: [],
     };
 
-    // Append the activity inside the database so concurrent adds are preserved.
-    // Read the itinerary, modify the day in memory, and save.
-    const itinerary = await this.itineraryModel
-      .findOne({ _id: id, ownerId })
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': targetDayId },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$day._id', targetDayId] },
+                      {
+                        $mergeObjects: [
+                          '$$day',
+                          {
+                            activities: {
+                              $concatArrays: [
+                                '$$day.activities',
+                                [{ $literal: activity }],
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$day',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
       .exec();
-    if (!itinerary) throw this.notFound();
+    if (!updated) throw this.notFound();
+    const index = updated.days.findIndex((day) => day._id.equals(targetDayId));
+    return this.toDayView(updated.days[index], index, updated.startDate);
+  }
 
-    const day = itinerary.days.find(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
+  /** ITN-10: edits only supplied fields on an activity owned by the caller. */
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ActivityView> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+    const input = await validateActivityInput(
+      UpdateActivityDto,
+      dto,
+      this.referenceData,
     );
-    if (!day) throw this.notFound();
+    const changes = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
+    };
+    const filter = { ownerId, 'days.activities._id': id };
+    const updated =
+      Object.keys(changes).length === 0
+        ? await this.itineraryModel.findOne(filter).lean().exec()
+        : await this.itineraryModel
+            .findOneAndUpdate(
+              filter,
+              [
+                {
+                  $set: {
+                    days: {
+                      $map: {
+                        input: '$days',
+                        as: 'day',
+                        in: {
+                          $mergeObjects: [
+                            '$$day',
+                            {
+                              activities: {
+                                $map: {
+                                  input: '$$day.activities',
+                                  as: 'activity',
+                                  in: {
+                                    $cond: [
+                                      { $eq: ['$$activity._id', id] },
+                                      {
+                                        $mergeObjects: [
+                                          '$$activity',
+                                          { $literal: changes },
+                                        ],
+                                      },
+                                      '$$activity',
+                                    ],
+                                  },
+                                },
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+                ...this.recomputeDayFields(),
+              ],
+              { returnDocument: 'after', updatePipeline: true },
+            )
+            .lean()
+            .exec();
+    if (!updated) throw this.notFound();
+    const activity = updated.days
+      .flatMap((day) => day.activities)
+      .find((activity) => activity._id.equals(id));
+    if (!activity) throw this.notFound();
+    return this.toActivityView(activity);
+  }
 
-    day.activities.push(activity);
-    await itinerary.save();
-
-    const updatedIndex = itinerary.days.findIndex(
-      (day) => day._id.toHexString() === targetDayId.toHexString(),
-    );
-    return this.toDayView(day, updatedIndex, itinerary.startDate);
+  /** ITN-10: removes an owned activity; image file handling ships with ITN-12. */
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
+    const id = this.parseId(activityId, 'activityId');
+    const ownerId = this.parseId(userId, 'userId');
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { ownerId, 'days.activities._id': id },
+        [
+          {
+            $set: {
+              days: {
+                $map: {
+                  input: '$days',
+                  as: 'day',
+                  in: {
+                    $mergeObjects: [
+                      '$$day',
+                      {
+                        activities: {
+                          $filter: {
+                            input: '$$day.activities',
+                            as: 'activity',
+                            cond: { $ne: ['$$activity._id', id] },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          ...this.recomputeDayFields(),
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
   }
 
   /**

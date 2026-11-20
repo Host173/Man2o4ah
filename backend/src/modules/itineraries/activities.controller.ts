@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   UploadedFile,
 } from '@nestjs/common';
@@ -14,6 +16,7 @@ import {
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiPayloadTooLargeResponse,
@@ -25,20 +28,58 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser } from '../accounts/auth/decorators.js';
 import { ImageUpload } from '../storage/image-upload.decorator.js';
 import type { UploadedImage } from '../storage/image-rules.js';
-import { ItineraryDayResponseDto } from './dto/itinerary.response.dto.js';
+import {
+  ActivityResponseDto,
+  ItineraryDayResponseDto,
+} from './dto/itinerary.response.dto.js';
+import { UpdateActivityDto } from './dto/update-activity.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
-import type { ItineraryDayView } from './itineraries.types.js';
+import type { ActivityView, ItineraryDayView } from './itineraries.types.js';
 
 /**
- * ITN-12: activity images are addressed by the activity's own ID, so these
- * routes live at `/api/activities/:id/images` (endpoints.md) even though the
- * module that owns them is `itineraries`.
+ * Activities are addressed by their own ID, so the ITN-10 edit/delete routes
+ * and the ITN-12 image routes live at `/api/activities/:id...` (endpoints.md)
+ * even though the module that owns them is `itineraries`.
  */
 @ApiTags('itineraries')
 @ApiCookieAuth()
 @Controller('activities')
 export class ActivitiesController {
-  constructor(private readonly itinerariesService: ItinerariesService) {}
+  constructor(private readonly itineraries: ItinerariesService) {}
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'ITN-10 Edit an activity in my itinerary' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: ActivityResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid activity ID or payload' })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'Activity not found or owned by another user',
+  })
+  update(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: UpdateActivityDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ActivityView> {
+    return this.itineraries.updateActivity(id.toHexString(), dto, user.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'ITN-10 Delete an activity from my itinerary' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiNoContentResponse({ description: 'Activity deleted' })
+  @ApiBadRequestResponse({ description: 'Invalid activity ID' })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({
+    description: 'Activity not found or owned by another user',
+  })
+  delete(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    return this.itineraries.deleteActivity(id.toHexString(), user.id);
+  }
 
   @Post(':id/images')
   @ImageUpload()
@@ -59,11 +100,7 @@ export class ActivitiesController {
     @UploadedFile() file: UploadedImage | undefined,
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDayView> {
-    return this.itinerariesService.addActivityImage(
-      id.toHexString(),
-      file,
-      user.id,
-    );
+    return this.itineraries.addActivityImage(id.toHexString(), file, user.id);
   }
 
   @Delete(':id/images/:imageId')
@@ -82,7 +119,7 @@ export class ActivitiesController {
     @Param('imageId', ParseObjectIdPipe) imageId: Types.ObjectId,
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
-    await this.itinerariesService.removeActivityImage(
+    await this.itineraries.removeActivityImage(
       id.toHexString(),
       imageId.toHexString(),
       user.id,

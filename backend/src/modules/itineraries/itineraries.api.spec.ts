@@ -1423,4 +1423,327 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       ).toEqual(expect.arrayContaining(['edited', 'second']));
     });
   });
+
+  describe('activities (ITN-10)', () => {
+    async function ownedDay() {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const itineraryId = await createOwnedItinerary(owner.cookie);
+      const day = await testApp
+        .http()
+        .post(`/api/itineraries/${itineraryId}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo', notes: 'Arrival' })
+        .expect(201);
+      const dayId = day.body._id as string;
+      return {
+        owner,
+        itineraryId,
+        dayId,
+        path: `/api/itineraries/${itineraryId}/days/${dayId}/activities`,
+      };
+    }
+
+    it('adds a trimmed activity with zero cost in a supported currency and persists it', async () => {
+      const { owner, itineraryId, path } = await ownedDay();
+      const response = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({
+          name: '  Free museum  ',
+          description: '$100 is not the admission price',
+          time: '00:00',
+          cost: { amountMinor: 0, currency: 'JPY' },
+        })
+        .expect(201);
+      expect(response.body.activities).toEqual([
+        {
+          _id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          name: 'Free museum',
+          description: '$100 is not the admission price',
+          time: '00:00',
+          cost: { amountMinor: 0, currency: 'JPY' },
+          images: [],
+        },
+      ]);
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+      expect(detail.body.days[0].activities).toEqual(response.body.activities);
+      expect(detail.body).toMatchObject({ dayCount: 1 });
+    });
+
+    it('accepts name and time boundaries and omits fields that were not supplied', async () => {
+      const { owner, path } = await ownedDay();
+      const first = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({ name: 'A' })
+        .expect(201);
+      expect(first.body.activities[0]).toEqual({
+        _id: expect.any(String),
+        name: 'A',
+        images: [],
+      });
+      const second = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({
+          name: 'N'.repeat(100),
+          description: 'D'.repeat(1000),
+          time: '23:59',
+          cost: { amountMinor: 2500, currency: 'USD' },
+        })
+        .expect(201);
+      expect(second.body.activities[1]).toMatchObject({
+        name: 'N'.repeat(100),
+        description: 'D'.repeat(1000),
+        time: '23:59',
+        cost: { amountMinor: 2500, currency: 'USD' },
+      });
+    });
+
+    it('edits only supplied activity fields and deletes only the addressed activity', async () => {
+      const { owner, itineraryId, path } = await ownedDay();
+      const added = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({
+          name: 'Original',
+          description: 'Keep',
+          time: '09:30',
+          cost: { amountMinor: 2000, currency: 'EGP' },
+        })
+        .expect(201);
+      const id = added.body.activities[0]._id as string;
+      await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({ name: 'Other activity' })
+        .expect(201);
+      const edited = await testApp
+        .http()
+        .patch(`/api/activities/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ name: '  $$ROOT  ', cost: { amountMinor: 0, currency: 'USD' } })
+        .expect(200);
+      expect(edited.body).toEqual({
+        _id: id,
+        name: '$$ROOT',
+        description: 'Keep',
+        time: '09:30',
+        cost: { amountMinor: 0, currency: 'USD' },
+        images: [],
+      });
+      const unchanged = await testApp
+        .http()
+        .patch(`/api/activities/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({})
+        .expect(200);
+      expect(unchanged.body).toEqual(edited.body);
+      const deleted = await testApp
+        .http()
+        .delete(`/api/activities/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(204);
+      expect(deleted.text).toBe('');
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+      expect(detail.body.days[0]).toMatchObject({
+        notes: 'Arrival',
+        activities: [{ name: 'Other activity' }],
+      });
+      const repeated = await testApp
+        .http()
+        .delete(`/api/activities/${id}`)
+        .set('Cookie', owner.cookie)
+        .expect(404);
+      expect(repeated.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('rejects invalid input with field details and leaves stored activities unchanged', async () => {
+      const { owner, itineraryId, path } = await ownedDay();
+      const added = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({ name: 'Keep' })
+        .expect(201);
+      const id = added.body.activities[0]._id as string;
+      const invalid = [
+        { name: '' },
+        { name: '   ' },
+        { name: 'N'.repeat(101) },
+        { name: null },
+        { description: 'D'.repeat(1001) },
+        { description: null },
+        { time: '24:00' },
+        { time: '09:60' },
+        { time: null },
+        { cost: 20 },
+        { cost: null },
+        { cost: { amountMinor: -1, currency: 'USD' } },
+        { cost: { amountMinor: 1.5, currency: 'USD' } },
+        { cost: { amountMinor: 1, currency: 'ZZZ' } },
+        { cost: { amountMinor: 1 } },
+        { cost: { amountMinor: 1, currency: 'USD', unknown: true } },
+        { unknown: true },
+      ];
+      for (const fields of invalid) {
+        const created = await testApp
+          .http()
+          .post(path)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'Valid', ...fields })
+          .expect(400);
+        const updated = await testApp
+          .http()
+          .patch(`/api/activities/${id}`)
+          .set('Cookie', owner.cookie)
+          .send(fields)
+          .expect(400);
+        for (const response of [created, updated]) {
+          expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+          const field = Object.keys(fields)[0];
+          expect(
+            errorDetails(response.body).some(
+              (detail) => detail === field || detail.startsWith(`${field}.`),
+            ),
+          ).toBe(true);
+        }
+      }
+      const detail = await testApp
+        .http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', owner.cookie)
+        .expect(200);
+      expect(detail.body.days[0].activities).toEqual(added.body.activities);
+    });
+
+    it('requires authentication and returns 404 for missing or foreign parents and activities', async () => {
+      const { owner, itineraryId, dayId, path } = await ownedDay();
+      const added = await testApp
+        .http()
+        .post(path)
+        .set('Cookie', owner.cookie)
+        .send({ name: 'Owned' })
+        .expect(201);
+      const id = added.body.activities[0]._id as string;
+      const foreign = await loginAs(testApp.connection, UserRole.ADMIN);
+      const missing = new Types.ObjectId().toHexString();
+      for (const cookie of [undefined, foreign.cookie]) {
+        const responses = await Promise.all([
+          testApp
+            .http()
+            .post(path)
+            .set('Cookie', cookie ?? '')
+            .send({ name: 'New' }),
+          testApp
+            .http()
+            .patch(`/api/activities/${id}`)
+            .set('Cookie', cookie ?? '')
+            .send({ name: 'New' }),
+          testApp
+            .http()
+            .delete(`/api/activities/${id}`)
+            .set('Cookie', cookie ?? ''),
+        ]);
+        for (const response of responses) {
+          expect(response.status).toBe(cookie ? 404 : 401);
+          expect(response.body.code).toBe(
+            cookie ? ErrorCode.NotFound : ErrorCode.NotAuthenticated,
+          );
+        }
+      }
+      const responses = await Promise.all([
+        testApp
+          .http()
+          .post(`/api/itineraries/${missing}/days/${dayId}/activities`)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days/${missing}/activities`)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .patch(`/api/activities/${missing}`)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .patch(`/api/activities/${missing}`)
+          .set('Cookie', owner.cookie)
+          .send({}),
+        testApp
+          .http()
+          .delete(`/api/activities/${missing}`)
+          .set('Cookie', owner.cookie),
+      ]);
+      for (const response of responses) {
+        expect(response.status).toBe(404);
+        expect(response.body.code).toBe(ErrorCode.NotFound);
+      }
+    });
+
+    it('rejects malformed route IDs with 400 VALIDATION_FAILED', async () => {
+      const { owner, itineraryId, dayId } = await ownedDay();
+      const responses = await Promise.all([
+        testApp
+          .http()
+          .post(`/api/itineraries/bad/days/${dayId}/activities`)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .post(`/api/itineraries/${itineraryId}/days/bad/activities`)
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .patch('/api/activities/bad')
+          .set('Cookie', owner.cookie)
+          .send({ name: 'New' }),
+        testApp
+          .http()
+          .delete('/api/activities/bad')
+          .set('Cookie', owner.cookie),
+      ]);
+      for (const response of responses) {
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      }
+    });
+
+    it('documents the required activity routes, money shape and cookie authentication in Swagger', () => {
+      const document = SwaggerModule.createDocument(
+        testApp.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      for (const [path, method] of [
+        ['/api/itineraries/{id}/days/{dayId}/activities', 'post'],
+        ['/api/activities/{id}', 'patch'],
+        ['/api/activities/{id}', 'delete'],
+      ] as const) {
+        expect(document.paths[path]?.[method]?.summary).toContain('ITN-10');
+        expect(document.paths[path]?.[method]?.security).toEqual([
+          { cookie: [] },
+        ]);
+      }
+      expect(document.components?.schemas?.ActivityCostDto).toMatchObject({
+        required: ['amountMinor', 'currency'],
+      });
+    });
+  });
 });

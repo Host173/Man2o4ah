@@ -4,7 +4,9 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import { UpdateActivityDto } from '../../src/modules/itineraries/dto/update-activity.dto.js';
+import { validateActivityInput } from '../../src/modules/itineraries/activity-input.js';
 import { MAX_IMAGES_PER_ITEM } from '../../src/modules/storage/image-rules.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
@@ -289,30 +291,106 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return structuredClone(this.toDetail(itinerary).days[index]);
   }
 
-  /** ITN-10: adds an activity to a day, so ITN-12 can fake image ownership. */
+  /** ITN-10: adds an owned activity with the real service's validation and errors. */
   async addActivity(
     itineraryId: string,
     dayId: string,
     dto: AddActivityDto,
     userId: string,
   ): Promise<ItineraryDayView> {
-    const itinerary = this.findOwned(itineraryId, userId);
-    const index = itinerary.days.findIndex((day) => day._id === dayId);
-    if (index === -1) throw this.activityNotFound();
-
-    const activity: ActivityView = {
+    const targetItineraryId = this.activityResourceId(
+      itineraryId,
+      'itineraryId',
+    );
+    const targetDayId = this.activityResourceId(dayId, 'dayId');
+    const input = await validateActivityInput(
+      AddActivityDto,
+      dto,
+      this.referenceData,
+    );
+    const itinerary = this.findOwned(targetItineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === targetDayId);
+    if (index === -1)
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    const day = itinerary.days[index];
+    day.activities.push({
       _id: (this.nextId++).toString(16).padStart(24, '0'),
-      name: dto.name.trim(),
+      name: input.name,
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
       images: [],
-    };
-    if (dto.description !== undefined) activity.description = dto.description;
-    if (dto.time !== undefined) activity.time = dto.time;
-    if (dto.cost !== undefined && dto.cost !== null) {
-      activity.cost = { amountMinor: dto.cost, currency: 'EGP' };
-    }
-    itinerary.days[index].activities.push(activity);
+    });
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ActivityView> {
+    const id = this.activityResourceId(activityId, 'activityId');
+    const input = await validateActivityInput(
+      UpdateActivityDto,
+      dto,
+      this.referenceData,
+    );
+    const { itinerary, activity } = this.findActivity(id, userId);
+    const changes = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description }
+        : {}),
+      ...(input.time !== undefined ? { time: input.time } : {}),
+      ...(input.cost !== undefined ? { cost: { ...input.cost } } : {}),
+    };
+    if (Object.keys(changes).length > 0) {
+      Object.assign(activity, changes);
+      itinerary.updatedAt = new Date();
+    }
+    return structuredClone(activity);
+  }
+
+  async deleteActivity(activityId: string, userId: string): Promise<void> {
+    const id = this.activityResourceId(activityId, 'activityId');
+    const { itinerary } = this.findActivity(id, userId);
+    for (const day of itinerary.days) {
+      day.activities = day.activities.filter((activity) => activity._id !== id);
+    }
+    itinerary.updatedAt = new Date();
+  }
+
+  private activityResourceId(value: string, field: string): string {
+    if (typeof value !== 'string' || !/^[0-9a-fA-F]{24}$/.test(value)) {
+      throw this.invalidField(field, 'must be a valid ObjectId');
+    }
+    return value.toLowerCase();
+  }
+
+  private findActivity(
+    activityId: string,
+    userId: string,
+  ): {
+    itinerary: ItineraryDetailView;
+    activity: ActivityView;
+  } {
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      const activity = itinerary.days
+        .flatMap((day) => day.activities)
+        .find((activity) => activity._id === activityId);
+      if (activity) return { itinerary, activity };
+    }
+    throw new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary activity not found',
+    });
   }
 
   /** ITN-12/GEN-08: attaches one image to the owner's activity. */
@@ -323,7 +401,7 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   ): Promise<ItineraryDayView> {
     if (!file)
       throw this.invalidField('file', 'must contain a JPG or PNG image');
-    const found = this.findActivity(activityId, userId);
+    const found = this.findImageActivity(activityId, userId);
     const images =
       found.itinerary.days[found.dayIndex].activities[found.activityIndex]
         .images;
@@ -332,7 +410,7 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     }
     const stored = await this.storage.save(file);
     try {
-      const current = this.findActivity(activityId, userId);
+      const current = this.findImageActivity(activityId, userId);
       const activity =
         current.itinerary.days[current.dayIndex].activities[
           current.activityIndex
@@ -361,7 +439,7 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     imageId: string,
     userId: string,
   ): Promise<void> {
-    const found = this.findActivity(activityId, userId);
+    const found = this.findImageActivity(activityId, userId);
     const images =
       found.itinerary.days[found.dayIndex].activities[found.activityIndex]
         .images;
@@ -375,7 +453,7 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     found.itinerary.updatedAt = new Date();
   }
 
-  private findActivity(
+  private findImageActivity(
     activityId: string,
     userId: string,
   ): {

@@ -3902,3 +3902,47 @@ With `MONGODB_URI` pointing at a **dev** database (never the one graders use, un
 
 How the output was used:
 Built the PLT-08 demo seed on chore/PLT-08-demo-data-seed: a fetch-based API client with a cookie jar, a typed demo world plan, an idempotent runDemoSeed over the public API, the seed:demo script and DEMO_PASSWORD in .env.example, an integration test that runs the seed twice, and a README section with the demo accounts; commits: chore(seed) x2, test(seed), docs(readme), chore(ai).
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-08
+
+Prompt:
+Two checks, then push and open the PR for PLT-08.
+
+1. The reused worktree. You reset an existing worktree to origin/develop instead of creating
+   ../man2o4ah-PLT-08. Tell me which branch it held before the reset, and whether anything was
+   lost. Check with `git reflog` in that worktree: list any commits that existed before the reset
+   and are not on any remote branch (`git branch -r --contains <sha>` is empty), and say whether
+   there were uncommitted changes. Don't recover or change anything; just report. If something
+   unpushed was lost, stop here and wait for me.
+
+2. Line endings. Run `git ls-files --eol .env.example backend/src/seed README.md`. Every file must
+   be `i/lf`. If any file you touched shows `i/crlf`, convert it back to LF (keep the content
+   identical), run `npm run format:check` in backend/, and commit it as
+   `chore(seed): restore LF line endings (PLT-08)`. Don't touch files you didn't change.
+
+3. If both checks are clean: push `chore/PLT-08-demo-data-seed` and open a PR into develop titled
+   `PLT-08: Demo data seed`. Fill the PR template. The description must include:
+   - What it adds: `npm run seed:demo`, a re-runnable demo world created through the HTTP API (no
+     direct model writes), never touching reference data or the admin.
+   - Run 1 counts: 3 airlines, 4 hotels, 7 moderators, 196 flights, 420 cabins, 16 rooms,
+     16 availability ranges, 3 users; about 14 s; run 2 creates nothing (the integration spec
+     proves it).
+   - The new optional variable `DEMO_PASSWORD` (`.env.example`); the seed fails fast without it.
+     The README lists the demo accounts but never the password.
+   - Deviations from the plan, one line each: flights start tomorrow (no past departures);
+     availability uses PATCH `SET_RANGES` because POST rejects overlaps; existing providers are
+     found by logging in as their moderator (no list endpoint), so `DEMO_PASSWORD` must stay the
+     same between runs; city slugs used directly; `DemoApi.fork()` for one cookie jar per actor.
+   - Gates: all pass; verify 205 files / 3,341 tests. Note that `itinerary-pdf.api.spec.ts` can
+     time out under full-suite load and passes alone (known, not caused by this PR).
+   - Run order for setup: `seed:reference` → `seed:admin` → `seed:demo`.
+   Add a prompt-log entry for this message to ai-prompts/kareem.txt first (course format,
+   append only) and commit it as `chore(ai): log the PLT-08 push prompt (PLT-08)` before pushing.
+
+Report: the worktree findings, the eol result, the PR link, and CI status once it starts.
+
+How the output was used:
+Checked the reused worktree (no unpushed work lost: the branch it held, claude/execute-this-1a6c9e, sits on origin/main) and the line endings (all files i/lf in the index), then pushed chore/PLT-08-demo-data-seed and opened the PLT-08 PR into develop.

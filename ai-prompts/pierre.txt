@@ -1349,3 +1349,81 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added profile boundary tests and UTF-16 DTO validation; preserved incoming updates, verified 2412 tests, and prepared follow-up PR #192 after #140 merged during verification.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+nameLength=Preserve existing 100 UTF-16-unit limit; align DTO, Swagger and tests, dependencyWiring=Keep ModuleRef; leave Kareem’s approval question explicit, branchScope=Update the PR branch, incorporate current develop, resolve conflicts, push, then comment
+
+How the output was used:
+Kept the frozen schema and ModuleRef lookup, documented UTF-16 counting, and preserved upstream history while integrating develop.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+re open it and add the fixes
+
+How the output was used:
+GitHub rejected reopening #140 because it had already merged.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Created the explicitly authorized follow-up PR #192 with test commit 1aa5673 before fix commit c223d4a.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+Authorize an append-only entry in kareem.txt, recording this request and approvals under Kareem
+
+How the output was used:
+Initially appended the authorized entries to kareem.txt under an incorrect GitHub-account assumption; the subsequent correction records Pierre as the actual PR author without deleting history.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Authorized these correctly attributed Pierre entries and an append-only correction in kareem.txt to fix the PR #192 prompt-log check.
+================================================

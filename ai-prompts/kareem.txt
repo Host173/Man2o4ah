@@ -2677,3 +2677,16 @@ Authorize an append-only entry in kareem.txt, recording this request and approva
 How the output was used:
 Appended these request and approval entries to ai-prompts/kareem.txt without changing its existing content.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: AI assistant using Copilot SDK in VS Code
+Related Requirement: ACC-09
+
+Prompt:
+true
+
+How the output was used:
+Attribution correction: the preceding five ACC-09 entries were recorded as Kareem because the assistant incorrectly assumed the GitHub account was Host173. The actual PR #192 author is pierreofficial (Pierre); correctly attributed request entries are appended to ai-prompts/pierre.txt, and the earlier kareem.txt entries remain unchanged.
+================================================

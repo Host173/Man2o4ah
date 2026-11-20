@@ -143,6 +143,48 @@ describe('DELETE /api/users/me (API, ACC-12)', () => {
       expectError(res, 401, ErrorCode.InvalidCredentials);
       expect(await sessionCount(u.id)).toBe(0);
     });
+
+    it('rejects an in-flight login that resumes after deactivation commits', async () => {
+      const u = await loginAs(t.connection, UserRole.USER);
+      await users.updateOne(
+        { _id: u.id },
+        { $set: { passwordHash: await bcrypt.hash(PASSWORD, 4) } },
+      );
+      const user = await users.findById(u.id).lean();
+      if (!user) throw new Error('Test user missing');
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const original = t.connection.startSession.bind(t.connection);
+      const spy = vi
+        .spyOn(t.connection, 'startSession')
+        .mockImplementationOnce(async (options) => {
+          started.resolve();
+          await release.promise;
+          return original(options);
+        });
+      const pending = t
+        .http()
+        .post('/api/auth/login')
+        .send({ email: user.email, password: PASSWORD })
+        .then((res) => res);
+      try {
+        await started.promise;
+        await t
+          .http()
+          .delete(URL)
+          .set('Cookie', u.cookie)
+          .send({ confirm: true })
+          .expect(204);
+      } finally {
+        release.resolve();
+        spy.mockRestore();
+      }
+
+      const res = await pending;
+      expectError(res, 401, ErrorCode.InvalidCredentials);
+      expect(await sessionCount(u.id)).toBe(0);
+      expect(await statusOf(u.id)).toBe(UserStatus.DEACTIVATED);
+    });
   });
 
   describe('upcoming confirmed bookings', () => {

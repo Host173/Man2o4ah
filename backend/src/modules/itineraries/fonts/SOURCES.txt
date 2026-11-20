@@ -1,5 +1,5 @@
-Unmodified Noto fonts, redistributed under the accompanying SIL Open Font
-License 1.1 notices. No font files are fetched at runtime.
+Noto fonts, redistributed under the accompanying SIL Open Font License 1.1
+notices, unmodified except NotoSansCJKsc.otf. No font files are fetched at runtime.
 
 NotoSans.ttf (Latin-OFL.txt):
 https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf
@@ -9,6 +9,10 @@ https://github.com/notofonts/noto-fonts/blob/main/hinted/ttf/NotoSansArabic/Noto
 
 NotoSansCJKsc.otf (CJK-OFL.txt):
 https://github.com/notofonts/noto-cjk/blob/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+Subset (OFL Modified Version) of the file above, built with
+backend/scripts/fonts/subset-cjk-font.py: GB2312, JIS X 0208 and KS X 1001
+characters, CJK punctuation, kana and full-width forms. Characters unsupported
+by all bundled fonts print as [U+XXXX].
 
 NotoEmoji.ttf (Emoji-OFL.txt):
 https://github.com/google/fonts/blob/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf

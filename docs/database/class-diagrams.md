@@ -156,6 +156,7 @@ classDiagram
       refreshTokenHash : string
       lastActivityAt : Date
       expiresAt : Date (TTL)
+      absoluteExpiresAt : Date (immutable)
     }
   }
   City --> Country : countryCode

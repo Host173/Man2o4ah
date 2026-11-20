@@ -27,18 +27,24 @@ const sid = new Types.ObjectId().toHexString();
 const providerId = new Types.ObjectId().toHexString();
 
 interface Setup {
-  session?: { userId: Types.ObjectId; expiresAt: Date } | null;
+  session?: {
+    userId: Types.ObjectId;
+    expiresAt: Date;
+    absoluteExpiresAt?: Date;
+  } | null;
   user?: { mustChangePassword: boolean } | null;
 }
 
 function setup({ session, user }: Setup = {}) {
   const sessionDoc =
-    session === undefined
-      ? {
+    session === null
+      ? null
+      : {
           userId: new Types.ObjectId(userId),
           expiresAt: new Date(NOW + MINUTE),
-        }
-      : session;
+          absoluteExpiresAt: new Date(NOW + 7 * 24 * 60 * MINUTE),
+          ...session,
+        };
   const userDoc = user === undefined ? { mustChangePassword: false } : user;
   const sessionModel = {
     findById: vi.fn(() => ({ lean: () => Promise.resolve(sessionDoc) })),
@@ -261,7 +267,12 @@ describe('JwtAuthGuard (unit)', () => {
         contextFor(withCookie(await tokenFor(jwt))).context,
       );
       expect(sessionModel.updateOne).toHaveBeenCalledWith(
-        { _id: sid, lastActivityAt: { $lt: new Date(NOW - MINUTE) } },
+        {
+          _id: sid,
+          expiresAt: { $gt: new Date(NOW) },
+          absoluteExpiresAt: { $gt: new Date(NOW) },
+          lastActivityAt: { $lt: new Date(NOW - MINUTE) },
+        },
         {
           $set: {
             lastActivityAt: new Date(NOW),
@@ -269,6 +280,67 @@ describe('JwtAuthGuard (unit)', () => {
           },
         },
       );
+    });
+
+    it.each([0, -1])(
+      'rejects an absolute deadline %i ms from now even when idle expiry is later',
+      async (remaining) => {
+        const { guard, jwt, sessionModel } = setup({
+          session: {
+            userId: new Types.ObjectId(userId),
+            expiresAt: new Date(NOW + MINUTE),
+            absoluteExpiresAt: new Date(NOW + remaining),
+          },
+        });
+
+        expect(
+          await codeOf(
+            guard.canActivate(
+              contextFor(withCookie(await tokenFor(jwt))).context,
+            ),
+          ),
+        ).toBe(ErrorCode.SessionExpired);
+        expect(sessionModel.updateOne).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts 1 ms before the absolute deadline and caps the idle slide there', async () => {
+      const absoluteExpiresAt = new Date(NOW + 1);
+      const { guard, jwt, sessionModel } = setup({
+        session: {
+          userId: new Types.ObjectId(userId),
+          expiresAt: new Date(NOW + MINUTE),
+          absoluteExpiresAt,
+        },
+      });
+
+      await expect(
+        guard.canActivate(contextFor(withCookie(await tokenFor(jwt))).context),
+      ).resolves.toBe(true);
+      expect(sessionModel.updateOne).toHaveBeenCalledWith(expect.anything(), {
+        $set: {
+          lastActivityAt: new Date(NOW),
+          expiresAt: absoluteExpiresAt,
+        },
+      });
+    });
+
+    it('rejects legacy sessions without an absolute deadline', async () => {
+      const { guard, jwt } = setup({
+        session: {
+          userId: new Types.ObjectId(userId),
+          expiresAt: new Date(NOW + MINUTE),
+          absoluteExpiresAt: undefined,
+        },
+      });
+
+      expect(
+        await codeOf(
+          guard.canActivate(
+            contextFor(withCookie(await tokenFor(jwt))).context,
+          ),
+        ),
+      ).toBe(ErrorCode.SessionExpired);
     });
   });
 

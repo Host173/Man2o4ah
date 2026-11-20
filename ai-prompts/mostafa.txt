@@ -847,6 +847,9 @@ resolve the conflicts
 
 How the output was used:
 Merged origin/develop into feature/ACC-15-provider-deactivation and resolved conflicts in backend/src/modules/admin/admin.controller.ts, backend/src/modules/admin/admin.service.ts, backend/src/modules/admin/admin.service.spec.ts, backend/src/modules/admin/admin.api.spec.ts, and ai-prompts/mostafa.txt.
+================================================
+
+================================================
 Date: 2026-11-19
 Student: Mostafa
 Tool: Antigravity
@@ -857,4 +860,314 @@ Implement BLG-10 (issue #82, Sprint 2, package 7, Community & Admin, module: blo
 
 How the output was used:
 Wired StorageModule and implemented POST /api/posts/:id/images, DELETE /api/posts/:id/images/:imageId, computed /uploads/<key> urls, atomic 5-image limit with orphan cleanup, and post-delete image file cleanup in backend/src/modules/blog/blog.module.ts, blog.types.ts, dto/post.response.dto.ts, blog.service.ts, and blog.controller.ts (e3a52df), and added BLG-10 integration and Supertest API tests in blog.service.spec.ts and blog.api.spec.ts (7799387).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: HTL-20
+
+Prompt:
+Implement ticket HTL-20 ("My hotel reservations", issue #60).
+
+Context:
+- Package 5: Bookings
+- Owner: Aya
+- Tool: Antigravity
+- Module: hotel-bookings
+- Branch: feature/HTL-20-my-hotel-reservations
+- PR title, for reference only: HTL-20: My hotel reservations
+- Requirement: HTL-20
+- Prompt log: ai-prompts/aya.txt
+- Ticket tests: Integration; API (owner only)
+- TDD: No
+
+1. Inspect before editing
+
+Read README.md "Team rules", docs/ai/skills/travel-platform/SKILL.md and its relevant references, docs/DECISIONS.md, and docs/database/data-model.md. Read issue #60 and confirm its dependencies and boundaries.
+
+Follow the source-of-truth order: official requirements > locked decisions > data model > project skill. Inspect merged code to reuse current contracts and conventions, but do not let existing implementation override authoritative requirements or frozen contracts. Report conflicts instead of silently choosing.
+
+Confirm the implementer is authorized to change Aya's package. If someone else is implementing, obtain the package owner's agreement and use the actual implementer's own prompt log rather than recording false authorship.
+
+Fetch origin and create the feature branch directly from the latest origin/develop without modifying develop or main. Preserve unrelated local changes. If the branch already exists or local changes prevent safe branching, stop and ask rather than resetting or overwriting work.
+
+Inspect:
+- HotelBookingsModule, controller, service, public types and existing fakes.
+- HTL-16/HTL-18 hold service, response DTOs and tests.
+- HTL-17 confirmation service and tests.
+- Existing hotel hold-expiry job.
+- Hotel reservation schema, snapshots, timestamps and indexes.
+- Existing hotel-bookings lifecycle helper.
+- HotelsService.getHotel and existing provider fakes.
+- Shared pagination, DateOnly helpers, authentication, ownership, standard errors and Swagger conventions.
+- Existing scheduler setup and job-testing patterns.
+- Any existing reservation-detail and refund-view contracts.
+
+If a genuine ambiguity affects grouping, response shape, authorization or status transitions, stop before editing the affected code and present concise numbered questions for Kareem. Distinguish documented rules from recommendations.
+
+2. Define the grouping contract without inventing rules
+
+HTL-20 requires reservations grouped as Upcoming, Past and Cancelled, showing reference, hotel, rooms, dates, guests, total and status, with full details.
+
+Check authoritative sources and existing code for:
+- Which group contains an ongoing stay.
+- Whether pending_payment and expired reservations appear, and in which group.
+- How confirmed reservations awaiting the hourly completion job are grouped.
+- Whether GET /api/hotel-bookings returns separately paginated groups or accepts a group filter and returns one standard paginated result.
+- Group defaults and ordering.
+
+If these choices are not settled, ask Kareem before implementing the list contract. Do not silently exclude reservations, invent a fourth group, or return an unpaginated grouped structure.
+
+Use one consistent classification rule for filtering, totals and returned rows. Apply ownership and group filters before pagination.
+
+3. Implement owner-only reservation listing and details
+
+Add:
+- GET /api/hotel-bookings
+- GET /api/hotel-bookings/:id
+
+Keep controllers thin. Business rules and database access belong in hotel-bookings services.
+
+Ownership:
+- Derive userId from the authenticated user, never from client input.
+- Scope list queries to that user.
+- Load details using both reservation ID and userId.
+- Unknown reservations and another user's reservations return 404.
+- No login returns 401.
+- Use the documented role conventions; do not invent admin or hotel-moderator access to these owner endpoints. Their booking views belong to separate tickets.
+
+Listing:
+- Implement the agreed Upcoming, Past and Cancelled contract.
+- Reuse PaginationQueryDto: default page 1, default limit 10, maximum limit 50.
+- Use the standard { items, page, limit, total, totalPages } shape for each paginated result.
+- Use deterministic ordering with an ID tie-breaker.
+- Return an accurate empty result without fabricated rows or totals.
+
+Show the requirement's fields:
+- Reservation ID and reference when present.
+- Hotel identity and display information.
+- Reserved rooms and guest allocation.
+- Check-in/check-out dates and nights.
+- Snapshotted totalMinor and currency.
+- Actual stored status.
+
+Do not generate a reference on read. References are created by HTL-17 confirmation; pending/expired reservations may have none.
+
+Full details:
+- Return the reservation's complete relevant customer-facing information, including saved room prices/subtotals, guest allocation, policy snapshot and applicable lifecycle timestamps/cancellation information.
+- Preserve existing field naming and plain-view conventions.
+- Convert ObjectIds to strings.
+- Serialize DateOnly values as YYYY-MM-DD and instants using existing API conventions.
+- Never expose internal documents, authentication fields, tokens or unrelated account information.
+
+Preserve historical booking data:
+- Use saved roomName, roomType, pricePerNightMinor, subtotalMinor, totalMinor and policySnapshot.
+- Do not reprice from current hotel/room data.
+- Obtain current hotel display information through HotelsService, not direct collection access.
+- Do not add hotel-name snapshots to the frozen schema.
+- Existing reservations remain readable when a hotel becomes inactive.
+
+If required hotel metadata is unavailable, follow an existing documented error policy. Do not silently fabricate a name or hide a valid reservation; ask Kareem if the behavior is not settled.
+
+Reads must not implicitly confirm, expire, complete or cancel reservations.
+
+4. Implement the reservation completion job
+
+Add and register the completion job required by issue #60.
+
+Follow the data model:
+- Run every hour.
+- Consider only confirmed reservations.
+- Complete a stay only when checkOutDate < today's UTC DateOnly.
+- Equality is not enough: a stay checking out today remains confirmed under the documented rule.
+- Set completedAt when the transition succeeds.
+
+Use the existing lifecycle helper where appropriate, or equivalent conditional updates:
+- Match the expected confirmed status.
+- Preserve the checkout eligibility condition in the write so a concurrent change cannot produce an invalid transition.
+- Check write results.
+- Make repeated runs and concurrent job instances idempotent.
+- Do not overwrite completedAt on already-completed reservations.
+
+Do not:
+- Complete pending_payment, expired or cancelled reservations.
+- Change references, snapshots, prices or guest data.
+- Release room-night inventory on completion; the data model specifies no inventory operation for this transition.
+- Change hotel or room activity.
+- Implement reviews from HTL-23.
+- Invent a completion event or notification not present in the shared contracts.
+
+Use existing batching and job error-reporting conventions. Do not let one failed record cause an endless retry loop or silently disappear. Log/report genuine failures and allow later runs to retry according to repository patterns.
+
+Keep completion separate from list/detail reads. Expose a testable execution method using an explicit time value if that matches existing job patterns.
+
+5. Tests
+
+Use the project's in-memory MongoDB replica set and existing helpers:
+- createTestApp
+- clearCollections
+- loginAs
+- Existing typed provider/payment fakes where appropriate
+- FakeEvents if event assertions are relevant to regressions
+
+Never touch Atlas, call live external services or load development .env values.
+
+Integration tests:
+- Ownership-scoped listing and details.
+- The agreed group classification for future, ongoing and past stays.
+- Cancelled reservations remain in the correct group regardless of dates.
+- The agreed handling of pending_payment and expired reservations.
+- Classification around the completion-job boundary.
+- Pagination, accurate totals, deterministic ordering and empty groups.
+- Room/price/policy snapshots remain unchanged after provider data changes.
+- Inactive hotels do not hide existing reservations.
+- Completion before, at and after the strict UTC checkout boundary.
+- Repeated completion runs preserve completedAt.
+- Only eligible confirmed reservations change.
+- Concurrent job runs preserve one valid transition.
+- Job failures remain visible and do not prevent unrelated eligible records from being processed according to the chosen batching pattern.
+
+Use Promise.allSettled for concurrent execution and assert final invariants rather than which invocation won.
+
+API tests:
+- Owner can list reservations and open full details.
+- Another user's reservations never appear in list items or totals.
+- Another user's detail request returns 404.
+- No authentication returns 401.
+- Role behavior follows the agreed owner-only contract.
+- Invalid IDs, pagination and group parameters return standard validation errors.
+- Exact response shape and required HTL-20 fields.
+- DateOnly values are YYYY-MM-DD.
+- Money remains integer minor units.
+- All agreed groups, empty results and multiple pages.
+- No fabricated reference for an unconfirmed reservation.
+- Swagger registration and preservation of existing hold endpoints.
+
+Modify existing tests only when HTL-20 intentionally changes specified behavior or directly dependent test wiring. Report exactly which tests changed and why. Never weaken, skip or delete tests to obtain a pass.
+
+TDD is not required for this feature ticket. If a separate genuine bug fix is needed, follow the repository's test-first rule for that fix without expanding scope.
+
+6. Dependencies, boundaries and verification
+
+At the time this prompt was prepared, HTL-16 (#58) and HTL-17 (#59) were closed and their implementations were present on develop. Recheck current sources and issue status.
+
+Refund display:
+- Inspect existing detail contracts and PAY-03 requirements.
+- If refund information is already part of the relevant contract, obtain it through PaymentsService.getRefund, never refund collections.
+- Do not invent a new refund response contract or make every reservation read depend on an unfinished refund service without resolving that scope with Kareem.
+- If required refund display depends on unfinished PAY-03, report the dependency instead of fabricating a status or implementing payments.
+
+Change only hotel-bookings, directly related tests/fakes and the authorized implementer's prompt log.
+- Preserve existing exported methods such as listForAdmin.
+- If extending a public service API, keep its directly dependent PublicApi fake and contract tests consistent.
+- Do not implement ACC-17 administration, HTL-21 cancellation, HTL-23 reviews, payments or provider logic.
+- Do not add frontend pages; this is the backend ticket.
+
+Preserve frozen schemas and shared contracts. Stop for owner/team-leader approval if another package, shared helper, event contract or data-model change is required.
+
+Follow existing backend conventions. Avoid any, TypeScript suppression and lint-disable comments. Do not add feature or contract documentation to README files.
+
+Run npm run verify inside backend. Preserve the existing requirement that every src/modules/**/*.service.ts file has at least 80% line coverage individually.
+
+Fix failures introduced by or directly coupled to HTL-20, then rerun verification. Do not expand scope to repair unrelated baseline failures or another owner's modules. Report blockers with exact commands and evidence. Never claim verification passed when it did not.
+
+7. Logging, commits and final report
+
+Commit only intended ticket changes on the feature branch using Conventional Commits with hotel-bookings scope and (HTL-20) at the end of the subject.
+
+Never commit to develop or main, push, open a PR, force-push, rebase or amend commits.
+
+Append one entry for this prompt to ai-prompts/aya.txt if Aya is the implementer; otherwise use the confirmed authorized implementer's own log:
+- Date
+- Student: actual implementer's first name
+- Tool: Antigravity
+- Related Requirement: HTL-20
+- Complete prompt copied verbatim, with secrets replaced by <removed>
+- One-line "How the output was used" listing changed files and implementation commit hashes
+
+Preserve previous entries. Include the log in a final commit; do not attempt to record that commit's own hash inside itself.
+
+Finally report:
+- Changed files
+- Agreed grouping, ordering and pagination contract
+- Tests added or updated, including reasons for existing test changes
+- Completion-job UTC boundary and idempotency results
+- Exact verification commands and results
+- Remaining dependencies or blockers
+- Commit hashes
+
+How the output was used:
+Answer only, no files changed (inspected HTL-20 docs and merged code on origin/develop, reported dependency status, and asked clarifying contract questions before editing).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: HTL-20
+
+Prompt:
+For the following, think of the best solution and begin the implementation: Corrections to your assessment:
+
+1. Ownership
+Git identity does not establish who is implementing or prove package-owner approval. Confirm the actual implementer and Aya's agreement explicitly, then use that implementer's prompt log.
+
+2. Grouping and pagination
+This remains undecided. Your Options A and B overlap, and Option A leaves the omitted-group behavior unresolved. Ask for one complete contract:
+- group filter with an explicit default; or
+- separately paginated groups.
+Also confirm pending_payment, expired and ongoing-stay classification. Do not treat your recommendations as approved.
+
+3. Completion
+The documented rule is confirmed -> completed when checkOutDate < today's UTC date, checked hourly. Checkout today does not qualify. Set completedAt; do not release inventory or invent a completion event.
+toDateOnly accepts a YYYY-MM-DD string; ensure that string represents the UTC date.
+
+4. Ordering
+The descending index does not require descending API ordering: MongoDB can traverse an index in reverse. Ordering is a UX/contract choice, not a schema-imposed rule. Ask Kareem for a definite ordering per group.
+
+5. Authorization
+endpoints.md already defines Own as “logged-in owner of the resource”, with 404 otherwise. Do not add @Roles(Role.USER) merely because the hold-creation endpoint uses it. Follow the documented owner-only read contract unless Kareem explicitly approves a change.
+
+6. Response and missing hotel
+HotelHold does not currently contain reference. A reservation summary/detail view can include the schema's optional reference, which is assigned on confirmation—not fabricated on read.
+
+Do not silently treat a missing referenced hotel as a missing reservation. Ask Kareem for the explicit missing-metadata policy and required hotel display fields.
+
+7. Refund display
+Calling getRefund only for cancelled reservations with a positive refund does not remove the PAY-03 dependency: those detail requests would still fail against the stub.
+
+Ask Kareem whether refund display belongs in this ticket now or is deferred. Do not substitute a fake in production, swallow NotImplementedException or fabricate refund status.
+
+Please reduce the remaining questions to the actual decisions needed: authorized implementer, grouped-list contract/default, classification, ordering, hotel metadata/error policy and refund-display scope.
+
+How the output was used:
+Created feature/HTL-20-my-hotel-reservations from origin/develop and implemented HTL-20 in backend/src/modules/hotel-bookings/ (booking-lifecycle.ts, hotel-bookings.types.ts, dto/list-hotel-reservations-query.dto.ts, dto/hotel-reservation.response.dto.ts, hotel-stay-completion.job.ts, hotel-reservations.service.ts, hotel-bookings.controller.ts, hotel-bookings.module.ts; commit 226bd9d) with tests (booking-lifecycle.spec.ts, hotel-stay-completion.job.spec.ts, hotel-reservations.service.spec.ts, hotel-reservations.api.spec.ts; commit e02f3f5).
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: HTL-20
+
+Prompt:
+Why is running the backend verification suite stalling
+
+How the output was used:
+Answer only for code; diagnosed sandbox EPERM on /Users/appleera/package.json causing vitest coverage resolver wait, completed npm run verify (2471 tests passed), and logged initial entries in 223903a before moving to ai-prompts/mostafa.txt.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Mostafa
+Tool: Antigravity
+Related Requirement: HTL-20
+
+Prompt:
+Fix the prompt to be placed in mostafa.txt as it was now assigned to mostafa rather than aya. Additionally fix the formatting mistakes within mostafa.txt.
+
+How the output was used:
+Restored ai-prompts/aya.txt to match origin/develop, inserted missing separators between ACC-15 and BLG-10 in ai-prompts/mostafa.txt, and moved the HTL-20 prompt log entries to ai-prompts/mostafa.txt.
 ================================================

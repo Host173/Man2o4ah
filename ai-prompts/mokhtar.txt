@@ -514,3 +514,15 @@ Review my branch before I mark the PR ready. You are a strict reviewer, not the 
 How the output was used:
 Ran the strict self-review against the committed branch diff, wrote throwaway probes for limits, validation, ownership and concurrency, fixed every non-merge finding it reported, re-ran checks until clean, and used the final report in the PR description.
 ================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Continue the ITN-20 self-review. A strict read of the whole diff found one real gap: endpoints.md assigns GET /api/itineraries/public/search to ITN-20 + ITN-21 and requirement ITN-20 says public itineraries appear in shared search and are read-only to others, but the branch had no public search route, so non-owners could not read public itineraries at all. Fix it without taking over ITN-21's keyword/filter/detail/clone work: add a minimal @Public paginated search (visible public itineraries only, newest first), typed Swagger response, fake parity, and service/API tests for anonymous access, private removal taking effect immediately, and invalid pagination. Re-run npm run format and npm run verify and keep the prompt log append-only.
+
+How the output was used:
+Added ItinerariesService.searchPublic and a shared findPublicPage filter used with listPublicByAuthor, declared GET /api/itineraries/public/search before /:id with @Public() and PaginatedPublicItinerariesResponseDto, mirrored it in FakeItinerariesService, and added service, fake and API tests. Ran 7 throwaway probes (boundaries, invalid visibility, 401/404, malformed reports, concurrent toggles, fake parity, anonymous public search) - all passed after the fix. Deleted the probes and re-ran the full verification suite.
+================================================

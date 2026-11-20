@@ -109,19 +109,41 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     this.referenceData = referenceData;
   }
 
+  /** ITN-20: the shared public search, matching the real service's filters. */
+  async searchPublic(
+    query: PublicItineraryQuery = {},
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.findPublic(undefined, query);
+  }
+
   async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.findPublic(ownerId, query);
+  }
+
+  private async findPublic(
+    ownerId: string | undefined,
+    query: PublicItineraryQuery,
+  ): Promise<Paginated<PublicItinerarySummary>> {
     const { page, limit } = this.parsePublicQuery(query);
+    const isVisible = (itinerary: {
+      visibility: ItineraryVisibility;
+      isHidden?: boolean;
+      authorDeactivated?: boolean;
+    }): boolean =>
+      itinerary.visibility === ItineraryVisibility.PUBLIC &&
+      !itinerary.isHidden &&
+      !itinerary.authorDeactivated;
     const seeded = this.itineraries
       .filter(
         (itinerary) =>
-          itinerary.ownerId === ownerId &&
-          (itinerary.visibility ?? ItineraryVisibility.PUBLIC) ===
-            ItineraryVisibility.PUBLIC &&
-          !itinerary.isHidden &&
-          !itinerary.authorDeactivated,
+          (ownerId === undefined || itinerary.ownerId === ownerId) &&
+          isVisible({
+            ...itinerary,
+            visibility: itinerary.visibility ?? ItineraryVisibility.PUBLIC,
+          }),
       )
       .map((itinerary) => this.withoutSeedFlags(itinerary));
     // Itineraries created through the owner methods become visible here once
@@ -129,10 +151,8 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     const owned = [...this.owned.values()]
       .filter(
         (itinerary) =>
-          itinerary.ownerId === ownerId &&
-          itinerary.visibility === ItineraryVisibility.PUBLIC &&
-          !itinerary.isHidden &&
-          !itinerary.authorDeactivated,
+          (ownerId === undefined || itinerary.ownerId === ownerId) &&
+          isVisible(itinerary),
       )
       .map((itinerary) => this.toPublicSummary(itinerary));
     const matching = [...seeded, ...owned].sort(

@@ -221,6 +221,43 @@ describe('FakeItinerariesService.listPublicByAuthor', () => {
       (await itineraries.getById(created._id, ownerId)).authorDeactivated,
     ).toBe(false);
   });
+
+  it('searchPublic lists only public, visible items from every author', async () => {
+    const itineraries = new FakeItinerariesService([
+      itinerary('visible', '2026-11-05T10:00:00.000Z'),
+      itinerary('other', '2026-11-04T10:00:00.000Z', { ownerId: 'user-2' }),
+      itinerary('private', '2026-11-03T10:00:00.000Z', {
+        visibility: ItineraryVisibility.PRIVATE,
+      }),
+      itinerary('hidden', '2026-11-02T10:00:00.000Z', { isHidden: true }),
+      itinerary('deactivated', '2026-11-01T10:00:00.000Z', {
+        authorDeactivated: true,
+      }),
+    ]);
+    const created = await itineraries.create(createDto(), 'user-3');
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-3',
+    );
+
+    const page = await itineraries.searchPublic();
+    expect(page.items).toHaveLength(3);
+    expect(ids(page.items)).toEqual(
+      expect.arrayContaining(['visible', 'other', created._id]),
+    );
+    expect(page.total).toBe(3);
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PRIVATE },
+      'user-3',
+    );
+    expect(ids((await itineraries.searchPublic()).items)).toEqual([
+      'visible',
+      'other',
+    ]);
+  });
 });
 
 function createDto(

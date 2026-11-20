@@ -597,6 +597,17 @@ export class ItinerariesService {
   }
 
   /**
+   * ITN-20: the shared public search. ITN-21 adds keyword and filters; this
+   * level already exposes every visible public itinerary, newest first. It is
+   * read-only: no route here lets another user modify what they can see.
+   */
+  async searchPublic(
+    query: PublicItineraryQuery = {},
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.findPublicPage({}, query);
+  }
+
+  /**
    * BLG-12: an author's public itineraries for the author page, newest
    * `updatedAt` first. Only `visibility: public` itineraries are included, and
    * hidden ones or those of a deactivated author are left out (ITN-20).
@@ -607,11 +618,18 @@ export class ItinerariesService {
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
     const owner = this.parseId(ownerId, 'ownerId');
+    return this.findPublicPage({ ownerId: owner }, query);
+  }
+
+  private async findPublicPage(
+    filter: { ownerId?: Types.ObjectId },
+    query: PublicItineraryQuery,
+  ): Promise<Paginated<PublicItinerarySummary>> {
     const { page, limit } = this.parsePublicQuery(query);
     const result = await paginate(
       this.itineraryModel,
       {
-        ownerId: owner,
+        ...filter,
         visibility: ItineraryVisibility.PUBLIC,
         isHidden: false,
         authorDeactivated: false,

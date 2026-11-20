@@ -158,6 +158,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
 
     expect(document.paths['/api/itineraries']?.post).toBeDefined();
     expect(document.paths['/api/itineraries']?.get).toBeDefined();
+    expect(document.paths['/api/itineraries/public/search']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.delete).toBeDefined();
@@ -1539,6 +1540,120 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(
         detail.body.days.map((day: { notes: string }) => day.notes),
       ).toEqual(expect.arrayContaining(['edited', 'second']));
+    });
+  });
+
+  describe('GET /api/itineraries/public/search (ITN-20)', () => {
+    it('lets an unauthenticated caller read public itineraries without private or hidden fields', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const other = await loginAs(testApp.connection, UserRole.USER);
+      const published = await createOwnedItinerary(owner.cookie);
+      const others = await createOwnedItinerary(other.cookie);
+      const privateId = await createOwnedItinerary(owner.cookie);
+      const hiddenId = await createOwnedItinerary(owner.cookie);
+      const deactivatedId = await createOwnedItinerary(owner.cookie);
+
+      for (const id of [published, others, hiddenId, deactivatedId]) {
+        await testApp
+          .http()
+          .patch(`/api/itineraries/${id}`)
+          .set('Cookie', id === others ? other.cookie : owner.cookie)
+          .send({ visibility: ItineraryVisibility.PUBLIC });
+      }
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(hiddenId) },
+        { $set: { isHidden: true } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(deactivatedId) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      const response = await testApp
+        .http()
+        .get('/api/itineraries/public/search');
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(
+        response.body.items.map((item: { id: string }) => item.id),
+      ).toEqual(expect.arrayContaining([published, others]));
+      for (const item of response.body.items) {
+        expect(Object.keys(item).sort()).toEqual([
+          'cityIds',
+          'countryCodes',
+          'dayCount',
+          'id',
+          'ownerId',
+          'startDate',
+          'title',
+          'updatedAt',
+        ]);
+      }
+      expect(
+        response.body.items.some(
+          (item: { id: string }) =>
+            item.id === privateId ||
+            item.id === hiddenId ||
+            item.id === deactivatedId,
+        ),
+      ).toBe(false);
+    });
+
+    it('removes an itinerary from shared search as soon as it becomes private', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC });
+      expect(
+        (await testApp.http().get('/api/itineraries/public/search')).body.total,
+      ).toBe(1);
+
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PRIVATE });
+      const after = await testApp.http().get('/api/itineraries/public/search');
+      expect(after.body).toMatchObject({ items: [], total: 0 });
+    });
+
+    it('paginates and rejects invalid pagination parameters', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      for (const title of ['One', 'Two', 'Three']) {
+        const id = await createOwnedItinerary(owner.cookie);
+        await itineraryModel.collection.updateOne(
+          { _id: new Types.ObjectId(id) },
+          { $set: { title, visibility: ItineraryVisibility.PUBLIC } },
+        );
+      }
+
+      const page2 = await testApp
+        .http()
+        .get('/api/itineraries/public/search?page=2&limit=2');
+      expect(page2.status).toBe(200);
+      expect(page2.body).toMatchObject({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(page2.body.items).toHaveLength(1);
+
+      for (const query of ['page=0', 'limit=0', 'limit=51', 'limit=abc']) {
+        const bad = await testApp
+          .http()
+          .get(`/api/itineraries/public/search?${query}`);
+        expect(bad.status).toBe(400);
+        expect(bad.body.code).toBe(ErrorCode.ValidationFailed);
+      }
     });
   });
 

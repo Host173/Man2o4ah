@@ -29,7 +29,7 @@ import type { Types } from 'mongoose';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
 import { ReorderDaysDto } from './dto/reorder-days.dto.js';
@@ -38,6 +38,7 @@ import {
   ItineraryDetailResponseDto,
   PaginatedItinerariesResponseDto,
 } from './dto/itinerary.response.dto.js';
+import { PaginatedPublicItinerariesResponseDto } from './dto/public-itinerary.response.dto.js';
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { ItinerariesService } from './itineraries.service.js';
@@ -46,6 +47,7 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  PublicItinerarySummary,
 } from './itineraries.types.js';
 
 @ApiTags('itineraries')
@@ -81,6 +83,23 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<Paginated<ItinerarySummary>> {
     return this.itinerariesService.listMine(user.id, query);
+  }
+
+  /**
+   * Static path: declare before `/:id` (endpoints.md). ITN-21 extends this with
+   * keyword and filters; ITN-20 already publishes the visible public list.
+   */
+  @Public()
+  @Get('public/search')
+  @ApiOperation({
+    summary: 'ITN-20, ITN-21 Search public itineraries (read-only)',
+  })
+  @ApiOkResponse({ type: PaginatedPublicItinerariesResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid pagination query' })
+  searchPublic(
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    return this.itinerariesService.searchPublic(query);
   }
 
   @Get(':id')

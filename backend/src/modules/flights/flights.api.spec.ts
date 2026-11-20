@@ -1,5 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { JwtService } from '@nestjs/jwt';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -13,6 +14,7 @@ import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
+import { TEST_JWT_ACCESS_SECRET } from '../../../test/support/test-config.js';
 import { FlightsModule } from './flights.module.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
@@ -374,6 +376,32 @@ describe('Flights HTTP API (FLT-03, FLT-06)', () => {
       .set('Cookie', otherModerator.cookie)
       .expect(404);
     expect(notOwned.body.code).toBe(ErrorCode.NotFound);
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
+  });
+
+  it('returns 404 without changing the flight when the moderator token has no assigned airline', async () => {
+    const owner = await moderator();
+    const created = await createFlight(owner);
+    const token = await new JwtService({
+      secret: TEST_JWT_ACCESS_SECRET,
+    }).signAsync(
+      { sub: owner.id, role: owner.role, sid: owner.sid },
+      { algorithm: 'HS256', expiresIn: '15m' },
+    );
+
+    const response = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', `access_token=${token}`)
+      .expect(404);
+
+    expect(response.body.code).toBe(ErrorCode.NotFound);
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    expect(
+      await flights.findById(created.body._id).lean().exec(),
+    ).toMatchObject({
+      status: 'scheduled',
+    });
     expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
   });
 

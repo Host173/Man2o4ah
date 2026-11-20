@@ -14,6 +14,7 @@ import { FlightsService } from './flights.service.js';
 import { FlightsModule } from './flights.module.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight, FlightStatus } from './schemas/flight.schema.js';
+import { SeatInventory } from './seat-inventory.js';
 
 describe('FlightsService cancellation integration (FLT-06)', () => {
   let testApp: TestApp;
@@ -107,6 +108,82 @@ describe('FlightsService cancellation integration (FLT-06)', () => {
     expect(events.payloadsOf(Events.FlightCancelled)).toEqual([
       { flightId: flight._id.toString() },
     ]);
+  });
+
+  it('preserves seat counters when cancellation races a hold and rejects subsequent holds', async () => {
+    const { airline, flight } = await seedFlight();
+    const cabinId = new Types.ObjectId();
+    await flightModel
+      .updateOne(
+        { _id: flight._id },
+        {
+          $set: {
+            cabins: [
+              {
+                _id: cabinId,
+                cabinClass: 'economy',
+                totalSeats: 1,
+                availableSeats: 1,
+                heldSeats: 0,
+                bookedSeats: 0,
+                priceMinor: 100,
+                freeBags: 0,
+                maxBagWeightKg: 23,
+              },
+            ],
+          },
+        },
+        { runValidators: true },
+      )
+      .exec();
+    const inventory = testApp.moduleRef.get(SeatInventory);
+    const items = [
+      {
+        flightId: flight._id.toString(),
+        cabinId: cabinId.toString(),
+        seats: 1,
+      },
+    ];
+    async function hold() {
+      const session = await testApp.connection.startSession();
+      try {
+        await session.withTransaction(() => inventory.hold(items, { session }));
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    const results = await Promise.allSettled([
+      flights.cancelFlight(flight._id.toString(), airline._id.toString()),
+      hold(),
+    ]);
+
+    expect(results[0].status).toBe('fulfilled');
+    if (results[1].status === 'rejected') {
+      expect(results[1].reason).toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.SeatsUnavailable },
+      });
+    }
+    const saved = await flightModel.findById(flight._id).lean().exec();
+    expect(saved?.status).toBe(FlightStatus.CANCELLED);
+    expect(saved?.cancelledAt).toBeInstanceOf(Date);
+    const cabin = saved!.cabins[0];
+    expect(cabin.totalSeats).toBe(
+      cabin.availableSeats + cabin.heldSeats + cabin.bookedSeats,
+    );
+    expect(cabin.heldSeats).toBe(results[1].status === 'fulfilled' ? 1 : 0);
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([
+      { flightId: flight._id.toString() },
+    ]);
+
+    await expect(hold()).rejects.toMatchObject({
+      status: 409,
+      response: { code: ErrorCode.SeatsUnavailable },
+    });
+    expect(
+      (await flightModel.findById(flight._id).lean().exec())?.cabins,
+    ).toEqual(saved?.cabins);
   });
 
   it('returns 404 for an unknown or unowned flight and 409 for a non-scheduled flight', async () => {

@@ -18,13 +18,10 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import type { AirportView } from '../reference-data/reference-data.types.js';
-import { convertFlightTimes } from './flight-time.js';
-import { formatLocalDateTime } from './flight-time.js';
+import { convertFlightTimes, formatLocalDateTime } from './flight-time.js';
 import { AirlinesService } from './airlines.service.js';
 import { validateCabinInput } from './cabin-input.js';
 import { SeatInventory } from './seat-inventory.js';
-import { AppEvents } from '../../common/events/app-events.service.js';
-import { Events } from '../../common/events/events.js';
 import type {
   AddCabinInput,
   AirlineView,
@@ -414,9 +411,17 @@ export class FlightsService {
     try {
       let updated: FlightRecord | null = null;
       await session.withTransaction(async () => {
+        const airportsChanged =
+          departureAirportId !== flight.departureAirportId ||
+          arrivalAirportId !== flight.arrivalAirportId;
         const result = await this.flightModel
           .updateOne(
-            { ...filter, status: FlightStatus.SCHEDULED },
+            {
+              ...filter,
+              status: FlightStatus.SCHEDULED,
+              // A hold placed after the read above must still lock the airports.
+              ...(airportsChanged ? { hasBookings: false } : {}),
+            },
             {
               $set: {
                 departureAirportId,
@@ -430,7 +435,17 @@ export class FlightsService {
             { session, runValidators: true },
           )
           .exec();
-        if (result.modifiedCount !== 1) throw this.flightNotFound();
+        // matchedCount: re-sending the current values modifies nothing but is valid.
+        if (result.matchedCount !== 1) {
+          if (airportsChanged) {
+            throw new ConflictException({
+              code: ErrorCode.Conflict,
+              message:
+                'Airports cannot be changed after a booking or seat hold',
+            });
+          }
+          throw this.flightNotFound();
+        }
         updated = await this.flightModel
           .findOne(filter)
           .session(session)
@@ -538,7 +553,7 @@ export class FlightsService {
               { session, runValidators: true },
             )
             .exec();
-          if (result.modifiedCount !== 1) throw this.flightNotFound();
+          if (result.matchedCount !== 1) throw this.flightNotFound();
         }
         updated = await this.flightModel
           .findOne(filter)

@@ -774,7 +774,7 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-05, FLT-06)', () => {
       .get(`/api/flights/${new Types.ObjectId().toHexString()}`)
       .expect(404);
     expect(missing.body.code).toBe(ErrorCode.NotFound);
-  });  });
+  });
 
   it('edits scheduled flight times and emits one reschedule event after the update', async () => {
     const user = await moderator();
@@ -809,6 +809,44 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-05, FLT-06)', () => {
       departureAt: new Date('2027-03-14T08:30:00.000Z'),
       arrivalAt: new Date('2027-03-14T09:00:00.000Z'),
     });
+  });
+
+  it('accepts an edit that re-sends the current price, seat count and times without emitting a reschedule', async () => {
+    const user = await moderator();
+    const created = await createFlight(user);
+    const withCabin = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cabins`)
+      .set('Cookie', user.cookie)
+      .send(cabin)
+      .expect(201);
+    const events = t.moduleRef.get(AppEvents);
+    const emit = vi.spyOn(events, 'emit');
+    emit.mockClear();
+    const cabinPath = `/api/flights/${created.body._id}/cabins/${withCabin.body.cabins[0]._id}`;
+
+    await t
+      .http()
+      .patch(cabinPath)
+      .set('Cookie', user.cookie)
+      .send({ priceMinor: cabin.priceMinor })
+      .expect(200);
+    await t
+      .http()
+      .patch(cabinPath)
+      .set('Cookie', user.cookie)
+      .send({ totalSeats: cabin.totalSeats })
+      .expect(200);
+    await t
+      .http()
+      .patch(`/api/flights/${created.body._id}`)
+      .set('Cookie', user.cookie)
+      .send({ departureLocal: flight.departureLocal })
+      .expect(200);
+    expect(emit).not.toHaveBeenCalledWith(
+      Events.FlightRescheduled,
+      expect.anything(),
+    );
   });
 
   it('rejects past, reversed, empty, unknown-airport and booked-airport flight edits', async () => {

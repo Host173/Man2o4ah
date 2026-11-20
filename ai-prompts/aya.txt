@@ -1743,3 +1743,15 @@ can i test on swagger
 How the output was used:
 Answered with Swagger instructions; appended this prompt to ai-prompts/aya.txt
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: GitHub Copilot
+Related Requirement: FLT-29
+
+Prompt:
+[Attached: Pasted Image.png (screenshot of Swagger GET /api/airlines/{id}/flights with the required id field blank and a validation error; image, no text content)]
+
+How the output was used:
+Explained how to supply the moderator's providerId, retrieve a flight _id, and use it to test the FLT-29 endpoints
+================================================

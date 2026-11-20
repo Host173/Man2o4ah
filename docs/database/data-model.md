@@ -276,7 +276,7 @@ Indexes: `{ code: 1 }` unique · `{ isActive: 1 }`
 | `freeBags` | int | ≥ 0, free bag count per passenger |
 | `maxBagWeightKg` | number | > 0, per bag (also the limit for extra bags, FLT-08) |
 
-**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
+**Invariant: `totalSeats = availableSeats + heldSeats + bookedSeats`.** Only `SeatInventory` (section 4.1) initializes or changes the four counters. A new cabin starts with `availableSeats = totalSeats`, the others 0.
 
 Indexes
 - `{ airlineId: 1, flightNumber: 1, departureLocalDate: 1 }` **unique** (FLT-03; cancelled flights keep their number for that date)
@@ -731,11 +731,14 @@ These classes are the **only** code that changes inventory. Each method takes th
 
 | Method | Filter (besides `_id` and cabin `_id`) | Change | Fails with |
 |---|---|---|---|
+| `addCabin(flightId, input, moderatorAirlineId)` | flight belongs to the moderator's airline, `status: scheduled`, no cabin of `input.cabinClass` | atomically append a cabin with `totalSeats = availableSeats = input.totalSeats`, `heldSeats = bookedSeats = 0` | `NotFound`, `InvalidStatusTransition` or `Conflict` |
 | `hold(items)` | flight `status: scheduled`, `departureAt > now`; cabin `availableSeats ≥ seats` | `availableSeats −seats`, `heldSeats +seats`, `hasBookings = true` | `SeatsUnavailable` |
 | `confirm(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `bookedSeats +seats` | `InventoryCorrupted` |
 | `release(items)` | cabin `heldSeats ≥ seats` | `heldSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `returnBooked(items)` | cabin `bookedSeats ≥ seats` | `bookedSeats −seats`, `availableSeats +seats` | `InventoryCorrupted` |
 | `changeCapacity(flightId, cabinId, newTotal, expectedTotal)` | cabin `totalSeats = expectedTotal`, `availableSeats ≥ expectedTotal − newTotal` | `totalSeats` and `availableSeats` both `+ (newTotal − expectedTotal)` | `CapacityBelowReserved` or `ConcurrentChange` |
+
+`addCabin` takes the plain `AddCabinInput` fields (class, total seats, price in minor units, free bags and per-bag weight) and required `InventoryOptions { session }`, like the other inventory methods. `FlightsService.addCabin` owns its transaction and reads the resulting flight in the same session. This extends the inventory contract without changing the schema or indexes.
 
 Example (`hold`, one item):
 ```js

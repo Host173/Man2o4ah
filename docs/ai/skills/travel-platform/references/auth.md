@@ -23,20 +23,20 @@ Admins exist only through the seed script (ACC-18); registration always creates 
 | Cookie | Content | Path | Lifetime |
 |---|---|---|---|
 | `access_token` | JWT `{ sub, role, sid, providerId? }` (`providerId` = `moderatorOf.providerId`), HS256, `JWT_ACCESS_SECRET` | `/` | 15 min (cookie `maxAge` = token TTL) |
-| `refresh_token` | 48 random bytes, base64url; only its SHA-256 hash is stored | `/` | 7 days absolute |
+| `refresh_token` | 48 random bytes, base64url; only its SHA-256 hash is stored | `/` | 8 hours absolute for admins; 7 days absolute for other roles (ACC-06, ticket #27) |
 
 The refresh cookie uses path `/` on purpose: `proxy.ts` must see it on page navigations to refresh silently. Both cookies: `httpOnly: true, secure: true, sameSite: 'lax'`. Browsers accept `secure` cookies on `http://localhost`. Set them with Express `res.cookie()` (milliseconds) via `@Res({ passthrough: true })`, and clear them with `res.clearCookie(name, { path })` using the same path.
 Never put email, name or anything sensitive in the JWT. Never return tokens in a JSON body.
 
 ## 3. Sessions
 
-Collection `sessions`: `userId, refreshTokenHash, lastActivityAt, expiresAt` with a **TTL index on `expiresAt`** (`expiresAt = lastActivityAt + 30 min`). A session that exists and has `expiresAt > now` is live; anything else is dead. Revoking = deleting.
+Collection `sessions`: `userId, refreshTokenHash, lastActivityAt, expiresAt, absoluteExpiresAt` with a **TTL index on `expiresAt`** (`expiresAt = min(lastActivityAt + 30 min, absoluteExpiresAt)`). `absoluteExpiresAt` is immutable: login + 8 hours for admins, login + 7 days otherwise, using the role at login. A live session exists and has both expiry fields greater than now; anything else is dead. Existing sessions without an absolute deadline require a new login. Revoking = deleting.
 
-- **Idle expiry (ACC-06):** the guard rejects a missing session, or one with `expiresAt ≤ now` (TTL deletion can lag ~60 s), with `401 SESSION_EXPIRED`.
-- **Activity:** the guard slides `lastActivityAt` and `expiresAt` at most once per 60 s per session (`updateOne({ _id: sid, lastActivityAt: { $lt: now - 60s } }, { $set: { lastActivityAt: now, expiresAt: now + 30 min } })`).
+- **Expiry (ACC-06):** the guard rejects a missing session, an absent/passed absolute deadline, or `expiresAt ≤ now` (TTL deletion can lag ~60 s), with `401 SESSION_EXPIRED`. A still-valid access token never bypasses the absolute deadline.
+- **Activity:** the guard conditionally slides `lastActivityAt` and `expiresAt` at most once per 60 s per session, only while both expiries are future. Set `lastActivityAt = now` and `expiresAt = min(now + 30 min, absoluteExpiresAt)`.
 - **Delete all of a user's sessions** when they change their password, are reset by an admin, suspended or deactivated. It takes effect on their next request.
-- **Refresh** `POST /api/auth/refresh` (public): hash the cookie, find a live session with that hash, slide its activity, issue a new access token, and set the `access_token` cookie. The refresh token is **not** rotated: several parallel requests (prefetches) may refresh at once, and rotation would make all but one fail. Logout, idle expiry and revocation still kill it. Anything else gets `401 SESSION_EXPIRED` and both cookies are cleared.
-- **Logout** `POST /api/auth/logout`: delete the session and clear both cookies (ACC-06).
+- **Refresh** `POST /api/auth/refresh` (public): hash the cookie, find a live session with that hash, slide its activity without passing the fixed absolute deadline, issue a new access token, and set the `access_token` cookie. The refresh token is **not** rotated: several parallel requests (prefetches) may refresh at once, and rotation would make all but one fail. Missing, unknown, revoked, idle-expired or absolute-expired credentials get `401 SESSION_EXPIRED` and both cookies are cleared. Non-401 failures preserve the cookies so a transient outage can be retried.
+- **Logout** `POST /api/auth/logout` (public, idempotent): delete the authenticated session, or fall back to the refresh cookie's hash when the access cookie cannot authenticate, and clear both cookies. Return 204 even for missing, expired or already-revoked credentials; do not delete other sessions (ACC-06). The browser calls logout directly; no preliminary refresh is required.
 
 ## 4. Login, lockout, register, passwords
 
@@ -73,7 +73,7 @@ export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionConte
 1. If `reflector.getAllAndOverride(IS_PUBLIC, [handler, class])` is true, try to attach the user if a valid cookie exists (so public pages can personalize), and always return true.
 2. Read `req.cookies.access_token`. If it's missing, return `401 NOT_AUTHENTICATED`.
 3. `jwtService.verifyAsync`. On failure, return `401 TOKEN_EXPIRED`; the frontend then calls refresh.
-4. Load the session by `sid` (lean). If it's missing or `expiresAt ≤ now`, return `401 SESSION_EXPIRED`. Slide the activity time.
+4. Load the session by `sid` (lean). If it's missing, either expiry has passed, or the absolute deadline is absent, return `401 SESSION_EXPIRED`. Slide the activity time, capped at the absolute deadline.
 5. Enforce the `mustChangePassword` allow-list, then set `req.user = { id: sub, role, providerId, sid }`.
 
 `RolesGuard`: no `@Roles` metadata means any logged-in user may pass. Otherwise a role not in the list gets `403 FORBIDDEN_ROLE`. Use `ForbiddenException`, not `UnauthorizedException`.

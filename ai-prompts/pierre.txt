@@ -1228,12 +1228,14 @@ Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
 Related Requirement: ACC-08
+Related Requirement: ACC-06
 
 Prompt:
 fix all of these then add a comment on the pr
 
 How the output was used:
 Added test-first password-session fixes, cookie revocation and Swagger evidence for PR #139.
+Added test-first session-deadline and idempotent-logout fixes for PR #138, synchronized approved contract documentation and diagrams, and passed backend verify with 2078 tests.
 ================================================
 
 ================================================
@@ -1247,4 +1249,22 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
+Related Requirement: ACC-06
+
+Prompt:
+contract_approval=i dont unsestand what is the problem and what do you want and what is the ticket even, logout_policy=idempotent-refresh-capable
+
+How the output was used:
+Explained ticket #27 and requested approval for the frozen session-schema change; recorded the selected idempotent, refresh-cookie-capable logout behavior.
+
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-06
+
+Prompt:
+approved
+
+How the output was used:
+Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
 ================================================

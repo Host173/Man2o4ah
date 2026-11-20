@@ -1,9 +1,10 @@
-import type { CookieOptions, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
+import type { UserRole } from '../schemas/user.schema.js';
 import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_COOKIE_MAX_AGE_MS,
   REFRESH_TOKEN_COOKIE,
-  REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
+  getSessionMaxAgeMs,
 } from './auth.constants.js';
 
 /**
@@ -22,15 +23,36 @@ const BASE: CookieOptions = {
 export function setAuthCookies(
   res: Response,
   tokens: { accessToken: string; refreshToken: string },
+  role: UserRole,
 ): void {
-  res.cookie(ACCESS_TOKEN_COOKIE, tokens.accessToken, {
+  setAccessCookie(res, tokens.accessToken);
+  res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
+    ...BASE,
+    maxAge: getSessionMaxAgeMs(role),
+  });
+}
+
+export function readRefreshCookie(req: Request): string | undefined {
+  const cookies = req.cookies as Record<string, unknown> | undefined;
+  const token = cookies?.[REFRESH_TOKEN_COOKIE];
+  return typeof token === 'string' ? token : undefined;
+}
+
+/** Sets only the access cookie (after a refresh; the refresh token is not rotated). */
+export function setAccessCookie(res: Response, accessToken: string): void {
+  res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
     ...BASE,
     maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE_MS,
   });
-  res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
-    ...BASE,
-    maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
-  });
+}
+
+/**
+ * Clears both cookies (logout, dead session). The browser only removes a
+ * cookie whose path matches, so this uses the same options they were set with.
+ */
+export function clearAuthCookies(res: Response): void {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, BASE);
+  res.clearCookie(REFRESH_TOKEN_COOKIE, BASE);
 }
 
 export function clearAuthCookies(res: Response): void {

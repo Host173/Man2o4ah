@@ -19,6 +19,7 @@ import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
 import {
+  getSessionMaxAgeMs,
   LOCKOUT_MS,
   MAX_FAILED_LOGIN_ATTEMPTS,
   REFRESH_TOKEN_BYTES,
@@ -48,6 +49,14 @@ function invalidCredentials() {
   return new UnauthorizedException({
     code: ErrorCode.InvalidCredentials,
     message: 'Invalid email or password',
+  });
+}
+
+/** The session is gone, idle-expired or revoked: log in again (ACC-06). */
+function sessionExpired() {
+  return new UnauthorizedException({
+    code: ErrorCode.SessionExpired,
+    message: 'Your session has expired. Please log in again.',
   });
 }
 
@@ -171,7 +180,7 @@ export class AuthService {
 
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
     const dbSession = await this.connection.startSession();
-    let sid: string;
+    let sid: Types.ObjectId;
     try {
       // Serialize session creation with password changes on the verified hash.
       sid = await dbSession.withTransaction(async () => {
@@ -190,26 +199,107 @@ export class AuthService {
               refreshTokenHash: hashRefreshToken(refreshToken),
               lastActivityAt: new Date(now),
               expiresAt: new Date(now + SESSION_IDLE_MS),
+              absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(user.role)),
             },
           ],
           { session: dbSession },
         );
-        return session._id.toString();
+        return session._id;
       });
     } finally {
       await dbSession.endSession();
     }
 
+    const accessToken = await this.signAccessToken(user, sid);
+
+    return { user: toMe(user), accessToken, refreshToken };
+  }
+
+  /**
+   * ACC-06, ACC-19 (auth.md §2, §3): `POST /api/auth/refresh`. Finds the live
+   * session (`expiresAt > now`, `absoluteExpiresAt > now`) holding this
+   * refresh token's hash, slides its activity without passing the deadline
+   * fixed at login, and returns a new access token. The refresh
+   * token is not rotated, so parallel refreshes all succeed. A missing,
+   * unknown, idle-expired or revoked token, or an account that is gone or no
+   * longer active → 401 SESSION_EXPIRED.
+   */
+  async refresh(refreshToken: string | undefined): Promise<string> {
+    if (!refreshToken) throw sessionExpired();
+    const now = Date.now();
+
+    const session = await this.sessionModel
+      .findOne(
+        {
+          refreshTokenHash: hashRefreshToken(refreshToken),
+          expiresAt: { $gt: new Date(now) },
+          absoluteExpiresAt: { $gt: new Date(now) },
+        },
+        { userId: 1, absoluteExpiresAt: 1 },
+      )
+      .lean();
+    if (!session) throw sessionExpired();
+
+    const user = await this.userModel
+      .findById(session.userId, { role: 1, status: 1, moderatorOf: 1 })
+      .lean();
+    // Suspension and deactivation delete sessions; this also covers a leftover one.
+    if (!user || user.status !== UserStatus.ACTIVE) throw sessionExpired();
+
+    // Refresh counts as activity. The expiresAt filter stops it from reviving
+    // a session that expired or was revoked a moment ago.
+    const slid = await this.sessionModel.updateOne(
+      {
+        _id: session._id,
+        expiresAt: { $gt: new Date(now) },
+        absoluteExpiresAt: { $gt: new Date(now) },
+      },
+      {
+        $set: {
+          lastActivityAt: new Date(now),
+          expiresAt: new Date(
+            Math.min(
+              now + SESSION_IDLE_MS,
+              session.absoluteExpiresAt.getTime(),
+            ),
+          ),
+        },
+      },
+    );
+    if (slid.matchedCount === 0) throw sessionExpired();
+
+    return this.signAccessToken(user, session._id);
+  }
+
+  /**
+   * ACC-06 (auth.md §3): `POST /api/auth/logout`. Deletes the authenticated
+   * session, or falls back to the refresh cookie when the access cookie has
+   * expired. Other sessions stay logged in. Missing or already-revoked
+   * credentials are harmless: the endpoint still clears the browser cookies.
+   */
+  async logout(sid: string | undefined, refreshToken?: string): Promise<void> {
+    if (sid) {
+      await this.sessionModel.deleteOne({ _id: sid });
+    } else if (refreshToken) {
+      await this.sessionModel.deleteOne({
+        refreshTokenHash: hashRefreshToken(refreshToken),
+      });
+    }
+  }
+
+  /** Signs the 15-minute access token `{ sub, role, sid, providerId? }` (auth.md §2). */
+  private signAccessToken(
+    user: Pick<User, 'role' | 'moderatorOf'> & { _id: Types.ObjectId },
+    sid: Types.ObjectId,
+  ): Promise<string> {
     const providerId = user.moderatorOf?.providerId.toString();
     const payload: AccessTokenPayload = {
       sub: user._id.toString(),
       role: user.role,
-      sid,
+      sid: sid.toString(),
       ...(providerId ? { providerId } : {}),
     };
-    const accessToken = await this.jwt.signAsync(payload);
-
-    return { user: toMe(user), accessToken, refreshToken };
+    return this.jwt.signAsync(payload);
   }
 
   /**
@@ -262,12 +352,7 @@ export class AuthService {
    */
   async me(userId: string): Promise<MeDto> {
     const user = await this.userModel.findById(userId).lean();
-    if (!user) {
-      throw new UnauthorizedException({
-        code: ErrorCode.SessionExpired,
-        message: 'Your session has expired. Please log in again.',
-      });
-    }
+    if (!user) throw sessionExpired();
     return toMe(user);
   }
 

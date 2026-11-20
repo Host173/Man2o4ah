@@ -1870,3 +1870,14 @@ you will find my 4 pr (host173 prs) the last review found some errers, fix them 
 How the output was used:
 Fixed review points 1-2 on PR #171 (exact half-up rounding and result overflow check in fx-conversion.ts, shared with test/fakes/fx.fake.ts) with tests committed first, pushed to feature/ITN-18-exchange-rates.
 ================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ACC-08
+
+Prompt:
+ok i will commit you go and do another fast commit to fix the typecheck, so just npm run lint and format ig. do t fast
+
+How the output was used:
+On PR #139 after Kareem's develop merge: removed the duplicate clearAuthCookies in auth-cookies.ts and restored ai-prompts/aisha.txt and pierre.txt as develop plus the branch's entries; pushed to feature/ACC-08-change-password-forced-change.
+================================================

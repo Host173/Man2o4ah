@@ -1410,3 +1410,52 @@ merge develop and open the PR
 How the output was used:
 Merged develop into feature/FLT-25-my-flight-bookings (no conflicts), npm run verify passed, pushed and opened the PR "FLT-25: View my flight bookings"; commit chore(ai): log the PR prompt (FLT-25)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+tell me what to do to test it on swagger
+
+How the output was used:
+Answer only, no files changed (Swagger test steps for the FLT-25 routes); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+[Attached: 8.png (screenshot of VS Code with Swagger UI: POST /api/flights answered 403 FORBIDDEN_ROLE; terminal warns "No supported currencies; run npm run seed:reference"; image, no text content)]
+
+How the output was used:
+Answer only, no files changed (explained the 403 and the seed:reference warning); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+did it work
+[Attached: 9.png (screenshot of Swagger UI showing the documented Responses of a flight-bookings route: 200 example value, 401, 404; image, no text content)]
+
+How the output was used:
+Answer only, no files changed (explained the screenshot shows the documentation, not an executed call); no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+make my branch up to date with develop
+
+How the output was used:
+Fetched origin: the branch is already up to date with develop (0 commits behind), so no merge was needed; committed the pending prompt-log entries as chore(ai): log the Swagger testing prompts (FLT-25), not pushed
+================================================

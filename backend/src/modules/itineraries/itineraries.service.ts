@@ -26,8 +26,11 @@ import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
 import { AddActivityDto } from './dto/add-activity.dto.js';
+import type { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import { UpdateActivityDto } from './dto/update-activity.dto.js';
+import type { UpdateTransportCostDto } from './dto/update-transport-cost.dto.js';
 import { validateActivityInput } from './activity-input.js';
+import { validateTransportCost } from './transport-costs.js';
 import type {
   ActivityView,
   BudgetEntryView,
@@ -74,7 +77,7 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const MAX_TITLE_LENGTH = 100;
 
 /**
- * Itinerary workflows (ITN-01, ITN-03): create, edit, delete, list the owner's
+ * Itinerary workflows (ITN-01, ITN-03, ITN-16): create, edit, delete, list the owner's
  * itineraries and open one. Every read and write is scoped by `ownerId`, so
  * another user's itinerary is a 404, never a 403 (ACC-11).
  */
@@ -774,6 +777,129 @@ export class ItinerariesService {
       );
     }
     throw failure;
+  }
+
+  /** ITN-16: adds a transport cost; the day must still exist at write time. */
+  async addTransportCost(
+    itineraryId: string,
+    dto: CreateTransportCostDto,
+    userId: string,
+  ): Promise<TransportCostView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+    if (!(await this.itineraryModel.exists({ _id: id, ownerId }))) {
+      throw this.notFound();
+    }
+    await validateTransportCost(dto, this.referenceData, true);
+    const dayId = this.parseId(dto.dayId, 'dayId');
+    const cost: StoredTransportCost = {
+      _id: new Types.ObjectId(),
+      dayId,
+      mode: dto.mode,
+      fromCityId: dto.fromCityId,
+      toCityId: dto.toCityId,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+    };
+    // Pipeline updates bypass document validators; validation above plus the
+    // day filter enforce the schema's link invariant without a read/save race.
+    const updated = await this.itineraryModel
+      .findOneAndUpdate(
+        { _id: id, ownerId, 'days._id': dayId },
+        [
+          {
+            $set: {
+              transportCosts: {
+                $concatArrays: ['$transportCosts', { $literal: [cost] }],
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after', updatePipeline: true },
+      )
+      .lean()
+      .exec();
+    if (!updated) throw this.notFound();
+    return this.toTransportCostView(cost);
+  }
+
+  /** ITN-16: edits only supplied fields, preserving concurrent edits to others. */
+  async updateTransportCost(
+    costId: string,
+    dto: UpdateTransportCostDto,
+    userId: string,
+  ): Promise<TransportCostView> {
+    const targetId = this.parseId(costId, 'costId');
+    const ownerId = this.parseId(userId, 'userId');
+    const filter = { ownerId, 'transportCosts._id': targetId };
+    const itinerary = await this.itineraryModel.findOne(filter).lean().exec();
+    if (!itinerary) throw this.notFound();
+    await validateTransportCost(dto, this.referenceData, false);
+    const changes = {
+      ...(dto.dayId !== undefined
+        ? { dayId: this.parseId(dto.dayId, 'dayId') }
+        : {}),
+      ...(dto.mode !== undefined ? { mode: dto.mode } : {}),
+      ...(dto.fromCityId !== undefined ? { fromCityId: dto.fromCityId } : {}),
+      ...(dto.toCityId !== undefined ? { toCityId: dto.toCityId } : {}),
+      ...(dto.amountMinor !== undefined
+        ? { amountMinor: dto.amountMinor }
+        : {}),
+      ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
+    };
+    let record = itinerary;
+    if (Object.keys(changes).length > 0) {
+      const updated = await this.itineraryModel
+        .findOneAndUpdate(
+          {
+            ...filter,
+            _id: itinerary._id,
+            ...(changes.dayId !== undefined
+              ? { 'days._id': changes.dayId }
+              : {}),
+          },
+          [
+            {
+              $set: {
+                transportCosts: {
+                  $map: {
+                    input: '$transportCosts',
+                    as: 'cost',
+                    in: {
+                      $cond: [
+                        { $eq: ['$$cost._id', targetId] },
+                        { $mergeObjects: ['$$cost', { $literal: changes }] },
+                        '$$cost',
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+          { returnDocument: 'after', updatePipeline: true },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      record = updated;
+    }
+    const cost = record.transportCosts.find((cost) =>
+      cost._id.equals(targetId),
+    );
+    if (!cost) throw this.notFound();
+    return this.toTransportCostView(cost);
+  }
+
+  /** ITN-16: deletes an owner's transport cost without rewriting other entries. */
+  async deleteTransportCost(costId: string, userId: string): Promise<void> {
+    const targetId = this.parseId(costId, 'costId');
+    const ownerId = this.parseId(userId, 'userId');
+    const result = await this.itineraryModel.updateOne(
+      { ownerId, 'transportCosts._id': targetId },
+      { $pull: { transportCosts: { _id: targetId } } },
+    );
+    if (result.matchedCount === 0) throw this.notFound();
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */

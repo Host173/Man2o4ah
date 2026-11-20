@@ -1,3 +1,4 @@
+import type { CancelledBy } from '../../common/database/cancellation.schema.js';
 import type { HotelReservationStatus } from './schemas/hotel-reservation.schema.js';
 
 /**
@@ -65,4 +66,61 @@ export interface HotelHold {
   };
   /** When the hold ends if unpaid: 10 minutes after the reservation was created. */
   holdExpiresAt: Date;
+}
+
+export const HotelReservationGroup = {
+  UPCOMING: 'upcoming',
+  PAST: 'past',
+  CANCELLED: 'cancelled',
+} as const;
+export type HotelReservationGroup =
+  (typeof HotelReservationGroup)[keyof typeof HotelReservationGroup];
+
+export interface ListMyHotelReservationsQuery {
+  group?: HotelReservationGroup;
+  page?: number;
+  limit?: number;
+}
+
+export interface HotelReservationPolicyView {
+  cancellationTiers: { daysBefore: number; refundPercent: number }[];
+  checkInTime: string;
+  checkOutTime: string;
+}
+
+export interface HotelReservationCancellationView {
+  cancelledAt: Date;
+  cancelledBy: CancelledBy;
+  refundPercent: number;
+  refundAmountMinor: number;
+}
+
+/** One item in the owner's paginated reservation list (HTL-20). */
+export interface HotelReservationSummaryView {
+  reservationId: string;
+  /** Set only on confirmation (HTL-17); never generated on read. */
+  reference?: string;
+  status: HotelReservationStatus;
+  hotelId: string;
+  hotelName: string;
+  /** `YYYY-MM-DD`. */
+  checkInDate: string;
+  /** `YYYY-MM-DD`. */
+  checkOutDate: string;
+  nights: number;
+  rooms: HeldRoom[];
+  totalMinor: number;
+  currency: string;
+}
+
+/** Full customer-facing details for a single reservation (HTL-20). */
+export interface HotelReservationDetailView extends HotelReservationSummaryView {
+  policy: HotelReservationPolicyView;
+  holdExpiresAt: Date;
+  confirmedAt?: Date;
+  expiredAt?: Date;
+  completedAt?: Date;
+  cancellation?: HotelReservationCancellationView;
+  createdAt: Date;
+  updatedAt: Date;
 }

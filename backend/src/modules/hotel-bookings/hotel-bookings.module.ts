@@ -12,6 +12,8 @@ import {
 import { HotelHoldExpiryJob } from './hotel-hold-expiry.job.js';
 import { HotelHoldService } from './hotel-hold.service.js';
 import { HotelPayableBooking } from './hotel-payable-booking.js';
+import { HotelReservationsService } from './hotel-reservations.service.js';
+import { HotelStayCompletionJob } from './hotel-stay-completion.job.js';
 import {
   HotelReservation,
   HotelReservationSchema,
@@ -33,8 +35,10 @@ import { Review, ReviewSchema } from './schemas/review.schema.js';
   providers: [
     HotelBookingsService,
     HotelHoldService,
+    HotelReservationsService,
     HotelPayableBooking,
     HotelHoldExpiryJob,
+    HotelStayCompletionJob,
     HotelConfirmationService,
     // The real reference maker; tests swap it to choose the references.
     { provide: RESERVATION_REFERENCE, useValue: newReservationReference },

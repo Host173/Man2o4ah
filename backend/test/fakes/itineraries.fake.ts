@@ -1,4 +1,9 @@
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  NotImplementedException,
+} from '@nestjs/common';
+import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
@@ -266,6 +271,18 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (dto.notes !== undefined) day.notes = notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  /** ITN-10: stub for adding an activity to a day. */
+  async addActivity(
+    _itineraryId: string,
+    _dayId: string,
+    _dto: AddActivityDto,
+    _userId: string,
+  ): Promise<ItineraryDayView> {
+    throw new NotImplementedException(
+      'addActivity: implemented in ITN-12/GEN-08',
+    );
   }
 
   async deleteDay(

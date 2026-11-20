@@ -446,6 +446,50 @@ describe('hotel-bookings schemas', () => {
       await expect(reviews.create(reviewDoc())).resolves.toBeDefined();
     });
 
+    it('round-trips an optional moderator reply and replaces it without changing the review', async () => {
+      const review = await reviews.create(reviewDoc({ text: 'A good stay' }));
+      const original = await reviews.findById(review._id).lean().orFail();
+      expect(original.reply).toBeUndefined();
+
+      for (const reply of ['Thank you for staying with us', 'x'.repeat(1000)]) {
+        await reviews.updateOne(
+          { _id: review._id },
+          { $set: { reply } },
+          { runValidators: true },
+        );
+        const saved = await reviews.findById(review._id).lean().orFail();
+        expect(saved.reply).toBe(reply);
+        expect(saved).toMatchObject({
+          reservationId: original.reservationId,
+          hotelId: original.hotelId,
+          userId: original.userId,
+          rating: original.rating,
+          text: original.text,
+          isHidden: original.isHidden,
+        });
+      }
+    });
+
+    it('rejects replies longer than 1000 characters on create and update', async () => {
+      const reply = 'x'.repeat(1001);
+      await expect(reviews.create(reviewDoc({ reply }))).rejects.toThrow(
+        /reply/,
+      );
+
+      const review = await reviews.create(
+        reviewDoc({ reply: 'Thank you for your feedback' }),
+      );
+      await expect(
+        reviews.updateOne(
+          { _id: review._id },
+          { $set: { reply } },
+          { runValidators: true },
+        ),
+      ).rejects.toThrow(/reply/);
+      const saved = await reviews.findById(review._id).lean().orFail();
+      expect(saved.reply).toBe('Thank you for your feedback');
+    });
+
     it('has exactly the indexes from the data model', async () => {
       const indexes = await reviews.collection.indexes();
       expect(

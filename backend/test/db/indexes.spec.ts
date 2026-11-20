@@ -1,3 +1,8 @@
+import { Types } from 'mongoose';
+import {
+  Review,
+  ReviewSchema,
+} from '../../src/modules/hotel-bookings/schemas/review.schema.js';
 import { ALL_SCHEMAS } from '../support/all-schemas.js';
 import {
   HOOK_TIMEOUT,
@@ -208,4 +213,30 @@ describe('indexes match docs/database/data-model.md', () => {
       expect(actual).toEqual(expected);
     },
   );
+
+  it('stores an HTL-26 reply without adding review indexes', async () => {
+    const reviews = db.connection.model<Review>('reviews', ReviewSchema);
+    const review = await reviews.create({
+      reservationId: new Types.ObjectId(),
+      hotelId: new Types.ObjectId(),
+      userId: new Types.ObjectId(),
+      rating: 5,
+      reply: 'Thank you for staying with us',
+    });
+    const saved = await reviews.findById(review._id).lean().orFail();
+    expect(saved.reply).toBe(review.reply);
+
+    const actual = (await reviews.collection.listIndexes().toArray())
+      .filter((index) => index.name !== '_id_')
+      .map((index) =>
+        describe_({
+          key: index.key,
+          unique: index.unique,
+          partialFilterExpression: index.partialFilterExpression,
+          expireAfterSeconds: index.expireAfterSeconds,
+        }),
+      )
+      .sort();
+    expect(actual).toEqual(EXPECTED.reviews.map(describe_).sort());
+  });
 });

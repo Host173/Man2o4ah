@@ -348,6 +348,7 @@ classDiagram
       userId : ObjectId
       rating : int 1-5
       text : string?
+      reply : string? max 1000
       isHidden : boolean
     }
   }

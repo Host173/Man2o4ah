@@ -30,6 +30,10 @@ export class Review {
   @Prop({ type: String, maxlength: 1000 })
   text?: string;
 
+  /** HTL-26: one reply, replaced when the hotel's moderator submits again. */
+  @Prop({ type: String, maxlength: 1000 })
+  reply?: string;
+
   /** GEN-10 */
   @Prop({ type: Boolean, required: true, default: false })
   isHidden!: boolean;

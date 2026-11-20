@@ -470,11 +470,14 @@ Indexes
 | `userId` | ObjectId → users | ✓ | must own the reservation |
 | `rating` | int | ✓ | 1–5 |
 | `text` | string | | ≤ 1000 chars |
+| `reply` | string | | ≤ 1000 chars; one hotel moderator reply (HTL-26), replaced on resubmission |
 | `isHidden` | boolean | ✓ | default `false` (GEN-10) |
 
 Indexes: `{ reservationId: 1 }` unique · `{ hotelId: 1, createdAt: -1 }` (HTL-24) · `{ userId: 1 }`
 
 Rules: only for a `completed` reservation. After create, edit, delete, hide or delete-by-admin, recompute the hotel's average and count over **non-hidden** reviews and call `HotelsService.setRatingSummary` (average rounded to 1 decimal).
+
+HTL-26 reply design (approved by Kareem, 20 Nov): a review may have one reply. Only a hotel moderator whose `providerId` matches the review's `hotelId` may submit or replace it; hidden reviews are inaccessible to moderators (404). Replies do not change the rating or its summary. No new collection or index is needed. This field prepares storage; the reply endpoint ships separately.
 
 ---
 

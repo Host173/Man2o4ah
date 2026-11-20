@@ -1261,3 +1261,63 @@ approved
 How the output was used:
 Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-26
+
+Prompt:
+implement htl-26 then make pr
+
+How the output was used:
+Created isolated feature/HTL-26-reply-reviews branch from origin/develop; checked requirement, ownership and review schema; blocked on an approved reply data model; no application code changed or commit created.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-26
+
+Prompt:
+Aya/Kareem has approved me implementing HTL-26
+
+How the output was used:
+Recorded owner agreement and checked the merged review contract; no application code changed.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-26
+
+Prompt:
+approvedDesign=i dont undesrtand anything, modelPrApproval=true
+
+How the output was used:
+Recorded approval for a separate data-model PR; stopped because the reply storage design is still undecided; no application code or PR created.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-26
+
+Prompt:
+continue he approved
+
+How the output was used:
+Prepared the approved review-reply schema prerequisite, data model, diagrams and focused schema/index tests for a separate HTL-26 PR.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-26
+
+Prompt:
+Kareem approved the exact proposal above
+
+How the output was used:
+Recorded approval for one moderator reply per review, at most 1000 characters, replaced on resubmission, restricted to that hotel's moderator and inaccessible when the review is hidden.
+================================================

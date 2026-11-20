@@ -1,5 +1,8 @@
 import type { BookingType } from '../../src/common/database/booking-type.js';
-import type { ActiveBookingsCheck } from '../../src/modules/accounts/ports/active-bookings-check.port.js';
+import type {
+  ActiveBookingsCheck,
+  ActiveBookingsCheckOptions,
+} from '../../src/modules/accounts/ports/active-bookings-check.port.js';
 
 /**
  * A working `ActiveBookingsCheck` (ACC-12): users passed to the constructor
@@ -20,7 +23,11 @@ export class FakeActiveBookingsCheck implements ActiveBookingsCheck {
     else this.withBookings.delete(userId);
   }
 
-  async hasUpcomingConfirmed(userId: string): Promise<boolean> {
+  async hasUpcomingConfirmed(
+    userId: string,
+    options?: ActiveBookingsCheckOptions,
+  ): Promise<boolean> {
+    void options;
     return this.withBookings.has(userId);
   }
 }

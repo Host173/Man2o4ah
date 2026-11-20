@@ -105,6 +105,74 @@ describe('/api/users/me (API, ACC-09)', () => {
       });
     });
 
+    it.each([
+      ['one UTF-16 code unit', ' A ', 'A'],
+      ['100 UTF-16 code units', ` ${'A'.repeat(100)} `, 'A'.repeat(100)],
+      [
+        '50 non-BMP letters (100 UTF-16 code units)',
+        ` ${'\u{10400}'.repeat(50)} `,
+        '\u{10400}'.repeat(50),
+      ],
+    ])('200 saves a trimmed name of %s', async (_label, input, expected) => {
+      const u = await loginAs(t.connection, UserRole.USER);
+
+      const res = await t
+        .http()
+        .patch(URL)
+        .set('Cookie', u.cookie)
+        .send({ name: input });
+
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe(expected);
+      expect(await stored(u.id)).toMatchObject({ name: expected });
+    });
+
+    it.each([6, 20])('200 saves a phone of %s characters', async (length) => {
+      const u = await loginAs(t.connection, UserRole.USER);
+      const phone = '1'.repeat(length);
+
+      const res = await t
+        .http()
+        .patch(URL)
+        .set('Cookie', u.cookie)
+        .send({ phone });
+
+      expect(res.status).toBe(200);
+      expect(res.body.phone).toBe(phone);
+      expect(await stored(u.id)).toMatchObject({ phone });
+    });
+
+    it('rejects a name over 100 UTF-16 code units before checking currency, without saving', async () => {
+      const u = await loginAs(t.connection, UserRole.USER);
+      const before = await stored(u.id);
+      const currencyLookup = vi.spyOn(
+        t.moduleRef.get(ReferenceDataService),
+        'getCurrency',
+      );
+
+      try {
+        const res = await t
+          .http()
+          .patch(URL)
+          .set('Cookie', u.cookie)
+          .send({
+            name: '\u{10400}'.repeat(51),
+            phone: '+968 9123 4567',
+            preferredCurrency: 'EGP',
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(res.body.details).toEqual([
+          { field: 'name', message: expect.any(String) },
+        ]);
+        expect(await stored(u.id)).toEqual(before);
+        expect(currencyLookup).not.toHaveBeenCalled();
+      } finally {
+        currencyLookup.mockRestore();
+      }
+    });
+
     it('200 changes only the fields sent', async () => {
       const u = await loginAs(t.connection, UserRole.HOTEL_MODERATOR);
 
@@ -145,6 +213,7 @@ describe('/api/users/me (API, ACC-09)', () => {
       ['a null name', { name: null }],
       ['a phone in an invalid format', { phone: 'call me' }],
       ['a phone that is too short', { phone: '12345' }],
+      ['a phone that is too long', { phone: '1'.repeat(21) }],
       ['a non-string currency', { preferredCurrency: 1 }],
       ['a null currency', { preferredCurrency: null }],
       ['a field that is not editable', { email: 'new@test.local' }],

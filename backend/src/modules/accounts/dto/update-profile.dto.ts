@@ -1,13 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength,
-  ValidateIf,
-} from 'class-validator';
+import { IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
 import { PHONE } from '../schemas/user.schema.js';
 
 /** Trims strings and leaves anything else for the validators to reject. */
@@ -26,13 +19,17 @@ export class UpdateProfileDto {
     example: 'Aisha Al Rawahi',
     minLength: 1,
     maxLength: 100,
+    description:
+      'Trimmed name, 1-100 UTF-16 code units. Non-BMP characters count as two, matching the user schema.',
   })
   // Sent → must be a valid name; `null` is not "leave unchanged".
   @ValidateIf((o: UpdateProfileDto) => o.name !== undefined)
   @Transform(trim)
   @IsString()
-  @MinLength(1)
-  @MaxLength(100)
+  // Without a Unicode flag, this counts UTF-16 code units like Mongoose.
+  @Matches(/^[\s\S]{1,100}$/, {
+    message: 'name must be between 1 and 100 UTF-16 code units',
+  })
   name?: string;
 
   @ApiPropertyOptional({

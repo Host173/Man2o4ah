@@ -2,14 +2,17 @@ import {
   BadRequestException,
   ConflictException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type {
+  AddCabinInput,
   CabinView,
   FlightView,
   SeatItem,
 } from '../../src/modules/flights/flights.types.js';
 import type { SeatInventory } from '../../src/modules/flights/seat-inventory.js';
+import { validateCabinInput } from '../../src/modules/flights/cabin-input.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import type { PublicApi } from './public-api.js';
 
@@ -28,7 +31,55 @@ export interface SeatCounters {
  * `session` the real methods take is not needed here, so the fake leaves it out.
  */
 export class FakeSeatInventory implements PublicApi<SeatInventory> {
+  private nextCabinId = 1;
+
   constructor(readonly data: FakeFlightsData = new FakeFlightsData()) {}
+
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string,
+  ): Promise<void> {
+    validateCabinInput(input);
+    const flight = this.data.flight(flightId);
+    if (!flight || flight.airlineId !== moderatorAirlineId) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be edited',
+      });
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message: 'This flight already has that cabin class',
+      });
+    }
+    let id = `created-cabin-${this.nextCabinId++}`;
+    while (
+      this.data
+        .flights()
+        .some((item) => item.cabins.some((cabin) => cabin.id === id))
+    ) {
+      id = `created-cabin-${this.nextCabinId++}`;
+    }
+    flight.cabins.push({
+      id,
+      cabinClass: input.cabinClass,
+      totalSeats: input.totalSeats,
+      availableSeats: input.totalSeats,
+      heldSeats: 0,
+      bookedSeats: 0,
+      priceMinor: input.priceMinor,
+      freeBags: input.freeBags,
+      maxBagWeightKg: input.maxBagWeightKg,
+    });
+  }
 
   /** The current counters of a cabin, as a copy; `undefined` if the flight or cabin doesn't exist. */
   counters(flightId: string, cabinId: string): SeatCounters | undefined {

@@ -118,6 +118,8 @@ Handlers must be **idempotent** (conditional updates), because an event can be h
 
 Events carry the recipients' user IDs, so listeners don't look them up. Emit after the transaction commits.
 
+`flight-booking.rescheduled`, account suspension/reactivation and provider deactivation/reactivation also carry `eventId`: a non-empty opaque ID generated once per committed change and reused for retries. Distinct changes use distinct IDs, regardless of whether earlier notifications were read (`data-model.md` §6.3).
+
 ## 7. Background jobs (`@nestjs/schedule`)
 
 Each job lives in the module that owns the data and only uses conditional updates (safe if two app instances run it).

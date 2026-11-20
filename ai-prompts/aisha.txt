@@ -10361,3 +10361,1352 @@ don't push unless the self review passed 100%
 How the output was used:
 Pushed feature/ACC-16-account-administration-logic to PR #206 only after the self-review passed; updated the PR description
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-18
+
+Prompt:
+i ran the command please verify everything is up to date and my branch is empty and its all on develop from the repo
+
+How the output was used:
+Answer only, no files changed (verified feature/ACC-18-admin-seed = origin/develop 34f3142, 0 ahead/0 behind, clean)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-18
+
+Prompt:
+execute this file, make sure to branch from the current develop, and after you finish review what you did using the provided review md file, and make sure to review it with another isolated agent.
+[Attached: ACC-18-admin-seed.exec.md]
+# EXECUTION FILE — ACC-18: Admin seed (issue #32)
+
+> For the executing agent: this file is the complete design. **Do not redesign.** Create or edit exactly the files below, with the content given, then run the verification steps. If something here contradicts the repo (a file moved, an import path broke), make the smallest fix that keeps the design, and say so in your final report. If a fix would need a change outside the files listed here, **stop and report**. Do not improvise.
+
+---
+
+## 0. Ticket summary
+
+| | |
+|---|---|
+| Issue | #32 "ACC-18: Admin seed" (label `pkg-accounts-auth`, milestone Sprint 2 — Features) |
+| Requirement | **ACC-18** [M] (System): admin accounts are created by seeding at setup. Admins cannot register themselves. |
+| Expected output | A seed script you can re-run. It creates the admin account from environment variables when that account doesn't exist yet. |
+| Tests | Integration: running the script twice still leaves one admin. (TDD not required.) |
+| Branch | `feature/ACC-18-admin-seed` |
+| PR title | `ACC-18: Admin seed` |
+| Depends on | #24 ACC-01 Registration (merged) · Blocks #89 PLT-08 Demo data seed |
+| Owner | Aisha (Accounts & Auth package, `accounts` module) |
+
+**This is a CLI seed script, not an HTTP endpoint.** No controller, DTO or Swagger change. Admins exist only through this seed (`references/auth.md` §1, `docs/database/data-model.md`).
+
+---
+
+## 1. Design (locked — implement exactly this)
+
+### 1.1 Behaviour of `npm run seed:admin`
+
+1. Read `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from `backend/.env` through `ConfigService`. These names are already reserved in `references/api-contract.md` §2.
+2. Validate **before any write**:
+   - Email: required. It is trimmed and lowercased, then must pass `isEmail` (class-validator, the same check as `RegisterDto`).
+   - Password: required. It must pass the shared `isValidPassword` rule (`accounts/auth/password-rule.ts`: 8–72 characters, at least one letter and one digit).
+   - Error messages name the variable. **They never repeat the password.**
+3. Look up a user by that email:
+   - **No user** → create `{ name: 'Admin', email, passwordHash: bcrypt(password, BCRYPT_ROUNDS), role: 'admin', status: 'active', mustChangePassword: false }`, then log `Admin account created for <email>.`
+   - **User exists with role `admin`** → change nothing: no password reset and no status change. Log `already exists … nothing changed`.
+   - **User exists with another role** → throw. The script exits with code 1 and changes nothing. It never promotes an existing account.
+4. Race safety: if two runs start at the same time, the unique `email` index decides who wins. The loser catches Mongo error 11000 and handles the account as "exists" (step 3), so there is always exactly one admin.
+5. The script exits with code 0 on success and code 1 on any error. The error message is printed and the stack is not. The same pattern is used in `seed-reference-data.ts`.
+
+### 1.2 Why (for the PR and the oral defense)
+
+- **Keyed by email.** The rule is "create the admin if it doesn't already exist", and the email is the account's unique key. Running the script twice with the same `.env` gives one admin.
+- **It never overwrites the password.** The admin may change their password later (ACC-08). A re-run must not undo that change or log them out.
+- **`mustChangePassword: false`.** The operator picks this password in `.env`, so it is not a temporary password given by someone else (that case is ACC-07a/ACC-13). The account must also work right away in Swagger for M1 grading.
+- **It never promotes.** Silently turning a traveler account into an admin would be a privilege escalation.
+- **Lean `AccountsSeedModule`.** The seed only needs the `User` model. Importing the full `AccountsModule` would also pull in the JWT module, global guards and controllers.
+- **Find-then-create plus catching 11000**, rather than an upsert. `create` runs every schema validator (the email regex, the enums) and stays easy to explain. The unique index still closes the race.
+
+### 1.3 Points to flag to the team leader in the PR (do NOT change the design for them)
+
+- The display name is fixed as `"Admin"`. A `SEED_ADMIN_NAME` variable is not reserved in api-contract.md, so none was added.
+- `src/seed/seed.module.ts` is shared seed infrastructure. This PR adds **one import line** (`AccountsSeedModule`) and updates its doc comment. Call this out at the top of the PR.
+
+---
+
+## 2. Setup
+
+```bash
+git checkout develop && git pull
+git checkout -b feature/ACC-18-admin-seed
+cd backend && npm ci   # only if node_modules is missing
+```
+
+---
+
+## 3. Files
+
+### 3.1 CREATE `backend/src/modules/accounts/seed/admin-seed-input.ts`
+
+```ts
+import { isEmail } from 'class-validator';
+import {
+  PASSWORD_RULE_MESSAGE,
+  isValidPassword,
+} from '../auth/password-rule.js';
+
+/** What the admin seed needs (ACC-18). */
+export interface AdminSeedInput {
+  /** Trimmed and lowercased. */
+  email: string;
+  password: string;
+}
+
+/**
+ * ACC-18: reads SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD and checks them
+ * before anything is written. The email is trimmed and lowercased; the
+ * password must follow the shared password rule (ACC-01). Errors name the
+ * variable but never repeat the password.
+ */
+export function parseAdminSeedInput(
+  env: Record<string, string | undefined>,
+): AdminSeedInput {
+  const email = env.SEED_ADMIN_EMAIL?.trim().toLowerCase() ?? '';
+  if (email === '') {
+    throw new Error(
+      'SEED_ADMIN_EMAIL is not set. Add it to backend/.env (see .env.example).',
+    );
+  }
+  if (!isEmail(email)) {
+    throw new Error('SEED_ADMIN_EMAIL must be a valid email address.');
+  }
+
+  const password = env.SEED_ADMIN_PASSWORD ?? '';
+  if (password === '') {
+    throw new Error(
+      'SEED_ADMIN_PASSWORD is not set. Add it to backend/.env (see .env.example).',
+    );
+  }
+  if (!isValidPassword(password)) {
+    throw new Error(
+      `SEED_ADMIN_PASSWORD is too weak: ${PASSWORD_RULE_MESSAGE}.`,
+    );
+  }
+
+  return { email, password };
+}
+```
+
+### 3.2 CREATE `backend/src/modules/accounts/seed/admin-seed.service.ts`
+
+```ts
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import bcrypt from 'bcrypt';
+import type { Model, Types } from 'mongoose';
+import { BCRYPT_ROUNDS } from '../auth/auth.constants.js';
+import { User, UserRole, UserStatus } from '../schemas/user.schema.js';
+import type { AdminSeedInput } from './admin-seed-input.js';
+
+/** The display name of the seeded admin (ACC-18). */
+export const SEED_ADMIN_NAME = 'Admin';
+
+/** MongoDB's duplicate-key error code. */
+const DUPLICATE_KEY = 11000;
+
+export interface AdminSeedResult {
+  /** `created` on the first run; `unchanged` when the admin already existed. */
+  status: 'created' | 'unchanged';
+  userId: string;
+}
+
+/** The fields the seed reads from an existing account. */
+type FoundUser = { _id: Types.ObjectId; role: UserRole; status: UserStatus };
+
+function isDuplicateEmail(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, keyValue } = error as { code?: unknown; keyValue?: unknown };
+  return (
+    code === DUPLICATE_KEY &&
+    typeof keyValue === 'object' &&
+    keyValue !== null &&
+    'email' in keyValue
+  );
+}
+
+/**
+ * ACC-18: creates the admin account at setup; there is no admin
+ * self-registration. Safe to re-run: keyed by email, it never changes an
+ * existing admin (no password reset, so a password changed with ACC-08
+ * stays) and never promotes an existing non-admin account.
+ */
+@Injectable()
+export class AdminSeedService {
+  private readonly logger = new Logger(AdminSeedService.name);
+
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+  ) {}
+
+  /**
+   * Creates an active admin with a bcrypt hash of the password and
+   * `mustChangePassword: false`, unless an account with that email exists.
+   * An existing admin → `unchanged`; any other role → throws, nothing
+   * changes. Two parallel runs: the unique email index lets one create, the
+   * other ends as `unchanged`.
+   */
+  async run(input: AdminSeedInput): Promise<AdminSeedResult> {
+    const existing = await this.findByEmail(input.email);
+    if (existing) return this.keepExisting(existing, input.email);
+
+    const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+    try {
+      const user = await this.userModel.create({
+        name: SEED_ADMIN_NAME,
+        email: input.email,
+        passwordHash,
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+        mustChangePassword: false,
+      });
+      this.logger.log(`Admin account created for ${input.email}.`);
+      return { status: 'created', userId: user._id.toString() };
+    } catch (error) {
+      // Another run created the account between our lookup and our insert.
+      if (!isDuplicateEmail(error)) throw error;
+      const winner = await this.findByEmail(input.email);
+      if (!winner) throw error;
+      return this.keepExisting(winner, input.email);
+    }
+  }
+
+  private findByEmail(email: string): Promise<FoundUser | null> {
+    return this.userModel
+      .findOne({ email }, { role: 1, status: 1 })
+      .lean<FoundUser | null>()
+      .exec();
+  }
+
+  private keepExisting(user: FoundUser, email: string): AdminSeedResult {
+    if (user.role !== UserRole.ADMIN) {
+      throw new Error(
+        `${email} is already registered with role "${user.role}". The admin seed never changes an existing account; set SEED_ADMIN_EMAIL to another address.`,
+      );
+    }
+    this.logger.log(
+      `Admin account for ${email} already exists (status ${user.status}); nothing changed.`,
+    );
+    return { status: 'unchanged', userId: user._id.toString() };
+  }
+}
+```
+
+### 3.3 CREATE `backend/src/modules/accounts/seed/accounts-seed.module.ts`
+
+```ts
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { User, UserSchema } from '../schemas/user.schema.js';
+import { AdminSeedService } from './admin-seed.service.js';
+
+/**
+ * Accounts' part of the standalone seed scripts (ACC-18): only the `users`
+ * model and `AdminSeedService`, without the JWT module, guards or
+ * controllers of `AccountsModule`. Imported by `SeedModule`, never by
+ * `AppModule`.
+ */
+@Module({
+  imports: [
+    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+  ],
+  providers: [AdminSeedService],
+  exports: [AdminSeedService],
+})
+export class AccountsSeedModule {}
+```
+
+### 3.4 CREATE `backend/src/seed/seed-admin.ts`
+
+```ts
+import { ConfigService } from '@nestjs/config';
+import { NestFactory } from '@nestjs/core';
+import { parseAdminSeedInput } from '../modules/accounts/seed/admin-seed-input.js';
+import { AdminSeedService } from '../modules/accounts/seed/admin-seed.service.js';
+import { SeedModule } from './seed.module.js';
+
+const app = await NestFactory.createApplicationContext(SeedModule);
+try {
+  const config = app.get(ConfigService);
+  const input = parseAdminSeedInput({
+    SEED_ADMIN_EMAIL: config.get<string>('SEED_ADMIN_EMAIL'),
+    SEED_ADMIN_PASSWORD: config.get<string>('SEED_ADMIN_PASSWORD'),
+  });
+  await app.get(AdminSeedService, { strict: false }).run(input);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+} finally {
+  await app.close();
+}
+```
+
+### 3.5 EDIT `backend/src/seed/seed.module.ts`
+
+Make these two changes:
+
+1. Add the import: `import { AccountsSeedModule } from '../modules/accounts/seed/accounts-seed.module.js';`
+2. Add `AccountsSeedModule` to `imports` after `ReferenceDataModule`.
+3. Replace the doc comment with:
+   `/** Minimal module for standalone seed scripts: config, connection, reference data, admin account (ACC-18). */`
+
+Resulting file:
+
+```ts
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { validate } from '../config/validate.js';
+import { AccountsSeedModule } from '../modules/accounts/seed/accounts-seed.module.js';
+import { ReferenceDataModule } from '../modules/reference-data/reference-data.module.js';
+
+/** Minimal module for standalone seed scripts: config, connection, reference data, admin account (ACC-18). */
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, validate }),
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        uri: config.getOrThrow<string>('MONGODB_URI'),
+      }),
+    }),
+    ReferenceDataModule,
+    AccountsSeedModule,
+  ],
+})
+export class SeedModule {}
+```
+
+Do **not** touch `src/config/validate.ts`. The app itself doesn't need these variables. Only the seed checks them, at run time.
+
+### 3.6 EDIT `backend/package.json` (scripts)
+
+Add this line directly after `"seed:reference"`:
+
+```json
+    "seed:admin": "nest build && node dist/seed/seed-admin.js",
+```
+
+### 3.7 EDIT `.env.example` (repo root)
+
+In the `# backend/.env` block, insert these lines after the `STRIPE_WEBHOOK_SECRET=whsec_...` line and before the blank line that precedes `# frontend/.env.local`:
+
+```
+# Admin account created by `npm run seed:admin` (ACC-18). Password: 8-72 chars, a letter and a digit.
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=<choose-a-strong-password>
+```
+
+### 3.8 EDIT `README.md` (section "Database")
+
+Add this bullet directly after the `npm run seed:reference` bullet. It is a setup step, not a contract description, so the README rule allows it.
+
+```
+- Create the admin account (ACC-18; there is no admin registration): set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in `backend/.env`, then run `npm run seed:admin` in `backend/`. It creates the admin only if no account has that email, never changes an existing account, and is safe to re-run.
+```
+
+---
+
+## 4. Tests
+
+### 4.1 CREATE `backend/src/modules/accounts/seed/admin-seed-input.spec.ts` (unit)
+
+```ts
+import { PASSWORD_RULE_MESSAGE } from '../auth/password-rule.js';
+import { parseAdminSeedInput } from './admin-seed-input.js';
+
+const VALID = {
+  SEED_ADMIN_EMAIL: 'admin@example.com',
+  SEED_ADMIN_PASSWORD: 'Admin12345',
+};
+
+describe('parseAdminSeedInput (ACC-18)', () => {
+  it('trims and lowercases the email and keeps the password as is', () => {
+    expect(
+      parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: '  Admin@Example.COM ' }),
+    ).toEqual({ email: 'admin@example.com', password: 'Admin12345' });
+  });
+
+  it.each([undefined, '', '   '])(
+    'rejects a missing SEED_ADMIN_EMAIL %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
+      ).toThrow(/SEED_ADMIN_EMAIL is not set/);
+    },
+  );
+
+  it.each(['admin', 'admin@', '@example.com', 'admin example@x.com'])(
+    'rejects the invalid email %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
+      ).toThrow(/SEED_ADMIN_EMAIL must be a valid email/);
+    },
+  );
+
+  it.each([undefined, ''])(
+    'rejects a missing SEED_ADMIN_PASSWORD %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_PASSWORD: value }),
+      ).toThrow(/SEED_ADMIN_PASSWORD is not set/);
+    },
+  );
+
+  it.each(['short1', 'onlyletters', '12345678', 'a1'.repeat(37)])(
+    'rejects the password %j without printing it',
+    (password) => {
+      let message = '';
+      try {
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_PASSWORD: password });
+      } catch (error) {
+        message = error instanceof Error ? error.message : '';
+      }
+      expect(message).toContain('SEED_ADMIN_PASSWORD');
+      expect(message).toContain(PASSWORD_RULE_MESSAGE);
+      expect(message).not.toContain(password);
+    },
+  );
+});
+```
+
+### 4.2 CREATE `backend/src/modules/accounts/seed/admin-seed.service.spec.ts` (integration, in-memory Mongo)
+
+```ts
+import { Logger } from '@nestjs/common';
+import { MongooseModule, getModelToken } from '@nestjs/mongoose';
+import { Test, type TestingModule } from '@nestjs/testing';
+import bcrypt from 'bcrypt';
+import type { Model } from 'mongoose';
+import {
+  HOOK_TIMEOUT,
+  startMemoryMongo,
+  type MemoryMongo,
+} from '../../../../test/support/mongo-memory.js';
+import { User, UserRole, UserStatus } from '../schemas/user.schema.js';
+import { AccountsSeedModule } from './accounts-seed.module.js';
+import { AdminSeedService, SEED_ADMIN_NAME } from './admin-seed.service.js';
+
+const INPUT = { email: 'admin@example.com', password: 'Admin12345' };
+
+// Each run hashes with bcrypt cost 12, so the tests get extra time.
+describe('admin seed (ACC-18)', { timeout: 30_000 }, () => {
+  let mongo: MemoryMongo;
+  let moduleRef: TestingModule;
+  let users: Model<User>;
+  let seed: AdminSeedService;
+
+  beforeAll(async () => {
+    Logger.overrideLogger(false);
+    mongo = await startMemoryMongo();
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        MongooseModule.forRoot(mongo.uri, { dbName: 'admin-seed' }),
+        AccountsSeedModule,
+      ],
+    }).compile();
+    await moduleRef.init();
+    users = moduleRef.get<Model<User>>(getModelToken(User.name));
+    // The unique email index must exist before the parallel-run test.
+    await users.init();
+    seed = moduleRef.get(AdminSeedService);
+  }, HOOK_TIMEOUT);
+
+  afterAll(async () => {
+    await moduleRef.close();
+    await mongo.stop();
+  }, HOOK_TIMEOUT);
+
+  beforeEach(async () => {
+    await users.deleteMany({});
+  });
+
+  async function storedHash(): Promise<string> {
+    const user = await users
+      .findOne({ email: INPUT.email })
+      .select('+passwordHash')
+      .lean();
+    if (!user) throw new Error('no account with the seed email');
+    return user.passwordHash;
+  }
+
+  it('creates one active admin with a bcrypt hash of the password', async () => {
+    const result = await seed.run(INPUT);
+
+    expect(result.status).toBe('created');
+    const all = await users.find().lean();
+    expect(all).toHaveLength(1);
+    expect(all[0]._id.toString()).toBe(result.userId);
+    expect(all[0]).toMatchObject({
+      name: SEED_ADMIN_NAME,
+      email: INPUT.email,
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      mustChangePassword: false,
+      failedLoginAttempts: 0,
+    });
+    const hash = await storedHash();
+    expect(hash).not.toBe(INPUT.password);
+    expect(await bcrypt.compare(INPUT.password, hash)).toBe(true);
+  });
+
+  it('running it twice leaves exactly one admin and changes nothing', async () => {
+    const first = await seed.run(INPUT);
+    const before = await users
+      .findById(first.userId)
+      .select('+passwordHash')
+      .lean();
+
+    const second = await seed.run(INPUT);
+
+    expect(second).toEqual({ status: 'unchanged', userId: first.userId });
+    expect(await users.countDocuments()).toBe(1);
+    expect(await users.countDocuments({ role: UserRole.ADMIN })).toBe(1);
+    const after = await users
+      .findById(first.userId)
+      .select('+passwordHash')
+      .lean();
+    expect(after).toEqual(before);
+  });
+
+  it('a re-run with another password keeps the original password', async () => {
+    await seed.run(INPUT);
+
+    await seed.run({ ...INPUT, password: 'Different123' });
+
+    expect(await bcrypt.compare(INPUT.password, await storedHash())).toBe(true);
+  });
+
+  it('refuses an email that belongs to a non-admin and changes nothing', async () => {
+    await users.create({
+      name: 'Traveler',
+      email: INPUT.email,
+      passwordHash: 'existing-hash',
+      role: UserRole.USER,
+    });
+
+    await expect(seed.run(INPUT)).rejects.toThrow(
+      /already registered with role "user"/,
+    );
+    expect(await users.countDocuments({ role: UserRole.ADMIN })).toBe(0);
+    expect(await storedHash()).toBe('existing-hash');
+  });
+
+  it('two runs at the same time still create exactly one admin', async () => {
+    const results = await Promise.all([seed.run(INPUT), seed.run(INPUT)]);
+
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'created',
+      'unchanged',
+    ]);
+    expect(results[0].userId).toBe(results[1].userId);
+    expect(await users.countDocuments()).toBe(1);
+  });
+});
+```
+
+---
+
+## 5. Verify (all must pass, report real output)
+
+From `backend/`:
+
+```bash
+npm run format                                   # Prettier may rewrap lines in the code above; that's expected
+npx vitest run src/modules/accounts/seed         # both spec files green
+npm run verify                                   # format:check + lint + typecheck + test:cov + build
+```
+
+- Coverage gate: `src/modules/accounts/seed/admin-seed.service.ts` must have ≥ 80 % lines. The parallel test covers the duplicate-key branch.
+- If oxlint flags something, fix the code. **Never** add a disable comment.
+- If `users.init()` or `.lean<FoundUser | null>()` causes a type error with Mongoose 9, change only the typing so it compiles (for example `.lean<FoundUser>()`, which returns `FoundUser | null` for `findOne` in some versions). Report what you changed.
+
+**Manual smoke test.** Run this only if `backend/.env` has a real `MONGODB_URI` and the user agrees to touch the shared Atlas DB. Ask before running it.
+
+```bash
+npm run seed:admin   # 1st: "Admin account created for …"
+npm run seed:admin   # 2nd: "… already exists (status active); nothing changed."
+```
+
+After that, `POST /api/auth/login` in Swagger (`/api/docs`) with those credentials should return `role: "admin"`. Never print or paste the `.env` values.
+
+---
+
+## 6. Commits (Conventional Commits, scope `accounts`)
+
+```
+feat(accounts): add re-runnable admin seed from env (ACC-18)
+  → admin-seed-input.ts, admin-seed.service.ts, accounts-seed.module.ts, src/seed/seed-admin.ts, src/seed/seed.module.ts, package.json
+test(accounts): cover admin seed input and idempotent runs (ACC-18)
+  → admin-seed-input.spec.ts, admin-seed.service.spec.ts
+docs(accounts): add SEED_ADMIN_* to .env.example and README setup (ACC-18)
+  → .env.example, README.md
+```
+
+Read `git diff --staged` before each commit. Never commit `.env`. **Do not push or open the PR unless the user explicitly asks.**
+
+---
+
+## 7. PR (only when asked) — target `develop`, title `ACC-18: Admin seed`
+
+Put this at the top: **Shared file touched: `backend/src/seed/seed.module.ts` (+1 import of `AccountsSeedModule`, doc comment).**
+
+Fill the template:
+
+- **What and why.** Requirement IDs: ACC-18. Summary: `npm run seed:admin` creates the admin account from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` when no account has that email. It is keyed by email, never resets an existing admin, never promotes a non-admin, and is safe to re-run. Closes #32. Unblocks #89.
+- **Design decisions.** Copy §1.2. Under "For the team leader", list the two points in §1.3.
+- **Testing technique.**
+  - Unit: env parsing. Covers missing or invalid email, the password rule, and that the password never appears in errors.
+  - Integration (mongodb-memory-server): the first run creates one active admin with a bcrypt hash. A second run leaves exactly one admin with the document unchanged. A re-run with another password keeps the original. A non-admin email is refused and nothing changes. Two parallel runs give one admin (`created` + `unchanged`).
+  - Manual: the smoke test from §5, if it was done.
+- **Screenshots.** The Swagger login response showing `role: "admin"`, if the smoke test was done.
+
+---
+
+## 8. Prompt log
+
+At the end of the turn, append the entry to `ai-prompts/aisha.txt` in the format from `AGENTS.example.md` §4, with Related Requirement `ACC-18`. Per `workflow.md` §5, add `[Attached: ACC-18-admin-seed.exec.md]` after the prompt and paste this file's full content unchanged.
+
+---
+
+## 9. Definition of done
+
+- [ ] Only these paths changed: `backend/src/modules/accounts/seed/*` (5 new files), `backend/src/seed/seed-admin.ts` (new), `backend/src/seed/seed.module.ts`, `backend/package.json`, `.env.example`, `README.md`, `ai-prompts/aisha.txt`
+- [ ] No change in any other module, in `common/`, or in `config/validate.ts`
+- [ ] `npm run verify` passes (paste the summary)
+- [ ] Commits follow §6; the branch is `feature/ACC-18-admin-seed`
+- [ ] The prompt log entry was appended
+
+How the output was used:
+Created the 6 ACC-18 files and edited seed.module.ts, package.json, .env.example, README.md exactly as the execution file says; commits 34cee10, 522184a, a4ea157 on feature/ACC-18-admin-seed (from origin/develop 34f3142); started the isolated review agent; not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-18
+
+Prompt:
+[Attached: SELF_REVIEW_PROMPT(1).md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Answer only, no files changed (sent the updated step 2 and answer format to the isolated review agent)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-18
+
+Prompt:
+execute this file, make sure to branch from the current develop, and after you finish review what you did using the provided review md file, and make sure to review it with another isolated agent.
+[Attached: SELF_REVIEW_PROMPT(1).md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+[Attached: ACC-18-admin-seed.exec.md]
+# EXECUTION FILE — ACC-18: Admin seed (issue #32)
+
+> For the executing agent: this file is the complete design. **Do not redesign.** Create or edit exactly the files below, with the content given, then run the verification steps. If something here contradicts the repo (a file moved, an import path broke), make the smallest fix that keeps the design, and say so in your final report. If a fix would need a change outside the files listed here, **stop and report**. Do not improvise.
+
+---
+
+## 0. Ticket summary
+
+| | |
+|---|---|
+| Issue | #32 "ACC-18: Admin seed" (label `pkg-accounts-auth`, milestone Sprint 2 — Features) |
+| Requirement | **ACC-18** [M] (System): admin accounts are created by seeding at setup. Admins cannot register themselves. |
+| Expected output | A seed script you can re-run. It creates the admin account from environment variables when that account doesn't exist yet. |
+| Tests | Integration: running the script twice still leaves one admin. (TDD not required.) |
+| Branch | `feature/ACC-18-admin-seed` |
+| PR title | `ACC-18: Admin seed` |
+| Depends on | #24 ACC-01 Registration (merged) · Blocks #89 PLT-08 Demo data seed |
+| Owner | Aisha (Accounts & Auth package, `accounts` module) |
+
+**This is a CLI seed script, not an HTTP endpoint.** No controller, DTO or Swagger change. Admins exist only through this seed (`references/auth.md` §1, `docs/database/data-model.md`).
+
+---
+
+## 1. Design (locked — implement exactly this)
+
+### 1.1 Behaviour of `npm run seed:admin`
+
+1. Read `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from `backend/.env` through `ConfigService`. These names are already reserved in `references/api-contract.md` §2.
+2. Validate **before any write**:
+   - Email: required. It is trimmed and lowercased, then must pass `isEmail` (class-validator, the same check as `RegisterDto`).
+   - Password: required. It must pass the shared `isValidPassword` rule (`accounts/auth/password-rule.ts`: 8–72 characters, at least one letter and one digit).
+   - Error messages name the variable. **They never repeat the password.**
+3. Look up a user by that email:
+   - **No user** → create `{ name: 'Admin', email, passwordHash: bcrypt(password, BCRYPT_ROUNDS), role: 'admin', status: 'active', mustChangePassword: false }`, then log `Admin account created for <email>.`
+   - **User exists with role `admin`** → change nothing: no password reset and no status change. Log `already exists … nothing changed`.
+   - **User exists with another role** → throw. The script exits with code 1 and changes nothing. It never promotes an existing account.
+4. Race safety: if two runs start at the same time, the unique `email` index decides who wins. The loser catches Mongo error 11000 and handles the account as "exists" (step 3), so there is always exactly one admin.
+5. The script exits with code 0 on success and code 1 on any error. The error message is printed and the stack is not. The same pattern is used in `seed-reference-data.ts`.
+
+### 1.2 Why (for the PR and the oral defense)
+
+- **Keyed by email.** The rule is "create the admin if it doesn't already exist", and the email is the account's unique key. Running the script twice with the same `.env` gives one admin.
+- **It never overwrites the password.** The admin may change their password later (ACC-08). A re-run must not undo that change or log them out.
+- **`mustChangePassword: false`.** The operator picks this password in `.env`, so it is not a temporary password given by someone else (that case is ACC-07a/ACC-13). The account must also work right away in Swagger for M1 grading.
+- **It never promotes.** Silently turning a traveler account into an admin would be a privilege escalation.
+- **Lean `AccountsSeedModule`.** The seed only needs the `User` model. Importing the full `AccountsModule` would also pull in the JWT module, global guards and controllers.
+- **Find-then-create plus catching 11000**, rather than an upsert. `create` runs every schema validator (the email regex, the enums) and stays easy to explain. The unique index still closes the race.
+
+### 1.3 Points to flag to the team leader in the PR (do NOT change the design for them)
+
+- The display name is fixed as `"Admin"`. A `SEED_ADMIN_NAME` variable is not reserved in api-contract.md, so none was added.
+- `src/seed/seed.module.ts` is shared seed infrastructure. This PR adds **one import line** (`AccountsSeedModule`) and updates its doc comment. Call this out at the top of the PR.
+
+---
+
+## 2. Setup
+
+```bash
+git checkout develop && git pull
+git checkout -b feature/ACC-18-admin-seed
+cd backend && npm ci   # only if node_modules is missing
+```
+
+---
+
+## 3. Files
+
+### 3.1 CREATE `backend/src/modules/accounts/seed/admin-seed-input.ts`
+
+```ts
+import { isEmail } from 'class-validator';
+import {
+  PASSWORD_RULE_MESSAGE,
+  isValidPassword,
+} from '../auth/password-rule.js';
+
+/** What the admin seed needs (ACC-18). */
+export interface AdminSeedInput {
+  /** Trimmed and lowercased. */
+  email: string;
+  password: string;
+}
+
+/**
+ * ACC-18: reads SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD and checks them
+ * before anything is written. The email is trimmed and lowercased; the
+ * password must follow the shared password rule (ACC-01). Errors name the
+ * variable but never repeat the password.
+ */
+export function parseAdminSeedInput(
+  env: Record<string, string | undefined>,
+): AdminSeedInput {
+  const email = env.SEED_ADMIN_EMAIL?.trim().toLowerCase() ?? '';
+  if (email === '') {
+    throw new Error(
+      'SEED_ADMIN_EMAIL is not set. Add it to backend/.env (see .env.example).',
+    );
+  }
+  if (!isEmail(email)) {
+    throw new Error('SEED_ADMIN_EMAIL must be a valid email address.');
+  }
+
+  const password = env.SEED_ADMIN_PASSWORD ?? '';
+  if (password === '') {
+    throw new Error(
+      'SEED_ADMIN_PASSWORD is not set. Add it to backend/.env (see .env.example).',
+    );
+  }
+  if (!isValidPassword(password)) {
+    throw new Error(
+      `SEED_ADMIN_PASSWORD is too weak: ${PASSWORD_RULE_MESSAGE}.`,
+    );
+  }
+
+  return { email, password };
+}
+```
+
+### 3.2 CREATE `backend/src/modules/accounts/seed/admin-seed.service.ts`
+
+```ts
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import bcrypt from 'bcrypt';
+import type { Model, Types } from 'mongoose';
+import { BCRYPT_ROUNDS } from '../auth/auth.constants.js';
+import { User, UserRole, UserStatus } from '../schemas/user.schema.js';
+import type { AdminSeedInput } from './admin-seed-input.js';
+
+/** The display name of the seeded admin (ACC-18). */
+export const SEED_ADMIN_NAME = 'Admin';
+
+/** MongoDB's duplicate-key error code. */
+const DUPLICATE_KEY = 11000;
+
+export interface AdminSeedResult {
+  /** `created` on the first run; `unchanged` when the admin already existed. */
+  status: 'created' | 'unchanged';
+  userId: string;
+}
+
+/** The fields the seed reads from an existing account. */
+type FoundUser = { _id: Types.ObjectId; role: UserRole; status: UserStatus };
+
+function isDuplicateEmail(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, keyValue } = error as { code?: unknown; keyValue?: unknown };
+  return (
+    code === DUPLICATE_KEY &&
+    typeof keyValue === 'object' &&
+    keyValue !== null &&
+    'email' in keyValue
+  );
+}
+
+/**
+ * ACC-18: creates the admin account at setup; there is no admin
+ * self-registration. Safe to re-run: keyed by email, it never changes an
+ * existing admin (no password reset, so a password changed with ACC-08
+ * stays) and never promotes an existing non-admin account.
+ */
+@Injectable()
+export class AdminSeedService {
+  private readonly logger = new Logger(AdminSeedService.name);
+
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+  ) {}
+
+  /**
+   * Creates an active admin with a bcrypt hash of the password and
+   * `mustChangePassword: false`, unless an account with that email exists.
+   * An existing admin → `unchanged`; any other role → throws, nothing
+   * changes. Two parallel runs: the unique email index lets one create, the
+   * other ends as `unchanged`.
+   */
+  async run(input: AdminSeedInput): Promise<AdminSeedResult> {
+    const existing = await this.findByEmail(input.email);
+    if (existing) return this.keepExisting(existing, input.email);
+
+    const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+    try {
+      const user = await this.userModel.create({
+        name: SEED_ADMIN_NAME,
+        email: input.email,
+        passwordHash,
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+        mustChangePassword: false,
+      });
+      this.logger.log(`Admin account created for ${input.email}.`);
+      return { status: 'created', userId: user._id.toString() };
+    } catch (error) {
+      // Another run created the account between our lookup and our insert.
+      if (!isDuplicateEmail(error)) throw error;
+      const winner = await this.findByEmail(input.email);
+      if (!winner) throw error;
+      return this.keepExisting(winner, input.email);
+    }
+  }
+
+  private findByEmail(email: string): Promise<FoundUser | null> {
+    return this.userModel
+      .findOne({ email }, { role: 1, status: 1 })
+      .lean<FoundUser | null>()
+      .exec();
+  }
+
+  private keepExisting(user: FoundUser, email: string): AdminSeedResult {
+    if (user.role !== UserRole.ADMIN) {
+      throw new Error(
+        `${email} is already registered with role "${user.role}". The admin seed never changes an existing account; set SEED_ADMIN_EMAIL to another address.`,
+      );
+    }
+    this.logger.log(
+      `Admin account for ${email} already exists (status ${user.status}); nothing changed.`,
+    );
+    return { status: 'unchanged', userId: user._id.toString() };
+  }
+}
+```
+
+### 3.3 CREATE `backend/src/modules/accounts/seed/accounts-seed.module.ts`
+
+```ts
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { User, UserSchema } from '../schemas/user.schema.js';
+import { AdminSeedService } from './admin-seed.service.js';
+
+/**
+ * Accounts' part of the standalone seed scripts (ACC-18): only the `users`
+ * model and `AdminSeedService`, without the JWT module, guards or
+ * controllers of `AccountsModule`. Imported by `SeedModule`, never by
+ * `AppModule`.
+ */
+@Module({
+  imports: [
+    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+  ],
+  providers: [AdminSeedService],
+  exports: [AdminSeedService],
+})
+export class AccountsSeedModule {}
+```
+
+### 3.4 CREATE `backend/src/seed/seed-admin.ts`
+
+```ts
+import { ConfigService } from '@nestjs/config';
+import { NestFactory } from '@nestjs/core';
+import { parseAdminSeedInput } from '../modules/accounts/seed/admin-seed-input.js';
+import { AdminSeedService } from '../modules/accounts/seed/admin-seed.service.js';
+import { SeedModule } from './seed.module.js';
+
+const app = await NestFactory.createApplicationContext(SeedModule);
+try {
+  const config = app.get(ConfigService);
+  const input = parseAdminSeedInput({
+    SEED_ADMIN_EMAIL: config.get<string>('SEED_ADMIN_EMAIL'),
+    SEED_ADMIN_PASSWORD: config.get<string>('SEED_ADMIN_PASSWORD'),
+  });
+  await app.get(AdminSeedService, { strict: false }).run(input);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+} finally {
+  await app.close();
+}
+```
+
+### 3.5 EDIT `backend/src/seed/seed.module.ts`
+
+Make these two changes:
+
+1. Add the import: `import { AccountsSeedModule } from '../modules/accounts/seed/accounts-seed.module.js';`
+2. Add `AccountsSeedModule` to `imports` after `ReferenceDataModule`.
+3. Replace the doc comment with:
+   `/** Minimal module for standalone seed scripts: config, connection, reference data, admin account (ACC-18). */`
+
+Resulting file:
+
+```ts
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { validate } from '../config/validate.js';
+import { AccountsSeedModule } from '../modules/accounts/seed/accounts-seed.module.js';
+import { ReferenceDataModule } from '../modules/reference-data/reference-data.module.js';
+
+/** Minimal module for standalone seed scripts: config, connection, reference data, admin account (ACC-18). */
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, validate }),
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        uri: config.getOrThrow<string>('MONGODB_URI'),
+      }),
+    }),
+    ReferenceDataModule,
+    AccountsSeedModule,
+  ],
+})
+export class SeedModule {}
+```
+
+Do **not** touch `src/config/validate.ts`. The app itself doesn't need these variables. Only the seed checks them, at run time.
+
+### 3.6 EDIT `backend/package.json` (scripts)
+
+Add this line directly after `"seed:reference"`:
+
+```json
+    "seed:admin": "nest build && node dist/seed/seed-admin.js",
+```
+
+### 3.7 EDIT `.env.example` (repo root)
+
+In the `# backend/.env` block, insert these lines after the `STRIPE_WEBHOOK_SECRET=whsec_...` line and before the blank line that precedes `# frontend/.env.local`:
+
+```
+# Admin account created by `npm run seed:admin` (ACC-18). Password: 8-72 chars, a letter and a digit.
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=<choose-a-strong-password>
+```
+
+### 3.8 EDIT `README.md` (section "Database")
+
+Add this bullet directly after the `npm run seed:reference` bullet. It is a setup step, not a contract description, so the README rule allows it.
+
+```
+- Create the admin account (ACC-18; there is no admin registration): set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in `backend/.env`, then run `npm run seed:admin` in `backend/`. It creates the admin only if no account has that email, never changes an existing account, and is safe to re-run.
+```
+
+---
+
+## 4. Tests
+
+### 4.1 CREATE `backend/src/modules/accounts/seed/admin-seed-input.spec.ts` (unit)
+
+```ts
+import { PASSWORD_RULE_MESSAGE } from '../auth/password-rule.js';
+import { parseAdminSeedInput } from './admin-seed-input.js';
+
+const VALID = {
+  SEED_ADMIN_EMAIL: 'admin@example.com',
+  SEED_ADMIN_PASSWORD: 'Admin12345',
+};
+
+describe('parseAdminSeedInput (ACC-18)', () => {
+  it('trims and lowercases the email and keeps the password as is', () => {
+    expect(
+      parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: '  Admin@Example.COM ' }),
+    ).toEqual({ email: 'admin@example.com', password: 'Admin12345' });
+  });
+
+  it.each([undefined, '', '   '])(
+    'rejects a missing SEED_ADMIN_EMAIL %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
+      ).toThrow(/SEED_ADMIN_EMAIL is not set/);
+    },
+  );
+
+  it.each(['admin', 'admin@', '@example.com', 'admin example@x.com'])(
+    'rejects the invalid email %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_EMAIL: value }),
+      ).toThrow(/SEED_ADMIN_EMAIL must be a valid email/);
+    },
+  );
+
+  it.each([undefined, ''])(
+    'rejects a missing SEED_ADMIN_PASSWORD %j',
+    (value) => {
+      expect(() =>
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_PASSWORD: value }),
+      ).toThrow(/SEED_ADMIN_PASSWORD is not set/);
+    },
+  );
+
+  it.each(['short1', 'onlyletters', '12345678', 'a1'.repeat(37)])(
+    'rejects the password %j without printing it',
+    (password) => {
+      let message = '';
+      try {
+        parseAdminSeedInput({ ...VALID, SEED_ADMIN_PASSWORD: password });
+      } catch (error) {
+        message = error instanceof Error ? error.message : '';
+      }
+      expect(message).toContain('SEED_ADMIN_PASSWORD');
+      expect(message).toContain(PASSWORD_RULE_MESSAGE);
+      expect(message).not.toContain(password);
+    },
+  );
+});
+```
+
+### 4.2 CREATE `backend/src/modules/accounts/seed/admin-seed.service.spec.ts` (integration, in-memory Mongo)
+
+```ts
+import { Logger } from '@nestjs/common';
+import { MongooseModule, getModelToken } from '@nestjs/mongoose';
+import { Test, type TestingModule } from '@nestjs/testing';
+import bcrypt from 'bcrypt';
+import type { Model } from 'mongoose';
+import {
+  HOOK_TIMEOUT,
+  startMemoryMongo,
+  type MemoryMongo,
+} from '../../../../test/support/mongo-memory.js';
+import { User, UserRole, UserStatus } from '../schemas/user.schema.js';
+import { AccountsSeedModule } from './accounts-seed.module.js';
+import { AdminSeedService, SEED_ADMIN_NAME } from './admin-seed.service.js';
+
+const INPUT = { email: 'admin@example.com', password: 'Admin12345' };
+
+// Each run hashes with bcrypt cost 12, so the tests get extra time.
+describe('admin seed (ACC-18)', { timeout: 30_000 }, () => {
+  let mongo: MemoryMongo;
+  let moduleRef: TestingModule;
+  let users: Model<User>;
+  let seed: AdminSeedService;
+
+  beforeAll(async () => {
+    Logger.overrideLogger(false);
+    mongo = await startMemoryMongo();
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        MongooseModule.forRoot(mongo.uri, { dbName: 'admin-seed' }),
+        AccountsSeedModule,
+      ],
+    }).compile();
+    await moduleRef.init();
+    users = moduleRef.get<Model<User>>(getModelToken(User.name));
+    // The unique email index must exist before the parallel-run test.
+    await users.init();
+    seed = moduleRef.get(AdminSeedService);
+  }, HOOK_TIMEOUT);
+
+  afterAll(async () => {
+    await moduleRef.close();
+    await mongo.stop();
+  }, HOOK_TIMEOUT);
+
+  beforeEach(async () => {
+    await users.deleteMany({});
+  });
+
+  async function storedHash(): Promise<string> {
+    const user = await users
+      .findOne({ email: INPUT.email })
+      .select('+passwordHash')
+      .lean();
+    if (!user) throw new Error('no account with the seed email');
+    return user.passwordHash;
+  }
+
+  it('creates one active admin with a bcrypt hash of the password', async () => {
+    const result = await seed.run(INPUT);
+
+    expect(result.status).toBe('created');
+    const all = await users.find().lean();
+    expect(all).toHaveLength(1);
+    expect(all[0]._id.toString()).toBe(result.userId);
+    expect(all[0]).toMatchObject({
+      name: SEED_ADMIN_NAME,
+      email: INPUT.email,
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      mustChangePassword: false,
+      failedLoginAttempts: 0,
+    });
+    const hash = await storedHash();
+    expect(hash).not.toBe(INPUT.password);
+    expect(await bcrypt.compare(INPUT.password, hash)).toBe(true);
+  });
+
+  it('running it twice leaves exactly one admin and changes nothing', async () => {
+    const first = await seed.run(INPUT);
+    const before = await users
+      .findById(first.userId)
+      .select('+passwordHash')
+      .lean();
+
+    const second = await seed.run(INPUT);
+
+    expect(second).toEqual({ status: 'unchanged', userId: first.userId });
+    expect(await users.countDocuments()).toBe(1);
+    expect(await users.countDocuments({ role: UserRole.ADMIN })).toBe(1);
+    const after = await users
+      .findById(first.userId)
+      .select('+passwordHash')
+      .lean();
+    expect(after).toEqual(before);
+  });
+
+  it('a re-run with another password keeps the original password', async () => {
+    await seed.run(INPUT);
+
+    await seed.run({ ...INPUT, password: 'Different123' });
+
+    expect(await bcrypt.compare(INPUT.password, await storedHash())).toBe(true);
+  });
+
+  it('refuses an email that belongs to a non-admin and changes nothing', async () => {
+    await users.create({
+      name: 'Traveler',
+      email: INPUT.email,
+      passwordHash: 'existing-hash',
+      role: UserRole.USER,
+    });
+
+    await expect(seed.run(INPUT)).rejects.toThrow(
+      /already registered with role "user"/,
+    );
+    expect(await users.countDocuments({ role: UserRole.ADMIN })).toBe(0);
+    expect(await storedHash()).toBe('existing-hash');
+  });
+
+  it('two runs at the same time still create exactly one admin', async () => {
+    const results = await Promise.all([seed.run(INPUT), seed.run(INPUT)]);
+
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'created',
+      'unchanged',
+    ]);
+    expect(results[0].userId).toBe(results[1].userId);
+    expect(await users.countDocuments()).toBe(1);
+  });
+});
+```
+
+---
+
+## 5. Verify (all must pass, report real output)
+
+From `backend/`:
+
+```bash
+npm run format                                   # Prettier may rewrap lines in the code above; that's expected
+npx vitest run src/modules/accounts/seed         # both spec files green
+npm run verify                                   # format:check + lint + typecheck + test:cov + build
+```
+
+- Coverage gate: `src/modules/accounts/seed/admin-seed.service.ts` must have ≥ 80 % lines. The parallel test covers the duplicate-key branch.
+- If oxlint flags something, fix the code. **Never** add a disable comment.
+- If `users.init()` or `.lean<FoundUser | null>()` causes a type error with Mongoose 9, change only the typing so it compiles (for example `.lean<FoundUser>()`, which returns `FoundUser | null` for `findOne` in some versions). Report what you changed.
+
+**Manual smoke test.** Run this only if `backend/.env` has a real `MONGODB_URI` and the user agrees to touch the shared Atlas DB. Ask before running it.
+
+```bash
+npm run seed:admin   # 1st: "Admin account created for …"
+npm run seed:admin   # 2nd: "… already exists (status active); nothing changed."
+```
+
+After that, `POST /api/auth/login` in Swagger (`/api/docs`) with those credentials should return `role: "admin"`. Never print or paste the `.env` values.
+
+---
+
+## 6. Commits (Conventional Commits, scope `accounts`)
+
+```
+feat(accounts): add re-runnable admin seed from env (ACC-18)
+  → admin-seed-input.ts, admin-seed.service.ts, accounts-seed.module.ts, src/seed/seed-admin.ts, src/seed/seed.module.ts, package.json
+test(accounts): cover admin seed input and idempotent runs (ACC-18)
+  → admin-seed-input.spec.ts, admin-seed.service.spec.ts
+docs(accounts): add SEED_ADMIN_* to .env.example and README setup (ACC-18)
+  → .env.example, README.md
+```
+
+Read `git diff --staged` before each commit. Never commit `.env`. **Do not push or open the PR unless the user explicitly asks.**
+
+---
+
+## 7. PR (only when asked) — target `develop`, title `ACC-18: Admin seed`
+
+Put this at the top: **Shared file touched: `backend/src/seed/seed.module.ts` (+1 import of `AccountsSeedModule`, doc comment).**
+
+Fill the template:
+
+- **What and why.** Requirement IDs: ACC-18. Summary: `npm run seed:admin` creates the admin account from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` when no account has that email. It is keyed by email, never resets an existing admin, never promotes a non-admin, and is safe to re-run. Closes #32. Unblocks #89.
+- **Design decisions.** Copy §1.2. Under "For the team leader", list the two points in §1.3.
+- **Testing technique.**
+  - Unit: env parsing. Covers missing or invalid email, the password rule, and that the password never appears in errors.
+  - Integration (mongodb-memory-server): the first run creates one active admin with a bcrypt hash. A second run leaves exactly one admin with the document unchanged. A re-run with another password keeps the original. A non-admin email is refused and nothing changes. Two parallel runs give one admin (`created` + `unchanged`).
+  - Manual: the smoke test from §5, if it was done.
+- **Screenshots.** The Swagger login response showing `role: "admin"`, if the smoke test was done.
+
+---
+
+## 8. Prompt log
+
+At the end of the turn, append the entry to `ai-prompts/aisha.txt` in the format from `AGENTS.example.md` §4, with Related Requirement `ACC-18`. Per `workflow.md` §5, add `[Attached: ACC-18-admin-seed.exec.md]` after the prompt and paste this file's full content unchanged.
+
+---
+
+## 9. Definition of done
+
+- [ ] Only these paths changed: `backend/src/modules/accounts/seed/*` (5 new files), `backend/src/seed/seed-admin.ts` (new), `backend/src/seed/seed.module.ts`, `backend/package.json`, `.env.example`, `README.md`, `ai-prompts/aisha.txt`
+- [ ] No change in any other module, in `common/`, or in `config/validate.ts`
+- [ ] `npm run verify` passes (paste the summary)
+- [ ] Commits follow §6; the branch is `feature/ACC-18-admin-seed`
+- [ ] The prompt log entry was appended
+
+How the output was used:
+Answer only, no files changed (restored the externally deleted ACC-18 files from a4ea157; npm run verify passed 3325 tests, 100% on admin-seed.service.ts; self-review and isolated-agent review run; 2 findings await Aisha's decision; not pushed)
+================================================

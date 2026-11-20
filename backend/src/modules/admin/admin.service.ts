@@ -38,10 +38,11 @@ import type { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
 const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const VALID_ROLES = new Set<string>(Object.values(UserRole));
 const VALID_STATUSES = new Set<string>(Object.values(UserStatus));
+const VALID_PROVIDER_TYPES = new Set<string>(Object.values(ProviderType));
 
 /**
- * Admin read-only booking list, account management, and moderation delegation
- * (`ACC-07a`, `ACC-13`, `ACC-14`, `ACC-16`, `ACC-17`).
+ * Admin read-only booking list, account management, provider moderation, and
+ * delegation workflows (`ACC-07a`, `ACC-13`, `ACC-14`, `ACC-15`, `ACC-16`, `ACC-17`).
  * Reads and mutates external data solely through exported module contracts (`CTR-01`..`CTR-04`).
  */
 @Injectable()
@@ -325,6 +326,77 @@ export class AdminService {
       actorId: adminId,
       action: AuditAction.ACCOUNT_REACTIVATED,
       target: { type: 'user', id: userId },
+    });
+  }
+
+  /**
+   * ACC-15: deactivates an airline or hotel via its owning service, resolves
+   * its moderators through `AccountsService.getModeratorIds`, and emits
+   * `provider.deactivated` and `admin.action` (`PROVIDER_DEACTIVATED`).
+   */
+  async deactivateProvider(
+    type: ProviderType,
+    providerId: string,
+    adminId: string,
+  ): Promise<void> {
+    await this.setProviderActive(type, providerId, false, adminId);
+  }
+
+  /**
+   * ACC-15: reactivates an airline or hotel via its owning service, resolves
+   * its moderators through `AccountsService.getModeratorIds`, and emits
+   * `provider.reactivated` and `admin.action` (`PROVIDER_REACTIVATED`).
+   */
+  async reactivateProvider(
+    type: ProviderType,
+    providerId: string,
+    adminId: string,
+  ): Promise<void> {
+    await this.setProviderActive(type, providerId, true, adminId);
+  }
+
+  private async setProviderActive(
+    type: ProviderType,
+    providerId: string,
+    isActive: boolean,
+    adminId: string,
+  ): Promise<void> {
+    if (!VALID_PROVIDER_TYPES.has(type)) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [{ field: 'type', message: 'type must be airline or hotel' }],
+      });
+    }
+    this.assertObjectId(providerId, 'id');
+
+    // Look up recipients before mutating so lookup failures leave provider state untouched.
+    const moderatorIds = await this.accountsService.getModeratorIds(
+      type,
+      providerId,
+    );
+
+    if (type === ProviderType.AIRLINE) {
+      await this.flightsService.setAirlineActive(providerId, isActive);
+    } else {
+      await this.hotelsService.setActive(providerId, isActive);
+    }
+
+    this.events.emit(
+      isActive ? Events.ProviderReactivated : Events.ProviderDeactivated,
+      {
+        providerType: type,
+        providerId,
+        moderatorIds,
+      },
+    );
+
+    this.events.emit(Events.AdminAction, {
+      actorId: adminId,
+      action: isActive
+        ? AuditAction.PROVIDER_REACTIVATED
+        : AuditAction.PROVIDER_DEACTIVATED,
+      target: { type, id: providerId },
     });
   }
 

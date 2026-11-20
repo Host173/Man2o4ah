@@ -242,6 +242,15 @@ describe('FakeFlightsService', () => {
   });
 
   describe('getFlightsForBooking', () => {
+    it('includes airport IANA zones in the booking-facing flight contract', async () => {
+      const { flights } = setup();
+      const result = await flights.getFlightsForBooking(['f1']);
+      expect(result.get('f1')?.flight).toMatchObject({
+        departureTimeZone: 'Africa/Cairo',
+        arrivalTimeZone: 'Asia/Dubai',
+      });
+    });
+
     it('returns each flight with its airline and leaves unknown IDs out', async () => {
       const { flights } = setup();
       const result = await flights.getFlightsForBooking(['f2', 'nope']);

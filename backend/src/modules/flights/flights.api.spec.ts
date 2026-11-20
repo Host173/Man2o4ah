@@ -709,4 +709,68 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
     expect(response.body.code).toBe(ErrorCode.InvalidStatusTransition);
     expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
   });
+
+  it('returns public flight details with zones, cabins and airline policies', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    const document = await flights.findById(created.body._id).exec();
+    if (!document) throw new Error('Created flight was not persisted');
+    document.cabins.push({
+      cabinClass: CabinClass.ECONOMY,
+      totalSeats: 8,
+      availableSeats: 5,
+      heldSeats: 2,
+      bookedSeats: 1,
+      priceMinor: 30000,
+      freeBags: 2,
+      maxBagWeightKg: 23,
+    });
+    await document.save();
+
+    const response = await t
+      .http()
+      .get(`/api/flights/${created.body._id}`)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      _id: created.body._id,
+      flightNumber: 'MS 123',
+      departureTimeZone: 'America/New_York',
+      arrivalTimeZone: 'Africa/Cairo',
+      departureAt: '2027-03-14T07:30:00.000Z',
+      arrivalAt: '2027-03-14T08:00:00.000Z',
+      durationMinutes: 30,
+      cabins: [
+        {
+          cabinClass: 'economy',
+          totalSeats: 8,
+          availableSeats: 5,
+          heldSeats: 2,
+          bookedSeats: 1,
+          priceMinor: 30000,
+          freeBags: 2,
+          maxBagWeightKg: 23,
+        },
+      ],
+      airline: {
+        id: user.providerId,
+        name: 'Test Airline',
+        isActive: true,
+      },
+    });
+  });
+
+  it('returns 400 for a malformed details ID and 404 for unknown flights', async () => {
+    await t.http().get('/api/flights/not-an-id').expect(400);
+    const missing = await t
+      .http()
+      .get(`/api/flights/${new Types.ObjectId().toHexString()}`)
+      .expect(404);
+    expect(missing.body.code).toBe(ErrorCode.NotFound);
+  });
 });

@@ -72,13 +72,13 @@ export interface FlightView {
   status: FlightStatus;
   hasBookings: boolean;
   cabins: CabinView[];
-}
-
-/** A flight-management response includes the airport zones needed to display its UTC instants locally. */
-export interface FlightManagementView extends FlightView {
+  /** IANA zones used to display the UTC instants locally. */
   departureTimeZone: string;
   arrivalTimeZone: string;
 }
+
+/** A flight-management response includes the airport zones needed to display its UTC instants locally. */
+export interface FlightManagementView extends FlightView {}
 
 /** Flight fields supplied by an airline moderator; the airline ID comes from authentication. */
 export interface CreateFlightInput {

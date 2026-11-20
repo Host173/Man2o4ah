@@ -29,9 +29,10 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
-import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
+import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
 import {
   FlightResponseDto,
   PaginatedFlightsResponseDto,
@@ -47,6 +48,23 @@ import { FlightsService } from './flights.service.js';
 @Controller()
 export class FlightsController {
   constructor(private readonly flights: FlightsService) {}
+
+  @Get('flights/:id')
+  @Public()
+  @ApiOperation({ summary: 'FLT-17 Get flight details' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: FlightDetailsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiNotFoundResponse({ description: 'Flight or airline not found' })
+  async getDetails(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<FlightDetailsResponseDto> {
+    const details = await this.flights.getFlightDetails(id.toHexString());
+    return FlightDetailsResponseDto.fromDetails(
+      details.flight,
+      details.airline,
+    );
+  }
 
   @Post('flights')
   @Roles(Role.AIRLINE_MODERATOR)

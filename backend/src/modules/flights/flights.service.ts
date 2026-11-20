@@ -303,15 +303,92 @@ export class FlightsService {
   /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
-   * ask `checkBookable` whether they can be booked. Implemented in FLT-17.
+   * ask `checkBookable` whether they can be booked. Returns airport IANA zones
+   * for booking-facing and e-ticket local-time display (FLT-17).
    */
-  getFlightsForBooking(
+  async getFlightsForBooking(
     flightIds: string[],
   ): Promise<Map<string, FlightWithAirline>> {
-    void flightIds;
-    throw new NotImplementedException(
-      'getFlightsForBooking: implemented in FLT-17',
+    const objectIds = flightIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    if (objectIds.length === 0) return new Map();
+    const flights = await this.flightModel
+      .find({ _id: { $in: objectIds } })
+      .lean<FlightRecord[]>()
+      .exec();
+    if (flights.length === 0) return new Map();
+    const airlineIds = [
+      ...new Set(flights.map((flight) => flight.airlineId.toHexString())),
+    ].map((id) => new Types.ObjectId(id));
+    const airlines = await this.airlineModel
+      .find({ _id: { $in: airlineIds } })
+      .lean<(Airline & { _id: Types.ObjectId })[]>()
+      .exec();
+    const airlinesById = new Map(
+      airlines.map((airline) => [airline._id.toHexString(), airline]),
     );
+    const airportCodes = [
+      ...new Set(
+        flights.flatMap((flight) => [
+          flight.departureAirportId,
+          flight.arrivalAirportId,
+        ]),
+      ),
+    ];
+    const airports = await this.referenceData.getAirports(airportCodes);
+    const result = new Map<string, FlightWithAirline>();
+    for (const flight of flights) {
+      const airline = airlinesById.get(flight.airlineId.toHexString());
+      const departureAirport = airports.get(flight.departureAirportId);
+      const arrivalAirport = airports.get(flight.arrivalAirportId);
+      if (!airline || !departureAirport || !arrivalAirport) continue;
+      result.set(flight._id.toHexString(), {
+        flight: this.toFlightViewWithZones(
+          flight,
+          departureAirport.timeZone,
+          arrivalAirport.timeZone,
+        ),
+        airline: this.airlineView(airline),
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Public flight details (FLT-17): flight, airline, local UTC-derived times,
+   * all cabins, remaining seats and baggage/cancellation policies.
+   */
+  async getFlightDetails(
+    flightId: string,
+  ): Promise<{ flight: FlightManagementView; airline: AirlineView }> {
+    const flightObjectId = this.flightObjectId(flightId);
+    const flight = await this.flightModel
+      .findById(flightObjectId)
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) throw this.flightNotFound();
+    const airline = await this.airlineModel
+      .findById(flight.airlineId)
+      .lean<Airline & { _id: Types.ObjectId }>()
+      .exec();
+    if (!airline) throw this.flightNotFound();
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+    return {
+      flight: this.toManagementView(flight, departureAirport, arrivalAirport),
+      airline: this.airlineView(airline),
+    };
   }
 
   /**
@@ -319,15 +396,43 @@ export class FlightsService {
    * departure in the future and enough available seats. The seat check is advisory:
    * only `SeatInventory.hold` is atomic. Never throws for a business reason. Implemented in FLT-17.
    */
-  checkBookable(
+  async checkBookable(
     flightId: string,
     cabinId: string,
     seats: number,
   ): Promise<BookabilityResult> {
-    void flightId;
-    void cabinId;
-    void seats;
-    throw new NotImplementedException('checkBookable: implemented in FLT-17');
+    if (!Types.ObjectId.isValid(flightId) || !Types.ObjectId.isValid(cabinId)) {
+      return { bookable: false, reason: 'flight_not_found' };
+    }
+    if (!Number.isSafeInteger(seats) || seats < 1) {
+      return { bookable: false, reason: 'not_enough_seats' };
+    }
+    const flight = await this.flightModel
+      .findById(new Types.ObjectId(flightId))
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) return { bookable: false, reason: 'flight_not_found' };
+    const cabin = flight.cabins.find((item) =>
+      item._id.equals(new Types.ObjectId(cabinId)),
+    );
+    if (!cabin) return { bookable: false, reason: 'cabin_not_found' };
+    const airline = await this.airlineModel
+      .findById(flight.airlineId)
+      .select({ isActive: 1 })
+      .lean()
+      .exec();
+    if (!airline?.isActive)
+      return { bookable: false, reason: 'airline_inactive' };
+    if (flight.status !== FlightStatus.SCHEDULED) {
+      return { bookable: false, reason: 'flight_not_scheduled' };
+    }
+    if (flight.departureAt.getTime() <= Date.now()) {
+      return { bookable: false, reason: 'departure_passed' };
+    }
+    if (cabin.availableSeats < seats) {
+      return { bookable: false, reason: 'not_enough_seats' };
+    }
+    return { bookable: true };
   }
 
   /**
@@ -369,6 +474,67 @@ export class FlightsService {
   private flightObjectId(id: string): Types.ObjectId {
     if (!Types.ObjectId.isValid(id)) throw this.flightNotFound();
     return new Types.ObjectId(id);
+  }
+
+  private airlineView(airline: Airline & { _id: Types.ObjectId }): AirlineView {
+    const logo = airline.logo
+      ? {
+          id:
+            (
+              airline.logo as unknown as { _id?: Types.ObjectId }
+            )._id?.toString() ?? airline.logo.key,
+          url: `/uploads/${airline.logo.key}`,
+        }
+      : undefined;
+    return {
+      id: airline._id.toHexString(),
+      name: airline.name,
+      code: airline.code,
+      isActive: airline.isActive,
+      ...(logo ? { logo } : {}),
+      baggagePolicy: {
+        extraBagPriceMinor: airline.baggagePolicy.extraBagPriceMinor,
+        maxExtraBagsPerPassenger:
+          airline.baggagePolicy.maxExtraBagsPerPassenger,
+      },
+      cancellationTiers: airline.cancellationPolicy.tiers.map((tier) => ({
+        daysBefore: tier.daysBefore,
+        refundPercent: tier.refundPercent,
+      })),
+    };
+  }
+
+  private toFlightViewWithZones(
+    flight: FlightRecord,
+    departureTimeZone: string,
+    arrivalTimeZone: string,
+  ): FlightManagementView {
+    return {
+      id: flight._id.toHexString(),
+      airlineId: flight.airlineId.toHexString(),
+      flightNumber: flight.flightNumber,
+      departureAirportId: flight.departureAirportId,
+      arrivalAirportId: flight.arrivalAirportId,
+      departureAt: new Date(flight.departureAt),
+      arrivalAt: new Date(flight.arrivalAt),
+      departureLocalDate: flight.departureLocalDate,
+      durationMinutes: flight.durationMinutes,
+      status: flight.status,
+      hasBookings: flight.hasBookings,
+      cabins: flight.cabins.map((cabin) => ({
+        id: cabin._id.toHexString(),
+        cabinClass: cabin.cabinClass,
+        totalSeats: cabin.totalSeats,
+        availableSeats: cabin.availableSeats,
+        heldSeats: cabin.heldSeats,
+        bookedSeats: cabin.bookedSeats,
+        priceMinor: cabin.priceMinor,
+        freeBags: cabin.freeBags,
+        maxBagWeightKg: cabin.maxBagWeightKg,
+      })),
+      departureTimeZone,
+      arrivalTimeZone,
+    };
   }
 
   private toManagementView(

@@ -44,9 +44,3 @@ export class AuthUserResponseDto {
   @ApiProperty({ type: MeDto })
   user!: MeDto;
 }
-
-/** The logged-in account's profile (ACC-09): `MeDto` plus the phone, if set. */
-export class ProfileDto extends MeDto {
-  @ApiPropertyOptional({ example: '+968 9123 4567' })
-  phone?: string;
-}

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { Connection } from 'mongoose';
 import request from 'supertest';
+import { HealthModule } from '../../../src/health/health.module.js';
 import { AccountsSeedModule } from '../../../src/modules/accounts/seed/accounts-seed.module.js';
 import { AdminSeedService } from '../../../src/modules/accounts/seed/admin-seed.service.js';
 import { AdminModule } from '../../../src/modules/admin/admin.module.js';
@@ -320,6 +321,7 @@ export async function createStressApp(): Promise<Stress> {
 
   const t = await createTestApp({
     imports: [
+      HealthModule,
       AccountsSeedModule,
       ReferenceDataModule,
       FlightsModule,

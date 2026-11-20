@@ -9,6 +9,8 @@ import {
   cityGroups,
   dayDate,
   dayNumber,
+  orderDaysById,
+  withoutTransportCostsOf,
 } from '../../src/modules/itineraries/days.js';
 import {
   MAX_DAYS,
@@ -16,6 +18,7 @@ import {
 } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
+import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
@@ -263,6 +266,72 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (dto.notes !== undefined) day.notes = notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  async deleteDay(
+    itineraryId: string,
+    dayId: string,
+    userId: string,
+  ): Promise<void> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === dayId);
+    if (index === -1) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    // The day's activities and budget entries are embedded in it; transport
+    // costs live in a separate array and must be filtered (ITN-07).
+    itinerary.days.splice(index, 1);
+    itinerary.transportCosts = withoutTransportCostsOf(
+      itinerary.transportCosts,
+      dayId,
+    );
+    itinerary.dayCount = itinerary.days.length;
+    itinerary.updatedAt = new Date();
+  }
+
+  async reorderDays(
+    itineraryId: string,
+    dto: ReorderDaysDto,
+    userId: string,
+  ): Promise<ItineraryDetailView> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const days = itinerary.days;
+    // Mirror the service's permutation check: the fake must fail with the
+    // same 400 VALIDATION_FAILED shape, never a TypeError or a partial write.
+    const value = dto?.dayIds;
+    if (!Array.isArray(value)) {
+      throw this.invalidField('dayIds', 'dayIds must be an array');
+    }
+    if (value.some((id) => typeof id !== 'string')) {
+      throw this.invalidField('dayIds', 'dayIds must contain day IDs');
+    }
+    const ids = (value as string[]).map((id) => id.toLowerCase());
+    if (ids.length !== days.length) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
+    }
+    const known = new Set(days.map((day) => day._id.toLowerCase()));
+    if (ids.some((id) => !/^[0-9a-f]{24}$/.test(id) || !known.has(id))) {
+      throw this.invalidField('dayIds', 'dayIds must be current day IDs');
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
+    }
+    const ordered = orderDaysById(days, ids, (day) => day._id.toLowerCase());
+    const unchanged = itinerary.days.every(
+      (day, index) => day._id === ordered[index]._id,
+    );
+    if (!unchanged) {
+      itinerary.days = ordered;
+      itinerary.dayCount = ordered.length;
+      itinerary.updatedAt = new Date();
+    }
+    return this.toDetail(itinerary);
   }
 
   invalidField(field: string, message: string): never {

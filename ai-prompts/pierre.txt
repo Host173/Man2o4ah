@@ -1105,6 +1105,61 @@ see the ticket of gen-01 and read its pr and comments on it and solve the proble
 
 How the output was used:
 Read issue #19 and PR #168, merged origin/develop into isolated fix/GEN-01-review-issues, and added listener concurrency regressions plus an API read-state regression; reproduced duplicate notifications for all 10 events before changing production code.
+Related Requirement: ITN-28
+
+Prompt:
+ok start making itn-28 then run this self review on the pr and insure that it has no issues and attach the report of it in comments
+Related Requirement: BLG-13
+
+Prompt:
+ok start making blg-13 then run this self review on the pr SELF_REVIEW_PROMPT.md which is and insure that it has no issues and attach the report of it in comments
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Implemented the owner-only PDF endpoint, bundled fonts, API tests, dependency/runtime setup and CI wiring on the ITN-28 branch; prepared its PR and requested self-review.
+Prepared the separate BLG-13 schema prerequisite: optional post itinerary reference, coordinated data-model/class diagrams/SVGs and schema regressions; feature API deferred until this prerequisite merges.
 ================================================
 ================================================
 Date: 2026-11-19
@@ -1117,6 +1172,20 @@ Kareem approved these GEN-01 fixes
 
 How the output was used:
 With the notification owner's approval, fixed concurrent duplicate storage in backend/src/modules/notifications/notifications.service.ts and its listener/API regressions in an isolated worktree; restored two deleted separator lines in ai-prompts/kareem.txt without removing or changing any existing log line.
+Related Requirement: ITN-28
+
+Prompt:
+Mokhtar/Kareem has approved me implementing ITN-28; proceed
+
+How the output was used:
+Confirmed cross-package approval and created the isolated ITN-28 worktree from origin/develop.
+Related Requirement: BLG-13
+
+Prompt:
+Approved by Mostafa and Kareem — proceed
+
+How the output was used:
+Recorded cross-package approval for Pierre to prepare the blog schema prerequisite; no other owner's collections are accessed.
 ================================================
 ================================================
 Date: 2026-11-19
@@ -1153,4 +1222,130 @@ true
 
 How the output was used:
 Authorized publishing the verified local GEN-01 commits to the existing feature/GEN-01-app-notifications branch for PR #168, updating its validation evidence, and checking the new CI results; no force-push or PR merge.
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfmake and its TypeScript types; proceed
+
+How the output was used:
+Evaluated pdfmake with real PDF tests; replaced it after discovering Arabic shaping limitations.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves adding pdfjs-dist for PDF validation; proceed
+
+How the output was used:
+Added the development-only PDF parser and verified actual output text and page counts in the API tests.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Approve bundled fallback fonts for Arabic, CJK and emoji; preserve unsupported characters explicitly
+
+How the output was used:
+Bundled open-licensed Noto fonts and glyph validation; unsupported graphemes are printed as explicit Unicode code points.
+Date: 2026-11-19
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-28
+
+Prompt:
+Kareem approves switching to Playwright/Chromium, including browser setup and CI wiring; proceed
+
+How the output was used:
+Switched PDF generation to isolated Chromium rendering with blocked scripts/network, added runtime setup instructions and CI provisioning.
+Related Requirement: BLG-13
+
+Prompt:
+schema_approval=Create a separate prerequisite schema PR first, visibility=Public and private — store only the ID; keep itinerary access checks unchanged
+
+How the output was used:
+Split schema preparation from feature implementation as requested; documented that owned public/private itineraries may be referenced without publishing or embedding their contents.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+and read also the last comment on the pr
+
+How the output was used:
+Read the latest comment on PR #173 and distinguished its reported cleanup bug from the current pinned merge conflict.
+Related Requirement: ACC-06
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first session-deadline and idempotent-logout fixes for PR #138, synchronized approved contract documentation and diagrams, and passed backend verify with 2078 tests.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+ok fix all these and push then comment on the pr
+
+How the output was used:
+Merged pinned develop preserving both author-log histories (b1bc81c), committed failing cleanup regressions (0a97f9c), implemented transactional cleanup records and a retry job with model/diagram/index documentation, and passed backend verify (2049 tests) and production audit (0 vulnerabilities).
+Related Requirement: ACC-06
+
+Prompt:
+contract_approval=i dont unsestand what is the problem and what do you want and what is the ticket even, logout_policy=idempotent-refresh-capable
+
+How the output was used:
+Explained ticket #27 and requested approval for the frozen session-schema change; recorded the selected idempotent, refresh-cookie-capable logout behavior.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+Kareem and Mostafa approve this approach and including it in #173
+
+How the output was used:
+Implemented the requester-approved blog-owned durable cleanup collection and scheduled job in PR #173, including the matching data-model, diagrams and index tests.
+Related Requirement: ACC-06
+
+Prompt:
+approved
+
+How the output was used:
+Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first password-session fixes, cookie revocation and Swagger evidence for PR #139.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+sessionBehavior=Revoke every session and require login again, pushFixes=true
+
+How the output was used:
+Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
 ================================================

@@ -38,8 +38,8 @@ function unauthorized(code: ErrorCode, message: string) {
  * 1. `@Public()`: attaches the user if a valid cookie exists, always passes.
  * 2. No `access_token` cookie → 401 NOT_AUTHENTICATED.
  * 3. Bad or expired token → 401 TOKEN_EXPIRED (the frontend then refreshes).
- * 4. Session missing or idle for 30 minutes → 401 SESSION_EXPIRED; otherwise
- *    its activity slides (at most once a minute).
+ * 4. Missing, idle-expired or absolute-expired session → 401 SESSION_EXPIRED;
+ *    otherwise activity slides (at most once a minute), capped at its deadline.
  * 5. `mustChangePassword` → 403 PASSWORD_CHANGE_REQUIRED outside the allow-list.
  */
 @Injectable()
@@ -79,7 +79,11 @@ export class JwtAuthGuard implements CanActivate {
 
     const [session, user] = await Promise.all([
       this.sessionModel
-        .findById(payload.sid, { userId: 1, expiresAt: 1 })
+        .findById(payload.sid, {
+          userId: 1,
+          expiresAt: 1,
+          absoluteExpiresAt: 1,
+        })
         .lean(),
       this.userModel.findById(payload.sub, { mustChangePassword: 1 }).lean(),
     ]);
@@ -87,6 +91,8 @@ export class JwtAuthGuard implements CanActivate {
       !session ||
       !user ||
       session.expiresAt.getTime() <= now ||
+      !session.absoluteExpiresAt ||
+      session.absoluteExpiresAt.getTime() <= now ||
       session.userId.toString() !== payload.sub
     ) {
       throw unauthorized(
@@ -95,7 +101,7 @@ export class JwtAuthGuard implements CanActivate {
       );
     }
 
-    await this.slide(payload.sid, now);
+    await this.slide(payload.sid, now, session.absoluteExpiresAt);
 
     if (
       user.mustChangePassword &&
@@ -161,16 +167,24 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   /** Conditional, so parallel requests slide a session once per interval at most. */
-  private async slide(sid: string, now: number): Promise<void> {
+  private async slide(
+    sid: string,
+    now: number,
+    absoluteExpiresAt: Date,
+  ): Promise<void> {
     await this.sessionModel.updateOne(
       {
         _id: sid,
+        expiresAt: { $gt: new Date(now) },
+        absoluteExpiresAt: { $gt: new Date(now) },
         lastActivityAt: { $lt: new Date(now - SESSION_SLIDE_INTERVAL_MS) },
       },
       {
         $set: {
           lastActivityAt: new Date(now),
-          expiresAt: new Date(now + SESSION_IDLE_MS),
+          expiresAt: new Date(
+            Math.min(now + SESSION_IDLE_MS, absoluteExpiresAt.getTime()),
+          ),
         },
       },
     );

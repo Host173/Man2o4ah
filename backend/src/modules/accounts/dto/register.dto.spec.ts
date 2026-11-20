@@ -75,6 +75,7 @@ describe('RegisterDto (ACC-01)', () => {
   describe('password (the ACC-01 rule)', () => {
     it.each([
       ['7 characters', 'abcdef1'],
+      ['73 characters', `${'a'.repeat(72)}1`],
       ['letters only', 'abcdefgh'],
       ['digits only', '12345678'],
       ['missing', undefined],
@@ -84,8 +85,11 @@ describe('RegisterDto (ACC-01)', () => {
       expect(failed).toEqual(['password']);
     });
 
-    it('accepts 8 characters with a letter and a digit', async () => {
-      const { failed } = await check({ ...valid, password: '1234567a' });
+    it.each([
+      ['8 characters', '1234567a'],
+      ['72 characters', `${'a'.repeat(71)}1`],
+    ])('accepts %s with a letter and a digit', async (_case, password) => {
+      const { failed } = await check({ ...valid, password });
       expect(failed).toEqual([]);
     });
   });

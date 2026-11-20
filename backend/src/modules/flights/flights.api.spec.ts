@@ -758,15 +758,17 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
         },
       ],
       airline: {
-        id: user.providerId,
+        _id: user.providerId,
         name: 'Test Airline',
         isActive: true,
       },
     });
+    expect(response.body.airline).not.toHaveProperty('id');
   });
 
   it('returns 400 for a malformed details ID and 404 for unknown flights', async () => {
-    await t.http().get('/api/flights/not-an-id').expect(400);
+    const malformed = await t.http().get('/api/flights/not-an-id').expect(400);
+    expect(malformed.body.code).toBe(ErrorCode.ValidationFailed);
     const missing = await t
       .http()
       .get(`/api/flights/${new Types.ObjectId().toHexString()}`)

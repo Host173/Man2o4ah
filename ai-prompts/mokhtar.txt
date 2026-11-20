@@ -473,3 +473,90 @@ The user attached the updated `SELF_REVIEW_PROMPT (2).md` and reported a self-re
 How the output was used:
 Switched to the existing `feature/ITN-07-delete-reorder-days` branch (PR #155), pulled it, and merged `origin/develop` (180 commits behind) without rebasing. Resolved all three conflicts keeping both sides: the ITN-07 fake methods (deleteDay/reorderDays) plus develop's invalidField/validation, both fake spec test sets, and all prompt-log entries from both sides. `git merge-tree --write-tree` reported no conflicts and the working tree was clean. Ran the full self-review: `npm ci` + `npm run verify` passed (1964 tests initially, 98.31% lines on itineraries.service.ts); read the whole diff - all ITN-07/08 clauses have tests, routes are Own with 404 for foreign data, errors use the shared shape, TDD order holds, prompt log only appended. Wrote 6 throwaway probes: 3 found a real fake-parity bug (fake reorderDays threw generic errors or silently dropped/duplicated days for non-permutation input). Added a red fake-spec test (975fa83) then fixed the fake to validate permutations with 400 VALIDATION_FAILED on dayIds (a40c124); re-ran all probes clean. Re-ran `npm run format` and `npm run verify` (1965 tests, all green), then committed, pushed to the existing branch, and updated PR #155 with the report.
 
+
+=============================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-10
+
+Prompt:
+I have attached `SELF_REVIEW_PROMPT (2).md`. **CRITICAL GIT & PR RULES:**
+- Do **NOT** create any new branch or open any new Pull Request.
+- **ITN-10: Activities (#163)** is **already an opened PR** on branch `feature/ITN-10-activities` targeting `develop`[cite: 9]. You must **only** switch to the existing `feature/ITN-10-activities` branch, push your updates directly to it, and **edit/update the already opened PR #163**[cite: 9].
+
+### Context & Situation Assessment
+On the already opened PR #163 (`feature/ITN-10-activities` -> `develop`), the self-review stopped at the conflict gate because the branch has conflicts with `origin/develop` (head `4223883`, 180 commits behind `701f790`)[cite: 9]. Specifically, `git merge-tree --write-tree origin/develop HEAD` exits with content conflicts in `backend/test/fakes/itineraries.fake.ts`[cite: 9]. In addition, two CI checks are currently failing[cite: 9]:
+1. `CI / Backend (pull_request)`[cite: 9]
+2. `CI / ci-ok (pull_request)` (Required)[cite: 9]
+
+Your job is to understand the full codebase and conflict context thoroughly—not blindly copy-paste—resolve the merge conflicts while preserving both sides, diagnose and fix both failing CI checks, pass the full `SELF_REVIEW_PROMPT (2).md` loop, and update the **existing** PR #163 cleanly[cite: 9].
+
+### 1. Switch to Existing Branch, Merge `origin/develop` (NO Rebase) & Resolve Conflicts
+* Read all project skill files and guidelines in `docs/ai/skills/travel-platform/` and follow repository conventions.
+* Fetch the latest remote refs (`git fetch origin`) and switch directly to the existing `feature/ITN-10-activities` branch (do **not** run `git checkout -b` or create a new branch)[cite: 9].
+* **Merge `origin/develop` into `feature/ITN-10-activities`**[cite: 9]. **Do NOT rebase.**
+* Resolve all conflicts while **preserving changes from both `origin/develop` and `feature/ITN-10-activities`**, paying special attention to `backend/test/fakes/itineraries.fake.ts` (preserving contract/error parity, validation order, existing `develop` behavior, and `ITN-10` activity fake logic) as well as any other conflicted files[cite: 9].
+* Verify `git merge-tree --write-tree origin/develop HEAD` exits cleanly with zero conflicts and `git status` shows a clean merge state[cite: 9].
+
+### 2. Diagnose & Fix Both Failing CI Checks (`CI / Backend` and `CI / ci-ok`)
+* Inspect the exact failure logs/steps for both `CI / Backend` and `CI / ci-ok` (and check workflow definitions under `.github/workflows/` if needed) so you understand why each one failed[cite: 9].
+* Fix every root cause across code, fakes, tests, formatting, linting, typechecking, or build steps—do not leave any workaround or skipped check behind.
+* Run `npm run format` and `npm run verify` locally and confirm all checks pass with **zero errors**.
+
+### 3. Run `SELF_REVIEW_PROMPT (2).md` Loop Until Clean
+* Read and execute the attached `SELF_REVIEW_PROMPT (2).md` against `feature/ITN-10-activities` now that conflicts are resolved[cite: 9].
+* Fix **every** issue, skipped review check/probe, missing test, fake parity gap, or rule violation found during the review.
+* Re-run `SELF_REVIEW_PROMPT (2).md` again after fixes until a complete run completes with **zero unresolved problems**.
+* Run `npm run verify` again after final edits to guarantee everything remains green.
+
+### 4. Log Prompts & Edit Existing PR #163 (Do NOT Open a New PR)
+* Log the prompts used for this task into the repository's prompts file following project prompt-tracking rules.
+* Commit all changes cleanly and push directly to the existing remote branch `feature/ITN-10-activities`[cite: 9].
+* **Edit/update the already opened Pull Request #163** (`ITN-10: Activities`)—do **not** open a new PR—with a clear summary of the conflict resolution and CI fixes plus the **full Self-Review Report** from the final clean run of `SELF_REVIEW_PROMPT (2).md`[cite: 9].
+[Attached: SELF_REVIEW_PROMPT (2).md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Switched to the existing `feature/ITN-10-activities` branch (PR #163), fetched and merged `origin/develop` without rebasing; resolved the only conflict in `backend/test/fakes/itineraries.fake.ts` by keeping all develop methods and replacing the ITN-10 stub with working add/edit/delete methods at contract parity. Diagnosed CI: Backend failed at Prettier `format:check` on the service and fake; `ci-ok` failed only because Backend failed. Fixed DTOs, service (atomic `$map`/`$concatArrays` writes, `$literal`, currency validation, minor units), added the three ITN-10 endpoints with Swagger, API/fake tests, removed committed verify-output artifacts, ran `npm run format` and `npm run verify` (2047 tests green; itineraries.service.ts 95.24% lines), ran review probes, and will commit, push to the existing branch and edit PR #163.

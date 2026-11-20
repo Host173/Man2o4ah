@@ -12,7 +12,6 @@ import { FlightsService } from './flights.service.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
 import { SeatInventory } from './seat-inventory.js';
-import { AppEvents } from '../../common/events/app-events.service.js';
 
 describe('FlightsService', () => {
   let moduleRef: TestingModule | undefined;

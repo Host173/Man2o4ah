@@ -1270,3 +1270,27 @@ Open questions: `flight-booking.confirmed` carries only `{bookingId, userId, ref
 How the output was used:
 Restored develop's exact 48-char final separator in ai-prompts/aya.txt (CI append-only fix); logged this prompt; no commit
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+start on flt 26
+
+How the output was used:
+Created branch feature/FLT-26-cancel-flight-booking from develop; read the HTL-21 hotel cancellation as the pattern; drafted the 4-step plan; committed the pending FLT-25 re-review log entry on the FLT-25 branch first (chore(ai): log the FLT-25 re-review prompt (FLT-25), not pushed); no other files changed; this entry not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+kareem said yes to all three, start step 1
+
+How the output was used:
+Wrote the failing FLT-26 tests first (flight-cancellation.service.spec.ts, 25 tests), the FlightRefundPreview and CancelledFlightBooking types and a FlightCancellationService stub registered in the module; commits test(flight-bookings): add the cancellation tests (FLT-26) and chore(ai): log the FLT-26 step 1 prompts (FLT-26)
+================================================

@@ -1,5 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { JwtService } from '@nestjs/jwt';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -8,29 +9,40 @@ import { loginAs } from '../../../test/support/auth.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { CabinClass } from '../../common/database/cabin-class.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeEvents } from '../../../test/support/fake-events.js';
+import { TEST_JWT_ACCESS_SECRET } from '../../../test/support/test-config.js';
 import { FlightsModule } from './flights.module.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
 
-describe('Flights HTTP API (FLT-03, FLT-04)', () => {
+describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
   let t: TestApp;
+  let events: FakeEvents;
+  let airlineSequence = 0;
 
   beforeAll(async () => {
+    events = new FakeEvents();
     t = await createTestApp({
       imports: [FlightsModule],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)
-          .useValue(new FakeReferenceDataService()),
+          .useValue(new FakeReferenceDataService())
+          .overrideProvider(AppEvents)
+          .useValue(events),
     });
   }, HOOK_TIMEOUT);
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
     await clearCollections(t.connection);
+    events.clear();
+    airlineSequence = 0;
   });
   afterEach(() => vi.useRealTimers());
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -60,9 +72,18 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
     await airlines.create({
       _id: new Types.ObjectId(providerId),
       name: 'Test Airline',
-      code: 'TA',
+      code: `T${String(++airlineSequence).padStart(2, '0')}`,
     });
     return user;
+  }
+
+  async function createFlight(user: Awaited<ReturnType<typeof moderator>>) {
+    return t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
   }
 
   it('creates a flight with normalized number, UTC instants, and airport zones', async () => {
@@ -555,5 +576,137 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
         storedCabin!.heldSeats +
         storedCabin!.bookedSeats,
     );
+  });
+
+  it('cancels an owned scheduled flight and emits flight.cancelled once', async () => {
+    const user = await moderator();
+    const created = await createFlight(user);
+
+    await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', user.cookie)
+      .expect(204);
+
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    const stored = await flights.findById(created.body._id).lean().exec();
+    expect(stored).toMatchObject({
+      status: 'cancelled',
+      cancelledAt: new Date('2026-11-19T12:00:00.000Z'),
+    });
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([
+      { flightId: created.body._id },
+    ]);
+
+    const repeated = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', user.cookie)
+      .expect(409);
+    expect(repeated.body.code).toBe(ErrorCode.InvalidStatusTransition);
+    expect(events.payloadsOf(Events.FlightCancelled)).toHaveLength(1);
+  });
+
+  it('documents the cancellation ID as a string path parameter', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().build(),
+    );
+    const operation = document.paths['/api/flights/{id}/cancel']?.post;
+
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'id',
+          in: 'path',
+          required: true,
+          schema: expect.objectContaining({ type: 'string' }),
+        }),
+      ]),
+    );
+  });
+
+  it('requires authentication and the airline moderator role to cancel', async () => {
+    const id = new Types.ObjectId().toHexString();
+    await t.http().post(`/api/flights/${id}/cancel`).expect(401);
+
+    const user = await loginAs(t.connection, UserRole.USER);
+    const forbidden = await t
+      .http()
+      .post(`/api/flights/${id}/cancel`)
+      .set('Cookie', user.cookie)
+      .expect(403);
+    expect(forbidden.body.code).toBe(ErrorCode.ForbiddenRole);
+  });
+
+  it('returns 400 for a malformed ID and 404 for an unknown or other-airline flight', async () => {
+    const owner = await moderator();
+    const created = await createFlight(owner);
+    const otherModerator = await moderator();
+
+    const malformed = await t
+      .http()
+      .post('/api/flights/not-an-id/cancel')
+      .set('Cookie', owner.cookie)
+      .expect(400);
+    expect(malformed.body.code).toBe(ErrorCode.ValidationFailed);
+
+    const unknown = await t
+      .http()
+      .post(`/api/flights/${new Types.ObjectId().toHexString()}/cancel`)
+      .set('Cookie', owner.cookie)
+      .expect(404);
+    expect(unknown.body.code).toBe(ErrorCode.NotFound);
+
+    const notOwned = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', otherModerator.cookie)
+      .expect(404);
+    expect(notOwned.body.code).toBe(ErrorCode.NotFound);
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
+  });
+
+  it('returns 404 without changing the flight when the moderator token has no assigned airline', async () => {
+    const owner = await moderator();
+    const created = await createFlight(owner);
+    const token = await new JwtService({
+      secret: TEST_JWT_ACCESS_SECRET,
+    }).signAsync(
+      { sub: owner.id, role: owner.role, sid: owner.sid },
+      { algorithm: 'HS256', expiresIn: '15m' },
+    );
+
+    const response = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', `access_token=${token}`)
+      .expect(404);
+
+    expect(response.body.code).toBe(ErrorCode.NotFound);
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    expect(
+      await flights.findById(created.body._id).lean().exec(),
+    ).toMatchObject({
+      status: 'scheduled',
+    });
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
+  });
+
+  it('does not cancel a departed flight or emit an event', async () => {
+    const user = await moderator();
+    const created = await createFlight(user);
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    await flights
+      .updateOne({ _id: created.body._id }, { $set: { status: 'departed' } })
+      .exec();
+
+    const response = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cancel`)
+      .set('Cookie', user.cookie)
+      .expect(409);
+    expect(response.body.code).toBe(ErrorCode.InvalidStatusTransition);
+    expect(events.payloadsOf(Events.FlightCancelled)).toEqual([]);
   });
 });

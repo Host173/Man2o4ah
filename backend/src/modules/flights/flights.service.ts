@@ -11,6 +11,8 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Connection, Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -68,6 +70,8 @@ export class FlightsService {
 
     @Inject(SeatInventory)
     private readonly seatInventory: SeatInventory,
+
+    private readonly events: AppEvents,
   ) {}
 
   /**
@@ -181,6 +185,54 @@ export class FlightsService {
       return this.toManagementView(flight, departureAirport, arrivalAirport);
     });
     return toPage(items, total, query.page, query.limit);
+  }
+
+  /**
+   * Cancel a scheduled flight owned by the moderator (FLT-06). The conditional
+   * update is atomic; the cancellation event is emitted only after it succeeds.
+   */
+  async cancelFlight(
+    flightId: string,
+    moderatorAirlineId: string | undefined,
+  ): Promise<void> {
+    if (
+      !Types.ObjectId.isValid(flightId) ||
+      !moderatorAirlineId ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+
+    const id = new Types.ObjectId(flightId);
+    const airlineId = new Types.ObjectId(moderatorAirlineId);
+    const flight = await this.flightModel
+      .findOneAndUpdate(
+        { _id: id, airlineId, status: FlightStatus.SCHEDULED },
+        {
+          $set: {
+            status: FlightStatus.CANCELLED,
+            cancelledAt: new Date(),
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean<FlightRecord>()
+      .exec();
+
+    if (!flight) {
+      const ownedFlight = await this.flightModel
+        .exists({ _id: id, airlineId })
+        .exec();
+      if (!ownedFlight) throw this.flightNotFound();
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be cancelled',
+      });
+    }
+
+    this.events.emit(Events.FlightCancelled, {
+      flightId: flight._id.toString(),
+    });
   }
 
   /**

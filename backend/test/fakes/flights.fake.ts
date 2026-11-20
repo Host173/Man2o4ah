@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { Events } from '../../src/common/events/events.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { convertFlightTimes } from '../../src/modules/flights/flight-time.js';
@@ -30,6 +31,7 @@ import type {
 } from '../../src/modules/flights/flights.types.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
+import { FakeEvents } from '../support/fake-events.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
 import type { PublicApi } from './public-api.js';
 
@@ -48,6 +50,7 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       ReferenceDataService,
       'getAirports'
     > = new FakeReferenceDataService(),
+    readonly events: FakeEvents = new FakeEvents(),
   ) {
     this.seatInventory = new FakeSeatInventory(data);
   }
@@ -180,6 +183,32 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
         };
       });
     return toPage(items, flights.length, query.page, query.limit);
+  }
+
+  async cancelFlight(
+    flightId: string,
+    moderatorAirlineId: string | undefined,
+  ): Promise<void> {
+    const flight = this.data.flight(flightId);
+    if (
+      !flight ||
+      !moderatorAirlineId ||
+      flight.airlineId !== moderatorAirlineId
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Flight not found',
+      });
+    }
+    if (flight.status !== 'scheduled') {
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be cancelled',
+      });
+    }
+
+    flight.status = 'cancelled';
+    this.events.emit(Events.FlightCancelled, { flightId });
   }
 
   async addCabin(

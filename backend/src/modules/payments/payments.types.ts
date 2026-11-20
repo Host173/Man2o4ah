@@ -1,4 +1,5 @@
 import type { BookingType } from '../../common/database/booking-type.js';
+import type { BookingPolicies } from './ports/payable-booking.port.js';
 import type { PaymentStatus } from './schemas/payment.schema.js';
 import type { RefundReason, RefundStatus } from './schemas/refund.schema.js';
 
@@ -42,4 +43,19 @@ export interface PaymentView {
   currency: string;
   status: PaymentStatus;
   createdAt: Date;
+}
+
+/** A booking's policy snapshot as its owner sees it, with the acceptance (PAY-02). */
+export type BookingPoliciesView = BookingPolicies & {
+  bookingId: string;
+  accepted: boolean;
+  acceptedAt: Date | null;
+};
+
+/** The stored acceptance of a booking's policies (PAY-02). */
+export interface PolicyAcceptanceView {
+  bookingType: BookingType;
+  bookingId: string;
+  accepted: true;
+  acceptedAt: Date;
 }

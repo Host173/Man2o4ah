@@ -1,4 +1,9 @@
 import type { BookingType } from '../../../common/database/booking-type.js';
+import type { ClientSession } from 'mongoose';
+
+export interface ActiveBookingsCheckOptions {
+  session?: ClientSession;
+}
 
 /**
  * Owned by accounts; implemented by flight-bookings and hotel-bookings
@@ -10,5 +15,8 @@ import type { BookingType } from '../../../common/database/booking-type.js';
 export interface ActiveBookingsCheck {
   readonly bookingType: BookingType;
   /** True if the user has a `confirmed` booking whose trip or stay hasn't started yet. */
-  hasUpcomingConfirmed(userId: string): Promise<boolean>;
+  hasUpcomingConfirmed(
+    userId: string,
+    options?: ActiveBookingsCheckOptions,
+  ): Promise<boolean>;
 }

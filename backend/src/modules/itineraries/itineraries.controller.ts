@@ -16,6 +16,7 @@ import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -33,11 +34,13 @@ import { CurrentUser } from '../accounts/auth/decorators.js';
 import { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import { CreateDayDto } from './dto/create-day.dto.js';
 import { AddActivityDto } from './dto/add-activity.dto.js';
+import { CreateTransportCostDto } from './dto/create-transport-cost.dto.js';
 import { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import {
   ItineraryDayResponseDto,
   ItineraryDetailResponseDto,
   PaginatedItinerariesResponseDto,
+  TransportCostResponseDto,
 } from './dto/itinerary.response.dto.js';
 import { UpdateDayDto } from './dto/update-day.dto.js';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
@@ -47,6 +50,7 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  TransportCostView,
 } from './itineraries.types.js';
 
 @ApiTags('itineraries')
@@ -151,6 +155,10 @@ export class ItinerariesController {
   @ApiOperation({ summary: 'ITN-01 Delete my itinerary' })
   @ApiParam({ name: 'id', type: String })
   @ApiNoContentResponse({ description: 'Itinerary deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: days changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary not found or owned by another user',
@@ -172,6 +180,10 @@ export class ItinerariesController {
   @ApiParam({ name: 'id', type: String })
   @ApiParam({ name: 'dayId', type: String })
   @ApiNoContentResponse({ description: 'Day deleted' })
+  @ApiConflictResponse({
+    description:
+      'CONCURRENT_CHANGE: day changed during image cleanup; retry deletion',
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary or day ID' })
   @ApiNotFoundResponse({
     description: 'Itinerary or day not found, or owned by another user',
@@ -184,6 +196,27 @@ export class ItinerariesController {
     await this.itinerariesService.deleteDay(
       id.toHexString(),
       dayId.toHexString(),
+      user.id,
+    );
+  }
+
+  @Post(':id/transport-costs')
+  @ApiOperation({ summary: 'ITN-16 Add a transport cost to my itinerary' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: TransportCostResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid transport cost or references',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({ description: 'Owned itinerary or day not found' })
+  addTransportCost(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: CreateTransportCostDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<TransportCostView> {
+    return this.itinerariesService.addTransportCost(
+      id.toHexString(),
+      dto,
       user.id,
     );
   }

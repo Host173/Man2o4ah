@@ -50,6 +50,13 @@ function invalidCredentials() {
   });
 }
 
+function accountSuspended() {
+  return new ForbiddenException({
+    code: ErrorCode.AccountSuspended,
+    message: 'Your account is suspended',
+  });
+}
+
 /** The session is gone, idle-expired or revoked: log in again (ACC-06). */
 function sessionExpired() {
   return new UnauthorizedException({
@@ -170,10 +177,7 @@ export class AuthService {
     }
     // Only after the right password: a stranger can't learn the account is suspended.
     if (user.status === UserStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        code: ErrorCode.AccountSuspended,
-        message: 'Your account is suspended',
-      });
+      throw accountSuspended();
     }
 
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
@@ -183,11 +187,25 @@ export class AuthService {
       // Serialize session creation with password changes on the verified hash.
       sid = await dbSession.withTransaction(async () => {
         const result = await this.userModel.updateOne(
-          { _id: user._id, passwordHash: hash },
+          {
+            _id: user._id,
+            passwordHash: hash,
+            status: UserStatus.ACTIVE,
+          },
           { $set: { failedLoginAttempts: 0, lockedUntil: null } },
           { session: dbSession },
         );
-        if (result.matchedCount === 0) throw invalidCredentials();
+        if (result.matchedCount === 0) {
+          const suspended = await this.userModel
+            .exists({
+              _id: user._id,
+              passwordHash: hash,
+              status: UserStatus.SUSPENDED,
+            })
+            .session(dbSession);
+          if (suspended) throw accountSuspended();
+          throw invalidCredentials();
+        }
 
         const now = Date.now();
         const [session] = await this.sessionModel.create(

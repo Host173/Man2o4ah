@@ -111,6 +111,31 @@ export class AccountsService {
   }
 
   /**
+   * ACC-12: serialize booking confirmation with self-deactivation using the
+   * caller's transaction. Increments the existing Mongoose version key to
+   * acquire a write fence; false means the account is missing or deactivated.
+   * Suspension does not invalidate existing bookings (data-model §3.2).
+   * Confirmation and its inventory writes must use this same session.
+   */
+  async tryLockForBookingConfirmation(
+    userId: string,
+    { session }: { session: ClientSession },
+  ): Promise<boolean> {
+    if (!session.inTransaction()) {
+      throw new Error('Booking confirmation requires an active transaction');
+    }
+    const result = await this.userModel.updateOne(
+      {
+        _id: userId,
+        status: { $in: [UserStatus.ACTIVE, UserStatus.SUSPENDED] },
+      },
+      { $inc: { __v: 1 } },
+      { session },
+    );
+    return result.matchedCount === 1;
+  }
+
+  /**
    * Profiles of the given users, for author names, "Deleted user" (ACC-12) and
    * the author page (BLG-12). The real name and status are returned; the
    * reader shows "Deleted user" when `status` is `deactivated`

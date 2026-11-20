@@ -10,6 +10,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Connection, Model } from 'mongoose';
+import { Cron } from '@nestjs/schedule';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
@@ -73,6 +74,21 @@ export class FlightsService {
 
     private readonly events: AppEvents,
   ) {}
+
+  /** Marks scheduled flights departed once their UTC departure time passes (FLT-30). */
+  @Cron('* * * * *', { name: 'mark-flights-departed', timeZone: 'UTC' })
+  async markFlightsDeparted(now = new Date()): Promise<number> {
+    const result = await this.flightModel
+      .updateMany(
+        {
+          status: FlightStatus.SCHEDULED,
+          departureAt: { $lte: now },
+        },
+        { $set: { status: FlightStatus.DEPARTED } },
+      )
+      .exec();
+    return result.modifiedCount;
+  }
 
   /**
    * Create a scheduled flight from the two airport-local times (FLT-03, FLT-02,

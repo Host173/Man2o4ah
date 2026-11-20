@@ -487,3 +487,25 @@ solve https://github.com/Host173/Man2o4ah/pull/163 problem ig it's just a format
 How the output was used:
 On feature/ITN-10-activities: merged develop (resolved the conflict in backend/test/fakes/itineraries.fake.ts keeping both sides), ran npm run format, lint and typecheck, removed an unused import and prefixed unused fake stub params with underscores; the Prompt log entry check then failed because the branch had no new entry in ai-prompts/mokhtar.txt, so this entry was appended.
 ================================================
+Date: 2026-11-20
+Student: Mokhtar (owner-approved work via Pierre)
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Implemented transport-cost CRUD, validated DTOs, shared reference validation, API tests and itinerary fake contract tests; full backend verification passed with VITEST_MAX_WORKERS=2.
+================================================
+Date: 2026-11-20
+Student: Mokhtar (owner-approved work via Pierre)
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+Approved; proceed as Mokhtar and use mokhtar.txt
+
+How the output was used:
+Authorized itinerary-package changes and the Mokhtar prompt log; GitHub publishing uses the authenticated pierreofficial account, whose log is also appended for CI.
+================================================

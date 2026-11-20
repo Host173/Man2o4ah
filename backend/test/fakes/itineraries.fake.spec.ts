@@ -2,8 +2,12 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
+import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
-import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
+import {
+  ItineraryVisibility,
+  TransportMode,
+} from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import { FakeItinerariesService } from './itineraries.fake.js';
 
 function itinerary(
@@ -31,6 +35,89 @@ const seed = [
 ];
 
 const ids = (items: PublicItinerarySummary[]) => items.map((item) => item.id);
+
+describe('FakeItinerariesService transport contract (ITN-16)', () => {
+  async function setup() {
+    const service = new FakeItinerariesService();
+    const trip = await service.create(
+      {
+        title: 'Transport trip',
+        countryCodes: ['EG'],
+        startDate: '2027-04-01',
+      },
+      'user-1',
+    );
+    const day = await service.addDay(trip._id, { cityId: 'cairo' }, 'user-1');
+    const body: CreateTransportCostDto = {
+      dayId: day._id,
+      mode: TransportMode.TRAIN,
+      fromCityId: 'cairo',
+      toCityId: 'dubai',
+      amountMinor: 100,
+      currency: 'EGP',
+    };
+    return { service, trip, body };
+  }
+
+  it('keeps independent returned views and mirrors partial edits, deletion and day cascade', async () => {
+    const { service, trip, body } = await setup();
+    const cost = await service.addTransportCost(trip._id, body, 'user-1');
+    cost.amountMinor = 999;
+    const edited = await service.updateTransportCost(
+      cost._id,
+      { amountMinor: 0, currency: 'JPY' },
+      'user-1',
+    );
+    expect(edited).toEqual({
+      _id: cost._id,
+      ...body,
+      amountMinor: 0,
+      currency: 'JPY',
+    });
+    const before = await service.getById(trip._id, 'user-1');
+    await service.updateTransportCost(cost._id, {}, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).updatedAt).toEqual(
+      before.updatedAt,
+    );
+    await service.deleteTransportCost(cost._id, 'user-1');
+    await expect(
+      service.deleteTransportCost(cost._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await service.addTransportCost(trip._id, body, 'user-1');
+    await service.deleteDay(trip._id, body.dayId, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).transportCosts).toEqual(
+      [],
+    );
+  });
+
+  it('mirrors ownership, day references and currency errors without mutating costs', async () => {
+    const { service, trip, body } = await setup();
+    const cost = await service.addTransportCost(trip._id, body, 'user-1');
+    for (const promise of [
+      service.addTransportCost(trip._id, body, 'user-2'),
+      service.updateTransportCost(cost._id, {}, 'user-2'),
+      service.deleteTransportCost(cost._id, 'user-2'),
+      service.updateTransportCost(
+        cost._id,
+        { dayId: 'ffffffffffffffffffffffff' },
+        'user-1',
+      ),
+    ]) {
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+    }
+    await expect(
+      service.updateTransportCost(cost._id, { currency: 'XXX' }, 'user-1'),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.UnsupportedCurrency },
+    });
+    await expect(
+      service.updateTransportCost(cost._id, { amountMinor: -1 }, 'user-1'),
+    ).rejects.toMatchObject({ response: { code: ErrorCode.ValidationFailed } });
+    expect((await service.getById(trip._id, 'user-1')).transportCosts).toEqual([
+      cost,
+    ]);
+  });
+});
 
 describe('FakeItinerariesService.listPublicByAuthor', () => {
   it('returns an empty page when nothing is seeded', async () => {

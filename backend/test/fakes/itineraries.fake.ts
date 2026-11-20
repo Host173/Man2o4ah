@@ -4,6 +4,9 @@ import {
   NotImplementedException,
 } from '@nestjs/common';
 import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
+import type { UpdateTransportCostDto } from '../../src/modules/itineraries/dto/update-transport-cost.dto.js';
+import { validateTransportCost } from '../../src/modules/itineraries/transport-costs.js';
 import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
@@ -33,6 +36,7 @@ import type {
   ItinerarySummary,
   PublicItineraryQuery,
   PublicItinerarySummary,
+  TransportCostView,
 } from '../../src/modules/itineraries/itineraries.types.js';
 import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { PublicApi } from './public-api.js';
@@ -349,6 +353,103 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
       itinerary.updatedAt = new Date();
     }
     return this.toDetail(itinerary);
+  }
+
+  async addTransportCost(
+    itineraryId: string,
+    dto: CreateTransportCostDto,
+    userId: string,
+  ): Promise<TransportCostView> {
+    this.findOwned(itineraryId, userId);
+    await validateTransportCost(dto, this.referenceData, true);
+    const itinerary = this.findOwned(itineraryId, userId);
+    if (!itinerary.days.some((day) => day._id === dto.dayId.toLowerCase())) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    const cost: TransportCostView = {
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      dayId: dto.dayId.toLowerCase(),
+      mode: dto.mode,
+      fromCityId: dto.fromCityId,
+      toCityId: dto.toCityId,
+      amountMinor: dto.amountMinor,
+      currency: dto.currency,
+    };
+    itinerary.transportCosts.push(cost);
+    itinerary.updatedAt = new Date();
+    return structuredClone(cost);
+  }
+
+  async updateTransportCost(
+    costId: string,
+    dto: UpdateTransportCostDto,
+    userId: string,
+  ): Promise<TransportCostView> {
+    this.findOwnedTransportCost(costId, userId);
+    await validateTransportCost(dto, this.referenceData, false);
+    const { itinerary, cost } = this.findOwnedTransportCost(costId, userId);
+    if (
+      dto.dayId !== undefined &&
+      !itinerary.days.some((day) => day._id === dto.dayId?.toLowerCase())
+    ) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    let changed = false;
+    for (const field of [
+      'mode',
+      'fromCityId',
+      'toCityId',
+      'currency',
+    ] as const) {
+      if (dto[field] !== undefined) {
+        Object.assign(cost, { [field]: dto[field] });
+        changed = true;
+      }
+    }
+    if (dto.dayId !== undefined) {
+      cost.dayId = dto.dayId.toLowerCase();
+      changed = true;
+    }
+    if (dto.amountMinor !== undefined) {
+      cost.amountMinor = dto.amountMinor;
+      changed = true;
+    }
+    if (changed) itinerary.updatedAt = new Date();
+    return structuredClone(cost);
+  }
+
+  async deleteTransportCost(costId: string, userId: string): Promise<void> {
+    const { itinerary, cost } = this.findOwnedTransportCost(costId, userId);
+    itinerary.transportCosts = itinerary.transportCosts.filter(
+      (entry) => entry._id !== cost._id,
+    );
+    itinerary.updatedAt = new Date();
+  }
+
+  private findOwnedTransportCost(
+    costId: string,
+    userId: string,
+  ): { itinerary: ItineraryDetailView; cost: TransportCostView } {
+    if (typeof costId !== 'string' || !/^[0-9a-f]{24}$/i.test(costId)) {
+      this.invalidField('costId', 'must be a valid ObjectId');
+    }
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      const cost = itinerary.transportCosts.find(
+        (entry) => entry._id === costId.toLowerCase(),
+      );
+      if (cost) return { itinerary, cost };
+    }
+    throw new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary not found',
+    });
   }
 
   invalidField(field: string, message: string): never {

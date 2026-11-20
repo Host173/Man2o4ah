@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
@@ -385,6 +386,7 @@ export class AdminService {
     this.events.emit(
       isActive ? Events.ProviderReactivated : Events.ProviderDeactivated,
       {
+        eventId: randomUUID(),
         providerType: type,
         providerId,
         moderatorIds,

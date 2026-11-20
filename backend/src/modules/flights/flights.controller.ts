@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Patch,
   Param,
   Post,
   Query,
@@ -35,6 +36,8 @@ import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
 import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
+import { UpdateFlightDto } from './dto/update-flight.dto.js';
+import { UpdateFlightCabinDto } from './dto/update-flight-cabin.dto.js';
 import {
   PaginatedFlightSearchResponseDto,
   RoundTripFlightSearchResponseDto,
@@ -141,6 +144,57 @@ export class FlightsController {
   ): Promise<FlightResponseDto> {
     return FlightResponseDto.fromView(
       await this.flights.addCabin(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Patch('flights/:id')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-05 Edit a scheduled flight' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid airport or local time' })
+  @ApiConflictResponse({
+    description: 'Flight is not scheduled or airports are already locked',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async updateFlight(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() input: UpdateFlightDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightResponseDto> {
+    return FlightResponseDto.fromView(
+      await this.flights.updateFlight(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Patch('flights/:id/cabins/:cabinId')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-05 Edit cabin price and seat capacity' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'cabinId', type: String })
+  @ApiOkResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid cabin edit' })
+  @ApiConflictResponse({
+    description: 'Flight or capacity cannot be changed',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight or cabin not found or not assigned to this moderator',
+  })
+  async updateCabin(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('cabinId', ParseObjectIdPipe) cabinId: Types.ObjectId,
+    @Body() input: UpdateFlightCabinDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightResponseDto> {
+    return FlightResponseDto.fromView(
+      await this.flights.updateCabin(
+        id.toHexString(),
+        cabinId.toHexString(),
+        input,
+        user.providerId,
+      ),
     );
   }
 

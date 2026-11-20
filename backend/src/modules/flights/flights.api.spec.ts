@@ -20,7 +20,7 @@ import { FlightsModule } from './flights.module.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Flight } from './schemas/flight.schema.js';
 
-describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
+describe('Flights HTTP API (FLT-03, FLT-04, FLT-05, FLT-06)', () => {
   let t: TestApp;
   let events: FakeEvents;
   let airlineSequence = 0;
@@ -1001,5 +1001,253 @@ describe('Flights HTTP API (FLT-03, FLT-04, FLT-06)', () => {
       .get(`/api/flights/${new Types.ObjectId().toHexString()}`)
       .expect(404);
     expect(missing.body.code).toBe(ErrorCode.NotFound);
+  });
+
+  it('edits scheduled flight times and emits one reschedule event after the update', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+    const events = t.moduleRef.get(AppEvents);
+    const emit = vi.spyOn(events, 'emit');
+
+    const response = await t
+      .http()
+      .patch(`/api/flights/${created.body._id}`)
+      .set('Cookie', user.cookie)
+      .send({
+        departureLocal: '2027-03-14T04:30',
+        arrivalLocal: '2027-03-14T11:00',
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      departureAt: '2027-03-14T08:30:00.000Z',
+      arrivalAt: '2027-03-14T09:00:00.000Z',
+      departureLocalDate: '2027-03-14',
+      durationMinutes: 30,
+      status: 'scheduled',
+    });
+    expect(emit).toHaveBeenCalledWith(Events.FlightRescheduled, {
+      flightId: created.body._id,
+      departureAt: new Date('2027-03-14T08:30:00.000Z'),
+      arrivalAt: new Date('2027-03-14T09:00:00.000Z'),
+    });
+  });
+
+  it('accepts an edit that re-sends the current price, seat count and times without emitting a reschedule', async () => {
+    const user = await moderator();
+    const created = await createFlight(user);
+    const withCabin = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cabins`)
+      .set('Cookie', user.cookie)
+      .send(cabin)
+      .expect(201);
+    const events = t.moduleRef.get(AppEvents);
+    const emit = vi.spyOn(events, 'emit');
+    emit.mockClear();
+    const cabinPath = `/api/flights/${created.body._id}/cabins/${withCabin.body.cabins[0]._id}`;
+
+    await t
+      .http()
+      .patch(cabinPath)
+      .set('Cookie', user.cookie)
+      .send({ priceMinor: cabin.priceMinor })
+      .expect(200);
+    await t
+      .http()
+      .patch(cabinPath)
+      .set('Cookie', user.cookie)
+      .send({ totalSeats: cabin.totalSeats })
+      .expect(200);
+    await t
+      .http()
+      .patch(`/api/flights/${created.body._id}`)
+      .set('Cookie', user.cookie)
+      .send({ departureLocal: flight.departureLocal })
+      .expect(200);
+    expect(emit).not.toHaveBeenCalledWith(
+      Events.FlightRescheduled,
+      expect.anything(),
+    );
+  });
+
+  it('rejects past, reversed, empty, unknown-airport and booked-airport flight edits', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+
+    for (const body of [
+      {},
+      { departureLocal: '2020-01-10T12:00' },
+      {
+        departureLocal: '2027-03-14T12:00',
+        arrivalLocal: '2027-03-14T11:00',
+      },
+      { departureAirportId: 'ZZZ' },
+    ]) {
+      const response = await t
+        .http()
+        .patch(`/api/flights/${created.body._id}`)
+        .set('Cookie', user.cookie)
+        .send(body)
+        .expect(400);
+      expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    await flights
+      .updateOne(
+        { _id: new Types.ObjectId(created.body._id) },
+        { $set: { hasBookings: true } },
+      )
+      .exec();
+    const locked = await t
+      .http()
+      .patch(`/api/flights/${created.body._id}`)
+      .set('Cookie', user.cookie)
+      .send({ departureAirportId: 'LHR' })
+      .expect(409);
+    expect(locked.body.code).toBe(ErrorCode.Conflict);
+  });
+
+  it('enforces edit ownership and role checks', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+    const path = `/api/flights/${created.body._id}`;
+
+    await t
+      .http()
+      .patch(path)
+      .send({ departureLocal: '2027-03-14T04:30' })
+      .expect(401);
+    const regular = await loginAs(t.connection, UserRole.USER);
+    await t
+      .http()
+      .patch(path)
+      .set('Cookie', regular.cookie)
+      .send({ departureLocal: '2027-03-14T04:30' })
+      .expect(403);
+    const another = await loginAs(t.connection, UserRole.AIRLINE_MODERATOR, {
+      providerId: new Types.ObjectId().toHexString(),
+    });
+    await t
+      .http()
+      .patch(path)
+      .set('Cookie', another.cookie)
+      .send({ departureLocal: '2027-03-14T04:30' })
+      .expect(404);
+  });
+
+  it('edits cabin price and seat count, and rejects cuts below reserved seats', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+    const cabinResponse = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cabins`)
+      .set('Cookie', user.cookie)
+      .send(cabin)
+      .expect(201);
+    const cabinId = cabinResponse.body.cabins[0]._id;
+
+    const updated = await t
+      .http()
+      .patch(`/api/flights/${created.body._id}/cabins/${cabinId}`)
+      .set('Cookie', user.cookie)
+      .send({ priceMinor: 42000, totalSeats: 8 })
+      .expect(200);
+    expect(updated.body.cabins[0]).toMatchObject({
+      _id: cabinId,
+      priceMinor: 42000,
+      totalSeats: 8,
+      availableSeats: 8,
+    });
+
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    await flights
+      .updateOne(
+        { _id: new Types.ObjectId(created.body._id) },
+        {
+          $set: {
+            'cabins.0.totalSeats': 8,
+            'cabins.0.availableSeats': 5,
+            'cabins.0.heldSeats': 2,
+            'cabins.0.bookedSeats': 1,
+          },
+        },
+      )
+      .exec();
+    const cut = await t
+      .http()
+      .patch(`/api/flights/${created.body._id}/cabins/${cabinId}`)
+      .set('Cookie', user.cookie)
+      .send({ totalSeats: 2 })
+      .expect(409);
+    expect(cut.body.code).toBe(ErrorCode.CapacityBelowReserved);
+  });
+
+  it('rejects invalid cabin edits and edits to cancelled flights', async () => {
+    const user = await moderator();
+    const created = await t
+      .http()
+      .post('/api/flights')
+      .set('Cookie', user.cookie)
+      .send(flight)
+      .expect(201);
+    const cabinResponse = await t
+      .http()
+      .post(`/api/flights/${created.body._id}/cabins`)
+      .set('Cookie', user.cookie)
+      .send(cabin)
+      .expect(201);
+    const cabinId = cabinResponse.body.cabins[0]._id;
+    const path = `/api/flights/${created.body._id}/cabins/${cabinId}`;
+
+    await t.http().patch(path).set('Cookie', user.cookie).send({}).expect(400);
+    await t
+      .http()
+      .patch(path)
+      .set('Cookie', user.cookie)
+      .send({ priceMinor: 0 })
+      .expect(400);
+    await t
+      .http()
+      .patch(path)
+      .set('Cookie', user.cookie)
+      .send({ totalSeats: 1.5 })
+      .expect(400);
+
+    const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
+    await flights
+      .updateOne(
+        { _id: new Types.ObjectId(created.body._id) },
+        { $set: { status: 'cancelled' } },
+      )
+      .exec();
+    const cancelled = await t
+      .http()
+      .patch(path)
+      .set('Cookie', user.cookie)
+      .send({ priceMinor: 42000 })
+      .expect(409);
+    expect(cancelled.body.code).toBe(ErrorCode.InvalidStatusTransition);
   });
 });

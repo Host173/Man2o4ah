@@ -98,6 +98,20 @@ export interface AddCabinInput {
   maxBagWeightKg: number;
 }
 
+/** Optional fields supplied when an airline moderator edits a scheduled flight. */
+export interface UpdateFlightInput {
+  departureAirportId?: string;
+  arrivalAirportId?: string;
+  departureLocal?: string;
+  arrivalLocal?: string;
+}
+
+/** Optional cabin fields an airline moderator may edit (FLT-05). */
+export interface UpdateCabinInput {
+  priceMinor?: number;
+  totalSeats?: number;
+}
+
 /** Pagination for a moderator's own-airline flight list. */
 export interface FlightListQuery {
   page: number;

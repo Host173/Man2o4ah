@@ -23,20 +23,20 @@ Admins exist only through the seed script (ACC-18); registration always creates 
 | Cookie | Content | Path | Lifetime |
 |---|---|---|---|
 | `access_token` | JWT `{ sub, role, sid, providerId? }` (`providerId` = `moderatorOf.providerId`), HS256, `JWT_ACCESS_SECRET` | `/` | 15 min (cookie `maxAge` = token TTL) |
-| `refresh_token` | 48 random bytes, base64url; only its SHA-256 hash is stored | `/` | 7 days absolute |
+| `refresh_token` | 48 random bytes, base64url; only its SHA-256 hash is stored | `/` | 8 hours absolute for admins; 7 days absolute for other roles (ACC-06, ticket #27) |
 
 The refresh cookie uses path `/` on purpose: `proxy.ts` must see it on page navigations to refresh silently. Both cookies: `httpOnly: true, secure: true, sameSite: 'lax'`. Browsers accept `secure` cookies on `http://localhost`. Set them with Express `res.cookie()` (milliseconds) via `@Res({ passthrough: true })`, and clear them with `res.clearCookie(name, { path })` using the same path.
 Never put email, name or anything sensitive in the JWT. Never return tokens in a JSON body.
 
 ## 3. Sessions
 
-Collection `sessions`: `userId, refreshTokenHash, lastActivityAt, expiresAt` with a **TTL index on `expiresAt`** (`expiresAt = lastActivityAt + 30 min`). A session that exists and has `expiresAt > now` is live; anything else is dead. Revoking = deleting.
+Collection `sessions`: `userId, refreshTokenHash, lastActivityAt, expiresAt, absoluteExpiresAt` with a **TTL index on `expiresAt`** (`expiresAt = min(lastActivityAt + 30 min, absoluteExpiresAt)`). `absoluteExpiresAt` is immutable: login + 8 hours for admins, login + 7 days otherwise, using the role at login. A live session exists and has both expiry fields greater than now; anything else is dead. Existing sessions without an absolute deadline require a new login. Revoking = deleting.
 
-- **Idle expiry (ACC-06):** the guard rejects a missing session, or one with `expiresAt ≤ now` (TTL deletion can lag ~60 s), with `401 SESSION_EXPIRED`.
-- **Activity:** the guard slides `lastActivityAt` and `expiresAt` at most once per 60 s per session (`updateOne({ _id: sid, lastActivityAt: { $lt: now - 60s } }, { $set: { lastActivityAt: now, expiresAt: now + 30 min } })`).
+- **Expiry (ACC-06):** the guard rejects a missing session, an absent/passed absolute deadline, or `expiresAt ≤ now` (TTL deletion can lag ~60 s), with `401 SESSION_EXPIRED`. A still-valid access token never bypasses the absolute deadline.
+- **Activity:** the guard conditionally slides `lastActivityAt` and `expiresAt` at most once per 60 s per session, only while both expiries are future. Set `lastActivityAt = now` and `expiresAt = min(now + 30 min, absoluteExpiresAt)`.
 - **Delete all of a user's sessions** when they change their password, are reset by an admin, suspended or deactivated. It takes effect on their next request.
-- **Refresh** `POST /api/auth/refresh` (public): hash the cookie, find a live session with that hash, slide its activity, issue a new access token, and set the `access_token` cookie. The refresh token is **not** rotated: several parallel requests (prefetches) may refresh at once, and rotation would make all but one fail. Logout, idle expiry and revocation still kill it. Anything else gets `401 SESSION_EXPIRED` and both cookies are cleared.
-- **Logout** `POST /api/auth/logout`: delete the session and clear both cookies (ACC-06).
+- **Refresh** `POST /api/auth/refresh` (public): hash the cookie, find a live session with that hash, slide its activity without passing the fixed absolute deadline, issue a new access token, and set the `access_token` cookie. The refresh token is **not** rotated: several parallel requests (prefetches) may refresh at once, and rotation would make all but one fail. Missing, unknown, revoked, idle-expired or absolute-expired credentials get `401 SESSION_EXPIRED` and both cookies are cleared. Non-401 failures preserve the cookies so a transient outage can be retried.
+- **Logout** `POST /api/auth/logout` (public, idempotent): delete the authenticated session, or fall back to the refresh cookie's hash when the access cookie cannot authenticate, and clear both cookies. Return 204 even for missing, expired or already-revoked credentials; do not delete other sessions (ACC-06). The browser calls logout directly; no preliminary refresh is required.
 
 ## 4. Login, lockout, register, passwords
 
@@ -45,14 +45,16 @@ Login `POST /api/auth/login`, in this order:
 2. If `lockedUntil > now`, return `401 ACCOUNT_LOCKED` with the minutes remaining (ACC-05).
 3. If `bcrypt.compare` fails, increment `failedLoginAttempts` atomically (`$inc`, never read-then-write). At 5, set `lockedUntil = now + 15 min` and reset the count, then return `ACCOUNT_LOCKED`; otherwise return `INVALID_CREDENTIALS`.
 4. If the password is right but status is `suspended`, return `403 ACCOUNT_SUSPENDED` "Your account is suspended" (ACC-04).
-5. Reset `failedLoginAttempts`, create a session, set cookies, return `{ user: MeDto }`.
+5. In one transaction, reset `failedLoginAttempts` conditional on the verified password hash and create a session. A hash changed by a concurrent password change returns `401 INVALID_CREDENTIALS` instead. Set cookies and return `{ user: MeDto }`.
 
 `MeDto` (`GET /api/auth/me`): `{ _id, name, email, role, status, preferredCurrency, moderatorOf?, mustChangePassword }`.
 
-Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching `/^(?=.*[A-Za-z])(?=.*\d).{8,}$/`, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
+Password rule (ACC-01, shared by ACC-07a, ACC-08, ACC-13): 8 to 72 characters with at least one letter and one digit, `/^(?=.*[A-Za-z])(?=.*\d).{8,72}$/`, in one place: `accounts/auth/password-rule.ts` (`PASSWORD_RULE`, `PASSWORD_RULE_MESSAGE`). The 72 cap (team leader, 17 Nov, #126; `docs/DECISIONS.md` §3): bcrypt ignores everything after 72 bytes. It counts characters, not UTF-8 bytes, so non-ASCII passwords can still go past 72 bytes; whether to count bytes is an open item for the team leader. It is applied in DTOs to new passwords only; login and the current password on change-password accept any non-empty string, so temporary passwords and passwords stored before the cap still work.
+
+Register (ACC-01): `name`, `email` (`@IsEmail`), `password` matching the password rule, `acceptTerms: true` (`@Equals(true)`). Duplicate email returns `409 EMAIL_TAKEN` (catch Mongo 11000). Hash with `bcrypt.hash(pw, 12)`. Store `termsAcceptedAt`. Don't log the user in automatically unless the team decides to.
 
 Temporary passwords (ACC-07a, ACC-13): the admin sets one, the backend stores the hash, sets `mustChangePassword = true` and deletes the user's sessions. While `mustChangePassword` is true, the guard allows only `GET /auth/me`, `PATCH /auth/change-password` and `POST /auth/logout` and returns `403 PASSWORD_CHANGE_REQUIRED` for anything else.
-Change password (ACC-08): requires the current password; the new one follows the ACC-01 rule; clear `mustChangePassword`; delete the user's other sessions.
+Change password (ACC-08) `PATCH /api/auth/change-password` `{ currentPassword, newPassword }`: requires the current password (wrong → `400 VALIDATION_FAILED` with `details` on `currentPassword`, not 401, since the caller is still logged in); the new one follows the password rule; during a forced change (`mustChangePassword`), a new password that still matches the temporary one (checked with `bcrypt.compare` against the stored hash) gets `400 VALIDATION_FAILED` on `newPassword`, while a normal change may keep the same password; in one transaction, store a new bcrypt hash and clear `mustChangePassword` (an update conditional on the old hash) and delete all of the user's sessions, so neither happens without the other (data model §3.2). Returns `204` and clears both authentication cookies at path `/`; the caller must log in again with the new password.
 
 ## 5. Guards and decorators
 
@@ -71,7 +73,7 @@ export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionConte
 1. If `reflector.getAllAndOverride(IS_PUBLIC, [handler, class])` is true, try to attach the user if a valid cookie exists (so public pages can personalize), and always return true.
 2. Read `req.cookies.access_token`. If it's missing, return `401 NOT_AUTHENTICATED`.
 3. `jwtService.verifyAsync`. On failure, return `401 TOKEN_EXPIRED`; the frontend then calls refresh.
-4. Load the session by `sid` (lean). If it's missing or `expiresAt ≤ now`, return `401 SESSION_EXPIRED`. Slide the activity time.
+4. Load the session by `sid` (lean). If it's missing, either expiry has passed, or the absolute deadline is absent, return `401 SESSION_EXPIRED`. Slide the activity time, capped at the absolute deadline.
 5. Enforce the `mustChangePassword` allow-list, then set `req.user = { id: sub, role, providerId, sid }`.
 
 `RolesGuard`: no `@Roles` metadata means any logged-in user may pass. Otherwise a role not in the list gets `403 FORBIDDEN_ROLE`. Use `ForbiddenException`, not `UnauthorizedException`.

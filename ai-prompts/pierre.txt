@@ -1222,3 +1222,85 @@ schema_approval=Create a separate prerequisite schema PR first, visibility=Publi
 How the output was used:
 Split schema preparation from feature implementation as requested; documented that owned public/private itineraries may be referenced without publishing or embedding their contents.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+and read also the last comment on the pr
+
+How the output was used:
+Read the latest comment on PR #173 and distinguished its reported cleanup bug from the current pinned merge conflict.
+Related Requirement: ACC-06
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first session-deadline and idempotent-logout fixes for PR #138, synchronized approved contract documentation and diagrams, and passed backend verify with 2078 tests.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+ok fix all these and push then comment on the pr
+
+How the output was used:
+Merged pinned develop preserving both author-log histories (b1bc81c), committed failing cleanup regressions (0a97f9c), implemented transactional cleanup records and a retry job with model/diagram/index documentation, and passed backend verify (2049 tests) and production audit (0 vulnerabilities).
+Related Requirement: ACC-06
+
+Prompt:
+contract_approval=i dont unsestand what is the problem and what do you want and what is the ticket even, logout_policy=idempotent-refresh-capable
+
+How the output was used:
+Explained ticket #27 and requested approval for the frozen session-schema change; recorded the selected idempotent, refresh-cookie-capable logout behavior.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-10
+
+Prompt:
+Kareem and Mostafa approve this approach and including it in #173
+
+How the output was used:
+Implemented the requester-approved blog-owned durable cleanup collection and scheduled job in PR #173, including the matching data-model, diagrams and index tests.
+Related Requirement: ACC-06
+
+Prompt:
+approved
+
+How the output was used:
+Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first password-session fixes, cookie revocation and Swagger evidence for PR #139.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ACC-08
+
+Prompt:
+sessionBehavior=Revoke every session and require login again, pushFixes=true
+
+How the output was used:
+Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
+================================================

@@ -63,6 +63,7 @@ All app collections use `{ timestamps: true }` (`createdAt`, `updatedAt`). Refer
 - Responses compute the URL: `${PUBLIC_BASE_URL}/uploads/${key}`. The URL is never stored.
 - Limits: JPG/PNG, ≤ 5 MB each; ≤ 5 per post, activity or hotel; 1 logo per airline.
 - Removing an image (or its parent) deletes the file.
+- For blog post deletion, image keys enter `post_image_cleanups` in the same transaction that removes the post, comments and likes. File deletion starts only after commit. A failed deletion remains durably queued for retry, including across restarts; the API still returns 204 for the committed post deletion.
 
 ### 1.7 Visibility flags
 | Field | On | Set by | Meaning |
@@ -114,6 +115,7 @@ Comments and reviews of a deactivated user stay visible but show **"Deleted user
 | 25 | `reports` | moderation | User reports on content |
 | 26 | `notifications` | notifications | In-app notifications |
 | 27 | `audit_logs` | audit | Append-only log of admin actions |
+| 28 | `post_image_cleanups` | blog | Durable file cleanup for deleted posts (BLG-10) |
 
 `admin` owns no collection. `storage` owns no collection (files on disk). `common` owns no collection.
 
@@ -213,13 +215,16 @@ One document per logged-in device. Implements refresh-token revocation and the 3
 | `userId` | ObjectId → users | ✓ | |
 | `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
 | `lastActivityAt` | Date | ✓ | |
-| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+| `expiresAt` | Date | ✓ | `min(lastActivityAt + 30 min, absoluteExpiresAt)` |
+| `absoluteExpiresAt` | Date | ✓ | immutable; login + 8 hours for admins, login + 7 days for other roles (ACC-06, ticket #27) |
 
 Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
 
 Rules
-- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
-- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Every authenticated request checks the session exists, `expiresAt > now` and `absoluteExpiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session), never beyond `absoluteExpiresAt`.
+- The absolute deadline is fixed from the role at login, including the refresh cookie's max age; refresh and role changes never extend it. Existing sessions without this field require a new login; no Atlas data migration is needed.
+- Logout is public and idempotent: delete the authenticated session, or use the refresh token's hash if the access cookie cannot authenticate, then clear both cookies and return 204. Missing or already-revoked credentials still clear the cookies. Other sessions are unaffected.
+- Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
 - Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
 
 ---
@@ -650,6 +655,16 @@ Indexes: `{ postId: 1, createdAt: 1 }` · `{ authorId: 1 }`
 Indexes: `{ postId: 1, userId: 1 }` **unique** (BLG-06) · `{ userId: 1 }`
 Like = insert + `$inc likeCount`; a duplicate key means already liked. Unlike = delete + `$inc -1` only if a document was deleted.
 
+#### `post_image_cleanups` (BLG-10)
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `postId` | ObjectId | ✓ | ID of the deleted post; intentionally survives the parent |
+| `key` | string | ✓ | Stored file name, unique; never reused by storage |
+
+Indexes: `{ key: 1 }` **unique** · `{ postId: 1, _id: 1 }`
+
+Created with the caller's session in the post deletion transaction. The post-commit attempt and the 30-second job call idempotent `StorageService.delete(key)` and remove the record only after success. Storage or acknowledgement failure leaves the record for retry; no TTL. Concurrent workers may attempt the same key safely. Batches advance past failed records so they cannot starve later files. No API response exposes these internal records.
+
 ---
 
 ### 3.11 moderation
@@ -853,6 +868,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |
 | Complete stays | hotel-bookings | 1 h | `confirmed` with `checkOutDate < today` → `completed` |
 | Refresh rates | fx | daily | fetch FXRatesAPI, insert today's `exchange_rates` |
+| Retry post image cleanup | blog | 30 s | Delete queued files via storage; remove each cleanup record only after success |
 
 Sessions need no job (TTL index).
 

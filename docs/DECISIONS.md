@@ -3,7 +3,7 @@
 Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
 If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
 
-Last updated: 2026-11-17 (booking rules per module; open items)
+Last updated: 2026-11-20 (durable blog image cleanup)
 
 ---
 
@@ -27,7 +27,7 @@ Last updated: 2026-11-17 (booking rules per module; open items)
 | payments | Stripe payments, refunds, policy acceptance for both booking types | payments, refunds, policy acceptances, stripe webhook events |
 | itineraries | Trip planning and budgeting | itineraries (with days, activities, budgets, transport costs) |
 | fx | FXRatesAPI integration and rate caching | cached exchange rates |
-| blog | Community content | posts (with tags), comments, likes |
+| blog | Community content | posts (with tags), comments, likes, post_image_cleanups |
 | moderation | Reports on any content type | reports |
 | notifications | In-app notifications, triggered by events | notifications |
 | audit | Logs of important admin and moderation actions, triggered by events | audit logs |
@@ -39,11 +39,13 @@ Infrastructure (not domain modules):
 
 ## 3. Module rules
 
+- **Passwords are 8 to 72 characters, with at least one letter and one digit.** One shared rule in `accounts/auth/password-rule.ts` (`/^(?=.*[A-Za-z])(?=.*\d).{8,72}$/`), applied in the DTOs to every new password: registration, password change, the forced change and admin resets. Login and the current password on change-password accept any non-empty string, so temporary passwords and passwords stored before the cap still work. Why: bcrypt ignores everything after 72 bytes, so without a cap two long passwords sharing their first 72 bytes would both work. The cap counts characters (JS string length), not UTF-8 bytes; whether to count bytes is open item 1. Decided 17 Nov (raised in PR #126, built in ACC-08).
 - **One owner per collection.** Each collection belongs to exactly one module.
 - **Cross-module access goes through the owning module's exported service.** A module never queries another module's collections directly.
 - **No populate across modules.** Mongoose populate only within a module.
 - **Inventory belongs to the provider modules:** seats to flights, room-nights to hotels. Booking modules call their services (e.g. `holdSeats`, `reserveNights`).
 - **Background jobs live in the module that owns the data:** hold expiry and completion in flight-bookings and hotel-bookings (they own the pending bookings), marking flights departed in flights, rate refresh in fx. No separate jobs module.
+- **Blog image cleanup (BLG-10, 20 Nov):** post deletion transactionally retains image keys in blog-owned `post_image_cleanups`. Files are deleted after commit; failures are logged and retried every 30 seconds, including after restarts, while the committed deletion returns 204. Kareem and Mostafa's approval of this model/job change and its inclusion in PR #173 was confirmed by the requester.
 - **A hold is a pending booking.** There is no separate holds collection; the inventory counters/nights live in the provider modules.
 - **Modules talk through services, ports and events.** Lower modules never import higher ones; when they must, the lower module owns an interface (port) or emits an event. The allowed imports, ports and events are listed in `data-model.md` §6.
 - **Booking rules are implemented in each booking module.** The GEN-11 lifecycle (allowed status moves) and the FLT-09/HTL-10 refund tiers are needed by both flight-bookings and hotel-bookings. Each module has its own copy, with its own tests; neither imports the other, and they don't go in `common/` (no business logic there). The two copies must follow the same rule (HTL-10 uses FLT-09's selection rule); only the start date differs (flight: outbound departure; hotel: check-in at 00:00 UTC). Why: each module owns all of its logic, there's no coupling between the booking modules, and one owner (Bookings) keeps both copies in step. Decided 17 Nov (PR #130).
@@ -187,6 +189,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 - **One error shape** for every non-2xx response, produced by one global exception filter (Platform package): `{ statusCode, code, message, details?, path, timestamp }`. `details` lists field errors for validation (GEN-02).
 - **Calendar dates** (`DateOnly` in the database) travel as `YYYY-MM-DD` strings in requests and responses. **Money** keeps the data model's names and minor units (`totalMinor`), formatted by the frontend.
 - **Error codes live in one enum** (`common/errors/error-codes.ts`). New codes are added there in the same PR that uses them. Tests assert the status and the code, never the message wording.
+- **Session deadlines and logout (ACC-06, ticket #27):** fix `sessions.absoluteExpiresAt` at login: 8 hours for admins, 7 days for other roles. Both refresh-cookie max age and server enforcement follow this role-at-login deadline. Every idle slide is capped there; sessions without it require a new login. Logout is public and idempotent: revoke the authenticated session, or fall back to the refresh cookie's hash, clear both cookies and return 204 even if already logged out. Other sessions are unaffected. Refresh clears cookies only on 401, not transient server failures.
 
 ## 18. Git rules
 
@@ -217,7 +220,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 
 **Priority: answer these first** (raised in Aisha's ACC-01 PR #126, merged as is on 15 Nov):
 
-1. **Password maximum length.** bcrypt ignores everything after 72 bytes, so two long passwords that share their first 72 bytes both work. Proposal: add `@MaxLength(72)` to the shared password rule (`accounts/auth/password-rule.ts`), so registration, password change and admin resets all get it.
+1. **Password cap: characters or bytes?** (raised in ACC-08 PR #139). The 17 Nov cap (§3) counts characters, but bcrypt counts UTF-8 bytes, so non-ASCII passwords can still collide: `"a1" + "é"×70` and `"a1" + "é"×35 + "x"×35` are both 72 characters and pass the rule, and a hash of the first accepts the second. Options: also require `Buffer.byteLength(password, 'utf8') <= 72`, or keep the character cap and document it.
 2. **Registration response.** `POST /api/auth/register` returns `201 { user: MeDto }`, the same shape as login. Proposal: keep it.
 3. **Auto-login after registering.** Currently no (the `auth.md` default); the frontend sends the user to the login page. Proposal: keep it.
 4. **PLT-04 design calls** (`data-model.md` §8). PLT-04 is closed and its schemas are on develop. Proposal: record them as confirmed.

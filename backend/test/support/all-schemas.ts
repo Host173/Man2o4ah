@@ -5,6 +5,7 @@ import { AuditLogSchema } from '../../src/modules/audit/schemas/audit-log.schema
 import { CommentSchema } from '../../src/modules/blog/schemas/comment.schema.js';
 import { LikeSchema } from '../../src/modules/blog/schemas/like.schema.js';
 import { PostSchema } from '../../src/modules/blog/schemas/post.schema.js';
+import { PostImageCleanupSchema } from '../../src/modules/blog/schemas/post-image-cleanup.schema.js';
 import { FlightBookingSchema } from '../../src/modules/flight-bookings/schemas/flight-booking.schema.js';
 import { AirlineSchema } from '../../src/modules/flights/schemas/airline.schema.js';
 import { FlightSchema } from '../../src/modules/flights/schemas/flight.schema.js';
@@ -27,7 +28,7 @@ import { CitySchema } from '../../src/modules/reference-data/schemas/city.schema
 import { CountrySchema } from '../../src/modules/reference-data/schemas/country.schema.js';
 import { CurrencySchema } from '../../src/modules/reference-data/schemas/currency.schema.js';
 
-/** The 27 collections of data-model §2, each with its Mongoose schema. */
+/** The 28 collections of data-model §2, each with its Mongoose schema. */
 export const ALL_SCHEMAS: Record<string, Schema> = {
   countries: CountrySchema,
   cities: CitySchema,
@@ -53,6 +54,7 @@ export const ALL_SCHEMAS: Record<string, Schema> = {
   posts: PostSchema,
   comments: CommentSchema,
   likes: LikeSchema,
+  post_image_cleanups: PostImageCleanupSchema,
   reports: ReportSchema,
   notifications: NotificationSchema,
   audit_logs: AuditLogSchema,

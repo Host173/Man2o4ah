@@ -2246,7 +2246,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
       },
     ]);
 
-    // 2) Repeated deactivate keeps isActive=false and emits one event pair under agreed policy
+    // 2) Repeated deactivate keeps isActive=false and emits one event pair.
     fakeEvents.clear();
     const repeatDeactAirline = await accApp!
       .http()

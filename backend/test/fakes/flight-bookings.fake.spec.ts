@@ -84,6 +84,18 @@ describe('FakeFlightBookingsService.listForAdmin', () => {
     expect(ids(page.items)).toEqual(['b-2']);
   });
 
+  it('orders equal-createdAt bookings by newest id, independent of seed order', async () => {
+    const tied = '2026-11-05T10:00:00.000Z';
+    const bookings = new FakeFlightBookingsService([
+      booking('b-1', tied),
+      booking('b-3', tied),
+      booking('b-2', tied),
+    ]);
+    expect(
+      ids((await bookings.listForAdmin({ page: 1, limit: 10 })).items),
+    ).toEqual(['b-3', 'b-2', 'b-1']);
+  });
+
   it('paginates and keeps the total', async () => {
     const bookings = new FakeFlightBookingsService(seed);
     const second = await bookings.listForAdmin({ page: 2, limit: 2 });

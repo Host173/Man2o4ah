@@ -881,6 +881,7 @@ describe('AdminService', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: adminId,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airlineId },
@@ -910,6 +911,7 @@ describe('AdminService', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: adminId,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotelId },

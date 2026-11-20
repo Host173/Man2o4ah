@@ -1579,3 +1579,40 @@ push it and open the PR but i will do the self review
 How the output was used:
 Pushed feature/FLT-26-cancel-flight-booking and opened the PR "FLT-26: Cancel a flight booking" against develop; self-review left to Aya; commit chore(ai): log the FLT-26 PR prompt (FLT-26)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+adapt the seed script for flt 26
+
+How the output was used:
+Wrote a throwaway seed-flt26.cjs in the session scratchpad (outside the repo, not committed) that inserts flights with consistent seat counters plus 8 bookings for the FLT-26 Swagger checks; only the dry run was executed; this entry not committed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+do the self review for flt 26
+
+How the output was used:
+Answer only, no files changed (self-review of FLT-26; probes written and deleted)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+[Attached: self-review text for FLT-26 (pasted checklist: missing FLT-06 flight.cancelled handler, missing FLT-05 flight.rescheduled handler, PR text says FLT-06 is a separate ticket; open question about refunds after commit)]
+fix the problems of the self review first
+
+How the output was used:
+Checked issue #56 (it includes FLT-06 bookings side and FLT-05); wrote the failing tests first (flight-provider-cancellation.service.spec.ts, flight-reschedule-sync.service.spec.ts, shared test/support/flight-booking-fixtures.ts), then FlightProviderCancellationService and FlightRescheduleSyncService (@OnEvent handlers, idempotent, one transaction per booking); npm run verify passed; commits test(flight-bookings): add the provider cancellation and reschedule tests (FLT-26), feat(flight-bookings): cancel and expire bookings when a flight is cancelled (FLT-26), feat(flight-bookings): sync booking times when a flight is rescheduled (FLT-26), chore(ai): log the self-review fixes prompt (FLT-26); not pushed, PR text not yet updated
+================================================

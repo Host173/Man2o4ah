@@ -630,6 +630,28 @@ describe('FakeItinerariesService owner-only methods', () => {
     }
   });
 
+  it('leaves every field unchanged when a mixed update has invalid visibility', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const before = await itineraries.getById(created._id, 'user-1');
+
+    await expect(
+      itineraries.update(
+        created._id,
+        {
+          title: 'Changed',
+          countryCodes: ['AE'],
+          startDate: '2027-05-01',
+          visibility: 'hidden',
+        } as never,
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.ValidationFailed },
+    });
+    expect(await itineraries.getById(created._id, 'user-1')).toEqual(before);
+  });
+
   it('adds days numbered and dated from the start date, and groups them by city', async () => {
     const itineraries = new FakeItinerariesService();
     const created = await itineraries.create(createDto(), 'user-1');

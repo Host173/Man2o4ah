@@ -167,6 +167,25 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
     expect(document.paths['/api/itineraries']?.post).toBeDefined();
     expect(document.paths['/api/itineraries']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/public/search']?.get).toBeDefined();
+    expect(
+      document.paths['/api/itineraries/public/search']?.get?.responses['200'],
+    ).toMatchObject({
+      content: {
+        'application/json': {
+          schema: {
+            $ref: '#/components/schemas/PaginatedPublicItinerarySearchResponseDto',
+          },
+        },
+      },
+    });
+    expect(
+      document.components?.schemas?.PublicItinerarySearchItemResponseDto,
+    ).toMatchObject({
+      properties: {
+        _id: { type: 'string' },
+        startDate: { type: 'string', format: 'date' },
+      },
+    });
     expect(document.paths['/api/itineraries/{id}']?.get).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.patch).toBeDefined();
     expect(document.paths['/api/itineraries/{id}']?.delete).toBeDefined();
@@ -1588,26 +1607,27 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         totalPages: 1,
       });
       expect(
-        response.body.items.map((item: { id: string }) => item.id),
+        response.body.items.map((item: { _id: string }) => item._id),
       ).toEqual(expect.arrayContaining([published, others]));
       for (const item of response.body.items) {
         expect(Object.keys(item).sort()).toEqual([
+          '_id',
           'cityIds',
           'countryCodes',
           'dayCount',
-          'id',
           'ownerId',
           'startDate',
           'title',
           'updatedAt',
         ]);
+        expect(item.startDate).toBe(validBody.startDate);
       }
       expect(
         response.body.items.some(
-          (item: { id: string }) =>
-            item.id === privateId ||
-            item.id === hiddenId ||
-            item.id === deactivatedId,
+          (item: { _id: string }) =>
+            item._id === privateId ||
+            item._id === hiddenId ||
+            item._id === deactivatedId,
         ),
       ).toBe(false);
     });

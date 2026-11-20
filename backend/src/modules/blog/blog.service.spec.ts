@@ -27,6 +27,9 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { Hotel } from '../hotels/schemas/hotel.schema.js';
+import { Room } from '../hotels/schemas/room.schema.js';
+import { RoomNight } from '../hotels/schemas/room-night.schema.js';
 import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
 import {
   Report,
@@ -73,6 +76,12 @@ describe('BlogService (skeleton)', () => {
       .overrideProvider(getModelToken(Session.name))
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Hotel.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Room.name))
+      .useValue({})
+      .overrideProvider(getModelToken(RoomNight.name))
       .useValue({})
       .overrideProvider(getModelToken(Report.name))
       .useValue({})

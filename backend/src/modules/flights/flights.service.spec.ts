@@ -231,4 +231,28 @@ describe('FlightsService', () => {
     expect(airlineProfiles.getAirline).toHaveBeenCalledWith('a1');
     expect(airlineProfiles.setAirlineActive).toHaveBeenCalledWith('a1', false);
   });
+
+  it('marks scheduled flights departed at the exact boundary and leaves other states unchanged', async () => {
+    const updateMany = vi.fn().mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ modifiedCount: 2 }),
+    });
+    const flightModel = moduleRef?.get(
+      getModelToken(Flight.name),
+    ) as unknown as {
+      updateMany: typeof updateMany;
+    };
+    flightModel.updateMany = updateMany;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-20T12:00:00.000Z'));
+
+    await expect(service.markFlightsDeparted()).resolves.toBe(2);
+    expect(updateMany).toHaveBeenCalledWith(
+      {
+        status: 'scheduled',
+        departureAt: { $lte: new Date('2026-11-20T12:00:00.000Z') },
+      },
+      { $set: { status: 'departed' } },
+    );
+    vi.useRealTimers();
+  });
 });

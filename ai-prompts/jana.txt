@@ -580,6 +580,45 @@ Confirmed package 5 is owned by Aya; left its files unchanged and retained the o
 Date: 2026-11-20
 Student: Jana
 Tool: Copilot SDK in VS Code
+Related Requirement: FLT-30
+
+Prompt:
+# FLT-30: Flight status job #40
+
+Open
+
+## Description
+[![@Host173](https://avatars.githubusercontent.com/u/191864423?u=c0922e57ce09c1690245e1808a603333f742e2fe&v=4&size=48)](https://github.com/Host173)
+[Host173](https://github.com/Host173)
+opened [1w ago](https://github.com/Host173/Man2o4ah/issues/40#issue-6313317041)
+
+Owner
+
+**Expected output**
+Scheduled flights become departed once departure passes; only scheduled flights are searchable, editable or bookable.
+
+**Requirements:** FLT-30
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit (boundary); integration (job idempotent)
+**TDD required:** Yes
+
+**Branch:** `feature/FLT-30-flight-status-job`
+**PR title:** `FLT-30: Flight status job`
+
+**Depends on:** [#35](https://github.com/Host173/Man2o4ah/issues/35) (FLT-03)
+**Blocks:** —
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket make sure to test all cases and implement according to fakes and contracts
+
+How the output was used:
+Added the FLT-30 scheduled departure job, boundary and idempotency tests, and the matching fake contract; verified the backend with 2453 passing tests and committed the implementation in c778f06.
+================================================
+================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
 Related Requirement: FLT-11
 
 Prompt:

@@ -1616,3 +1616,15 @@ fix the problems of the self review first
 How the output was used:
 Checked issue #56 (it includes FLT-06 bookings side and FLT-05); wrote the failing tests first (flight-provider-cancellation.service.spec.ts, flight-reschedule-sync.service.spec.ts, shared test/support/flight-booking-fixtures.ts), then FlightProviderCancellationService and FlightRescheduleSyncService (@OnEvent handlers, idempotent, one transaction per booking); npm run verify passed; commits test(flight-bookings): add the provider cancellation and reschedule tests (FLT-26), feat(flight-bookings): cancel and expire bookings when a flight is cancelled (FLT-26), feat(flight-bookings): sync booking times when a flight is rescheduled (FLT-26), chore(ai): log the self-review fixes prompt (FLT-26); not pushed, PR text not yet updated
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+you decide on the open question, make the the new fixes a comment instead and then commit and push
+
+How the output was used:
+Decided the refund-after-commit gap stays consistent with HTL-21 and is recorded as code comments (flight-cancellation.service.ts, flight-provider-cancellation.service.ts) instead of a fix; committed docs(flight-bookings): note the refund gap after a committed cancellation (FLT-26) and chore(ai): log the refund gap decision prompt (FLT-26); pushed the branch and posted a comment on PR #213 describing the new commits
+================================================

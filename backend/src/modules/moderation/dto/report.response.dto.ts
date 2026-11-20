@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { Paginated } from '../../../common/pagination/paginated.js';
 import type { ReportView } from '../moderation.types.js';
 import { ReportStatus, ReportTargetType } from '../schemas/report.schema.js';
 
@@ -51,4 +52,22 @@ export class ReportResponseDto implements ReportView {
     example: '2026-11-18T09:00:00.000Z',
   })
   updatedAt!: Date;
+}
+
+/** Swagger response model for paginated moderation reports (`GEN-10`). */
+export class PaginatedReportsResponseDto implements Paginated<ReportResponseDto> {
+  @ApiProperty({ type: [ReportResponseDto] })
+  items!: ReportResponseDto[];
+
+  @ApiProperty({ example: 1 })
+  page!: number;
+
+  @ApiProperty({ example: 10 })
+  limit!: number;
+
+  @ApiProperty({ example: 1 })
+  total!: number;
+
+  @ApiProperty({ example: 1 })
+  totalPages!: number;
 }

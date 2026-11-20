@@ -1327,6 +1327,7 @@ approved
 How the output was used:
 Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
 ================================================
+
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
@@ -1341,6 +1342,13 @@ Added test-first password-session fixes, cookie revocation and Swagger evidence 
 Date: 2026-11-20
 Student: Pierre
 Tool: Copilot SDK in VS Code
+Related Requirement: GEN-10
+
+Prompt:
+fix and push
+
+How the output was used:
+Resolved PR #176's develop conflicts in an isolated worktree, preserving admin account/moderation routes and both test suites; integrated develop through 2f38c8e, reused durable blog image cleanup for admin deletion and added an integration regression; final format, lint and typecheck passed, full verify had two unrelated PDF timeouts, bounded test:cov passed all 2113 tests across 133 files and build passed; production audit was blocked by proxy rate limiting and an alternate TLS failure; prepared the validated merge for push without rebasing or force-pushing.
 Related Requirement: ACC-08
 
 Prompt:
@@ -1348,4 +1356,48 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first activity CRUD, validation, supported-currency costs, atomic writes and fake/API tests for the findings on PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+merge-and-publish
+
+How the output was used:
+Preserved the incoming PR history and prompt entry while reconciling activity conflicts with the tested fixes.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+follow-up-pr
+
+How the output was used:
+Authorized a follow-up fix PR targeting develop and a comment on already-merged PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+true
+
+How the output was used:
+Authorized recording this session's actual request and publication approvals in Pierre's append-only prompt log.
 ================================================

@@ -526,3 +526,14 @@ Continue the ITN-20 self-review. A strict read of the whole diff found one real 
 How the output was used:
 Added ItinerariesService.searchPublic and a shared findPublicPage filter used with listPublicByAuthor, declared GET /api/itineraries/public/search before /:id with @Public() and PaginatedPublicItinerariesResponseDto, mirrored it in FakeItinerariesService, and added service, fake and API tests. Ran 7 throwaway probes (boundaries, invalid visibility, 401/404, malformed reports, concurrent toggles, fake parity, anonymous public search) - all passed after the fix. Deleted the probes and re-ran the full verification suite.
 ================================================
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-20
+
+Prompt:
+Continue the ITN-20 self-review. The PR was opened but GitHub reported no checks at all; the cause was that the PR had merge conflicts (GitHub skips pull_request workflows for conflicting PRs). Merge origin/develop into feature/ITN-20-visibility-public-view (never rebase), resolve every conflict preserving both sides (blog.service.spec.ts Report + AppEvents mocks, itineraries.module.ts ActivitiesController + ItineraryReportableContent, itineraries.api.spec.ts ITN-20 + ITN-10 test blocks), keep the prompt log append-only, fix any cross-module test fallout from develop's GEN-10 moderation suite, re-run npm run format and npm run verify until green, push, update PR #207, and confirm CI is green.
+
+How the output was used:
+Merged develop (33 commits) and resolved the three conflicts preserving both sides; removed a duplicate Report import, kept the AppEvents mock, combined the module's controllers/providers, and kept both ITN-20 and ITN-10 API test blocks. Overrode the real itinerary report provider in admin.api.spec.ts's GEN-10 suite so its own in-memory fake can register. Re-ran npm run format and npm run verify: 2637 tests passed, 98.36% lines, build passed.
+================================================

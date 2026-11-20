@@ -234,8 +234,6 @@ describe('FlightsService', () => {
 
   // Each method fails loudly until its ticket implements it, so nobody mistakes a stub for the real thing.
   it.each([
-    ['getFlightsForBooking', () => service.getFlightsForBooking(['f1'])],
-    ['checkBookable', () => service.checkBookable('f1', 'c1', 1)],
     ['search (one way)', () => service.search(search)],
     [
       'search (round trip)',

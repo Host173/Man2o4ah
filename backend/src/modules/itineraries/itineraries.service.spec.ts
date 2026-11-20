@@ -88,6 +88,66 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
     );
   }
 
+  /**
+   * Seeds a trip with one activity (with an image), one budget entry and one
+   * transport cost per day, straight into the model. Returns the stored IDs so
+   * a test can check the cascade and the order.
+   */
+  async function seedTrip(
+    itineraryId: string,
+    cityIds = ['cairo', 'dubai', 'cairo'],
+  ): Promise<{ dayIds: string[]; costIds: string[] }> {
+    const days = cityIds.map((cityId, index) => ({
+      _id: new Types.ObjectId(),
+      cityId,
+      activities: [
+        {
+          _id: new Types.ObjectId(),
+          name: `${cityId} ${index + 1}`,
+          description: 'Visit',
+          images: [
+            { _id: new Types.ObjectId(), key: `${cityId}-${index + 1}.jpg` },
+          ],
+        },
+      ],
+      budgetEntries: [
+        {
+          _id: new Types.ObjectId(),
+          category: 'food',
+          amountMinor: 1000,
+          currency: 'EGP',
+          note: 'Lunch',
+        },
+      ],
+    }));
+    const transportCosts = days.map((day, index) => ({
+      _id: new Types.ObjectId(),
+      dayId: day._id,
+      mode: 'train',
+      fromCityId: cityIds[index],
+      toCityId: cityIds[(index + 1) % cityIds.length],
+      amountMinor: 1000 * (index + 1),
+      currency: 'EGP',
+    }));
+
+    await itineraryModel.collection.updateOne(
+      { _id: new Types.ObjectId(itineraryId) },
+      {
+        $set: {
+          days,
+          dayCount: days.length,
+          cityIds: [...new Set(cityIds)].sort(),
+          transportCosts,
+        },
+      },
+    );
+
+    return {
+      dayIds: days.map((day) => day._id.toHexString()),
+      costIds: transportCosts.map((cost) => cost._id.toHexString()),
+    };
+  }
+
   describe('create', () => {
     it('creates a private itinerary owned by the user with trimmed title and DateOnly start date', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
@@ -660,6 +720,44 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       expect(errorDetails(error).details[0].field).toBe('notes');
     });
 
+    it('stores $-prefixed notes verbatim as literal values', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const withMoney = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: '$100 for dinner' }),
+        owner.id,
+      );
+      expect(withMoney.notes).toBe('$100 for dinner');
+
+      const withRoot = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'dubai', notes: '$$ROOT' }),
+        owner.id,
+      );
+      expect(withRoot.notes).toBe('$$ROOT');
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
+      expect(stored?.days[1].notes).toBe('$$ROOT');
+    });
+
+    it('omits the notes key entirely when a day is added without notes', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+
+      expect(day).not.toHaveProperty('notes');
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0]).not.toHaveProperty('notes');
+    });
+
     it('returns 404 for another user’s itinerary and for an unknown one', async () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const intruder = await loginAs(t.connection, UserRole.USER);
@@ -763,6 +861,27 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         owner.id,
       );
       expect(untouched).toEqual(notesOnly);
+    });
+
+    it('updates $-prefixed notes verbatim through the day edit', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const day = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'cairo', notes: 'original' }),
+        owner.id,
+      );
+
+      const updated = await itineraries.updateDay(
+        created._id,
+        day._id,
+        { notes: '$100 for dinner' },
+        owner.id,
+      );
+      expect(updated).toMatchObject({ notes: '$100 for dinner' });
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days[0].notes).toBe('$100 for dinner');
     });
 
     it('rejects an unknown city and over-long notes with 400', async () => {
@@ -917,6 +1036,357 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
           checkOut: '2027-04-12',
         }),
       ]);
+    });
+  });
+
+  describe('deleteDay (ITN-07)', () => {
+    it('deletes the day with its activities, budgets and transport costs, then renumbers, re-dates and regroups the rest', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+
+      await itineraries.deleteDay(created._id, middle, owner.id);
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days.map((day) => day._id)).toEqual([first, last]);
+      expect(detail.days.map((day) => day.dayNumber)).toEqual([1, 2]);
+      expect(detail.days.map((day) => day.date)).toEqual([
+        '2027-04-01',
+        '2027-04-02',
+      ]);
+      expect(detail.days.map((day) => day.cityId)).toEqual(['cairo', 'cairo']);
+      expect(
+        detail.days.map((day) => day.activities.map((a) => a.name)),
+      ).toEqual([['cairo 1'], ['cairo 3']]);
+      expect(detail.days.flatMap((day) => day.budgetEntries)).toHaveLength(2);
+      expect(detail.transportCosts.map((cost) => cost.dayId)).toEqual([
+        first,
+        last,
+      ]);
+      expect(detail.dayCount).toBe(2);
+      expect(detail.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDay: 1,
+          toDay: 2,
+          dayCount: 2,
+          checkIn: '2027-04-01',
+          checkOut: '2027-04-03',
+        },
+      ]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(2);
+      expect(stored?.days.flatMap((day) => day.activities)).toHaveLength(2);
+      expect(stored?.days.flatMap((day) => day.budgetEntries)).toHaveLength(2);
+      expect(stored?.transportCosts).toHaveLength(2);
+      expect(stored?.dayCount).toBe(2);
+      expect(stored?.cityIds).toEqual(['cairo']);
+    });
+
+    it('can delete the only day, leaving an empty itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id, ['dubai']);
+
+      await itineraries.deleteDay(created._id, seeded.dayIds[0], owner.id);
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toEqual([]);
+      expect(detail.cityGroups).toEqual([]);
+      expect(detail.transportCosts).toEqual([]);
+      expect(detail.dayCount).toBe(0);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toEqual([]);
+      expect(stored?.cityIds).toEqual([]);
+    });
+
+    it('returns 404 for a foreign itinerary, an unknown day and a day of another itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const intruder = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const other = await itineraries.create(
+        createDto({ title: 'Another trip' }),
+        owner.id,
+      );
+      const seeded = await seedTrip(created._id);
+      const otherSeeded = await seedTrip(other._id, ['dubai']);
+
+      for (const [itineraryId, dayId, userId] of [
+        [created._id, seeded.dayIds[0], intruder.id],
+        [created._id, new Types.ObjectId().toHexString(), owner.id],
+        [created._id, otherSeeded.dayIds[0], owner.id],
+      ] as const) {
+        await expect(
+          itineraries.deleteDay(itineraryId, dayId, userId),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      }
+
+      expect(
+        (await itineraries.getById(created._id, owner.id)).days,
+      ).toHaveLength(3);
+    });
+
+    it('rejects malformed IDs with 400 VALIDATION_FAILED', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+
+      for (const [itineraryId, dayId] of [
+        ['not-an-id', seeded.dayIds[0]],
+        [created._id, 'not-an-id'],
+      ] as const) {
+        await expect(
+          itineraries.deleteDay(itineraryId, dayId, owner.id),
+        ).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    });
+  });
+
+  describe('reorderDays (ITN-08)', () => {
+    it('moves the days into the requested order and recalculates numbers, dates, groups, cityIds and totals', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+
+      const reordered = await itineraries.reorderDays(
+        created._id,
+        { dayIds: [last, first, middle] },
+        owner.id,
+      );
+
+      expect(reordered.days.map((day) => day._id)).toEqual([
+        last,
+        first,
+        middle,
+      ]);
+      expect(reordered.days.map((day) => day.dayNumber)).toEqual([1, 2, 3]);
+      expect(reordered.days.map((day) => day.date)).toEqual([
+        '2027-04-01',
+        '2027-04-02',
+        '2027-04-03',
+      ]);
+      expect(reordered.days.map((day) => day.cityId)).toEqual([
+        'cairo',
+        'cairo',
+        'dubai',
+      ]);
+      expect(
+        reordered.days.map((day) => day.activities.map((a) => a.name)),
+      ).toEqual([['cairo 3'], ['cairo 1'], ['dubai 2']]);
+      expect(reordered.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDay: 1,
+          toDay: 2,
+          dayCount: 2,
+          checkIn: '2027-04-01',
+          checkOut: '2027-04-03',
+        },
+        {
+          cityId: 'dubai',
+          fromDay: 3,
+          toDay: 3,
+          dayCount: 1,
+          checkIn: '2027-04-03',
+          checkOut: '2027-04-04',
+        },
+      ]);
+      expect(reordered.transportCosts.map((cost) => cost.dayId)).toEqual([
+        first,
+        middle,
+        last,
+      ]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.dayCount).toBe(3);
+      expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
+      expect(stored?.days.map((day) => day._id.toHexString())).toEqual([
+        last,
+        first,
+        middle,
+      ]);
+      expect(
+        stored?.transportCosts.map((cost) =>
+          (cost as unknown as { _id: Types.ObjectId })._id.toHexString(),
+        ),
+      ).toEqual(seeded.costIds);
+    });
+
+    it('treats the current order as a no-op and keeps updatedAt', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const before = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
+
+      const result = await itineraries.reorderDays(
+        created._id,
+        { dayIds: seeded.dayIds },
+        owner.id,
+      );
+
+      const after = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
+      expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
+      expect(result.days.map((day) => day._id)).toEqual(seeded.dayIds);
+    });
+
+    it('accepts an empty order for an itinerary without days', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      const detail = await itineraries.reorderDays(
+        created._id,
+        { dayIds: [] },
+        owner.id,
+      );
+
+      expect(detail.days).toEqual([]);
+      expect(detail.cityGroups).toEqual([]);
+      expect(detail.updatedAt.getTime()).toBe(created.updatedAt.getTime());
+    });
+
+    it('rejects anything that is not a permutation of the current day IDs with 400 on dayIds', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+      const unknown = new Types.ObjectId().toHexString();
+
+      const invalid = [
+        undefined,
+        'not-a-list',
+        [],
+        [first, middle],
+        [first, middle, last, unknown],
+        [first, middle, middle],
+        [first, middle, unknown],
+        [first, middle, 42],
+        [first, middle, 'not-an-id'],
+      ];
+
+      for (const dayIds of invalid) {
+        const error = await itineraries
+          .reorderDays(created._id, { dayIds } as never, owner.id)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(errorDetails(error).code).toBe(ErrorCode.ValidationFailed);
+        expect(errorDetails(error).details[0].field).toBe('dayIds');
+      }
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days.map((day) => day._id.toHexString())).toEqual(
+        seeded.dayIds,
+      );
+    });
+
+    it('returns 404 for a foreign or unknown itinerary', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const intruder = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+
+      for (const [itineraryId, userId] of [
+        [created._id, intruder.id],
+        [new Types.ObjectId().toHexString(), owner.id],
+      ] as const) {
+        await expect(
+          itineraries.reorderDays(
+            itineraryId,
+            { dayIds: seeded.dayIds },
+            userId,
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      }
+    });
+
+    it('rejects a malformed itinerary ID with 400 VALIDATION_FAILED', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+
+      await expect(
+        itineraries.reorderDays('not-an-id', { dayIds: [] }, owner.id),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('concurrent day writes (ITN-07/08 review)', () => {
+    it('keeps an overlapping add when a day is deleted', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+
+      const results = await Promise.allSettled([
+        itineraries.deleteDay(created._id, seeded.dayIds[1], owner.id),
+        itineraries.addDay(
+          created._id,
+          dayDto({ cityId: 'new_york' }),
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(3);
+      expect(detail.days.map((day) => day._id)).not.toContain(seeded.dayIds[1]);
+      expect(detail.days.map((day) => day.cityId)).toEqual(
+        expect.arrayContaining(['cairo', 'new_york']),
+      );
+      expect(detail.dayCount).toBe(3);
+      expect(detail.transportCosts.map((cost) => cost.dayId)).toEqual([
+        seeded.dayIds[0],
+        seeded.dayIds[2],
+      ]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(3);
+      expect(stored?.transportCosts).toHaveLength(2);
+    });
+
+    it('keeps an overlapping add when the days are reordered', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+
+      const results = await Promise.allSettled([
+        itineraries.reorderDays(
+          created._id,
+          { dayIds: [last, first, middle] },
+          owner.id,
+        ),
+        itineraries.addDay(
+          created._id,
+          dayDto({ cityId: 'new_york' }),
+          owner.id,
+        ),
+      ]);
+
+      for (const result of results) expect(result.status).toBe('fulfilled');
+
+      const detail = await itineraries.getById(created._id, owner.id);
+      expect(detail.days).toHaveLength(4);
+      expect(detail.days.map((day) => day._id)).toEqual(
+        expect.arrayContaining([...seeded.dayIds]),
+      );
+      expect(detail.dayCount).toBe(4);
+      expect(detail.days.map((day) => day.dayNumber)).toEqual([1, 2, 3, 4]);
+
+      const stored = await itineraryModel.findById(created._id).lean().exec();
+      expect(stored?.days).toHaveLength(4);
+      expect(stored?.dayCount).toBe(4);
     });
   });
 

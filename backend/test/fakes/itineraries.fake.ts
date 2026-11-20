@@ -1,21 +1,32 @@
-import { NotFoundException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { AddActivityDto } from '../../src/modules/itineraries/dto/add-activity.dto.js';
+import type { UpdateActivityDto } from '../../src/modules/itineraries/dto/update-activity.dto.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { HH_MM } from '../../src/common/database/validators.js';
 import {
   cityGroups,
   dayDate,
   dayNumber,
+  orderDaysById,
+  withoutTransportCostsOf,
 } from '../../src/modules/itineraries/days.js';
+import {
+  MAX_DAYS,
+  MAX_NOTES_LENGTH,
+} from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { CreateDayDto } from '../../src/modules/itineraries/dto/create-day.dto.js';
 import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/create-itinerary.dto.js';
+import type { ReorderDaysDto } from '../../src/modules/itineraries/dto/reorder-days.dto.js';
 import type { UpdateDayDto } from '../../src/modules/itineraries/dto/update-day.dto.js';
 import type { UpdateItineraryDto } from '../../src/modules/itineraries/dto/update-itinerary.dto.js';
 import type { ItinerariesService } from '../../src/modules/itineraries/itineraries.service.js';
 import type {
+  ActivityView,
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
@@ -24,6 +35,34 @@ import type {
 } from '../../src/modules/itineraries/itineraries.types.js';
 import { ItineraryVisibility } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { PublicApi } from './public-api.js';
+
+function validateNotes(notes: string): string {
+  if (typeof notes !== 'string') {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'notes',
+          message: 'notes must be a string',
+        },
+      ],
+    });
+  }
+  if (Array.from(notes).length > MAX_NOTES_LENGTH) {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'notes',
+          message: `notes must have at most ${MAX_NOTES_LENGTH} characters`,
+        },
+      ],
+    });
+  }
+  return notes;
+}
 
 /**
  * A working `ItinerariesService` for other modules' tests: seeded public
@@ -41,9 +80,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
   private readonly owned = new Map<string, ItineraryDetailView>();
   private nextId = 1;
 
-  constructor(itineraries: PublicItinerarySummary[] = []) {
+  private readonly referenceData: FakeReferenceDataService;
+
+  constructor(
+    itineraries: PublicItinerarySummary[] = [],
+    referenceData: FakeReferenceDataService = new FakeReferenceDataService(),
+  ) {
     // A deep copy, so a test that changes its fixtures can't affect another test.
     this.itineraries = structuredClone(itineraries);
+    this.referenceData = referenceData;
   }
 
   listPublicByAuthor(
@@ -145,13 +190,34 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<ItineraryDayView> {
     const itinerary = this.findOwned(itineraryId, userId);
+    // City existence/reference validation (GEN-12 / ITN-05)
+    if (typeof dto.cityId !== 'string') {
+      throw this.invalidField('cityId', 'cityId must be a string');
+    }
+    const cityId = dto.cityId.trim();
+    if (cityId.length === 0) {
+      throw this.invalidField('cityId', 'cityId must not be blank');
+    }
+    const knownCities = await this.referenceData.getCities([cityId]);
+    if (!knownCities.has(cityId)) {
+      throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+    }
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    // 60-day cap (ITN-05), after the city and notes checks like the real service.
+    if (itinerary.days.length >= MAX_DAYS) {
+      throw this.invalidField(
+        'days',
+        `an itinerary has at most ${MAX_DAYS} days`,
+      );
+    }
     const index = itinerary.days.length;
     const day: ItineraryDayView = {
       _id: (this.nextId++).toString(16).padStart(24, '0'),
       dayNumber: dayNumber(index),
       date: dayDate(toDateOnly(itinerary.startDate), index),
-      cityId: dto.cityId.trim(),
-      ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+      cityId,
+      ...(notes !== undefined ? { notes } : {}),
       activities: [],
       budgetEntries: [],
     };
@@ -172,25 +238,277 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     if (index === -1) {
       throw new NotFoundException({
         code: ErrorCode.NotFound,
-        message: 'Itinerary day not found',
+        message: 'Itinerary not found',
       });
     }
 
     const day = itinerary.days[index];
-    if (dto.cityId !== undefined) day.cityId = dto.cityId.trim();
-    if (dto.notes !== undefined) day.notes = dto.notes;
+    // An empty body returns the day untouched (like the real service).
+    if (dto.cityId === undefined && dto.notes === undefined) {
+      return structuredClone(this.toDetail(itinerary).days[index]);
+    }
+    // City existence/reference validation (GEN-12 / ITN-05)
+    let nextCityId: string | undefined;
+    if (dto.cityId !== undefined) {
+      if (typeof dto.cityId !== 'string') {
+        throw this.invalidField('cityId', 'cityId must be a string');
+      }
+      const cityId = dto.cityId.trim();
+      if (cityId.length === 0) {
+        throw this.invalidField('cityId', 'cityId must not be blank');
+      }
+      const knownCities = await this.referenceData.getCities([cityId]);
+      if (!knownCities.has(cityId)) {
+        throw this.invalidField('cityId', `Unknown city: ${cityId}`);
+      }
+      nextCityId = cityId;
+    }
+    // Validate notes before mutating, so a failure leaves the day unchanged.
+    const notes =
+      dto.notes !== undefined ? validateNotes(dto.notes) : undefined;
+    if (nextCityId !== undefined) day.cityId = nextCityId;
+    if (dto.notes !== undefined) day.notes = notes;
     itinerary.updatedAt = new Date();
     return structuredClone(this.toDetail(itinerary).days[index]);
   }
 
-  /** ITN-10: stub for adding an activity to a day. */
+  async deleteDay(
+    itineraryId: string,
+    dayId: string,
+    userId: string,
+  ): Promise<void> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === dayId);
+    if (index === -1) {
+      throw new NotFoundException({
+        code: ErrorCode.NotFound,
+        message: 'Itinerary day not found',
+      });
+    }
+    // The day's activities and budget entries are embedded in it; transport
+    // costs live in a separate array and must be filtered (ITN-07).
+    itinerary.days.splice(index, 1);
+    itinerary.transportCosts = withoutTransportCostsOf(
+      itinerary.transportCosts,
+      dayId,
+    );
+    itinerary.dayCount = itinerary.days.length;
+    itinerary.updatedAt = new Date();
+  }
+
+  async reorderDays(
+    itineraryId: string,
+    dto: ReorderDaysDto,
+    userId: string,
+  ): Promise<ItineraryDetailView> {
+    const itinerary = this.findOwned(itineraryId, userId);
+    const days = itinerary.days;
+    // Mirror the service's permutation check: the fake must fail with the
+    // same 400 VALIDATION_FAILED shape, never a TypeError or a partial write.
+    const value = dto?.dayIds;
+    if (!Array.isArray(value)) {
+      throw this.invalidField('dayIds', 'dayIds must be an array');
+    }
+    if (value.some((id) => typeof id !== 'string')) {
+      throw this.invalidField('dayIds', 'dayIds must contain day IDs');
+    }
+    const ids = (value as string[]).map((id) => id.toLowerCase());
+    if (ids.length !== days.length) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
+    }
+    const known = new Set(days.map((day) => day._id.toLowerCase()));
+    if (ids.some((id) => !/^[0-9a-f]{24}$/.test(id) || !known.has(id))) {
+      throw this.invalidField('dayIds', 'dayIds must be current day IDs');
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
+    }
+    const ordered = orderDaysById(days, ids, (day) => day._id.toLowerCase());
+    const unchanged = itinerary.days.every(
+      (day, index) => day._id === ordered[index]._id,
+    );
+    if (!unchanged) {
+      itinerary.days = ordered;
+      itinerary.dayCount = ordered.length;
+      itinerary.updatedAt = new Date();
+    }
+    return this.toDetail(itinerary);
+  }
+
+  /** ITN-10: adds an activity to a day, with the real service's owner scoping. */
   async addActivity(
     itineraryId: string,
     dayId: string,
     dto: AddActivityDto,
     userId: string,
   ): Promise<ItineraryDayView> {
-    throw new NotImplementedException('addActivity: implemented in ITN-12/GEN-08');
+    const itinerary = this.findOwned(itineraryId, userId);
+    const index = itinerary.days.findIndex((day) => day._id === dayId);
+    if (index === -1) throw this.activityNotFound();
+
+    const changes = await this.activityChanges(dto, false);
+    const day = itinerary.days[index];
+    const activity: ActivityView = {
+      _id: (this.nextId++).toString(16).padStart(24, '0'),
+      name: changes.name as string,
+      images: [],
+    };
+    if (changes.description !== undefined) {
+      activity.description = changes.description as string;
+    }
+    if (changes.time !== undefined) activity.time = changes.time as string;
+    if (changes.cost !== undefined) {
+      activity.cost = changes.cost as ActivityView['cost'];
+    }
+    day.activities.push(activity);
+    itinerary.updatedAt = new Date();
+    return structuredClone(this.toDetail(itinerary).days[index]);
+  }
+
+  /** ITN-10: edits one activity, addressed by its own ID (endpoints.md). */
+  async updateActivity(
+    activityId: string,
+    dto: UpdateActivityDto,
+    userId: string,
+  ): Promise<ItineraryDayView> {
+    const found = this.findActivity(activityId, userId);
+    const changes = await this.activityChanges(dto, true);
+    if (Object.keys(changes).length === 0) {
+      return structuredClone(
+        this.toDetail(found.itinerary).days[found.dayIndex],
+      );
+    }
+    const activity = found.itinerary.days[found.dayIndex].activities[
+      found.activityIndex
+    ];
+    Object.assign(activity, changes);
+    found.itinerary.updatedAt = new Date();
+    return structuredClone(
+      this.toDetail(found.itinerary).days[found.dayIndex],
+    );
+  }
+
+  /** ITN-10: deletes one activity, addressed by its own ID (endpoints.md). */
+  async deleteActivity(
+    activityId: string,
+    userId: string,
+  ): Promise<void> {
+    const found = this.findActivity(activityId, userId);
+    found.itinerary.days[found.dayIndex].activities.splice(
+      found.activityIndex,
+      1,
+    );
+    found.itinerary.updatedAt = new Date();
+  }
+
+  /**
+   * Validates the ITN-10 fields in the same order as the real service, so a
+   * test driven through this fake sees the same 400 VALIDATION_FAILED errors.
+   */
+  private async activityChanges(
+    dto: AddActivityDto | UpdateActivityDto,
+    partial: boolean,
+  ): Promise<Record<string, unknown>> {
+    const changes: Record<string, unknown> = {};
+    if (!partial || dto.name !== undefined) {
+      if (typeof dto.name !== 'string') {
+        throw this.invalidField('name', 'name must be a string');
+      }
+      const name = dto.name.trim();
+      const length = Array.from(name).length;
+      if (length < 1 || length > 100) {
+        throw this.invalidField(
+          'name',
+          'name must be between 1 and 100 characters',
+        );
+      }
+      changes.name = name;
+    }
+    if (dto.description !== undefined) {
+      if (typeof dto.description !== 'string') {
+        throw this.invalidField('description', 'description must be a string');
+      }
+      if (Array.from(dto.description).length > 1000) {
+        throw this.invalidField(
+          'description',
+          'description must have at most 1000 characters',
+        );
+      }
+      changes.description = dto.description;
+    }
+    if (dto.time !== undefined) {
+      if (typeof dto.time !== 'string' || !HH_MM.test(dto.time)) {
+        throw this.invalidField('time', 'time must be HH:mm');
+      }
+      changes.time = dto.time;
+    }
+    if (dto.cost !== undefined) {
+      const cost = dto.cost;
+      if (
+        typeof cost !== 'object' ||
+        cost === null ||
+        Array.isArray(cost) ||
+        !Number.isInteger(cost.amountMinor) ||
+        cost.amountMinor < 0
+      ) {
+        throw this.invalidField(
+          'cost.amountMinor',
+          'cost.amountMinor must be a non-negative integer',
+        );
+      }
+      if (typeof cost.currency !== 'string' || cost.currency.trim() === '') {
+        throw this.invalidField('cost.currency', 'cost.currency must be a code');
+      }
+      const currency = cost.currency.trim();
+      if (!(await this.referenceData.getCurrency(currency))) {
+        throw this.invalidField(
+          'cost.currency',
+          `Unknown currency: ${currency}`,
+        );
+      }
+      changes.cost = { amountMinor: cost.amountMinor, currency };
+    }
+    return changes;
+  }
+
+  private findActivity(
+    activityId: string,
+    userId: string,
+  ): {
+    itinerary: ItineraryDetailView;
+    dayIndex: number;
+    activityIndex: number;
+  } {
+    for (const itinerary of this.owned.values()) {
+      if (itinerary.ownerId !== userId) continue;
+      for (let dayIndex = 0; dayIndex < itinerary.days.length; dayIndex++) {
+        const activityIndex = itinerary.days[dayIndex].activities.findIndex(
+          (activity) => activity._id === activityId,
+        );
+        if (activityIndex !== -1) {
+          return { itinerary, dayIndex, activityIndex };
+        }
+      }
+    }
+    throw this.activityNotFound();
+  }
+
+  private activityNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Itinerary activity not found',
+    });
+  }
+
+  invalidField(field: string, message: string): never {
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [{ field, message }],
+    });
   }
 
   private findOwned(itineraryId: string, userId: string): ItineraryDetailView {

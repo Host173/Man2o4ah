@@ -38,7 +38,10 @@ describe('Reference data HTTP API (GEN-12, FLT-02, GEN-05)', () => {
       currency: 'EGP',
     });
     const names = all.body.items.map((c: { name: string }) => c.name);
-    expect(names).toEqual([...names].sort());
+    // MongoDB sorts strings by code unit, like this compare.
+    expect(names).toEqual(
+      [...names].sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
 
     const united = await t.http().get('/api/countries?q=UNITED').expect(200);
     expect(ids(united.body)).toEqual(['AE', 'GB', 'US']);
@@ -160,6 +163,11 @@ describe('Reference data HTTP API (GEN-12, FLT-02, GEN-05)', () => {
         .get(`/api/countries?q=${encodeURIComponent(q)}`)
         .expect(200);
       expect(res.body.total).toBe(0);
+    }
+    // MongoDB rejects a raw NUL in a regex; it must be escaped, not crash (500).
+    for (const path of ['countries', 'cities', 'airports', 'attractions']) {
+      const nul = await t.http().get(`/api/${path}?q=a%00b`).expect(200);
+      expect(nul.body.total).toBe(0);
     }
     const blank = await t.http().get('/api/countries?q=%20%20').expect(200);
     expect(blank.body.total).toBe(8); // blank q = no filter

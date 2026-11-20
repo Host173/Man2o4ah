@@ -10480,3 +10480,35 @@ make sure that im up to date then run the self review prompt
 How the output was used:
 Merged develop (62ca8d2, 9288d99, no conflicts); self-review passed (npm ci + npm run verify: 3127 tests, 98.7% on accounts.service.ts; 8/8 probes); not pushed
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+please resolve these and then run the self review prompt and return the report 
+
+[Attached: pasted self-review report]
+Self-review · ACC-16
+Checks: npm run verify on the merged branch: format, lint, typecheck and build pass; 3153 tests passed, 9 failed. The 9 failures are in flight-e-ticket.api.spec.ts and itinerary-pdf.api.spec.ts, which need Playwright chromium (not installed in the review sandbox, "Executable doesn't exist"), so they are environmental and not caused by this PR. The accounts and fakes specs pass (759 tests). The coverage line for accounts.service.ts was not printed because the run failed; the 98.7% in the PR body was not re-checked, please confirm with CI.
+Branch: was 91 commits behind develop. Merged origin/develop with no conflicts in 5d0a3d2.
+Problems: none. Every clause of ACC-07a, ACC-13, ACC-14, ACC-15 and ACC-16 is implemented: the three lookups (including "Deleted user" for deactivated authors), conditional status updates, sessions deleted in the same transaction as the suspend, events emitted after the commit with an eventId, 409 EMAIL_TAKEN, and lockout cleared on reset. keywordRegex is used and nothing outside the accounts module is touched.
+Missing tests: none (the 37 integration cases cover each clause)
+Probes: 0 new (the author's 8 already cover the risky spots)
+Open questions: may an admin suspend another admin or themselves? The author suggests a follow-up that rejects admin targets with 409.
+
+How the output was used:
+Merged the remote branch's 5d0a3d2 (develop merge) into the local branch (055bff5, no conflicts); started the self-review rerun
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+why is this taking so long please fix it so that the checks dont take this long
+
+How the output was used:
+Answer only, no files changed (explained the check duration; no test config changed)
+================================================

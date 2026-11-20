@@ -266,7 +266,9 @@ export class AccountsService {
   /**
    * ACC-07a: stores a salted bcrypt hash of the temporary password, sets
    * `mustChangePassword` and deletes all of the account's sessions, in one
-   * transaction. An unknown or malformed ID throws 404 NOT_FOUND.
+   * transaction, and clears any running lockout (ACC-05) so the temporary
+   * password works at the next login. An unknown or malformed ID throws 404
+   * NOT_FOUND; an admin account throws 409 CONFLICT.
    */
   async resetPassword(
     userId: string,
@@ -282,12 +284,24 @@ export class AccountsService {
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
+        // Admin accounts are out of scope (ACC-07a names users and moderators).
+        // A running lockout is cleared so the temporary password works at the
+        // next login, as ACC-07a requires.
         const result = await this.userModel.updateOne(
-          { _id: userId },
-          { $set: { passwordHash, mustChangePassword: true } },
+          { _id: userId, role: { $ne: UserRole.ADMIN } },
+          {
+            $set: {
+              passwordHash,
+              mustChangePassword: true,
+              failedLoginAttempts: 0,
+              lockedUntil: null,
+            },
+          },
           { session },
         );
-        if (result.matchedCount === 0) throw accountNotFound();
+        if (result.matchedCount === 0) {
+          await this.throwNoMatchError(userId, undefined, session);
+        }
         await this.sessionModel.deleteMany({ userId }, { session });
       });
     } finally {
@@ -299,8 +313,10 @@ export class AccountsService {
    * ACC-15, ACC-16: `active` → `suspended`, deletes all of the account's
    * sessions in the same transaction, then emits `account.suspended` after the
    * commit. Bookings and content are untouched. Unknown or malformed ID → 404
-   * NOT_FOUND; any other status → 409 INVALID_STATUS_TRANSITION (nothing
-   * changes, nothing is emitted).
+   * NOT_FOUND; an admin account → 409 CONFLICT (ACC-15/16 name moderators and
+   * users only, and an admin could otherwise lock itself out); any other
+   * status → 409 INVALID_STATUS_TRANSITION. Nothing changes or is emitted on
+   * an error.
    */
   async suspend(userId: string): Promise<void> {
     if (!OBJECT_ID_HEX.test(userId)) throw accountNotFound();
@@ -312,12 +328,16 @@ export class AccountsService {
       await session.withTransaction(async () => {
         // Conditional on the old status (GEN-11): only one parallel request wins.
         const result = await this.userModel.updateOne(
-          { _id: userId, status: UserStatus.ACTIVE },
+          {
+            _id: userId,
+            status: UserStatus.ACTIVE,
+            role: { $ne: UserRole.ADMIN },
+          },
           { $set: { status: UserStatus.SUSPENDED } },
           { session },
         );
         if (result.matchedCount === 0) {
-          await this.throwTransitionError(userId, UserStatus.ACTIVE, session);
+          await this.throwNoMatchError(userId, UserStatus.ACTIVE, session);
         }
         await this.sessionModel.deleteMany({ userId }, { session });
       });
@@ -343,24 +363,34 @@ export class AccountsService {
       { $set: { status: UserStatus.ACTIVE } },
     );
     if (result.matchedCount === 0) {
-      await this.throwTransitionError(userId, UserStatus.SUSPENDED);
+      await this.throwNoMatchError(userId, UserStatus.SUSPENDED);
     }
 
     events.emit(Events.AccountReactivated, { userId });
   }
 
   /**
-   * After a conditional status update matched nothing: 404 if the account
-   * doesn't exist, otherwise 409 because it isn't in the `from` status.
+   * After a conditional update matched nothing, says why: 404 NOT_FOUND if the
+   * account doesn't exist; 409 CONFLICT if it is an admin and `from` is not
+   * `suspended` (suspend and reset only target users and moderators); otherwise
+   * 409 INVALID_STATUS_TRANSITION because it isn't in the `from` status.
    */
-  private async throwTransitionError(
+  private async throwNoMatchError(
     userId: string,
-    from: UserStatus,
+    from: UserStatus | undefined,
     session?: ClientSession,
   ): Promise<never> {
-    const query = this.userModel.exists({ _id: userId });
+    const query = this.userModel.findById(userId, { role: 1 }).lean();
     if (session) query.session(session);
-    if (!(await query)) throw accountNotFound();
+    const user = await query;
+    if (!user) throw accountNotFound();
+    if (user.role === UserRole.ADMIN && from !== UserStatus.SUSPENDED) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message:
+          'Admin accounts cannot be suspended or have their password reset',
+      });
+    }
     throw new ConflictException({
       code: ErrorCode.InvalidStatusTransition,
       message: `Only a ${from} account can be changed this way`,

@@ -482,6 +482,37 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       expect(await sessions.countDocuments({ userId: other._id })).toBe(1);
     });
 
+    it('clears a running lockout so the temporary password works at the next login (ACC-07a, ACC-05)', async () => {
+      const user = await createUser({
+        email: 'locked@example.com',
+        failedLoginAttempts: 3,
+        lockedUntil: new Date(Date.now() + 10 * MINUTE),
+      });
+
+      await accounts.resetPassword(user.id, TEMPORARY);
+
+      const stored = await reload(user._id);
+      expect(stored?.lockedUntil ?? null).toBeNull();
+      expect(stored?.failedLoginAttempts).toBe(0);
+      await expect(
+        auth.login({ email: 'locked@example.com', password: TEMPORARY }),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses to reset an admin account with 409 CONFLICT, changing nothing', async () => {
+      const admin = await createUser({ role: UserRole.ADMIN });
+      await createSession(admin._id);
+
+      const err = await errorOf(accounts.resetPassword(admin.id, TEMPORARY));
+
+      expect(err.status).toBe(409);
+      expect(err.body.code).toBe(ErrorCode.Conflict);
+      const stored = await reload(admin._id);
+      expect(stored?.mustChangePassword).toBe(false);
+      expect(await bcrypt.compare(PASSWORD, stored!.passwordHash)).toBe(true);
+      expect(await sessions.countDocuments({ userId: admin._id })).toBe(1);
+    });
+
     it('lets the account log in with the temporary password but not the old one', async () => {
       const user = await createUser({ email: 'reset@example.com' });
       await accounts.resetPassword(user.id, TEMPORARY);
@@ -540,6 +571,30 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
       expect(events.payloadsOf(Events.AccountReactivated)).toEqual([
         { userId: user.id },
       ]);
+    });
+
+    it('refuses to suspend an admin (even itself) with 409 CONFLICT, keeping its sessions', async () => {
+      const admin = await createUser({ role: UserRole.ADMIN });
+      await createSession(admin._id);
+
+      const err = await errorOf(accounts.suspend(admin.id));
+
+      expect(err.status).toBe(409);
+      expect(err.body.code).toBe(ErrorCode.Conflict);
+      expect((await reload(admin._id))?.status).toBe(UserStatus.ACTIVE);
+      expect(await sessions.countDocuments({ userId: admin._id })).toBe(1);
+      expect(events.emitted).toEqual([]);
+    });
+
+    it('still reactivates a suspended admin, so one suspended directly in the database can be recovered', async () => {
+      const admin = await createUser({
+        role: UserRole.ADMIN,
+        status: UserStatus.SUSPENDED,
+      });
+
+      await accounts.reactivate(admin.id);
+
+      expect((await reload(admin._id))?.status).toBe(UserStatus.ACTIVE);
     });
 
     it('suspends a moderator the same way (ACC-15)', async () => {

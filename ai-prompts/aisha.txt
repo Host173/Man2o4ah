@@ -10645,3 +10645,15 @@ Do not push yet—we need a fully passing `npm run verify` run with a generated 
 How the output was used:
 Answer only, no files changed (diagnosed the itineraries race read-only; did not edit another package's module; not pushed)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+ok push so that the repo is up to date
+
+How the output was used:
+Pushed fix/ACC-16-admin-target-rule to origin on request (self-review not fully passed: one itineraries race test outside this package); no PR opened
+================================================

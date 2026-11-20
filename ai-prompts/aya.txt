@@ -1567,3 +1567,15 @@ flt 25 is now merged , so fix upon it and then continue the steps
 How the output was used:
 Merged develop into the FLT-26 branch (resolved conflicts in aya.txt, flight-bookings.module.ts and flight-bookings.types.ts by keeping both sides); implemented FlightCancellationService (step 2, 25 tests green), added the refund-preview and cancel routes with DTOs, body pipe and API tests (step 3); npm run verify passed (175 files, 2918 tests); commits feat(flight-bookings): cancel a confirmed flight booking (FLT-26), feat(flight-bookings): add the cancellation routes (FLT-26), chore(ai): log the FLT-26 steps 2 and 3 prompt (FLT-26); not pushed, no PR yet
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-26
+
+Prompt:
+push it and open the PR but i will do the self review
+
+How the output was used:
+Pushed feature/FLT-26-cancel-flight-booking and opened the PR "FLT-26: Cancel a flight booking" against develop; self-review left to Aya; commit chore(ai): log the FLT-26 PR prompt (FLT-26)
+================================================

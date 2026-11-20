@@ -24,8 +24,8 @@ import { UsersController } from './users/users.controller.js';
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
- * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user, ACC-08
- * change password)
+ * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-06 refresh/logout,
+ * ACC-08 change password, ACC-19 current user)
  * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
  * currencies come from `ReferenceDataService`, looked up from the app, so
  * `ReferenceDataModule` must be registered beside this module); `AuthService`

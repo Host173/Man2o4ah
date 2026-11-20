@@ -1,9 +1,12 @@
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
+import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { ErrorCode } from '../../common/errors/error-codes.js';
+import { UserRole } from '../accounts/schemas/user.schema.js';
 import { StorageService } from '../storage/storage.service.js';
 import { AirlinesService } from './airlines.service.js';
 import { FlightsModule } from './flights.module.js';
@@ -115,6 +118,48 @@ describe('AirlinesService integration (FLT-01, ACC-15)', () => {
     await expect(flights.setAirlineActive('nope', false)).rejects.toMatchObject(
       { status: 404 },
     );
+  });
+
+  it('rejects a missing extra-bag price in the service without changing the saved policy', async () => {
+    const airline = await airlines.create({ name: 'Cairo Air', code: 'CA' });
+    const moderator = await loginAs(
+      testApp!.connection,
+      UserRole.AIRLINE_MODERATOR,
+      { providerId: airline.id },
+    );
+    const policy = { extraBagPriceMinor: 2500, maxExtraBagsPerPassenger: 2 };
+    await airlines.updateBaggagePolicy(airline.id, policy, moderator);
+
+    await expect(
+      airlines.updateBaggagePolicy(
+        airline.id,
+        { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 1 },
+        moderator,
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: ErrorCode.ValidationFailed,
+        details: [
+          {
+            field: 'extraBagPriceMinor',
+            message: expect.any(String),
+          },
+        ],
+      },
+    });
+    await expect(airlines.getAirline(airline.id)).resolves.toMatchObject({
+      baggagePolicy: policy,
+    });
+    await expect(
+      airlines.updateBaggagePolicy(
+        airline.id,
+        { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 0 },
+        moderator,
+      ),
+    ).resolves.toMatchObject({
+      baggagePolicy: { extraBagPriceMinor: null, maxExtraBagsPerPassenger: 0 },
+    });
   });
 
   it('replaces an airline logo and removes the old stored image', async () => {

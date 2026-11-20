@@ -250,6 +250,17 @@ describe('FakeAccountsService', () => {
         NotFoundException,
       );
     });
+
+    it('throws 409 CONFLICT for an admin account and changes nothing', async () => {
+      const accounts = new FakeAccountsService(seed);
+      expect(await codeOf(accounts.resetPassword('a-1', 'Temp9999'))).toBe(
+        ErrorCode.Conflict,
+      );
+      expect(accounts.get('a-1')).toMatchObject({
+        mustChangePassword: false,
+        sessionsRevoked: 0,
+      });
+    });
   });
 
   describe('suspend and reactivate (ACC-15, ACC-16)', () => {
@@ -272,6 +283,15 @@ describe('FakeAccountsService', () => {
       expect(await codeOf(accounts.reactivate('u-1'))).toBe(
         ErrorCode.InvalidStatusTransition,
       );
+    });
+
+    it('409 CONFLICT when suspending an admin, which stays active', async () => {
+      const accounts = new FakeAccountsService(seed);
+      expect(await codeOf(accounts.suspend('a-1'))).toBe(ErrorCode.Conflict);
+      expect(accounts.get('a-1')).toMatchObject({
+        status: 'active',
+        sessionsRevoked: 0,
+      });
     });
 
     it('404 NOT_FOUND for an unknown account', async () => {

@@ -193,12 +193,14 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
     temporaryPassword: string,
   ): Promise<void> {
     const account = this.find(userId);
+    this.rejectAdmin(account);
     account.temporaryPassword = temporaryPassword;
     account.mustChangePassword = true;
     account.sessionsRevoked += 1;
   }
 
   async suspend(userId: string): Promise<void> {
+    this.rejectAdmin(this.find(userId));
     const account = this.transition(
       userId,
       UserStatus.ACTIVE,
@@ -209,6 +211,17 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
 
   async reactivate(userId: string): Promise<void> {
     this.transition(userId, UserStatus.SUSPENDED, UserStatus.ACTIVE);
+  }
+
+  /** Suspension and admin resets target users and moderators only. */
+  private rejectAdmin(account: FakeAccount): void {
+    if (account.role === UserRole.ADMIN) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message:
+          'Admin accounts cannot be suspended or have their password reset',
+      });
+    }
   }
 
   private find(userId: string): FakeAccount {

@@ -10,6 +10,11 @@ import { Events } from '../../common/events/events.js';
 import { AuditModule } from './audit.module.js';
 import { AuditAction, AuditLog } from './schemas/audit-log.schema.js';
 
+class CredentialDetails {
+  password = 'audit-test-password';
+  refreshToken = 'audit-test-token';
+}
+
 describe('AuditListener (GEN-07)', () => {
   let t: TestApp;
   let emitter: EventEmitter2;
@@ -18,6 +23,7 @@ describe('AuditListener (GEN-07)', () => {
 
   const emit = (overrides: Record<string, unknown> = {}) =>
     emitter.emitAsync(Events.AdminAction, {
+      eventId: new Types.ObjectId().toHexString(),
       actorId,
       action: AuditAction.ACCOUNT_SUSPENDED,
       target: { type: 'user', id: 'u-1' },
@@ -94,6 +100,26 @@ describe('AuditListener (GEN-07)', () => {
     });
   });
 
+  it.each([
+    ['class instance', new CredentialDetails()],
+    [
+      'Map',
+      new Map([
+        ['password', 'audit-test-password'],
+        ['refreshToken', 'audit-test-token'],
+      ]),
+    ],
+  ])(
+    'does not persist credentials inside a nested %s',
+    async (_name, value) => {
+      await emit({ details: { reason: 'spam', nested: value, list: [value] } });
+      const doc = await model.findOne().lean();
+      expect(doc?.details?.['reason']).toBe('spam');
+      expect(JSON.stringify(doc?.details)).not.toContain('audit-test-password');
+      expect(JSON.stringify(doc?.details)).not.toContain('audit-test-token');
+    },
+  );
+
   it('stores no details when nothing is left or details is not a plain object', async () => {
     await emit({ details: { password: 'x' } });
     await emit({ details: ['a'] });
@@ -103,6 +129,9 @@ describe('AuditListener (GEN-07)', () => {
   });
 
   it.each([
+    ['a missing eventId', { eventId: undefined }],
+    ['an empty eventId', { eventId: '' }],
+    ['a blank eventId', { eventId: '   ' }],
     ['an invalid actorId', { actorId: 'nope' }],
     ['an unknown action', { action: 'made_coffee' }],
     ['an empty target.id', { target: { type: 'user', id: '' } }],
@@ -111,9 +140,27 @@ describe('AuditListener (GEN-07)', () => {
     expect(await model.countDocuments()).toBe(0);
   });
 
-  it('stores the same event twice as two documents (append-only)', async () => {
+  it('stores distinct actions even when their other fields are identical', async () => {
     await emit();
     await emit();
     expect(await model.countDocuments()).toBe(2);
+  });
+
+  it('ignores a replay after another action without changing the original entry', async () => {
+    const original = { eventId: 'action-1', details: { reason: 'first' } };
+    await emit(original);
+    const before = await model.findOne().lean();
+    await emit({ eventId: 'action-2' });
+    await emit({ ...original, details: { reason: 'changed on replay' } });
+    expect(await model.countDocuments()).toBe(2);
+    expect(await model.findById(before?._id).lean()).toEqual(before);
+  });
+
+  it('inserts one entry for concurrent deliveries of the same event', async () => {
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () => emit({ eventId: 'concurrent-action' })),
+    );
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    expect(await model.countDocuments()).toBe(1);
   });
 });

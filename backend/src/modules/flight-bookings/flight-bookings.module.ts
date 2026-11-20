@@ -14,6 +14,7 @@ import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightPayableBooking } from './flight-payable-booking.js';
 import { FlightQuoteService } from './flight-quote.service.js';
+import { MyFlightBookingsService } from './my-flight-bookings.service.js';
 import {
   FlightBooking,
   FlightBookingSchema,
@@ -38,6 +39,7 @@ import {
     FlightHoldExpiryJob,
     FlightConfirmationService,
     FlightETicket,
+    MyFlightBookingsService,
     // The real reference maker; tests swap it to choose the references.
     { provide: BOOKING_REFERENCE, useValue: newBookingReference },
   ],

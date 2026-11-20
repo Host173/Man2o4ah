@@ -25,7 +25,7 @@ class CancellationTierResponseDto {
   refundPercent!: number;
 }
 
-class QuotedSegmentPolicyResponseDto implements QuotedSegmentPolicy {
+export class QuotedSegmentPolicyResponseDto implements QuotedSegmentPolicy {
   @ApiProperty({ type: [CancellationTierResponseDto] })
   cancellationTiers!: CancellationTierResponseDto[];
 
@@ -83,7 +83,7 @@ class QuotedSegmentResponseDto implements QuotedSegment {
   policy!: QuotedSegmentPolicyResponseDto;
 }
 
-class QuotedPassengerResponseDto implements QuotedPassenger {
+export class QuotedPassengerResponseDto implements QuotedPassenger {
   @ApiProperty({ enum: Object.values(PassengerType) })
   type!: PassengerType;
 
@@ -103,7 +103,7 @@ class QuotedPassengerResponseDto implements QuotedPassenger {
   extraBagWeightKg?: number;
 }
 
-class QuotePricingResponseDto {
+export class QuotePricingResponseDto {
   @ApiProperty({ example: 22000 })
   fareTotalMinor!: number;
 

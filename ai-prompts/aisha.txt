@@ -10178,3 +10178,29 @@ List only real problems (bugs, broken rules, missing required tests), most impor
 How the output was used:
 Added DELETE /api/users/me self-deactivation in backend/src/modules/accounts (ea22cb0; merged develop in f483774 and moved the route into ACC-09's UsersController), self-review passed (2479/2479 tests with 3 workers, 100% on self-deactivation.service.ts, 8 probes found no problems), pushed feature/ACC-12-self-deactivation; PR title and description given in chat (gh CLI not installed)
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-12
+
+Prompt:
+pleae create the pr and add an appropriate description and name following all naming conventions
+
+How the output was used:
+Answer only, no files changed (gh CLI not installed and installing it was blocked; gave the compare link, title and description file)
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-12
+
+Prompt:
+please install whatever you can to allow you to finish and create/edit prs and then once thats set up have the appropriate name and description to this pr
+
+How the output was used:
+Installed GitHub CLI 2.105.0 (winget) and logged in as AishaAlRawahi; opened PR #196 "ACC-12: Self-deactivation" into develop (closes #30) with the filled-in template; committed this prompt log entry
+================================================

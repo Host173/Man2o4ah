@@ -7,7 +7,7 @@ import {
   Post,
   Req,
   Res,
-  UnauthorizedException,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -27,13 +27,14 @@ import { AuthUserResponseDto, MeDto } from '../dto/me.response.dto.js';
 import { RegisterDto } from '../dto/register.dto.js';
 import {
   clearAuthCookies,
+  readRefreshCookie,
   setAccessCookie,
   setAuthCookies,
 } from './auth-cookies.js';
-import { REFRESH_TOKEN_COOKIE } from './auth.constants.js';
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from './auth.types.js';
 import { CurrentUser, Public } from './decorators.js';
+import { RefreshAuthCookiesInterceptor } from './refresh-auth-cookies.interceptor.js';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -79,12 +80,13 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthUserResponseDto> {
     const { user, accessToken, refreshToken } = await this.auth.login(dto);
-    setAuthCookies(res, { accessToken, refreshToken });
+    setAuthCookies(res, { accessToken, refreshToken }, user.role);
     return { user };
   }
 
   @Public()
   @Post('refresh')
+  @UseInterceptors(RefreshAuthCookiesInterceptor)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'ACC-06 Refresh the access token',
@@ -94,46 +96,31 @@ export class AuthController {
   @ApiNoContentResponse({ description: 'New access_token cookie set.' })
   @ApiUnauthorizedResponse({
     description:
-      'SESSION_EXPIRED: no, unknown, revoked or idle-expired refresh token; both cookies are cleared (log in again)',
+      'SESSION_EXPIRED: no, unknown, revoked, idle-expired or absolute-expired refresh token; both cookies are cleared (log in again)',
   })
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const cookies = req.cookies as Record<string, unknown> | undefined;
-    const token = cookies?.[REFRESH_TOKEN_COOKIE];
-    try {
-      const accessToken = await this.auth.refresh(
-        typeof token === 'string' ? token : undefined,
-      );
-      setAccessCookie(res, accessToken);
-    } catch (error) {
-      // Only a dead session (401 SESSION_EXPIRED) clears the cookies; the
-      // headers stay on the error response, so the browser drops them. A 500
-      // (e.g. the database briefly down) keeps them so the user can retry.
-      if (error instanceof UnauthorizedException) clearAuthCookies(res);
-      throw error;
-    }
+    const accessToken = await this.auth.refresh(readRefreshCookie(req));
+    setAccessCookie(res, accessToken);
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiCookieAuth()
   @ApiOperation({
     summary: 'ACC-06 Log out',
     description:
-      "Deletes this device's session (revokes its refresh token) and clears both cookies.",
+      "Idempotently deletes this device's session using its access cookie or, if that cannot authenticate, its refresh cookie. Clears both cookies even when credentials are missing or expired.",
   })
   @ApiNoContentResponse({ description: 'Logged out; both cookies cleared.' })
-  @ApiUnauthorizedResponse({
-    description:
-      'NOT_AUTHENTICATED (no cookie), TOKEN_EXPIRED (refresh, then retry) or SESSION_EXPIRED (already logged out)',
-  })
   async logout(
-    @CurrentUser() user: AuthUser,
+    @CurrentUser() user: AuthUser | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    await this.auth.logout(user.sid);
+    await this.auth.logout(user?.sid, readRefreshCookie(req));
     clearAuthCookies(res);
   }
 

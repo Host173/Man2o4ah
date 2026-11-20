@@ -17,10 +17,10 @@ import { Session } from '../schemas/session.schema.js';
 import { UserRole, UserStatus } from '../schemas/user.schema.js';
 import { User } from '../schemas/user.schema.js';
 import {
+  getSessionMaxAgeMs,
   LOCKOUT_MS,
   MAX_FAILED_LOGIN_ATTEMPTS,
   REFRESH_TOKEN_BYTES,
-  REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   SESSION_IDLE_MS,
 } from './auth.constants.js';
 import type { AccessTokenPayload } from './auth.types.js';
@@ -161,6 +161,7 @@ export class AuthService {
       refreshTokenHash: hashRefreshToken(refreshToken),
       lastActivityAt: new Date(now),
       expiresAt: new Date(now + SESSION_IDLE_MS),
+      absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(user.role)),
     });
 
     const accessToken = await this.signAccessToken(user, session._id);
@@ -170,9 +171,9 @@ export class AuthService {
 
   /**
    * ACC-06, ACC-19 (auth.md §2, §3): `POST /api/auth/refresh`. Finds the live
-   * session (`expiresAt > now`, created less than 7 days ago) holding this
-   * refresh token's hash, slides its
-   * activity to now + 30 minutes and returns a new access token. The refresh
+   * session (`expiresAt > now`, `absoluteExpiresAt > now`) holding this
+   * refresh token's hash, slides its activity without passing the deadline
+   * fixed at login, and returns a new access token. The refresh
    * token is not rotated, so parallel refreshes all succeed. A missing,
    * unknown, idle-expired or revoked token, or an account that is gone or no
    * longer active → 401 SESSION_EXPIRED.
@@ -186,11 +187,9 @@ export class AuthService {
         {
           refreshTokenHash: hashRefreshToken(refreshToken),
           expiresAt: { $gt: new Date(now) },
-          // The 7-day absolute limit is enforced here too, not only by the
-          // cookie's maxAge, so a copied token can't be kept alive forever.
-          createdAt: { $gt: new Date(now - REFRESH_TOKEN_COOKIE_MAX_AGE_MS) },
+          absoluteExpiresAt: { $gt: new Date(now) },
         },
-        { userId: 1 },
+        { userId: 1, absoluteExpiresAt: 1 },
       )
       .lean();
     if (!session) throw sessionExpired();
@@ -204,11 +203,20 @@ export class AuthService {
     // Refresh counts as activity. The expiresAt filter stops it from reviving
     // a session that expired or was revoked a moment ago.
     const slid = await this.sessionModel.updateOne(
-      { _id: session._id, expiresAt: { $gt: new Date(now) } },
+      {
+        _id: session._id,
+        expiresAt: { $gt: new Date(now) },
+        absoluteExpiresAt: { $gt: new Date(now) },
+      },
       {
         $set: {
           lastActivityAt: new Date(now),
-          expiresAt: new Date(now + SESSION_IDLE_MS),
+          expiresAt: new Date(
+            Math.min(
+              now + SESSION_IDLE_MS,
+              session.absoluteExpiresAt.getTime(),
+            ),
+          ),
         },
       },
     );
@@ -218,12 +226,19 @@ export class AuthService {
   }
 
   /**
-   * ACC-06 (auth.md §3): `POST /api/auth/logout`. Deletes this device's
-   * session, which revokes its refresh token; the user's other devices stay
-   * logged in. Deleting a session that is already gone is not an error.
+   * ACC-06 (auth.md §3): `POST /api/auth/logout`. Deletes the authenticated
+   * session, or falls back to the refresh cookie when the access cookie has
+   * expired. Other sessions stay logged in. Missing or already-revoked
+   * credentials are harmless: the endpoint still clears the browser cookies.
    */
-  async logout(sid: string): Promise<void> {
-    await this.sessionModel.deleteOne({ _id: sid });
+  async logout(sid: string | undefined, refreshToken?: string): Promise<void> {
+    if (sid) {
+      await this.sessionModel.deleteOne({ _id: sid });
+    } else if (refreshToken) {
+      await this.sessionModel.deleteOne({
+        refreshTokenHash: hashRefreshToken(refreshToken),
+      });
+    }
   }
 
   /** Signs the 15-minute access token `{ sub, role, sid, providerId? }` (auth.md §2). */

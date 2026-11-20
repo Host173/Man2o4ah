@@ -396,29 +396,40 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
       .send(flight)
       .expect(201);
     const invalidCabins = [
-      { ...cabin, cabinClass: 'luxury' },
-      { ...cabin, totalSeats: 0 },
-      { ...cabin, totalSeats: 1.5 },
-      { ...cabin, totalSeats: Number.MAX_SAFE_INTEGER + 1 },
-      { ...cabin, priceMinor: 0 },
-      { ...cabin, priceMinor: 1.5 },
-      { ...cabin, priceMinor: Number.MAX_SAFE_INTEGER + 1 },
-      { ...cabin, freeBags: -1 },
-      { ...cabin, freeBags: 1.5 },
-      { ...cabin, maxBagWeightKg: 0 },
-      { ...cabin, maxBagWeightKg: '23' },
-      { ...cabin, unexpected: true },
-      { cabinClass: cabin.cabinClass },
+      { body: { ...cabin, cabinClass: 'luxury' }, field: 'cabinClass' },
+      { body: { ...cabin, totalSeats: 0 }, field: 'totalSeats' },
+      { body: { ...cabin, totalSeats: 1.5 }, field: 'totalSeats' },
+      {
+        body: { ...cabin, totalSeats: Number.MAX_SAFE_INTEGER + 1 },
+        field: 'totalSeats',
+      },
+      { body: { ...cabin, priceMinor: 0 }, field: 'priceMinor' },
+      { body: { ...cabin, priceMinor: 1.5 }, field: 'priceMinor' },
+      {
+        body: { ...cabin, priceMinor: Number.MAX_SAFE_INTEGER + 1 },
+        field: 'priceMinor',
+      },
+      { body: { ...cabin, freeBags: -1 }, field: 'freeBags' },
+      { body: { ...cabin, freeBags: 1.5 }, field: 'freeBags' },
+      { body: { ...cabin, maxBagWeightKg: 0 }, field: 'maxBagWeightKg' },
+      { body: { ...cabin, maxBagWeightKg: '23' }, field: 'maxBagWeightKg' },
+      { body: { ...cabin, unexpected: true }, field: 'unexpected' },
+      { body: { cabinClass: cabin.cabinClass }, field: 'totalSeats' },
     ];
 
-    for (const invalidCabin of invalidCabins) {
+    for (const { body, field } of invalidCabins) {
       const response = await t
         .http()
         .post(`/api/flights/${created.body._id}/cabins`)
         .set('Cookie', user.cookie)
-        .send(invalidCabin)
+        .send(body)
         .expect(400);
       expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field, message: expect.any(String) }),
+        ]),
+      );
     }
 
     const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
@@ -442,13 +453,15 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
       { providerId: new Types.ObjectId().toHexString() },
     );
 
-    await t.http().post(path).send(cabin).expect(401);
-    await t
+    const guest = await t.http().post(path).send(cabin).expect(401);
+    expect(guest.body.code).toBe(ErrorCode.NotAuthenticated);
+    const forbidden = await t
       .http()
       .post(path)
       .set('Cookie', regularUser.cookie)
       .send(cabin)
       .expect(403);
+    expect(forbidden.body.code).toBe(ErrorCode.ForbiddenRole);
     const wrongAirline = await t
       .http()
       .post(path)
@@ -514,14 +527,33 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
         .set('Cookie', user.cookie)
         .send(cabin),
     );
-    const responses = await Promise.all(requests);
+    const results = await Promise.allSettled(requests);
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    const responses = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
 
     expect(
       responses.map((response) => response.status).sort((a, b) => a - b),
     ).toEqual([201, 409]);
+    expect(
+      responses.find((response) => response.status === 409)?.body.code,
+    ).toBe(ErrorCode.Conflict);
     const flights = t.moduleRef.get<Model<Flight>>(getModelToken(Flight.name));
     const persisted = await flights.findById(created.body._id).lean().exec();
     expect(persisted?.cabins).toHaveLength(1);
     expect(persisted?.cabins[0]?.cabinClass).toBe(CabinClass.ECONOMY);
+    const storedCabin = persisted?.cabins[0];
+    expect(storedCabin).toMatchObject({
+      totalSeats: cabin.totalSeats,
+      availableSeats: cabin.totalSeats,
+      heldSeats: 0,
+      bookedSeats: 0,
+    });
+    expect(storedCabin?.totalSeats).toBe(
+      storedCabin!.availableSeats +
+        storedCabin!.heldSeats +
+        storedCabin!.bookedSeats,
+    );
   });
 });

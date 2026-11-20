@@ -4,6 +4,7 @@ import type {
   RoundTripSearchQuery,
 } from '../../src/modules/flights/flights.types.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { FakeReferenceDataService } from './reference-data.fake.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import { FakeFlightsService } from './flights.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -198,6 +199,44 @@ describe('FakeFlightsService', () => {
           .flight('f7')
           ?.cabins.filter((cabin) => cabin.cabinClass === 'business'),
       ).toHaveLength(1);
+    });
+
+    it('rejects a cancellation during the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.status = 'cancelled';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.InvalidStatusTransition },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
+    });
+
+    it('rechecks ownership after the airport lookup without adding a cabin', async () => {
+      const { data } = setup();
+      const reference = new FakeReferenceDataService();
+      const flights = new FakeFlightsService(data, {
+        getAirports: async (codes) => {
+          const flight = data.flight('f7');
+          if (!flight) throw new Error('Missing test flight');
+          flight.airlineId = 'a2';
+          return reference.getAirports(codes);
+        },
+      });
+
+      await expect(flights.addCabin('f7', input, 'a1')).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+      expect(data.flight('f7')?.cabins).toHaveLength(1);
     });
   });
 

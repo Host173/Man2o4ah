@@ -39,6 +39,7 @@ Infrastructure (not domain modules):
 
 ## 3. Module rules
 
+- **Passwords are 8 to 72 characters, with at least one letter and one digit.** One shared rule in `accounts/auth/password-rule.ts` (`/^(?=.*[A-Za-z])(?=.*\d).{8,72}$/`), applied in the DTOs to every new password: registration, password change, the forced change and admin resets. Login and the current password on change-password accept any non-empty string, so temporary passwords and passwords stored before the cap still work. Why: bcrypt ignores everything after 72 bytes, so without a cap two long passwords sharing their first 72 bytes would both work. The cap counts characters (JS string length), not UTF-8 bytes; whether to count bytes is open item 1. Decided 17 Nov (raised in PR #126, built in ACC-08).
 - **One owner per collection.** Each collection belongs to exactly one module.
 - **Cross-module access goes through the owning module's exported service.** A module never queries another module's collections directly.
 - **No populate across modules.** Mongoose populate only within a module.
@@ -219,7 +220,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 
 **Priority: answer these first** (raised in Aisha's ACC-01 PR #126, merged as is on 15 Nov):
 
-1. **Password maximum length.** bcrypt ignores everything after 72 bytes, so two long passwords that share their first 72 bytes both work. Proposal: add `@MaxLength(72)` to the shared password rule (`accounts/auth/password-rule.ts`), so registration, password change and admin resets all get it.
+1. **Password cap: characters or bytes?** (raised in ACC-08 PR #139). The 17 Nov cap (§3) counts characters, but bcrypt counts UTF-8 bytes, so non-ASCII passwords can still collide: `"a1" + "é"×70` and `"a1" + "é"×35 + "x"×35` are both 72 characters and pass the rule, and a hash of the first accepts the second. Options: also require `Buffer.byteLength(password, 'utf8') <= 72`, or keep the character cap and document it.
 2. **Registration response.** `POST /api/auth/register` returns `201 { user: MeDto }`, the same shape as login. Proposal: keep it.
 3. **Auto-login after registering.** Currently no (the `auth.md` default); the frontend sends the user to the login page. Proposal: keep it.
 4. **PLT-04 design calls** (`data-model.md` §8). PLT-04 is closed and its schemas are on develop. Proposal: record them as confirmed.

@@ -8,7 +8,7 @@ import { ReferenceDataService } from '../reference-data/reference-data.service.j
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FlightsModule } from './flights.module.js';
 import { FlightsService } from './flights.service.js';
-import { Flight } from './schemas/flight.schema.js';
+import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
 describe('Mark flights departed job (FLT-30)', () => {
   let testApp: TestApp;
@@ -43,7 +43,10 @@ describe('Mark flights departed job (FLT-30)', () => {
       flightSeed('MS-PAST', '2026-11-20T11:59:59.999Z'),
       flightSeed('MS-NOW', '2026-11-20T12:00:00.000Z'),
       flightSeed('MS-FUTURE', '2026-11-20T12:00:00.001Z'),
-      { ...flightSeed('MS-CANCELLED', '2026-11-20T11:00:00.000Z'), status: 'cancelled' },
+      {
+        ...flightSeed('MS-CANCELLED', '2026-11-20T11:00:00.000Z'),
+        status: 'cancelled',
+      },
     ]);
 
     await expect(flights.markFlightsDeparted()).resolves.toBe(2);
@@ -53,7 +56,11 @@ describe('Mark flights departed job (FLT-30)', () => {
       .find({}, { flightNumber: 1, status: 1 })
       .lean()
       .exec();
-    expect(Object.fromEntries(statuses.map((flight) => [flight.flightNumber, flight.status]))).toEqual({
+    expect(
+      Object.fromEntries(
+        statuses.map((flight) => [flight.flightNumber, flight.status]),
+      ),
+    ).toEqual({
       'MS-PAST': 'departed',
       'MS-NOW': 'departed',
       'MS-FUTURE': 'scheduled',
@@ -62,7 +69,10 @@ describe('Mark flights departed job (FLT-30)', () => {
   });
 });
 
-function flightSeed(flightNumber: string, departureAt: string) {
+function flightSeed(
+  flightNumber: string,
+  departureAt: string,
+): Partial<Flight> & { flightNumber: string } {
   const departure = new Date(departureAt);
   return {
     airlineId: new Types.ObjectId(),
@@ -73,6 +83,6 @@ function flightSeed(flightNumber: string, departureAt: string) {
     arrivalAt: new Date(departure.getTime() + 60_000),
     departureLocalDate: '2026-11-20',
     durationMinutes: 1,
-    status: 'scheduled',
+    status: FlightStatus.SCHEDULED,
   };
 }

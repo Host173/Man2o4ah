@@ -74,8 +74,12 @@ describe('FlightsService (contract stub)', () => {
   });
 
   it('marks scheduled flights departed at the exact boundary and leaves other states unchanged', async () => {
-    const updateMany = vi.fn().mockResolvedValue({ modifiedCount: 2 });
-    const flightModel = testModule.get(getModelToken(Flight.name)) as unknown as {
+    const updateMany = vi.fn().mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ modifiedCount: 2 }),
+    });
+    const flightModel = moduleRef?.get(
+      getModelToken(Flight.name),
+    ) as unknown as {
       updateMany: typeof updateMany;
     };
     flightModel.updateMany = updateMany;

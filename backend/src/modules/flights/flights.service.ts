@@ -9,6 +9,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { Cron } from '@nestjs/schedule';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
@@ -31,7 +32,7 @@ import type {
 } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Cabin } from './schemas/flight.schema.js';
-import { Flight } from './schemas/flight.schema.js';
+import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
 type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
   _id: Types.ObjectId;
@@ -59,6 +60,21 @@ export class FlightsService {
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
   ) {}
+
+  /** Marks scheduled flights departed once their UTC departure time passes (FLT-30). */
+  @Cron('* * * * *', { name: 'mark-flights-departed', timeZone: 'UTC' })
+  async markFlightsDeparted(now = new Date()): Promise<number> {
+    const result = await this.flightModel
+      .updateMany(
+        {
+          status: FlightStatus.SCHEDULED,
+          departureAt: { $lte: now },
+        },
+        { $set: { status: FlightStatus.DEPARTED } },
+      )
+      .exec();
+    return result.modifiedCount;
+  }
 
   /**
    * Create a scheduled flight from the two airport-local times (FLT-03, FLT-02,

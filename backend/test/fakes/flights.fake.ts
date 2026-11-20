@@ -46,6 +46,21 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
     > = new FakeReferenceDataService(),
   ) {}
 
+  /** Marks scheduled flights departed once their UTC departure time passes (FLT-30). */
+  markFlightsDeparted(now = new Date()): Promise<number> {
+    let modified = 0;
+    for (const flight of this.data.flights()) {
+      if (
+        flight.status === 'scheduled' &&
+        flight.departureAt.getTime() <= now.getTime()
+      ) {
+        flight.status = 'departed';
+        modified++;
+      }
+    }
+    return Promise.resolve(modified);
+  }
+
   async createFlight(
     input: CreateFlightInput,
     airlineId: string,

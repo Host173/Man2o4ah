@@ -11,6 +11,8 @@ import type { AuthUser } from '../accounts/auth/auth.types.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import type { CreateAirlineDto } from './dto/create-airline.dto.js';
+import type { UpdateAirlineBaggagePolicyDto } from './dto/update-airline-baggage-policy.dto.js';
+import type { UpdateAirlineCancellationPolicyDto } from './dto/update-airline-cancellation-policy.dto.js';
 import type { UpdateAirlineDto } from './dto/update-airline.dto.js';
 import type { AirlineView, CancellationTierView } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
@@ -58,6 +60,57 @@ export class AirlinesService {
       .findByIdAndUpdate(
         airlineId,
         { $set: updates },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!airline) throw this.notFound();
+    return this.toView(airline as AirlineRecord);
+  }
+
+  async updateBaggagePolicy(
+    airlineId: string,
+    policy: UpdateAirlineBaggagePolicyDto,
+    user: AuthUser,
+  ): Promise<AirlineView> {
+    await this.findOwned(airlineId, user.providerId);
+    if (
+      policy.maxExtraBagsPerPassenger > 0 &&
+      policy.extraBagPriceMinor === null
+    ) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'A price is required when extra bags are allowed',
+        details: [
+          {
+            field: 'extraBagPriceMinor',
+            message: 'must be a positive integer when extra bags are allowed',
+          },
+        ],
+      });
+    }
+    const airline = await this.airlineModel
+      .findByIdAndUpdate(
+        airlineId,
+        { $set: { baggagePolicy: policy } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean()
+      .exec();
+    if (!airline) throw this.notFound();
+    return this.toView(airline as AirlineRecord);
+  }
+
+  async updateCancellationPolicy(
+    airlineId: string,
+    policy: UpdateAirlineCancellationPolicyDto,
+    user: AuthUser,
+  ): Promise<AirlineView> {
+    await this.findOwned(airlineId, user.providerId);
+    const airline = await this.airlineModel
+      .findByIdAndUpdate(
+        airlineId,
+        { $set: { cancellationPolicy: { tiers: policy.tiers } } },
         { returnDocument: 'after', runValidators: true },
       )
       .lean()

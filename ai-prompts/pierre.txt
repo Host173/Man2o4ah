@@ -1349,3 +1349,47 @@ sessionBehavior=Revoke every session and require login again, pushFixes=true
 How the output was used:
 Aligned password changes with data-model section 3.2 and authorized pushing the fix commits to PR #139.
 ================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first activity CRUD, validation, supported-currency costs, atomic writes and fake/API tests for the findings on PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+merge-and-publish
+
+How the output was used:
+Preserved the incoming PR history and prompt entry while reconciling activity conflicts with the tested fixes.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+follow-up-pr
+
+How the output was used:
+Authorized a follow-up fix PR targeting develop and a comment on already-merged PR #163.
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-10
+
+Prompt:
+true
+
+How the output was used:
+Authorized recording this session's actual request and publication approvals in Pierre's append-only prompt log.
+================================================

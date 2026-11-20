@@ -1270,3 +1270,63 @@ Open questions: `flight-booking.confirmed` carries only `{bookingId, userId, ref
 How the output was used:
 Restored develop's exact 48-char final separator in ai-prompts/aya.txt (CI append-only fix); logged this prompt; no commit
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-23
+
+Prompt:
+i want to start on flt 25 make a 4 step plan
+
+How the output was used:
+Answer only, no files changed (4-step plan for FLT-25); logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+create the branch and start step 1
+
+How the output was used:
+Created branch feature/FLT-25-my-flight-bookings from develop; drafted the grouping questions for Kareem; logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+kareem said yes to all three, start step 2
+
+How the output was used:
+Added backend/src/modules/flight-bookings/booking-groups.spec.ts (failing tests first) and a booking-groups.ts stub for Aya to implement; logged this prompt; no commit
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+[Attached: 7.png (screenshot of VS Code; image, no text content: terminal shows booking-groups.spec.ts with 3 failed, 1 passed)]
+
+How the output was used:
+Answer only, no files changed (groupQuery still unimplemented; gave hints)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+no do the rest of the endpoint and then tell me
+
+How the output was used:
+Implemented groupQuery, MyFlightBookingsService, GET /api/flight-bookings and GET /api/flight-bookings/:id with DTOs and API tests; npm run verify passed; commits feat(flight-bookings): add the booking groups (FLT-25), feat(flight-bookings): list and show my flight bookings (FLT-25), chore(ai): log the FLT-25 prompts (FLT-25)
+================================================

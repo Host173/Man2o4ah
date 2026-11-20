@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ReferenceDataModule } from '../reference-data/reference-data.module.js';
+import { ItinerariesController } from './itineraries.controller.js';
 import { ItinerariesService } from './itineraries.service.js';
+import { ItineraryPdf } from './itinerary-pdf.js';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
 
 @Module({
@@ -8,8 +11,10 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema.js';
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
     ]),
+    ReferenceDataModule,
   ],
-  providers: [ItinerariesService],
+  controllers: [ItinerariesController],
+  providers: [ItinerariesService, ItineraryPdf],
   exports: [ItinerariesService],
 })
 export class ItinerariesModule {}

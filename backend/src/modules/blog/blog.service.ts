@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -11,24 +12,44 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
+import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { AccountsService } from '../accounts/accounts.service.js';
 import type { AccountProfile } from '../accounts/accounts.types.js';
-import { UserStatus } from '../accounts/schemas/user.schema.js';
+import { UserRole, UserStatus } from '../accounts/schemas/user.schema.js';
+import { ItinerariesService } from '../itineraries/itineraries.service.js';
+import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { StorageService } from '../storage/storage.service.js';
+import type { StoredImage } from '../storage/storage.service.js';
+import {
+  buildExcerpt,
+  MAX_TAG_LENGTH,
+  MAX_TAGS_PER_POST,
+  MIN_TAG_LENGTH,
+  normalizeTag,
+  normalizeTags,
+} from './blog-tags.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import type { CreateCommentDto } from './dto/create-comment.dto.js';
 import type { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import type { UpdateCommentDto } from './dto/update-comment.dto.js';
 import type { UpdatePostDto } from './dto/update-post.dto.js';
+import { PostImageCleanupJob } from './post-image-cleanup.job.js';
 import { Comment } from './schemas/comment.schema.js';
 import { Like } from './schemas/like.schema.js';
+import { PostImageCleanup } from './schemas/post-image-cleanup.schema.js';
 import { Post, PostStatus } from './schemas/post.schema.js';
 
 type StoredPost = Omit<Post, 'images'> & {
@@ -44,28 +65,37 @@ const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
 const DELETED_USER_NAME = 'Deleted user';
 
 /**
- * Travel blog post and comment workflows (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, ACC-12).
- * Other blog endpoints and listeners ship in later Sprint 2 tickets.
+ * Travel blog post, tag, search, images, author page, and comment workflows
+ * (BLG-01, BLG-02, BLG-03, BLG-04, BLG-05, BLG-07, BLG-08, BLG-09, BLG-10, BLG-12, ACC-12).
  */
 @Injectable()
 export class BlogService {
+  private readonly logger = new Logger(BlogService.name);
+
   constructor(
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(Post.name) private readonly postModel: Model<StoredPost>,
     @InjectModel(Comment.name)
     private readonly commentModel: Model<StoredComment>,
     @InjectModel(Like.name) private readonly likeModel: Model<Like>,
+    @InjectModel(PostImageCleanup.name)
+    private readonly imageCleanupModel: Model<PostImageCleanup>,
     private readonly accountsService: AccountsService,
+    private readonly itinerariesService: ItinerariesService,
+    private readonly storageService: StorageService,
+    private readonly imageCleanup: PostImageCleanupJob,
   ) {}
 
-  /** BLG-01: creates a post as draft or published owned by the authenticated user. */
+  /** BLG-01 / BLG-08: creates a post as draft or published owned by the authenticated user. */
   async create(dto: CreatePostDto, userId: string): Promise<PostView> {
     const authorId = this.parseId(userId, 'userId');
     this.assertNonBlankBody(dto.body);
+    const tags = dto.tags !== undefined ? this.prepareTags(dto.tags) : [];
     const created = await this.postModel.create({
       authorId,
       title: dto.title.trim(),
       body: dto.body,
+      tags,
       status: dto.status,
       ...(dto.status === PostStatus.PUBLISHED
         ? { publishedAt: new Date() }
@@ -75,39 +105,176 @@ export class BlogService {
   }
 
   /**
-   * BLG-02: lists paginated published posts (newest `publishedAt` first),
-   * optionally filtered by tag, excluding drafts, hidden posts and
-   * deactivated authors' posts.
+   * BLG-02 / BLG-08 / BLG-09: lists or searches paginated published posts,
+   * excluding drafts, hidden posts and deactivated authors' posts. When `q` is
+   * provided, matches title, normalised tags, or author name and orders by
+   * engagement (`likeCount + commentCount` desc) then newest `publishedAt` desc.
    */
   async listPublished(
     query: ListPostsQueryDto = new ListPostsQueryDto(),
   ): Promise<Paginated<PublishedPostView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const filter: QueryFilter<StoredPost> = {
-      status: PostStatus.PUBLISHED,
-      isHidden: false,
-      authorDeactivated: false,
-      ...(query.tag ? { tags: query.tag } : {}),
-    };
-    const result = await paginate(
-      this.postModel,
-      filter,
-      { page, limit },
-      { sort: { publishedAt: -1, _id: -1 } },
-    );
-    const profiles = await this.resolveProfiles(
-      result.items.map((post) => post.authorId.toHexString()),
-    );
-    return {
-      ...result,
-      items: result.items.map((post) =>
-        this.toPublishedView(
-          post as PostRecord,
-          profiles.get(post.authorId.toHexString()),
+    const tag = query.tag !== undefined ? normalizeTag(query.tag) : undefined;
+    const q = query.q !== undefined ? query.q.trim() : undefined;
+
+    if (q && q.length > 0) {
+      const matchedUserIds = await this.accountsService.findUserIdsByName(q);
+      const validAuthorIds = matchedUserIds.filter((id) =>
+        OBJECT_ID_HEX_RE.test(id),
+      );
+      const matchedAuthorProfiles = await this.resolveProfiles(validAuthorIds);
+      const authorObjectIds = validAuthorIds
+        .filter(
+          (id) =>
+            matchedAuthorProfiles.get(id)?.status !== UserStatus.DEACTIVATED,
+        )
+        .map((id) => new Types.ObjectId(id));
+
+      const titleRegex = keywordRegex(q);
+      const normalizedQueryTag = normalizeTag(q);
+      const tagRegex = new RegExp(escapeRegex(normalizedQueryTag), 'i');
+
+      const matchFilter: QueryFilter<StoredPost> = {
+        status: PostStatus.PUBLISHED,
+        isHidden: false,
+        authorDeactivated: false,
+        ...(tag ? { tags: tag } : {}),
+        $or: [
+          { title: titleRegex },
+          { tags: tagRegex },
+          ...(authorObjectIds.length > 0
+            ? [{ authorId: { $in: authorObjectIds } }]
+            : []),
+        ],
+      };
+
+      const [items, total] = await Promise.all([
+        this.postModel
+          .aggregate<PostRecord>([
+            { $match: matchFilter },
+            {
+              $addFields: {
+                interactionScore: { $add: ['$likeCount', '$commentCount'] },
+              },
+            },
+            { $sort: { interactionScore: -1, publishedAt: -1, _id: -1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            { $project: { interactionScore: 0 } },
+          ])
+          .exec(),
+        this.postModel.countDocuments(matchFilter).exec(),
+      ]);
+
+      const profiles = await this.resolveProfiles(
+        items.map((post) => post.authorId.toHexString()),
+      );
+      return toPage(
+        items.map((post) =>
+          this.toPublishedView(post, profiles.get(post.authorId.toHexString())),
         ),
+        total,
+        page,
+        limit,
+      );
+    }
+
+    return this.paginatePublishedPosts(tag ? { tags: tag } : {}, {
+      page,
+      limit,
+    });
+  }
+
+  /**
+   * BLG-12: loads the public author page showing display name, join date,
+   * independently paginated published posts and public itineraries (`CTR-06`).
+   * Throws 404 for unknown, deactivated, or non-user (admin/moderator) accounts.
+   */
+  async getAuthorPage(
+    authorId: string,
+    query: Partial<AuthorPageQueryDto> = new AuthorPageQueryDto(),
+  ): Promise<AuthorPageView> {
+    const authorObjectId = this.parseId(authorId, 'authorId');
+    const hexId = authorObjectId.toHexString();
+    const profiles = await this.resolveProfiles([hexId]);
+    const author = profiles.get(hexId);
+    if (
+      !author ||
+      author.status === UserStatus.DEACTIVATED ||
+      !(await this.isRegularUserAccount(author))
+    ) {
+      throw this.authorNotFound();
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const itinerariesPage = query.itinerariesPage ?? 1;
+    const itinerariesLimit = query.itinerariesLimit ?? 10;
+    const [posts, itineraries] = await Promise.all([
+      this.paginatePublishedPosts(
+        { authorId: authorObjectId },
+        { page, limit },
+        profiles,
       ),
+      this.itinerariesService.listPublicByAuthor(hexId, {
+        page: itinerariesPage,
+        limit: itinerariesLimit,
+      }),
+    ]);
+
+    return {
+      id: author.id,
+      name: author.name,
+      createdAt: author.createdAt,
+      posts,
+      itineraries,
     };
+  }
+
+  /**
+   * Checks account role via `AccountsService` (`CTR-01`) so admin and
+   * moderator accounts never expose an author page.
+   */
+  private async isRegularUserAccount(author: AccountProfile): Promise<boolean> {
+    const trimmedName = author.name.trim();
+    for (let page = 1; ; page += 1) {
+      const accountsPage = await this.accountsService.listAccounts({
+        page,
+        limit: 50,
+        ...(trimmedName !== '' ? { q: trimmedName } : {}),
+        status: author.status,
+      });
+      const match = accountsPage.items.find((item) => item.id === author.id);
+      if (match) {
+        return match.role === UserRole.USER;
+      }
+      if (page >= accountsPage.totalPages || accountsPage.items.length === 0) {
+        return false;
+      }
+    }
+  }
+
+  /**
+   * BLG-08: lists paginated published posts matching the normalised tag,
+   * excluding drafts, hidden posts and deactivated authors' posts.
+   */
+  async listByTag(
+    tag: string,
+    query: PaginationQueryDto = new PaginationQueryDto(),
+  ): Promise<Paginated<PublishedPostView>> {
+    const normalizedTag = typeof tag === 'string' ? normalizeTag(tag) : '';
+    if (
+      normalizedTag.length < MIN_TAG_LENGTH ||
+      normalizedTag.length > MAX_TAG_LENGTH
+    ) {
+      throw this.invalidTag();
+    }
+    const listQuery = new ListPostsQueryDto();
+    listQuery.page = query.page;
+    listQuery.limit = query.limit;
+    listQuery.tag = normalizedTag;
+    return this.listPublished(listQuery);
   }
 
   /** BLG-03: lists the authenticated author's posts (draft and published), newest updated first. */
@@ -284,8 +451,108 @@ export class BlogService {
   }
 
   /**
-   * BLG-04: updates the authenticated owner's post. Sets `publishedAt` the first
-   * time the post is published; throws 404 if missing or owned by someone else.
+   * BLG-06: likes a visible published post for the authenticated user
+   * (idempotent via the `{ postId: 1, userId: 1 }` unique index).
+   */
+  async likePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    // Handle the unique-index insert outside a transaction because E11000 aborts a MongoDB transaction.
+    let insertedLikeId: Types.ObjectId | undefined;
+    try {
+      const created = await this.likeModel.create({
+        postId: postObjectId,
+        userId: userObjectId,
+      });
+      insertedLikeId = created._id;
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        insertedLikeId = undefined;
+      } else {
+        throw error;
+      }
+    }
+
+    if (insertedLikeId !== undefined) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: 1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) {
+        await this.likeModel.deleteOne({ _id: insertedLikeId }).exec();
+        throw this.notFound();
+      }
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: true,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: true,
+    };
+  }
+
+  /**
+   * BLG-06: removes the authenticated user's like from a visible published
+   * post (idempotent; decrements `likeCount` only when a like was deleted).
+   */
+  async unlikePost(postId: string, userId: string): Promise<PostLikeView> {
+    const postObjectId = this.parseId(postId, 'postId');
+    const userObjectId = this.parseId(userId, 'userId');
+
+    await this.loadVisiblePublishedPost(postObjectId);
+
+    const deleted = await this.likeModel
+      .findOneAndDelete({
+        postId: postObjectId,
+        userId: userObjectId,
+      })
+      .lean()
+      .exec();
+
+    if (deleted) {
+      const updated = await this.postModel
+        .findOneAndUpdate(
+          { _id: postObjectId },
+          { $inc: { likeCount: -1 } },
+          { returnDocument: 'after' },
+        )
+        .lean()
+        .exec();
+      if (!updated) throw this.notFound();
+      return {
+        postId: postObjectId.toHexString(),
+        likeCount: Math.max(0, updated.likeCount),
+        liked: false,
+      };
+    }
+
+    const current = await this.postModel.findById(postObjectId).lean().exec();
+    if (!current) throw this.notFound();
+    return {
+      postId: postObjectId.toHexString(),
+      likeCount: Math.max(0, current.likeCount),
+      liked: false,
+    };
+  }
+
+  /**
+   * BLG-04 / BLG-08: updates the authenticated owner's post. Sets
+   * `publishedAt` the first time the post is published; throws 404 if missing
+   * or owned by someone else.
    */
   async update(
     postId: string,
@@ -298,6 +565,8 @@ export class BlogService {
     if (dto.body !== undefined) {
       this.assertNonBlankBody(dto.body);
     }
+    const normalizedTags =
+      dto.tags !== undefined ? this.prepareTags(dto.tags) : undefined;
 
     const existing = await this.postModel
       .findOne({ _id: id, authorId })
@@ -308,6 +577,7 @@ export class BlogService {
     const updates: {
       title?: string;
       body?: string;
+      tags?: string[];
       status?: PostStatus;
       publishedAt?: Date;
     } = {};
@@ -317,6 +587,9 @@ export class BlogService {
     }
     if (dto.body !== undefined) {
       updates.body = dto.body;
+    }
+    if (normalizedTags !== undefined) {
+      updates.tags = normalizedTags;
     }
     if (dto.status !== undefined) {
       updates.status = dto.status;
@@ -343,13 +616,16 @@ export class BlogService {
   }
 
   /**
-   * BLG-04: deletes the authenticated owner's post along with its comments and
-   * likes in one transaction; throws 404 if missing or owned by someone else.
+   * BLG-04 / BLG-10: deletes the authenticated owner's post along with its
+   * comments and likes in one transaction, durably queuing its image keys.
+   * Attempts file cleanup after commit; failures stay queued for the 30-second
+   * retry job, including across restarts. Throws 404 if missing or not owned.
    */
   async delete(postId: string, userId: string): Promise<void> {
     const id = this.parseId(postId, 'postId');
     const authorId = this.parseId(userId, 'userId');
 
+    let hasImages = false;
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
@@ -359,13 +635,123 @@ export class BlogService {
           .exec();
         if (!deleted) throw this.notFound();
 
+        hasImages = deleted.images.length > 0;
+        if (hasImages) {
+          await this.imageCleanupModel.create(
+            deleted.images.map((image) => ({ postId: id, key: image.key })),
+            { session, ordered: true },
+          );
+        }
         await this.commentModel.deleteMany({ postId: id }, { session }).exec();
         await this.likeModel.deleteMany({ postId: id }, { session }).exec();
       });
-      // BLG-10 will delete stored post image files after the transaction commits.
     } finally {
       await session.endSession();
     }
+
+    if (hasImages) {
+      try {
+        await this.imageCleanup.deletePending(id.toHexString());
+      } catch (error) {
+        this.logger.error(
+          `Image cleanup deferred for deleted post ${id.toHexString()}; keys remain queued`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
+  /**
+   * BLG-10 / GEN-08: attaches one uploaded image (max 5 atomically) to the
+   * authenticated owner's post. Propagates `StorageService` errors unchanged and
+   * deletes the stored file on any post-save failure or limit/race rejection.
+   */
+  async addImage(
+    postId: string,
+    file: UploadedImage | undefined,
+    userId: string,
+  ): Promise<PostView> {
+    const id = this.parseId(postId, 'postId');
+    const authorId = this.parseId(userId, 'userId');
+
+    const existing = await this.postModel
+      .findOne({ _id: id, authorId })
+      .select({ images: 1 })
+      .lean()
+      .exec();
+    if (!existing) throw this.notFound();
+
+    if (!file) {
+      throw new BadRequestException({
+        code: ErrorCode.ValidationFailed,
+        message: 'Validation failed',
+        details: [
+          { field: 'file', message: 'must contain a JPG or PNG image' },
+        ],
+      });
+    }
+
+    if (existing.images.length >= MAX_IMAGES_PER_ITEM) {
+      throw this.imageLimitExceeded();
+    }
+
+    const stored = await this.storageService.save(file);
+    try {
+      const updated = (await this.postModel
+        .findOneAndUpdate(
+          {
+            _id: id,
+            authorId,
+            [`images.${MAX_IMAGES_PER_ITEM - 1}`]: { $exists: false },
+          },
+          { $push: { images: stored } },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .lean()
+        .exec()) as PostRecord | null;
+      if (!updated) {
+        if (!(await this.postModel.exists({ _id: id, authorId }).exec())) {
+          throw this.notFound();
+        }
+        throw this.imageLimitExceeded();
+      }
+      return this.toView(updated);
+    } catch (error) {
+      return this.discardUnattachedImage(id, stored, error);
+    }
+  }
+
+  /**
+   * BLG-10 / GEN-08: keeps the image reference until storage confirms deletion
+   * (matching `HotelsService.removePhoto`). If the database removal then fails,
+   * retrying is safe because `storage.delete` is idempotent.
+   */
+  async removeImage(
+    postId: string,
+    imageId: string,
+    userId: string,
+  ): Promise<void> {
+    const id = this.parseId(postId, 'postId');
+    const imageObjectId = this.parseId(imageId, 'imageId');
+    const authorId = this.parseId(userId, 'userId');
+
+    const post = await this.postModel
+      .findOne({ _id: id, authorId })
+      .select({ images: 1 })
+      .lean()
+      .exec();
+    const image = post?.images.find((item) => item._id.equals(imageObjectId));
+    if (!image) throw this.notFound();
+
+    await this.storageService.delete(image.key);
+    const result = await this.postModel
+      .updateOne(
+        { _id: id, authorId, 'images._id': imageObjectId },
+        { $pull: { images: { _id: imageObjectId } } },
+        { runValidators: true },
+      )
+      .exec();
+    if (!result.matchedCount) throw this.notFound();
   }
 
   /** ACC-12: hides all posts of a deactivated author on future reads (idempotent). */
@@ -481,6 +867,52 @@ export class BlogService {
     }
   }
 
+  private prepareTags(tags: string[]): string[] {
+    if (
+      !Array.isArray(tags) ||
+      !tags.every((item): item is string => typeof item === 'string')
+    ) {
+      throw this.invalidTags('tags must be an array of strings');
+    }
+    const normalized = normalizeTags(tags);
+    if (normalized.length > MAX_TAGS_PER_POST) {
+      throw this.invalidTags(
+        `tags must contain no more than ${MAX_TAGS_PER_POST} items`,
+      );
+    }
+    if (
+      normalized.some(
+        (tag) => tag.length < MIN_TAG_LENGTH || tag.length > MAX_TAG_LENGTH,
+      )
+    ) {
+      throw this.invalidTags(
+        `each tag must be between ${MIN_TAG_LENGTH} and ${MAX_TAG_LENGTH} characters`,
+      );
+    }
+    return normalized;
+  }
+
+  private invalidTags(message: string): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [{ field: 'tags', message }],
+    });
+  }
+
+  private invalidTag(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'Validation failed',
+      details: [
+        {
+          field: 'tag',
+          message: `tag must be between ${MIN_TAG_LENGTH} and ${MAX_TAG_LENGTH} characters`,
+        },
+      ],
+    });
+  }
+
   private parseId(value: string, field: string): Types.ObjectId {
     if (typeof value !== 'string' || !OBJECT_ID_HEX_RE.test(value)) {
       throw new BadRequestException({
@@ -492,10 +924,50 @@ export class BlogService {
     return new Types.ObjectId(value);
   }
 
+  private async paginatePublishedPosts(
+    extraFilter: QueryFilter<StoredPost>,
+    { page, limit }: { page: number; limit: number },
+    knownProfiles?: Map<string, AccountProfile>,
+  ): Promise<Paginated<PublishedPostView>> {
+    const filter: QueryFilter<StoredPost> = {
+      status: PostStatus.PUBLISHED,
+      isHidden: false,
+      authorDeactivated: false,
+      ...extraFilter,
+    };
+    const result = await paginate(
+      this.postModel,
+      filter,
+      { page, limit },
+      { sort: { publishedAt: -1, _id: -1 } },
+    );
+    const profiles =
+      knownProfiles ??
+      (await this.resolveProfiles(
+        result.items.map((post) => post.authorId.toHexString()),
+      ));
+    return {
+      ...result,
+      items: result.items.map((post) =>
+        this.toPublishedView(
+          post as PostRecord,
+          profiles.get(post.authorId.toHexString()),
+        ),
+      ),
+    };
+  }
+
   private notFound(): NotFoundException {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Post not found',
+    });
+  }
+
+  private authorNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Author not found',
     });
   }
 
@@ -504,6 +976,40 @@ export class BlogService {
       code: ErrorCode.NotFound,
       message: 'Comment not found',
     });
+  }
+
+  private imageLimitExceeded(): BadRequestException {
+    return new BadRequestException({
+      code: ErrorCode.LimitExceeded,
+      message: `A post can have at most ${MAX_IMAGES_PER_ITEM} images`,
+    });
+  }
+
+  private async discardUnattachedImage(
+    postId: Types.ObjectId,
+    image: StoredImage,
+    failure: unknown,
+  ): Promise<never> {
+    try {
+      const attached = await this.postModel
+        .exists({
+          _id: postId,
+          images: { $elemMatch: { _id: image._id, key: image.key } },
+        })
+        .exec();
+      if (!attached) {
+        await this.storageService.delete(image.key);
+      }
+    } catch (cleanupError) {
+      this.logger.error(
+        `Could not reconcile post ${postId.toHexString()} image ${image._id.toHexString()}`,
+      );
+      throw new AggregateError(
+        [failure, cleanupError],
+        'Post image cleanup failed',
+      );
+    }
+    throw failure;
   }
 
   private toView(post: PostRecord): PostView {
@@ -516,12 +1022,13 @@ export class BlogService {
       images: post.images.map((image) => ({
         _id: image._id.toHexString(),
         key: image.key,
+        url: this.storageService.urlOf(image.key),
       })),
       status: post.status,
       ...(post.publishedAt !== undefined
         ? { publishedAt: post.publishedAt }
         : {}),
-      likeCount: post.likeCount,
+      likeCount: Math.max(0, post.likeCount),
       commentCount: post.commentCount,
       isHidden: post.isHidden,
       authorDeactivated: post.authorDeactivated,
@@ -537,6 +1044,7 @@ export class BlogService {
     return {
       ...this.toView(post),
       authorName: profile?.name ?? null,
+      excerpt: buildExcerpt(post.body),
     };
   }
 

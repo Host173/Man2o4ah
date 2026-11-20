@@ -2,7 +2,7 @@ import type { ClientSession } from 'mongoose';
 import type { CancellationPolicy } from '../../common/database/cancellation-policy.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
 
-/** Pass the caller's transaction to every read and inventory write in a hold. */
+/** Pass the caller's transaction to every read and inventory write in a hold. Required by all production inventory mutations. */
 export interface HotelTransactionOptions {
   session: ClientSession;
 }
@@ -32,6 +32,7 @@ export interface HotelView {
 export interface RoomView {
   id: string;
   hotelId: string;
+  /** New rooms use trimmed lowercase names; legacy reads retain their stored names. */
   name: string;
   type: string;
   beds: number;
@@ -41,6 +42,20 @@ export interface RoomView {
   /** Bookable nights, both ends inclusive. */
   availability: RoomDateRange[];
   hasEverBeenReserved: boolean;
+}
+
+export interface AvailableRoomView extends Pick<
+  RoomView,
+  | 'id'
+  | 'hotelId'
+  | 'name'
+  | 'type'
+  | 'beds'
+  | 'maxOccupancy'
+  | 'pricePerNightMinor'
+> {
+  /** HTL-15: nightly price times the stay's nights, in USD cents; not a held price. */
+  totalMinor: number;
 }
 
 export type RoomNightView = {
@@ -70,6 +85,6 @@ export interface HotelSearchQuery {
 }
 
 export interface HotelSearchResult extends HotelView {
-  /** The cheapest qualifying room's price, not the total stay price. */
+  /** Cheapest room that can join a capacity-valid selection of the requested room count; not the total stay price. */
   pricePerNightMinor: number;
 }

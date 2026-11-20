@@ -277,6 +277,31 @@ describe('Flights HTTP API (FLT-03, FLT-04)', () => {
     expect(response.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
+  it('documents flight search dates with an executable YYYY-MM-DD pattern', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().setTitle('Man2o4ah API').build(),
+    );
+    const operation = document.paths['/api/flights/search']?.get;
+    expect(operation).toBeDefined();
+    const parameters = operation?.parameters as Array<{
+      name: string;
+      schema: { format?: string; pattern?: string };
+    }>;
+    const date = parameters.find((parameter) => parameter.name === 'date');
+    const returnDate = parameters.find(
+      (parameter) => parameter.name === 'returnDate',
+    );
+    expect(date?.schema).toMatchObject({
+      format: 'date',
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    });
+    expect(returnDate?.schema).toMatchObject({
+      format: 'date',
+      pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+    });
+  });
+
   it('documents the cabin creation route and validated request fields in Swagger', () => {
     const document = SwaggerModule.createDocument(
       t.app,

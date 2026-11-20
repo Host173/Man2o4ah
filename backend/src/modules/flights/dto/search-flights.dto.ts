@@ -32,7 +32,11 @@ export class SearchFlightsDto implements SearchFlightsBase {
   @Matches(/^[A-Z]{3}$/)
   to!: string;
 
-  @ApiProperty({ example: '2027-03-14', pattern: 'YYYY-MM-DD' })
+  @ApiProperty({
+    example: '2027-03-14',
+    format: 'date',
+    pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+  })
   @IsString()
   @Matches(LOCAL_DATE)
   date!: string;
@@ -83,7 +87,11 @@ export class SearchFlightsDto implements SearchFlightsBase {
   @IsEnum(['price', 'duration', 'departure'])
   sortBy: FlightSortBy = 'departure';
 
-  @ApiPropertyOptional({ example: '2027-03-20', pattern: 'YYYY-MM-DD' })
+  @ApiPropertyOptional({
+    example: '2027-03-20',
+    format: 'date',
+    pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+  })
   @ValidateIf((dto) => dto.returnDate !== undefined)
   @IsString()
   @Matches(LOCAL_DATE)

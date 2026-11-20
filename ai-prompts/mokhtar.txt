@@ -101,3 +101,375 @@ Before making any edits, thoroughly read and inspect:
 How the output was used:
 Added the CTR-06 prompt-log entry and corrected the PR #118 description after review; no source changes.
 ================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+You are tasked with implementing GitHub Issue #65: "ITN-01: Create and list itineraries". 
+
+Please follow all project conventions, architecture guidelines, and standards.
+
+### 1. Initial Research & Review (Do this first)
+* Read the project skill guidelines located at `docs/ai/skills/travel-platform/` to understand the architecture, patterns, error handling, and coding standards.
+* Inspect the repository structure, existing modules, database models, and API routing conventions (especially around user ownership, validation, and authentication since tests require API owner-only checks).
+* Review existing code in related modules to maintain consistency.
+
+### 2. Branch Setup
+* Create and check out the correct feature branch:
+  `git checkout -b feature/ITN-01-create-list-itineraries`
+
+### 3. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement the following features satisfying requirements **ITN-01** and **ITN-03**:
+* **Create Itinerary:** Allow an authenticated owner to create an itinerary with fields: `title`, `countries`, and `start date`.
+* **Edit Itinerary:** Allow the owner to update/edit an existing itinerary.
+* **Delete Itinerary:** Allow the owner to delete an itinerary.
+* **List Itineraries:** List the current user's itineraries, ordered by **most recently updated first**.
+* **Open/View Itinerary:** Allow the owner to retrieve/open a single itinerary by ID.
+* **Access Control:** Ensure API endpoints are restricted to the owner only (owner-only API access).
+
+### 4. Testing & Verification
+* Write required integration and API tests for the `itineraries` module.
+* Run the test suite and linter to verify that all tests pass cleanly and no regressions are introduced.
+
+### 5. Pull Request Creation
+* Once everything is implemented, verified, and passing tests, commit your changes with clear commit messages.
+* Push the branch and create a Pull Request with the exact title:
+  `ITN-01: Create and list itineraries`
+* Ensure the PR description references issue `#65`.
+
+How the output was used:
+Implemented owner-only create/list/open/edit/delete for itineraries in `itineraries.service.ts`, `itineraries.controller.ts`, the DTOs and types, added service and API tests plus the expanded fake, and committed 4c00728.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+Please start the local development server so I can manually test the new itinerary endpoints in Swagger:
+1. Run the application (e.g., `npm run start:dev`).
+2. Provide the exact local Swagger UI URL.
+3. Confirm that session/cookie authentication is configured so I can test the POST, GET, PATCH, and DELETE `/api/itineraries` endpoints.
+
+Also, please check and confirm whether you have added the prompts I gave you into the project's prompts file. If they haven't been added yet, please add them now and confirm where they were saved.
+
+How the output was used:
+Started a local MongoDB and the Nest dev server on port 4000, confirmed Swagger and cookie auth, and verified the itinerary endpoints end to end; only `ai-prompts/mokhtar.txt` changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+MONGODB_URI=<removed>
+PORT=4000
+FRONTEND_URL=http://localhost:3000
+PLATFORM_CURRENCY=USD add this to the .env
+
+How the output was used:
+Pointed `backend/.env` at the team Atlas cluster and restarted the dev server on it; no source files changed.
+================================================
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+this api takes loading so long and it doesnt execcute
+
+How the output was used:
+Fixed the shared pagination query DTO so Swagger exposes `page` and `limit` as numbers instead of objects, confirmed GET /api/itineraries returns 200, and committed b26f24c.
+================================================
+
+Date: 2026-11-17
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+did you make tests in a test file for api as project rules or not ?
+
+How the output was used:
+Confirmed the co-located itineraries.api.spec.ts and itineraries.service.spec.ts files. Acting on the PR review afterwards, replaced the NotImplementedExceptions in FakeItinerariesService with in-memory owner-scoped create/list/open/edit/delete, added 	est/fakes/itineraries.fake.spec.ts, attached the Swagger screenshot, and committed f4538ae.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-01
+
+Prompt:
+[Screenshot of an email from kareem sayed]
+every thing is good ready tobe merged just small fixes so we avoid future problems (not now )
+1. The fake (no change needed) ... One tiny difference: an empty update({}) changes updatedAt in the fake but not in the real service. Fix it only if you want.
+2. The emoji title limit (small bug). The DTO's @maxlength(100) counts characters, but normalizeTitle uses .length, which counts an emoji as 2. So a title of 51-100 emoji passes the DTO and then gets a 400 from the service. Suggested fix: count the same way in the service, [...trimmed].length instead of trimmed.length, and add a test with a 100-emoji title.
+and about the screenshot, we don't need it in the repo
+
+How the output was used:
+Counted title characters as code points in the service and the schema (Array.from(value).length), added 100-emoji and 101-emoji tests to the service, API and schema specs, stopped an empty update from bumping updatedAt in the fake, deleted docs/screenshots/itn-01-swagger.jpg and dropped it from the PR description; committed ce48c4e.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+You are tasked with implementing GitHub Issue #66: "ITN-05: Days and city groups".
+
+Please follow all project rules, architecture guidelines, and conventions strictly.
+
+### 1. Initial Research & Full Codebase Overview (Do this first)
+* Read all relevant project documentation and skill files inside `docs/ai/skills/travel-platform/`.
+* Inspect the existing `itineraries` module, shared contracts, schemas/models, DTOs, services, controllers, and test files (including the implementation from dependency `#65` / `ITN-01`) so you have a complete overview of how itineraries, validation, owner scoping, and Swagger documentation are structured.
+* Confirm whether `#65` (`ITN-01`) is already merged into the base branch before branching; if not, let me know how you are basing the branch so there are no conflicts.
+
+### 2. Branch Setup
+* Create and check out the exact feature branch:
+  `git checkout -b feature/ITN-05-days-city-groups`
+
+### 3. Strict TDD Workflow (`TDD required: Yes`)
+Because **TDD is required** for this issue (`tdd` label), you MUST follow Red-Green-Refactor:
+1. **Write failing tests first** before writing any production implementation code:
+   * **Unit tests** covering day numbering, date calculation from the itinerary's `startDate`, and consecutive same-city grouping logic.
+   * **API tests** covering adding days, editing a day's city and notes, owner-only access (`401` without session, `404` on another user's itinerary, `400` on invalid input), and Swagger registration.
+2. Run the test suite to confirm the new tests fail for the expected reasons.
+3. Implement the minimal, clean production code to make all tests pass, then refactor while keeping tests green.
+
+### 4. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement all features satisfying requirements **ITN-05** and **ITN-09**:
+* **Add Days:** Allow the itinerary owner to add days to an itinerary.
+* **Edit Day Details:** Allow the owner to edit each day's `city` and `notes`.
+* **Automatic Numbering & Dating:** Automatically calculate and return day numbers (e.g., Day 1, Day 2...) and exact calendar dates derived sequentially from the itinerary's `startDate`.
+* **Consecutive Same-City Grouping:** Group consecutive days that share the same city into city groups in the response (maintaining chronological order).
+* **Security & Validation:** Enforce session authentication and strict `ownerId` scoping on every read and write operation. Ensure Swagger decorators/schemas are accurately updated.
+
+### 5. Verification, Prompt Logging & Pull Request Creation
+* Run the full verification command (e.g., `npm run verify` — format check, linter, typecheck, unit/integration/API tests, and build) and ensure 100% pass with strong coverage.
+* Log the prompts used for this issue into the project's prompts file following the repo's prompt-tracking rules.
+* Commit your changes cleanly, push the branch, and open a Pull Request with:
+  * **Exact PR Title:** `ITN-05: Days and city groups`
+  * **PR Description:** Include a clear summary of changes, `Closes #66`, test results, and a reminder/placeholder for the Swagger test screenshot.
+
+How the output was used:
+Implemented ITN-05/ITN-09 in the itineraries module (day helpers, DTOs, service, controller, Swagger models and fake), tests first then code; `npm run verify` passed with 1152 tests and 98.17% lines. The branch is based on the latest develop with the unmerged ITN-01 branch merged in; committed e540ae3 (tests) and b0a5186 (implementation).
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-07
+
+Prompt:
+You are tasked with implementing GitHub Issue #67: "ITN-07: Delete and reorder days".
+
+Please adhere strictly to all project rules, architectural conventions, and workflows.
+
+### 1. Initial Research & Full Codebase Overview (Do this first)
+* Read all project skill files and architectural guidelines in `docs/ai/skills/travel-platform/`.
+* Perform a full read of the `itineraries` module—including schemas/models, DTOs, services, controllers, shared contracts, Swagger decorators, and existing test suites.
+* Specifically examine how days, activities, budget entries, transport costs, day numbering, calendar date derivations, consecutive city grouping, and itinerary totals are currently implemented across dependencies `#66` (ITN-05), `#71` (ITN-16), and `#69` (ITN-12).
+* Check whether dependencies `#66`, `#71`, and `#69` are merged into the base branch; if any are still open, inform me before branching so we base the branch cleanly without merge conflicts.
+
+### 2. Branch Setup
+* Create and check out the exact feature branch:
+  `git checkout -b feature/ITN-07-delete-reorder-days`
+
+### 3. Strict TDD Workflow (`TDD required: Yes`)
+Because **TDD is strictly required** for this issue (`tdd` label), follow the Red-Green-Refactor cycle without exception:
+1. **Write failing tests first** before writing any production implementation code:
+   * **Unit tests** covering:
+     * Day renumbering after deleting a day or moving/reordering a day.
+     * Cascading deletion of all associated activities, budget entries, and transport costs when a day is deleted.
+     * Recalculation of calendar dates from `startDate`, consecutive same-city groups, and itinerary totals after deletion or reordering.
+   * **API tests** covering:
+     * Deleting a day (`DELETE`) and moving/reordering a day.
+     * Owner-only access enforcement (`401` without session, `404` for non-existent or foreign itinerary/day, `400` for invalid reorder indices/payloads).
+     * Swagger documentation registration with cookie auth.
+2. Run the test suite to verify the new tests fail for the expected reasons.
+3. Implement clean, minimal production code to pass all tests, then refactor while keeping the suite green.
+
+### 4. Implementation Requirements (Package 6 · Itineraries / Module: itineraries)
+Implement all requirements for **ITN-07** and **ITN-08**:
+* **Delete Day (Cascading):** Allow the authenticated itinerary owner to delete a specific day. Deleting a day must cleanly cascade-delete all associated activities, budget entries, and transport costs tied to that day.
+* **Move / Reorder Day:** Allow the owner to move a day to a new position/order within the itinerary.
+* **Automatic Recalculation:** After any deletion or reorder operation:
+  * Sequential day numbers (`1..N`) must automatically renumber.
+  * Calendar dates must update sequentially from the itinerary's `startDate`.
+  * Consecutive same-city groups must dynamically regroup based on the updated day sequence.
+  * Itinerary totals (budgets/costs) must accurately recalculate and reflect the current days.
+* **Security & Validation:** Scope every read and write operation strictly by `ownerId` from the active session, returning `400 VALIDATION_FAILED` on invalid inputs/positions and `404 NOT_FOUND` on missing or foreign resources.
+
+### 5. Verification, Prompt Logging & Pull Request Creation
+* Run the full verification pipeline (`npm run verify` — formatting, linting, typechecking, all unit/integration/API tests, and build) and verify everything passes with high coverage.
+* Log the prompts used for this task into the project's prompts file according to the repository guidelines.
+* Commit your changes cleanly, push the branch, and create a Pull Request with:
+  * **Exact PR Title:** `ITN-07: Delete and reorder days`
+  * **PR Description:** Include a concise summary of changes, `Closes #67`, test results, and a placeholder section for Swagger verification screenshots.
+
+How the output was used:
+Implemented ITN-07/ITN-08 in the itineraries module with strict TDD: red tests first (commit 0e328f5), then production code (commit b4d173f). Added `DELETE /api/itineraries/:id/days/:dayId` (204) with cascade of embedded activities/budget entries and filtering of transport costs by dayId, and `PATCH /api/itineraries/:id/days/reorder` (200) with permutation validation and a no-op that leaves updatedAt unchanged. Numbers/dates/groups are derived from array order; dayCount/cityIds are recomputed in the same write. Deleted activity image files are deferred to ITN-12/GEN-08 (StorageService.delete is a stub) and budget summaries to ITN-14/18, documented in code and the PR. The branch is based on the latest develop with the unmerged ITN-05 branch merged in (dependency #66, PR #154 still open); #71 and #69 have no PRs. `npm run verify` passed with 1181 tests and 98.21% lines.
+================================================
+Date: 2026-11-18
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05 / ITN-07 (review follow-up)
+
+Prompt:
+[The user attached a screenshot of the PR review from @Host173 on ITN-05 (PR #154):]
+
+"⚠️ Changes needed · ITN-05. Tests passed (1178 tests). The branch merges cleanly with develop now that ITN-01 is in, the diff holds only ITN-05/ITN-09 work, and the TDD order is right.
+1. Days are lost when requests overlap: `addDay`/`updateDay` read the whole `days` array and write it back with only `{_id, ownerId}` in the filter. 10 adds at once → ten 201s but only 6 days stored; an add plus a notes edit at once lost one change in 10 of 10 rounds. Fix: `$push` with `'days.59': {$exists: false}` for adds and an `arrayFilters` `$set` for edits (or an optimistic check on `updatedAt` returning 409), plus a `Promise.allSettled` test that checks `days.length` equals the number of 201s.
+2. The PR's own 'Swagger screenshot' box is unticked, and the PR template asks for it. Fix: attach the screenshot to the PR description (it doesn't go in the repo).
+Your call, @Mohamed-Mokhtar-Elalfy-16009527: deferring the city-group `subtotal` (listed in ITN-09 and `domain-rules.md`) to ITN-14/18. Suggestion: fine, but note it on ITN-14 (#70) so the subtotal is added there and ITN-09 isn't counted as fully done.
+Checked: 34 edge cases tried, 2 found problems. Missing tests: concurrent add/edit of days."
+
+How the output was used:
+Applied the fix to both PRs. On ITN-05 (branch `feature/ITN-05-days-city-groups`): merged latest `develop`; added red `Promise.allSettled` tests (`cd22e4e`) reproducing ten 201s with only six days stored; replaced the whole-array writes with atomic pipeline updates — `$push`-style `$concatArrays` guarded by `days.59` for adds and `$map`/`$mergeObjects` for edits, recomputing `dayCount`/`cityIds` in the same update (`3bc0daa`). `npm run verify` passed with 1231 tests and 98.07% lines. Attached a Swagger UI screenshot to PR #154 with `gh pr edit --attach`, updated its description with the concurrency fix and test results, and commented on #70 so ITN-14 adds `CityGroupView.subtotal` (ITN-09 not fully done until then).
+On ITN-07 (branch `feature/ITN-07-delete-reorder-days`): merged the updated ITN-05 branch (`513cb9b`, resolving test-file conflicts by keeping both sides), added red concurrency tests for overlapping delete/reorder and add (`dbf5618`), and made `deleteDay`/`reorderDays` atomic with pipelines that read `days`/`transportCosts` at write time (`19c6e99`). `npm run verify` passed with 1262 tests and 98.11% lines. Attached a Swagger screenshot to PR #155 and updated its description.
+================================================
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed � ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`). Please implement the following exact fixes and write the missing tests following TDD:
+
+### 1. Fix `notes: null` and Pipeline Spread
+* **Issue:** Adding a day without `notes` still stores and returns `"notes": null` because the last push reformatted `addDay` without conditionally omitting the key.
+* **Fix:** In the pipeline day construction, conditionally include `notes` only when it is provided (e.g., `...(notes !== undefined ? { notes: { $literal: notes } } : {})`) using a red test first[cite: 13].
+
+### 2. Add Missing Tests (Mandatory Red-First TDD)
+Write unit/API tests covering all previously requested items that are still missing[cite: 13]:
+* `POST` and `PATCH` with `"$100 for dinner"` and `"$$ROOT"` stored verbatim[cite: 13].
+* A day added without `notes` verifying the returned object has **no `notes` key**[cite: 13].
+* Fake service tests verifying the **61st day cap**, **unknown city rejection** on both add and edit, and proper error formatting[cite: 13].
+
+### 3. Fix Fake Service Error Shape & Validation Parity
+* **Issue:** The fake service's error structure doesn't match the real service (`copilot-instructions.md: fakes behave like the contract, including its errors`)[cite: 13]. Its `invalidField` throws `{ field, message }` instead of the service's shape (`{ code: "VALIDATION_FAILED", message, details: [{ field, message }] }`), and `PATCH` with a blank `cityId` (`" "`) returns `200` in the fake but `400` in the service[cite: 13].
+* **Fix:** Copy the service's exact error shape into the fake and reject blank `cityId` inputs when present[cite: 13].
+
+### 4. Close Smaller Fake Validation Gaps
+* Match the real service's validation order and behavior:
+  * Check the **day cap before the city validation** so the error matches the service[cite: 13].
+  * Enforce notes length limits (e.g., rejecting 2001-character notes)[cite: 13].
+  * Ensure an **empty PATCH body** does not incorrectly bump `updatedAt` (return early on an empty body)[cite: 13].
+
+### 5. Verification & Push to Update PR #154
+1. Run `npm run format` and the full verification pipeline (`npm run verify`) to ensure Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes with a clear commit message and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Applied conditional spread for notes in the addDay MongoDB pipeline, fixed the fake service invalidField error shape, added fake validation parity tests, added $-prefixed notes and omitted-notes tests, ran `npm run verify` (all green: 1236 tests), and committed to update PR #154.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the latest code review feedback ("Changes needed � ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Fix the Remaining Fake Service Parity Gaps (`itineraries.fake.ts`)
+Align `FakeItinerariesService` behavior completely with the real service:
+* **Empty PATCH Body:** Ensure an empty `PATCH` body returns early without bumping `updatedAt` (the real service leaves the day untouched)[cite: 14].
+* **Atomic Validation on PATCH:** When updating with invalid data (e.g., `PATCH { cityId: "dubai", notes: 2001 chars }`), the fake currently updates the city even though notes validation fails. Fix it so that the fake **validates both city and notes before making any changes**, leaving the day completely unchanged if validation fails[cite: 14].
+* **Validation Order Parity:** Ensure the fake checks the **city before the day cap** (matching the real service, where a 61st day with an unknown city triggers the city error first rather than the day-cap error)[cite: 14].
+
+### 2. Add Missing PATCH `$`-Prefixed Notes Test
+* **Issue:** The `POST` test for `$`-prefixed notes (like `"$100 for dinner"`) exists, but the corresponding `PATCH` test is still missing[cite: 14].
+* **Fix:** Add an explicit test for `updateDay` / `PATCH` with `"$100 for dinner"` to verify it is updated and stored verbatim[cite: 14].
+
+### 3. Git Workflow Reminder (Red Test Commit Rule)
+* Note the reviewer's tip: *�push the red test as its own commit first next time�*[cite: 14]. Ensure you make clean, atomic commits moving forward (e.g., adding/committing failing tests first before committing the implementation fix).
+
+### 4. Format, Verify, and Push to Update PR #154
+1. Run `npm run format` and the full verification suite (`npm run verify`) to confirm Prettier, `oxlint`, typechecking, all tests, and build pass cleanly with 0 errors[cite: 2, 10].
+2. Log the prompts used for this fix into the project's prompts file following repository rules.
+3. Commit your changes cleanly and push to remote branch `feature/ITN-05-days-city-groups` so PR #154 updates automatically and all CI checks turn green[cite: 6, 9].
+
+How the output was used:
+Fixed fake service updateDay (empty-body early return, atomic validation, notes-before-mutation), reordered addDay validation (city before day cap), added PATCH $-prefixed notes test, ran `npm run verify` (all green: 1237 tests), logged the prompt, and will commit/push to update PR #154.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received updated code review feedback ("Changes needed � ITN-05") on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6, 14]. Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Validation Order Fix in `itineraries.fake.ts`
+* **What happens right now:** Adding a **61st day** with a **valid city** and **2001-character `notes`** triggers the **days (60-day cap)** error in the fake, whereas the real service triggers the **`notes` validation error** first.
+* **What to understand & fix:** In `FakeItinerariesService.addDay`, validate `notes` (length/code-point limit) **before** checking the 60-day cap so the fake matches the real service's validation order and error response.
+
+### 2. Missing Tests to Pin Fake Behavior (`itineraries.fake.spec.ts`)
+Right now, if `f86cb72`'s `itineraries.fake.ts` changes are set aside, all itinerary/fake tests still pass because nothing pins those behaviors. Add dedicated fake-spec tests for:
+1. **Empty `PATCH`:** Calling `updateDay` with an empty patch does **not** bump `updatedAt` (leaves the day/timestamp unchanged).
+2. **Failed `PATCH` leaves city untouched:** Calling `updateDay` with `{ cityId: "dubai", notes: <2001 chars> }` fails with `400` / validation error **and** keeps the original `cityId` unchanged (no partial mutation).
+3. **61st day with an unknown city:** Calling `addDay` on a 61st day with an unknown city throws the **city error** (matching the service's validation order).
+4. **61st day with a valid city and 2001-char `notes`:** Calling `addDay` throws the **`notes` error** (not the 60-day cap error).
+
+### 3. Missing Boundary & Concurrency Tests
+Add tests verifying limits already enforced by the code:
+1. **57 days + 8 parallel `addDay` calls:** Stops cleanly at **60 days** total (not just the 10-parallel case).
+2. **Character / code-point notes boundary:** **2000 emoji characters** pass validation, while **2001 emoji characters** fail validation.
+
+### 4. Strict Commit Discipline ("Red Test First")
+* **Do NOT mix the red test and the fix into a single commit.**
+* First, add the new tests covering the gaps above, run the test suite to verify they fail ("red") for the expected reasons, and **commit and push the red test commit(s) first**.
+* Next, apply the `addDay` notes-before-60-day-cap fix in `itineraries.fake.ts` (and any needed test adjustments), verify everything turns **green**, and **commit and push the fix**.
+
+### 5. Final Verification & Prompt Logging
+* Run `npm run format` and the full verification suite (`npm run verify`) and confirm formatting, `oxlint`, TypeScript typechecking, the full test suite, and build all pass with **zero errors**.
+* Log the prompts used for this work into the repository's prompts file following project rules.
+* Push all commits to `feature/ITN-05-days-city-groups` and verify `gh pr checks` is green.
+
+How the output was used:
+Fixed the fake itineraries day validation order (notes before the 60-day cap) after pinning it with red tests and committed the red test then the fix.
+
+=============================================
+
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-05
+
+Prompt:
+We received the final "Changes needed ITN-05" code review feedback on PR #154 (`feature/ITN-05-days-city-groups`)[cite: 6].
+
+Please implement these final corrections and missing tests strictly following the instructions:
+
+### 1. Move Race and Emoji Coverage into the Real API Test Suite
+The 60-day cap under parallel adds and the emoji character count were only tested on the in-memory fake, which cannot race. Fix: put the 57 + 8 Promise.allSettled test and the 2000/2001 emoji test in `src/modules/itineraries/itineraries.api.spec.ts`.
+
+### 2. Deterministic Empty-PATCH Fake Test
+The fake's empty-PATCH test could not fail: with the fake fix set aside it still passed, because `updatedAt = new Date()` landed in the same millisecond. Fix: `vi.useFakeTimers()` and `vi.setSystemTime` before the PATCH.
+
+### 3. Fake Typing Parity
+The fake threw a TypeError for `addDay(id, {cityId: 'cairo', notes: null})` where the service gives 400 VALIDATION_FAILED. Fix: type-check notes and cityId in the fake before `.trim()`.
+
+### 4. Unify the Over-Limit Notes Message
+The over-limit notes message differed between the DTO and the service; one message would be cleaner.
+
+How the output was used:
+Moved the parallel-cap and emoji tests into the API spec, made the fake empty-patch test deterministic, typed the fake before trimming, unified the notes message, ran `npm run verify` (all green: 1245 tests), and committed and pushed the fixes.
+
+=============================================
+Date: 2026-11-19
+Student: Mokhtar
+Tool: OpenCode
+Related Requirement: ITN-07/08
+
+Prompt:
+The user attached the updated `SELF_REVIEW_PROMPT (2).md` and reported a self-review blocker on ITN-07: the review stopped at the conflict gate because the branch was 180 commits behind `origin/develop` with conflicts. Critical rule: do NOT create a new branch or a new Pull Request - switch to the existing ITN-07 branch (which has an open PR), pull it, merge `origin/develop` into it (never rebase), resolve all conflicts preserving both sides (specifically ai-prompts/mokhtar.txt, backend/test/fakes/itineraries.fake.ts and backend/test/fakes/itineraries.fake.spec.ts), verify zero conflicts, then fully execute the self-review loop until clean, run npm run format and npm run verify, log prompts, commit, push directly to the existing ITN-07 remote branch, and update the existing PR with the PR summary and the complete Self-Review Report.
+
+How the output was used:
+Switched to the existing `feature/ITN-07-delete-reorder-days` branch (PR #155), pulled it, and merged `origin/develop` (180 commits behind) without rebasing. Resolved all three conflicts keeping both sides: the ITN-07 fake methods (deleteDay/reorderDays) plus develop's invalidField/validation, both fake spec test sets, and all prompt-log entries from both sides. `git merge-tree --write-tree` reported no conflicts and the working tree was clean. Ran the full self-review: `npm ci` + `npm run verify` passed (1964 tests initially, 98.31% lines on itineraries.service.ts); read the whole diff - all ITN-07/08 clauses have tests, routes are Own with 404 for foreign data, errors use the shared shape, TDD order holds, prompt log only appended. Wrote 6 throwaway probes: 3 found a real fake-parity bug (fake reorderDays threw generic errors or silently dropped/duplicated days for non-permutation input). Added a red fake-spec test (975fa83) then fixed the fake to validate permutations with 400 VALIDATION_FAILED on dayIds (a40c124); re-ran all probes clean. Re-ran `npm run format` and `npm run verify` (1965 tests, all green), then committed, pushed to the existing branch, and updated PR #155 with the report.
+

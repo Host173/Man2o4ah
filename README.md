@@ -48,6 +48,11 @@ There is no root `package.json`. Each app has its own.
 ## Run
 
 - Backend: `npm run start:dev` in `backend/`
+- Backend with Stripe test payments: `npm run dev:stripe` in `backend/`
+  - Runs `npm run start:dev` and the Stripe CLI webhook forwarder (`stripe listen`) in one terminal, so test payments confirm bookings. It passes the listener's webhook secret to the backend for you.
+  - Needs the [Stripe CLI](https://docs.stripe.com/stripe-cli) installed (`winget install Stripe.StripeCLI` on Windows) and `stripe login` run once.
+  - `STRIPE_SECRET_KEY` (an `sk_test_` key) still comes from `backend/.env`.
+  - Not testing payments? Plain `npm run start:dev` is enough.
 - Frontend: `npm run dev` in `frontend/`
 
 ## URLs

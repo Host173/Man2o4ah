@@ -1,3 +1,4 @@
+import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { FakeFlightsData } from './flights-data.fake.js';
 import type { FakeFlightSeed } from './flights-data.fake.js';
 import { FakeSeatInventory } from './seat-inventory.fake.js';
@@ -151,16 +152,6 @@ describe('FakeSeatInventory', () => {
       );
     });
 
-    it('rejects seats that are not a positive integer, before touching anything', async () => {
-      const { inventory } = setup();
-      for (const seats of [0, -1, 1.5]) {
-        await expect(inventory.hold([hold('out', seats)])).rejects.toThrow(
-          'positive integer',
-        );
-      }
-      expect(inventory.counters('out', 'out-eco')?.availableSeats).toBe(5);
-    });
-
     it('does nothing for an empty list', async () => {
       const { inventory } = setup();
       await expect(inventory.hold([])).resolves.toBeUndefined();
@@ -289,6 +280,133 @@ describe('FakeSeatInventory', () => {
       await expect(
         inventory.changeCapacity('out', 'nope', 6, 5),
       ).rejects.toMatchObject(conflict('CONCURRENT_CHANGE'));
+    });
+
+    it('rejects a non-positive capacity', async () => {
+      const { inventory } = setup();
+      await expect(
+        inventory.changeCapacity('out', 'out-eco', 0, 5),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+      expect(inventory.counters('out', 'out-eco')?.totalSeats).toBe(5);
+    });
+  });
+
+  describe('validation (400 VALIDATION_FAILED, like the real class)', () => {
+    const methods = ['hold', 'confirm', 'release', 'returnBooked'] as const;
+    const badSeats: [string, number][] = [
+      ['zero', 0],
+      ['negative', -1],
+      ['a fraction', 1.5],
+      ['NaN', Number.NaN],
+      ['a numeric string', '2' as unknown as number],
+    ];
+    const untouched = {
+      totalSeats: 5,
+      availableSeats: 3,
+      heldSeats: 2,
+      bookedSeats: 0,
+    };
+
+    describe.each(methods)('%s', (method) => {
+      it.each(badSeats)(
+        'rejects seats that are %s and changes nothing',
+        async (_name, seats) => {
+          const { inventory } = setup();
+          await inventory.hold([hold('out', 2)]);
+          await expect(
+            inventory[method]([hold('out', seats)]),
+          ).rejects.toMatchObject({
+            status: 400,
+            response: {
+              code: 'VALIDATION_FAILED',
+              details: [{ field: 'items.0.seats' }],
+            },
+          });
+          expect(inventory.counters('out', 'out-eco')).toEqual(untouched);
+        },
+      );
+
+      it('checks every item first, so a bad later item changes nothing', async () => {
+        const { inventory } = setup();
+        await inventory.hold([hold('out', 2), hold('ret', 2)]);
+        await expect(
+          inventory[method]([hold('out', 1), hold('ret', 0)]),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { details: [{ field: 'items.1.seats' }] },
+        });
+        expect(inventory.counters('out', 'out-eco')).toEqual(untouched);
+        expect(inventory.counters('ret', 'ret-eco')).toEqual(untouched);
+      });
+
+      it('reports every bad item at once', async () => {
+        const { inventory } = setup();
+        await expect(
+          inventory[method]([hold('out', 0), hold('ret', 1), hold('out', -2)]),
+        ).rejects.toMatchObject({
+          response: {
+            details: [{ field: 'items.0.seats' }, { field: 'items.2.seats' }],
+          },
+        });
+      });
+    });
+
+    describe('changeCapacity', () => {
+      const notIntegers: [string, number][] = [
+        ['NaN', Number.NaN],
+        ['a numeric string', '5' as unknown as number],
+        ['a fraction', 5.5],
+      ];
+
+      it.each([['zero', 0], ['negative', -3], ...notIntegers] as [
+        string,
+        number,
+      ][])(
+        'rejects newTotal that is %s and changes nothing',
+        async (_name, newTotal) => {
+          const { inventory } = setup();
+          await expect(
+            inventory.changeCapacity('out', 'out-eco', newTotal, 5),
+          ).rejects.toMatchObject({
+            status: 400,
+            response: {
+              code: 'VALIDATION_FAILED',
+              details: [{ field: 'newTotal' }],
+            },
+          });
+          expect(inventory.counters('out', 'out-eco')?.totalSeats).toBe(5);
+        },
+      );
+
+      it.each(notIntegers)(
+        'rejects expectedTotal that is %s instead of answering CONCURRENT_CHANGE',
+        async (_name, expectedTotal) => {
+          const { inventory } = setup();
+          await expect(
+            inventory.changeCapacity('out', 'out-eco', 6, expectedTotal),
+          ).rejects.toMatchObject({
+            status: 400,
+            response: {
+              code: 'VALIDATION_FAILED',
+              details: [{ field: 'expectedTotal' }],
+            },
+          });
+          expect(inventory.counters('out', 'out-eco')?.totalSeats).toBe(5);
+        },
+      );
+
+      it('reports both fields when both are invalid', async () => {
+        const { inventory } = setup();
+        await expect(
+          inventory.changeCapacity('out', 'out-eco', 0, Number.NaN),
+        ).rejects.toMatchObject({
+          response: {
+            details: [{ field: 'newTotal' }, { field: 'expectedTotal' }],
+          },
+        });
+      });
     });
   });
 

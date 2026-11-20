@@ -63,6 +63,7 @@ All app collections use `{ timestamps: true }` (`createdAt`, `updatedAt`). Refer
 - Responses compute the URL: `${PUBLIC_BASE_URL}/uploads/${key}`. The URL is never stored.
 - Limits: JPG/PNG, ≤ 5 MB each; ≤ 5 per post, activity or hotel; 1 logo per airline.
 - Removing an image (or its parent) deletes the file.
+- For blog post deletion, image keys enter `post_image_cleanups` in the same transaction that removes the post, comments and likes. File deletion starts only after commit. A failed deletion remains durably queued for retry, including across restarts; the API still returns 204 for the committed post deletion.
 
 ### 1.7 Visibility flags
 | Field | On | Set by | Meaning |
@@ -114,6 +115,7 @@ Comments and reviews of a deactivated user stay visible but show **"Deleted user
 | 25 | `reports` | moderation | User reports on content |
 | 26 | `notifications` | notifications | In-app notifications |
 | 27 | `audit_logs` | audit | Append-only log of admin actions |
+| 28 | `post_image_cleanups` | blog | Durable file cleanup for deleted posts (BLG-10) |
 
 `admin` owns no collection. `storage` owns no collection (files on disk). `common` owns no collection.
 
@@ -213,13 +215,16 @@ One document per logged-in device. Implements refresh-token revocation and the 3
 | `userId` | ObjectId → users | ✓ | |
 | `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
 | `lastActivityAt` | Date | ✓ | |
-| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+| `expiresAt` | Date | ✓ | `min(lastActivityAt + 30 min, absoluteExpiresAt)` |
+| `absoluteExpiresAt` | Date | ✓ | immutable; login + 8 hours for admins, login + 7 days for other roles (ACC-06, ticket #27) |
 
 Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
 
 Rules
-- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
-- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Every authenticated request checks the session exists, `expiresAt > now` and `absoluteExpiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session), never beyond `absoluteExpiresAt`.
+- The absolute deadline is fixed from the role at login, including the refresh cookie's max age; refresh and role changes never extend it. Existing sessions without this field require a new login; no Atlas data migration is needed.
+- Logout is public and idempotent: delete the authenticated session, or use the refresh token's hash if the access cookie cannot authenticate, then clear both cookies and return 204. Missing or already-revoked credentials still clear the cookies. Other sessions are unaffected.
+- Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
 - Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
 
 ---
@@ -613,6 +618,7 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 | Field | Type | Req | Rules |
 |---|---|---|---|
 | `authorId` | ObjectId → users | ✓ | |
+| `itineraryId` | ObjectId → itineraries | | optional reference to one of the author's public or private itineraries (BLG-13); no embedded copy |
 | `title` | string | ✓ | 1–150 chars |
 | `body` | string | ✓ | 1–20000 chars |
 | `tags` | string[] | ✓ | 0–5; trimmed, lowercased, 1–30 chars, unique (BLG-08) |
@@ -627,6 +633,8 @@ Rules (ITN-18): fetched once per day; on API failure keep using the latest docum
 Indexes: `{ status: 1, isHidden: 1, authorDeactivated: 1, publishedAt: -1 }` · `{ authorId: 1, updatedAt: -1 }` · `{ tags: 1, status: 1 }`
 
 Search (BLG-09) orders by `likeCount + commentCount` descending, then `publishedAt` descending (computed in the aggregation, not stored). Deleting a post deletes its comments, likes and image files.
+
+BLG-13 schema prerequisite: existing posts need no migration and the indexes stay unchanged. The attachment API ships separately and must verify ownership through `ItinerariesService.getById(itineraryId, authorId)` before storing the reference. Attaching an itinerary does not publish it, copy its contents, or bypass its visibility and ownership checks.
 
 #### `comments`
 | Field | Type | Req | Rules |
@@ -646,6 +654,16 @@ Indexes: `{ postId: 1, createdAt: 1 }` · `{ authorId: 1 }`
 
 Indexes: `{ postId: 1, userId: 1 }` **unique** (BLG-06) · `{ userId: 1 }`
 Like = insert + `$inc likeCount`; a duplicate key means already liked. Unlike = delete + `$inc -1` only if a document was deleted.
+
+#### `post_image_cleanups` (BLG-10)
+| Field | Type | Req | Rules |
+|---|---|---|---|
+| `postId` | ObjectId | ✓ | ID of the deleted post; intentionally survives the parent |
+| `key` | string | ✓ | Stored file name, unique; never reused by storage |
+
+Indexes: `{ key: 1 }` **unique** · `{ postId: 1, _id: 1 }`
+
+Created with the caller's session in the post deletion transaction. The post-commit attempt and the 30-second job call idempotent `StorageService.delete(key)` and remove the record only after success. Storage or acknowledgement failure leaves the record for retry; no TTL. Concurrent workers may attempt the same key safely. Batches advance past failed records so they cannot starve later files. No API response exposes these internal records.
 
 ---
 
@@ -850,6 +868,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |
 | Complete stays | hotel-bookings | 1 h | `confirmed` with `checkOutDate < today` → `completed` |
 | Refresh rates | fx | daily | fetch FXRatesAPI, insert today's `exchange_rates` |
+| Retry post image cleanup | blog | 30 s | Delete queued files via storage; remove each cleanup record only after success |
 
 Sessions need no job (TTL index).
 
@@ -858,10 +877,12 @@ Sessions need no job (TTL index).
 ## 8. Decisions to confirm in team review
 These are the calls this design makes where the requirements are silent or ambiguous. Each module owner confirms or challenges the ones in their area.
 
-1. Platform currency is **USD**.
+**Status (17 Nov):** confirmed by the team leader, except the two parts marked *open* below, which wait on the TAs. Build to the confirmed call until a TA answer changes it.
+
+1. Platform currency is **USD**: all flight and hotel prices, payments and refunds (PAY-04). *Confirmed.* *Open (TAs):* may booking prices also be *displayed* converted to the user's preferred currency, as an approximation, while charging in USD? ITN-18 says booking prices are not converted, so not built unless the TAs allow it.
 2. "Today" for date-only rules is the **UTC** date.
 3. Refunds use the **policy snapshot taken at hold time**, not the provider's current policy (the user accepted that version, PAY-02).
-4. Extra baggage is chosen once per passenger and applies to **every segment**, charged per segment at that segment's airline price.
+4. Extra baggage is chosen once per passenger and applies to **every segment**. *Confirmed.* Charged per segment at that segment's airline price, as built. *Open (TAs):* charge the airline's price once per booking instead (with two airlines, each charges its price once)?
 5. A flight booking is **completed** when its last segment has departed.
 6. Pending bookings on a cancelled flight become **expired** (the only legal exit from `pending_payment`).
 7. A cancelled flight **keeps its flight number** for that date (no re-creating the same number that day).

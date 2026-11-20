@@ -12,6 +12,7 @@ import { AuthController } from './auth/auth.controller.js';
 import { AuthService } from './auth/auth.service.js';
 import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
 import { RolesGuard } from './auth/roles.guard.js';
+import { RefreshAuthCookiesInterceptor } from './auth/refresh-auth-cookies.interceptor.js';
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
@@ -23,7 +24,8 @@ import { UsersController } from './users/users.controller.js';
  * logged-in account (the `access_token` cookie) unless it is `@Public()`;
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
- * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user)
+ * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user, ACC-08
+ * change password)
  * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
  * currencies come from `ReferenceDataService`, looked up from the app, so
  * `ReferenceDataModule` must be registered beside this module); `AuthService`
@@ -54,6 +56,7 @@ import { UsersController } from './users/users.controller.js';
     AccountsService,
     AuthService,
     ProfileService,
+    RefreshAuthCookiesInterceptor,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).
     { provide: APP_GUARD, useClass: JwtAuthGuard },

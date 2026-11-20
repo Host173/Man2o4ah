@@ -220,3 +220,633 @@ i did them i think now i want to write the pr
 How the output was used:
 Ran npm run verify (passed); drafted the PR title and description for CTR-04; no files in the repo changed except this log
 ================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: GEN-11
+
+Prompt:
+yes start the plan
+
+How the output was used:
+Answer only, no files changed (FLT-19 plan)
+i want to start implementing endpoints in sprint 2 what do i need to know to start (i am user hestiasspace)
+
+How the output was used:
+Planned Sprint 2 (GEN-11 first); created branch feature/GEN-11-booking-lifecycle-refund-rules from develop and ran npm ci; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+where are you getting the information for the endpoints from
+Related Requirement: GEN-11
+
+Prompt:
+they are assigned to me
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+it shouldnt pass i think, commit
+
+How the output was used:
+Committed passenger-rules.spec.ts (failing TDD tests for FLT-19)
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+let me try to write it but give me a reference or something
+
+How the output was used:
+Answer only, no files changed (DTO references and a skeleton for Aya to fill in)
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+i am done check it
+
+How the output was used:
+Answer only, no files changed (review of dto/flight-quote.dto.ts)
+Related Requirement: GEN-11
+
+Prompt:
+go
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.spec.ts (TDD, failing until Step 2); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+can you fix my issues
+
+How the output was used:
+Fixed dto/flight-quote.dto.ts (validators, ValidateNested, definite assignment, optional weight, examples, enums); no commit
+Related Requirement: GEN-11
+
+Prompt:
+commit
+
+How the output was used:
+Committed refund-tiers.spec.ts (failing TDD test for GEN-11)
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do their tests
+
+How the output was used:
+Committed df4e82f (quote DTO); added dto/flight-quote.dto.spec.ts (30 tests passing); no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+u write it
+
+How the output was used:
+Added backend/src/modules/flight-bookings/refund-tiers.ts (tests now pass); no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do the service code
+
+How the output was used:
+Committed bae2de5 (quote service tests); added flight-quote.service.ts and the quote types in flight-bookings.types.ts (all tests pass); no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+commit  and step adding rlly short prompts to prompt txt
+
+How the output was used:
+Committed f54c55b (refund tier calculator); added a "skip really short prompts" rule to my local CLAUDE.md preferences
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+yes gp
+
+How the output was used:
+Committed b5894b5 (quote service); added flight-bookings.controller.ts, dto/flight-quote.response.dto.ts, flight-bookings.api.spec.ts and wired FlightsModule in flight-bookings.module.ts; no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+i want to copy env
+
+How the output was used:
+Created backend/.env and frontend/.env.local from .env.example (gitignored, not committed); generated a local JWT secret <removed>
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+what is error
+[Attached: screenshot of npm run start:dev failing with "querySrv ECONNREFUSED _mongodb._tcp.<removed>.mongodb.net"]
+
+How the output was used:
+Answer only, no files changed (diagnosed the MongoDB Atlas DNS error)
+Related Requirement: GEN-11
+
+Prompt:
+he didnt say anything make an assumption and i might change it later
+
+How the output was used:
+Kept the GEN-11 rules in flight-bookings (assumption, pending Kareem) and recorded it in file comments; skipped the README section because the backend README now forbids contract copies; no commit
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+[Attached: screenshot of Swagger UI, POST /api/flight-bookings answering 501 "getFlightsForBooking: implemented in FLT-17"]
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+commit and do step 6
+
+How the output was used:
+Committed 9cc2ed0 (quote endpoint); ran npm run verify twice (flaky accounts timeouts, flight-bookings green); fixed two lint warnings in flight-quote.service.spec.ts; drafted the FLT-19 PR text; no commit yet
+Related Requirement: GEN-11
+
+Prompt:
+commit and let me run npm run verify
+
+How the output was used:
+Committed the shared-location comments in refund-tiers.ts and booking-lifecycle.ts; Aya runs npm run verify herself
+================================================
+================================================
+Date: 2026-11-16
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+done now i want to move on to the nexft issue
+
+How the output was used:
+Answer only, no files changed (checked which tickets are unblocked)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+some changes were requested on the prs i made, can u briefly explain what is wrong and each and start a plan to fix them
+
+How the output was used:
+Answer only, no files changed (read Kareem's develop changes; plan for the GEN-11 fix; asked for the review comments)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+how do i install gh
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+i mean the second comment not the decisions md
+
+How the output was used:
+Answer only, no files changed
+Related Requirement: GEN-11
+
+Prompt:
+[Attached: screenshot of npm run verify passing (86 test files, 943 tests, 97.07% statements), with the draft message "it passed, do 1 and 2"]
+
+How the output was used:
+Committed the GEN-11 prompt log; drafted the GEN-11 PR title and description
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+Related Requirement: GEN-11
+
+Prompt:
+do all the stated fixes i approve
+
+How the output was used:
+FLT-19: merged develop (f64503a), tests d625347, fixes 650031c, npm run verify passed (1001 tests). GEN-11 fixes are on the GEN-11 branch
+GEN-11: merged develop (17a70eb), tests 5ca7aeb, fixes f969653, comments 8fd9a51, npm run verify passed. FLT-19: merged develop, review fixes with tests (see the FLT-19 commits)
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+i want to test it on swagger first
+
+How the output was used:
+Answer only, no files changed (explained why Swagger answers 501 and proposed a local run with the flight fakes)
+================================================
+================================================
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+no i will wait for janas stub now i want to move on to HTL 16
+
+How the output was used:
+Answer only, no files changed (HTL-16 plan)
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+check the new requested changes on those PRs and then fix them
+
+How the output was used:
+HTL-16 (#148): merged develop, tests fa91ab1, fixes 20ec367 (expiry skips failed holds, logs non-race errors), 0dc9917 (release overdue holds before reserving), 57e8c2f (users only); npm run verify passed
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+make the reply mds clickable links
+
+How the output was used:
+Answer only, no files changed
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+he made new comments that may be optional can you asses them and tell me if they really need to be done
+
+How the output was used:
+Answer only, no files changed (assessed the optional review comments on #147 and #148)
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+do them all
+
+How the output was used:
+HTL-16: tests f33ca83 (adjacent nights stay held, a shared night is freed, the pre-clear emits the expired event), comment eac89ad (why a hold that can't be freed still blocks); npm run verify passed
+================================================
+================================================
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-16
+
+Prompt:
+push and make the replies
+
+How the output was used:
+Pushed feature/FLT-22-flight-seat-hold and feature/HTL-16-hotel-room-hold; posted the follow-up replies on PR #147 and #148 with gh
+================================================
+================================================
+Date: 2026-11-19
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+push both and make pr list
+
+How the output was used:
+Pushed feature/FLT-19-flight-booking-quote (8a1ce59) and feature/GEN-11-booking-lifecycle-refund-rules (18eb409); drafted the review replies for PR #130 and #131
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+wait should i be just commenting on the conversation
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+now i want to start the new blocked endpoints
+
+How the output was used:
+Answer only, no files changed (checked merges; FLT-22 plan)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-19
+
+Prompt:
+are you following the excel sheet for project requirements?
+
+How the output was used:
+Answer only, no files changed
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+HTL 17 AND FLT 19 opened up, make some plans for them and then inform me , ensure the plans are maximum 4 steps each
+
+How the output was used:
+Answer only, no files changed (plans for #165 FLT-19 bag price once per airline and #59 HTL-17 hotel confirmation)
+Date: 2026-11-19
+so that no other user may steal the seats, commit
+
+How the output was used:
+Committed flight-hold.service.spec.ts (failing TDD tests for FLT-22)
+Date: 2026-11-17
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+lets do htl 17 first
+
+How the output was used:
+Created feature/HTL-17-hotel-confirmation from develop; added booking-reference.spec.ts (failing TDD tests); no commit yet
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i ran it but one test failed
+
+How the output was used:
+Answer only, no files changed (explained the failing run: booking-reference.ts does not exist yet)
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+how can i create a file from terminal
+
+How the output was used:
+Answer only, no files changed
+because the payment could fail in the middle, commit
+
+How the output was used:
+Committed flight-hold-expiry.job.spec.ts (failing TDD tests for the FLT-22 expiry job)
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+check the new requested changes on those PRs and then fix them
+
+How the output was used:
+FLT-22 (#147): merged develop, tests 5112bb1, fixes 9d23b27 (expiry skips failed holds), 773e8a0 (refuse holds < 10 min before departure), f190e1b (users only); npm run verify passed. HTL-16 fixes on its own branch
+Date: 2026-11-18
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-22
+
+Prompt:
+do them all
+
+How the output was used:
+FLT-22: tests 4517d7d, quote refuses flights leaving in < 10 min d0ca83c (rule moved from the hold into the quote); npm run verify passed. HTL-16 follow-ups on its own branch
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i created it and the tests pass now
+
+How the output was used:
+Answer only, no files changed (review of booking-reference.ts)
+Related Requirement: FLT-22
+
+Prompt:
+hey so check flt 22 again fix the issues and make a new pr
+
+How the output was used:
+Merged develop into FLT-22 (0043d47, prompt-log conflict resolved by keeping develop's file and appending the 8 missing entries); tests 82a86c7, fix d66a6af (one clock for quote and hold, one message for departed flights); npm run verify passed
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+i commited it now move on to step 2
+
+How the output was used:
+Added hotel-confirmation.service.spec.ts (failing TDD tests for the payment.succeeded handler); no commit yet
+Related Requirement: FLT-22
+
+Prompt:
+using this, review my open prs
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Make sure my branch is current: `git fetch origin`, then `git merge-base --is-ancestor origin/develop HEAD`. If it isn't, tell me to merge develop first (merge, never rebase) and stop.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Answer only, no files changed (self-review of #174 HTL-17 and #147 FLT-22; probes written and deleted)
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-17
+
+Prompt:
+commit and do service
+
+How the output was used:
+Committed 7be29f4 (confirmation tests); added hotel-confirmation.service.ts, moved the lost-race check into booking-lifecycle.ts (isInvalidTransition) and registered the service; no commit yet
+Related Requirement: FLT-22
+
+Prompt:
+fix the flt 22 problem but then attaacht the self review report to the prs
+
+How the output was used:
+FLT-22: test 501833f, fix 7436c46 (free overdue holds on the requested flights before holding); npm run verify passed; pushed; posted the self-review reports on #147 and #174
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Antigravity
+Related Requirement: FLT-19
+
+Prompt:
+start on flt 19 step by step
+
+How the output was used:
+Created branch fix/FLT-19-bag-price-once-per-airline; committed failing tests 65dafdb (decision table for extra-bag price once per airline)
+================================================
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Antigravity
+Related Requirement: FLT-19
+
+Prompt:
+use this new self review prompt instead of the old one and then commit the fix
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Check whether my branch is current: `git fetch origin`, then
+   `git rev-list --count HEAD..origin/develop` (how many develop commits I don't have).
+   Don't stop because of this. Only if `git merge-tree --write-tree origin/develop HEAD`
+   reports conflicts: tell me to merge develop into my branch first (merge, never
+   rebase) and stop. Otherwise continue, and mention the number on the
+   "Branch:" line of your answer.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Branch: up to date with develop | <N> commits behind develop (merge develop before the PR is merged) | conflicts with develop
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Committed fix be82cdd (charge extra-bag fee once per airline, not per segment); updated self-review prompt
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Aya
+Tool: Antigravity
+Related Requirement: FLT-19
+
+Prompt:
+open pr and write at the end the self review
+
+How the output was used:
+Pushed branch fix/FLT-19-bag-price-once-per-airline and opened PR for #165 with self-review attached
+================================================

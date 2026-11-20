@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
 } from '@nestjs/common';
 import { ParseObjectIdPipe } from '@nestjs/mongoose';
 import {
@@ -20,6 +21,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -28,22 +30,29 @@ import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
+import type { UploadedImage } from '../storage/image-rules.js';
+import { ImageUpload } from '../storage/image-upload.decorator.js';
 import { BlogService } from './blog.service.js';
 import type {
+  AuthorPageView,
   CommentView,
   PostDetailView,
+  PostLikeView,
   PostView,
   PublishedPostView,
 } from './blog.types.js';
+import { AuthorPageQueryDto } from './dto/author-page-query.dto.js';
 import { CreateCommentDto } from './dto/create-comment.dto.js';
 import { CreatePostDto } from './dto/create-post.dto.js';
 import { ListPostsQueryDto } from './dto/list-posts-query.dto.js';
 import {
+  AuthorPageResponseDto,
   CommentResponseDto,
   PaginatedCommentsResponseDto,
   PaginatedPostResponseDto,
   PaginatedPublishedPostsResponseDto,
   PostDetailResponseDto,
+  PostLikeResponseDto,
   PostResponseDto,
 } from './dto/post.response.dto.js';
 import { UpdateCommentDto } from './dto/update-comment.dto.js';
@@ -57,7 +66,9 @@ export class BlogController {
   @Post('posts')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-01 Create a post as draft or published' })
+  @ApiOperation({
+    summary: 'BLG-01 / BLG-08 Create a post as draft or published',
+  })
   @ApiCreatedResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   create(
@@ -70,7 +81,7 @@ export class BlogController {
   @Public()
   @Get('posts')
   @ApiOperation({
-    summary: 'BLG-02 Browse paginated published posts filterable by tag',
+    summary: 'BLG-02 / BLG-09 Browse or search paginated published posts',
   })
   @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid query parameters' })
@@ -113,7 +124,7 @@ export class BlogController {
   @Patch('posts/:id')
   @ApiCookieAuth()
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'BLG-04 Edit own post' })
+  @ApiOperation({ summary: 'BLG-04 / BLG-08 Edit own post' })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid post ID or body' })
@@ -217,5 +228,126 @@ export class BlogController {
     @CurrentUser() user: AuthUser,
   ): Promise<void> {
     await this.blogService.deleteComment(id.toHexString(), user.id);
+  }
+
+  @Post('posts/:id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-06 Like a published post (idempotent)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  likePost(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostLikeView> {
+    return this.blogService.likePost(id.toHexString(), user.id);
+  }
+
+  @Delete('posts/:id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary: 'BLG-06 Remove like from a published post (idempotent)',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid post ID' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or not publicly visible',
+  })
+  unlikePost(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostLikeView> {
+    return this.blogService.unlikePost(id.toHexString(), user.id);
+  }
+
+  @Post('posts/:id/images')
+  @ImageUpload()
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Attach an image to own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: PostResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'Missing image, invalid post ID, invalid image file, or LIMIT_EXCEEDED: post already has 5 images',
+  })
+  @ApiPayloadTooLargeResponse({ description: 'Image exceeds 5 MB' })
+  @ApiNotFoundResponse({
+    description: 'Post not found or owned by another user',
+  })
+  addImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @UploadedFile() file: UploadedImage | undefined,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PostView> {
+    return this.blogService.addImage(id.toHexString(), file, user.id);
+  }
+
+  @Delete('posts/:id/images/:imageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({ summary: 'BLG-10 Remove an image from own post (GEN-08)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'imageId', type: String })
+  @ApiNoContentResponse({ description: 'Image removed from post' })
+  @ApiBadRequestResponse({ description: 'Invalid post ID or image ID' })
+  @ApiNotFoundResponse({
+    description: 'Post or image not found, or post owned by another user',
+  })
+  async removeImage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('imageId', ParseObjectIdPipe) imageId: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.blogService.removeImage(
+      id.toHexString(),
+      imageId.toHexString(),
+      user.id,
+    );
+  }
+
+  @Public()
+  @Get('tags/:tag/posts')
+  @ApiOperation({
+    summary: 'BLG-08 List paginated published posts for a tag',
+  })
+  @ApiParam({ name: 'tag', type: String })
+  @ApiOkResponse({ type: PaginatedPublishedPostsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid tag or pagination query' })
+  listByTag(
+    @Param('tag') tag: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<PublishedPostView>> {
+    return this.blogService.listByTag(tag, query);
+  }
+
+  @Public()
+  @Get('authors/:id')
+  @ApiOperation({
+    summary:
+      'BLG-12 Read a public author page with published posts and public itineraries',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: AuthorPageResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid author ID or pagination query',
+  })
+  @ApiNotFoundResponse({
+    description: 'Author not found, deactivated, or not a user account',
+  })
+  getAuthorPage(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Query() query: AuthorPageQueryDto,
+  ): Promise<AuthorPageView> {
+    return this.blogService.getAuthorPage(id.toHexString(), query);
   }
 }

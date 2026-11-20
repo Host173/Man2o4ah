@@ -2713,3 +2713,16 @@ didi you run the review md.file  ?
 How the output was used:
 Ran the self-review checks on PAY-02 (branch freshness, issue and requirement, diff checklist, 8 throwaway probes deleted afterwards); no code changed.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-02
+
+Prompt:
+ok i want you to run it on another agent, isolated one that have no context of this convo , and make it a rule from now on in this convo: after each exec we will run the review in isolated agent
+
+How the output was used:
+Ran the PAY-02 self-review in an isolated subagent (no conversation context): no problems, no missing tests; no code changed.
+================================================

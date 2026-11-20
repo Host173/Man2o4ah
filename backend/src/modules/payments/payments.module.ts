@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { PaymentsController } from './payments.controller.js';
 import { PaymentExpiryListener } from './payment-expiry.listener.js';
 import { PaymentIntentsService } from './payment-intents.service.js';
 import { PaymentsService } from './payments.service.js';
@@ -31,6 +32,7 @@ import { STRIPE_GATEWAY } from './stripe/stripe-gateway.js';
       { name: StripeWebhookEvent.name, schema: StripeWebhookEventSchema },
     ]),
   ],
+  controllers: [PaymentsController],
   providers: [
     PaymentsService,
     PaymentIntentsService,

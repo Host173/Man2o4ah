@@ -24,6 +24,9 @@ export class ActivityImageResponseDto implements ActivityImageView {
 
   @ApiProperty({ example: 'cairo-123.jpg' })
   key!: string;
+
+  @ApiProperty({ example: '/uploads/cairo-123.jpg' })
+  url!: string;
 }
 
 /** Swagger response model for an activity's cost (ITN-14). */

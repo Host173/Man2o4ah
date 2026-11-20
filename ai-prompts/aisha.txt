@@ -10103,3 +10103,108 @@ once it passes push it and give me the report
 How the output was used:
 Pushed feature/ACC-08-change-password-forced-change to PR #139 (merge of Pierre's commits and prompt-log commits); self-review report given
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-12
+
+Prompt:
+Implement **ACC-12: Self-deactivation** on branch `feature/ACC-12-self-deactivation` (PR title: `ACC-12: Self-deactivation`).
+
+### Context & Dependencies
+- **Package / Module:** Package 2 · Accounts & Auth (`accounts` module)
+- **Depends on:** #10 (CTR-01), #8 (PLT-06)
+- **Works end to end once merged:** #64 (ACC-11)
+- **Needed end to end by:** #72 (ITN-20), #77 (BLG-02)
+- **TDD required:** No
+
+### Expected Behavior
+1. **Explicit confirmation:** A user can deactivate their own account only after explicit confirmation.
+2. **Upcoming booking guard:** Block self-deactivation if the user has any upcoming confirmed bookings (return a clear, domain-appropriate error without mutating account or session state).
+3. **Session cleanup:** Delete/invalidate active user sessions upon successful deactivation.
+4. **Domain event:** Emit `user.deactivated` when self-deactivation completes.
+
+### Implementation & Testing Requirements
+- Follow existing patterns and architectural boundaries in `accounts`, #10 (CTR-01), and #8 (PLT-06). Keep changes scoped to ACC-12.
+- Add **integration tests** (using port fakes) and **API tests** covering:
+  - Successful self-deactivation after confirmation (sessions removed, `user.deactivated` emitted, account state updated).
+  - Blocked self-deactivation when upcoming confirmed bookings exist (no sessions deleted, no `user.deactivated` event emitted).
+  - Missing/invalid confirmation or unauthorized/edge cases as applicable in the API/service layer.
+
+### Mandatory Gate Before Pushing
+Run the repository's **self-review prompt MD** and resolve every finding until it **fully passes**. **Do NOT push to `feature/ACC-12-self-deactivation` or open/update the PR until the self-review prompt MD passes completely.**
+
+after you're completely done please run the self review prompt md and if it doesn't pass please resolve the issues and rerun, repeat until it passes 100%, once it's passed please make a pr and follow all naming conventions for the title and the description and additionally provide me with the self review report here in the chat
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Make sure my branch is current: `git fetch origin`, then `git merge-base --is-ancestor origin/develop HEAD`. If it isn't, tell me to merge develop first (merge, never rebase) and stop.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Added DELETE /api/users/me self-deactivation in backend/src/modules/accounts (ea22cb0; merged develop in f483774 and moved the route into ACC-09's UsersController), self-review passed (2479/2479 tests with 3 workers, 100% on self-deactivation.service.ts, 8 probes found no problems), pushed feature/ACC-12-self-deactivation; PR title and description given in chat (gh CLI not installed)
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-12
+
+Prompt:
+pleae create the pr and add an appropriate description and name following all naming conventions
+
+How the output was used:
+Answer only, no files changed (gh CLI not installed and installing it was blocked; gave the compare link, title and description file)
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-12
+
+Prompt:
+please install whatever you can to allow you to finish and create/edit prs and then once thats set up have the appropriate name and description to this pr
+
+How the output was used:
+Installed GitHub CLI 2.105.0 (winget) and logged in as AishaAlRawahi; opened PR #196 "ACC-12: Self-deactivation" into develop (closes #30) with the filled-in template; committed this prompt log entry
+================================================
+
+Review correction (ACC-12, 2026-11-20; appended by the reviewer):
+The earlier "no problems" self-review conclusion was superseded by a strict review that reproduced concurrent login/session recreation and payment/deactivation races.
+Commit 1cae711 changed a previously committed "How the output was used" line. That historical append-only violation cannot be erased without rewriting history. Existing entries and commits are preserved; corrections are appended here instead.

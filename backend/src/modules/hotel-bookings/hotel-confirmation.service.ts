@@ -1,13 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Connection, Model } from 'mongoose';
 import { BookingType } from '../../common/database/booking-type.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
 import { PaymentsService } from '../payments/payments.service.js';
+import { AccountsService } from '../accounts/accounts.service.js';
+import { RoomNightInventory } from '../hotels/room-night-inventory.js';
 import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
 import {
   HotelReservation,
@@ -45,6 +47,9 @@ export class HotelConfirmationService {
     @Inject(RESERVATION_REFERENCE)
     private readonly newReference: () => string,
     private readonly payments: PaymentsService,
+    private readonly accounts: AccountsService,
+    private readonly roomNights: RoomNightInventory,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   @OnEvent(Events.PaymentSucceeded)
@@ -67,34 +72,67 @@ export class HotelConfirmationService {
   /** pending_payment → confirmed with a new reference; nothing if it isn't pending. */
   private async confirm(reservationId: string, now: Date): Promise<void> {
     if (!Types.ObjectId.isValid(reservationId)) return;
+    const reservation = await this.reservationModel
+      .findById(reservationId, { userId: 1 })
+      .lean();
+    if (!reservation) return;
+    const userId = reservation.userId.toString();
 
     for (let attempt = 1; attempt <= MAX_REFERENCE_TRIES; attempt += 1) {
       const reference = this.newReference();
+      const session = await this.connection.startSession();
+      let confirmed: boolean;
       try {
-        // One document changes and its nights simply stay reserved, so one
-        // conditional update is enough: no transaction needed.
-        await transitionStatus(
-          this.reservationModel,
-          reservationId,
-          HotelReservationStatus.PENDING_PAYMENT,
-          HotelReservationStatus.CONFIRMED,
-          { confirmedAt: now, reference },
-        );
+        confirmed = await session.withTransaction(async () => {
+          const canConfirm = await this.accounts.tryLockForBookingConfirmation(
+            userId,
+            {
+              session,
+            },
+          );
+          if (!canConfirm) {
+            await transitionStatus(
+              this.reservationModel,
+              reservationId,
+              HotelReservationStatus.PENDING_PAYMENT,
+              HotelReservationStatus.EXPIRED,
+              { expiredAt: now },
+              { session },
+            );
+            await this.roomNights.release(reservationId, { session });
+            return false;
+          }
+          await transitionStatus(
+            this.reservationModel,
+            reservationId,
+            HotelReservationStatus.PENDING_PAYMENT,
+            HotelReservationStatus.CONFIRMED,
+            { confirmedAt: now, reference },
+            { session },
+          );
+          return true;
+        });
       } catch (error) {
         if (isDuplicateKey(error)) continue; // reference taken: try another
         // Not pending any more: already confirmed (a duplicate event, nothing
         // to do), unknown, or expired before the payment arrived (late payment).
         if (isInvalidTransition(error)) return this.refundIfLate(reservationId);
         throw error;
+      } finally {
+        await session.endSession();
       }
 
-      const confirmed = await this.reservationModel
-        .findById(reservationId, { userId: 1 })
-        .lean();
-      // After the change: an event can't be rolled back.
+      if (!confirmed) {
+        this.events.emit(Events.HotelReservationExpired, {
+          bookingId: reservationId,
+          userId,
+        });
+        await this.refundIfLate(reservationId);
+        return;
+      }
       this.events.emit(Events.HotelReservationConfirmed, {
         bookingId: reservationId,
-        userId: confirmed!.userId.toString(),
+        userId,
         reference,
       });
       return;
@@ -105,7 +143,8 @@ export class HotelConfirmationService {
   }
 
   /**
-   * The payment came after the hold expired (§8.6, data-model §8 #14): the
+   * The confirmation came after the hold ended (§8.6, data-model §8 #14,
+   * ACC-12 deactivation): the
    * rooms may already be someone else's, so the reservation is not confirmed
    * and the whole amount is refunded. Payments keeps one refund per booking,
    * so a repeated event can't refund twice. Only `expired` qualifies: a

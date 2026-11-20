@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -15,6 +17,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiOkResponse,
   ApiParam,
@@ -27,6 +30,7 @@ import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto
 import { Role } from '../accounts/auth/auth.types.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Roles } from '../accounts/auth/decorators.js';
+import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
 import {
   FlightResponseDto,
@@ -62,6 +66,48 @@ export class FlightsController {
     return FlightResponseDto.fromView(
       await this.flights.createFlight(input, this.assignedAirlineId(user)),
     );
+  }
+
+  @Post('flights/:id/cabins')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-04 Add a cabin to an assigned flight' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID or cabin fields' })
+  @ApiConflictResponse({
+    description: 'Cabin class already exists or flight is not scheduled',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async addCabin(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() input: AddFlightCabinDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightResponseDto> {
+    return FlightResponseDto.fromView(
+      await this.flights.addCabin(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Post('flights/:id/cancel')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-06 Cancel a scheduled flight' })
+  @ApiParam({ name: 'id', type: String, description: 'Flight ObjectId' })
+  @ApiNoContentResponse({ description: 'Flight cancelled' })
+  @ApiBadRequestResponse({ description: 'Invalid flight ID' })
+  @ApiConflictResponse({
+    description: 'Only a scheduled flight can be cancelled',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async cancel(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    await this.flights.cancelFlight(id.toHexString(), user.providerId);
   }
 
   @Get('airlines/:id/flights')

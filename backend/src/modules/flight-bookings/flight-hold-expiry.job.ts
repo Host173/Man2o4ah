@@ -1,11 +1,11 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Interval } from '@nestjs/schedule';
 import type { Connection, Model, QueryFilter, Types } from 'mongoose';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { Events } from '../../common/events/events.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
-import { transitionStatus } from './booking-lifecycle.js';
+import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
 import {
   FlightBooking,
   FlightBookingStatus,
@@ -115,7 +115,8 @@ export class FlightHoldExpiryJob {
       });
     } catch (error) {
       // Lost the race: the booking was confirmed or expired by someone else.
-      if (error instanceof ConflictException) return false;
+      // Only a lost race is expected; any other error is logged.
+      if (isInvalidTransition(error)) return false;
       this.logger.error(
         `Could not expire flight booking ${hold._id.toString()}`,
         error instanceof Error ? error.stack : undefined,

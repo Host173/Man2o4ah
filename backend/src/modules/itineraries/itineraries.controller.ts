@@ -33,6 +33,7 @@ import type {
 } from '../flights/flights.types.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
+import { PublicSearchQueryDto } from './dto/public-search-query.dto.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import { CurrentUser, Public } from '../accounts/auth/decorators.js';
 import { BudgetSummaryResponseDto } from './dto/budget-summary.response.dto.js';
@@ -119,7 +120,7 @@ export class ItinerariesController {
   @ApiOkResponse({ type: PaginatedPublicItinerarySearchResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid pagination query' })
   async searchPublic(
-    @Query() query: PaginationQueryDto,
+    @Query() query: PublicSearchQueryDto,
   ): Promise<Paginated<PublicItinerarySearchItemResponseDto>> {
     const result = await this.itinerariesService.searchPublic(query);
     return {
@@ -190,6 +191,24 @@ export class ItinerariesController {
     @CurrentUser() user: AuthUser,
   ): Promise<ItineraryDetailView> {
     return this.itinerariesService.getById(id.toHexString(), user.id);
+  }
+
+  @Post(':id/clone')
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiOperation({
+    summary: 'ITN-21 Clone a public itinerary into a private copy',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiCreatedResponse({ type: ItineraryDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
+  @ApiNotFoundResponse({
+    description: 'Itinerary not found or not publicly visible',
+  })
+  clone(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ItineraryDetailView> {
+    return this.itinerariesService.clone(id.toHexString(), user.id);
   }
 
   @Get(':id/flights')

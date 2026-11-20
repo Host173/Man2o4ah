@@ -16,6 +16,8 @@ import { RefreshAuthCookiesInterceptor } from './auth/refresh-auth-cookies.inter
 import { ActiveBookingsCheckRegistry } from './ports/active-bookings-check.registry.js';
 import { Session, SessionSchema } from './schemas/session.schema.js';
 import { User, UserSchema } from './schemas/user.schema.js';
+import { SelfDeactivationController } from './users/self-deactivation.controller.js';
+import { SelfDeactivationService } from './users/self-deactivation.service.js';
 
 /**
  * Accounts (CTR-01). Registers the global guards: every route needs a
@@ -23,8 +25,9 @@ import { User, UserSchema } from './schemas/user.schema.js';
  * Swagger and `/uploads` are served outside the guards. Needs
  * `JWT_ACCESS_SECRET` in the configuration. `AuthController` serves
  * `/api/auth/*` (ACC-01 registration, ACC-04 login, ACC-19 current user, ACC-08
- * change password);
- * `AuthService` stays internal. Other
+ * change password); `SelfDeactivationController` serves
+ * `DELETE /api/users/me` (ACC-12).
+ * `AuthService` and `SelfDeactivationService` stay internal. Other
  * modules use the exported `AccountsService` and
  * `ActiveBookingsCheckRegistry`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
@@ -46,10 +49,11 @@ import { User, UserSchema } from './schemas/user.schema.js';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, SelfDeactivationController],
   providers: [
     AccountsService,
     AuthService,
+    SelfDeactivationService,
     RefreshAuthCookiesInterceptor,
     ActiveBookingsCheckRegistry,
     // Global, in this order: authentication first, then roles (auth.md §5).

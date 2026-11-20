@@ -111,9 +111,11 @@ export class StripeApiGateway implements StripeGateway {
     const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
     if (!secret) throw new Error('STRIPE_WEBHOOK_SECRET is not set');
 
+    // Outside the try: a missing client is a setup error (500), not a bad signature.
+    const client = this.client();
     let event: Stripe.Event;
     try {
-      event = this.client().webhooks.constructEvent(rawBody, signature, secret);
+      event = client.webhooks.constructEvent(rawBody, signature, secret);
     } catch {
       throw new BadRequestException({
         code: ErrorCode.BadSignature,

@@ -10361,3 +10361,202 @@ don't push unless the self review passed 100%
 How the output was used:
 Pushed feature/ACC-16-account-administration-logic to PR #206 only after the self-review passed; updated the PR description
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+
+[Attached: SELF_REVIEW_PROMPT.md]
+Review my branch before I mark the PR ready. You are a strict reviewer, not the author: find real problems, don't praise. Don't change any code and don't push; only report.
+
+Project: Man2o4ah (repo Host173/Man2o4ah), NestJS 12 + Mongoose 9 backend (Vitest), Next.js 16 frontend. The rules are in `docs/ai/skills/travel-platform/` (start with `SKILL.md`), `docs/DECISIONS.md` and `docs/database/data-model.md`.
+
+1. Find the ticket: the key is in my branch name (e.g. `feature/FLT-22-…` → `FLT-22`). Read its GitHub issue (title starts with `<KEY>:`; `gh issue list --search "<KEY> in:title" --state all`), the requirement text for that ID in `docs/ai/skills/travel-platform/references/requirements.md`, and the reference files the ticket's area uses (`endpoints.md` for each route's role, `auth.md`, `api-contract.md`, `bookings-payments.md` or `domain-rules.md`, `testing.md`). Read `.github/copilot-instructions.md` (the review checklist).
+
+2. Make sure my branch is current: `git fetch origin`, then `git merge-base --is-ancestor origin/develop HEAD`. If it isn't, tell me to merge develop first (merge, never rebase) and stop.
+
+3. Run the checks once, in each app my branch changes (`git diff --name-only origin/develop...HEAD`): `npm ci`, then `npm run verify`. Report the result line (test count, coverage of my `*.service.ts` files).
+
+4. Read my whole diff (`git diff origin/develop...HEAD`) and check:
+   - every clause of the requirement and the ticket's "Expected output" is built, and each has a test that would fail without it (list any clause with no test);
+   - each route has the role `endpoints.md` gives it; another user's data answers 404; errors use the shape `{ code: ErrorCode.X, message, details? }`;
+   - status changes are conditional updates on the old status; inventory and multi-document writes use a transaction; events are emitted only after the commit;
+   - I only touch my own module (no other module's model, no `populate` across modules, no change to `common/` or someone else's contract without saying so in the PR);
+   - user text in a regex goes through `escapeRegex`/`keywordRegex`; dates travel as `YYYY-MM-DD`; IDs as `_id`; money in minor units;
+   - Swagger: `@ApiTags`, `@ApiOperation({ summary: '<KEY> …' })`, typed responses;
+   - if the ticket says "TDD: required", the test commit comes before the code commit (`git log --reverse --format='%h %s' origin/develop..HEAD`);
+   - my prompt log `ai-prompts/<my first name>.txt` has a new entry and no earlier line changed.
+
+5. Try to break it: write at most 8 throwaway test cases (`zz-probe-*.spec.ts` next to my code, run with `npx vitest run <file>`, delete them afterwards) for the riskiest spots: limits (min, max, max+1), invalid input (wrong types, `2026-02-30`, unknown fields), no login (401), wrong role (403), another user's data (404), and two requests at the same time where my code changes inventory or a status.
+
+6. Answer with exactly this, at most 15 lines, so I can paste it into the PR:
+
+```
+**Self-review** · <KEY>
+Checks: npm run verify passed (<N> tests, <X>% on <service file>) | failed: <one line>
+Problems:
+1. <the problem in one sentence>, e.g. `<input>` → <wrong result>. Fix: <one sentence>.
+(or "none")
+Missing tests: <list or "none">
+Probes: <N> tried, <M> found problems
+Open questions: <a choice the docs don't settle, with your suggestion, or "none">
+```
+
+List only real problems (bugs, broken rules, missing required tests), most important first, at most 5. No style points that Prettier or the linter already enforce. If you are not sure whether something breaks a rule, say which rule and quote it instead of guessing.
+
+How the output was used:
+Answer only, no files changed (self-review stopped at step 2: branch behind origin/develop)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+please givw me the report from the self review
+
+How the output was used:
+Answer only, no files changed (gave the self-review report: stopped at step 2, branch behind origin/develop)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+merge develop and rerun the self review
+
+How the output was used:
+Merged develop twice (0f68675 and the GEN-07 merge, no conflicts); reran the self-review: npm run verify failed on 3 itineraries tests (pass alone), accounts 428/428, 8/8 probes; not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+rerun the self review prompt and if it passes push and give me the report if not then resolve the issues and  repeat till it passes
+
+How the output was used:
+Started a rerun loop that merged develop (a99c443); stopped on request before any check or push
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+give me the report once it passes
+
+How the output was used:
+Answer only, no files changed
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+stop doing extra things simply ONLY run the self review prompt
+
+How the output was used:
+Stopped the loop; ran the self-review, which stopped at step 2 (branch behind origin/develop); not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+make sure that im up to date then run the self review prompt
+
+How the output was used:
+Merged develop (62ca8d2, 9288d99, no conflicts); self-review passed (npm ci + npm run verify: 3127 tests, 98.7% on accounts.service.ts; 8/8 probes); not pushed
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+please resolve these and then run the self review prompt and return the report 
+
+[Attached: pasted self-review report]
+Self-review · ACC-16
+Checks: npm run verify on the merged branch: format, lint, typecheck and build pass; 3153 tests passed, 9 failed. The 9 failures are in flight-e-ticket.api.spec.ts and itinerary-pdf.api.spec.ts, which need Playwright chromium (not installed in the review sandbox, "Executable doesn't exist"), so they are environmental and not caused by this PR. The accounts and fakes specs pass (759 tests). The coverage line for accounts.service.ts was not printed because the run failed; the 98.7% in the PR body was not re-checked, please confirm with CI.
+Branch: was 91 commits behind develop. Merged origin/develop with no conflicts in 5d0a3d2.
+Problems: none. Every clause of ACC-07a, ACC-13, ACC-14, ACC-15 and ACC-16 is implemented: the three lookups (including "Deleted user" for deactivated authors), conditional status updates, sessions deleted in the same transaction as the suspend, events emitted after the commit with an eventId, 409 EMAIL_TAKEN, and lockout cleared on reset. keywordRegex is used and nothing outside the accounts module is touched.
+Missing tests: none (the 37 integration cases cover each clause)
+Probes: 0 new (the author's 8 already cover the risky spots)
+Open questions: may an admin suspend another admin or themselves? The author suggests a follow-up that rejects admin targets with 409.
+
+How the output was used:
+Merged the remote branch's 5d0a3d2 (develop merge) into the local branch (055bff5, no conflicts); started the self-review rerun
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+why is this taking so long please fix it so that the checks dont take this long
+
+How the output was used:
+Answer only, no files changed (explained the check duration; no test config changed)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+please optimize and check without doing the tedious things i need the checks to be a few min max i need the report now
+
+How the output was used:
+Answer only, no files changed (ran a fast self-review: no reinstall, format/lint/typecheck/build plus the accounts tests with coverage and 8 probes, about 3 minutes)
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+skip the reinstalling of everything and just run the self review prompt like you did for every other ACC
+
+How the output was used:
+Answer only, no files changed (self-review report given; not pushed)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+run this as FAST a possible and ignore anything else said previously in this chat thread simply run this self reviw and give me the report as fast as possible
+[Attached: SELF_REVIEW_PROMPT.md] (same content as the earlier SELF_REVIEW_PROMPT.md entry, unchanged)
+
+How the output was used:
+Answer only, no files changed (self-review stopped at step 2: branch behind origin/develop; PR #206 already merged)
+================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-16
+
+Prompt:
+resolve the problems stated
+
+How the output was used:
+Merged develop into the branch (7752166, no conflicts); the branch is now current and differs from develop only in ai-prompts/aisha.txt; not pushed
+================================================

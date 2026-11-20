@@ -9,19 +9,10 @@ import type { Model } from 'mongoose';
 import { chromium } from 'playwright';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { FlightsService } from '../flights/flights.service.js';
-import type { FlightView } from '../flights/flights.types.js';
 import {
   FlightBooking,
   FlightBookingStatus,
 } from './schemas/flight-booking.schema.js';
-
-/**
- * The airports' IANA time zones. Flights has them (FlightManagementView); Jana
- * confirmed FLT-17 will add them to getFlightsForBooking. Until then they're
- * missing and times are shown in UTC, labelled as such.
- */
-type FlightWithZones = FlightView &
-  Partial<{ departureTimeZone: string; arrivalTimeZone: string }>;
 
 /** One line of the e-ticket's flight table. */
 interface TicketSegment {
@@ -104,7 +95,7 @@ export class FlightETicket {
     );
     const segments: TicketSegment[] = booking.segments.map((s) => {
       const entry = found.get(s.flightId.toString());
-      const flight = entry?.flight as FlightWithZones | undefined;
+      const flight = entry?.flight;
       return {
         direction: s.direction === 'outbound' ? 'Outbound' : 'Return',
         airline: entry?.airline.name ?? s.airlineId.toString(),

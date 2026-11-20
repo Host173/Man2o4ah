@@ -1146,3 +1146,15 @@ List only real problems (bugs, broken rules, missing required tests), most impor
 How the output was used:
 Ran the strict self-review on feature/ITN-14-budgets-budget-summary: 5 throwaway probes passed with no problems; report attached to the PR.
 ================================================
+
+Date: 2026-11-20
+Student: Mokhtar
+Tool: Opencode
+Related Requirement: ITN-21
+
+Prompt:
+I have attached SELF_REVIEW_PROMPT (2).md. I am implementing GitHub Issue #73: "ITN-21: Public search and clone" (Package 6 · Itineraries, Module: itineraries). Complete it cleanly on the first pass: branch feature/ITN-21-public-search-clone from develop (ITN-20, ITN-12, ITN-14 are merged), read all travel-platform skills/guidelines, inspect the itineraries module (public search filters, visibility, days, activities, budgets, storage copy, ownerId scoping), and fakes. Wire the clone route POST /api/itineraries/:id/clone to the existing ItinerariesService.clone deep-copy implementation, apply the public search query DTO at the controller, keep FakeItinerariesService parity, and run npm run format and npm run verify with zero errors. Log prompts, push, open PR "ITN-21: Public search and clone" referencing #73 with the Self-Review Report, and confirm CI green.
+
+How the output was used:
+Branched from origin/develop, wired the clone route and public search DTO, fixed the FakeItinerariesService.clone implementation, ran npm run format and npm run verify (3133 tests, all green), pushed, opened PR #214, fixed the prompt-log byte mismatch by restoring origin/develop bytes and re-appending this entry, pushed again.
+================================================

@@ -1519,3 +1519,15 @@ can you add the decisions md thing
 How the output was used:
 Added the FLT-25 "my flight bookings" groups decision to docs/DECISIONS.md §3; commit docs(decisions): record the FLT-25 booking groups (FLT-25) and chore(ai): log the DECISIONS prompt (FLT-25), not pushed
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-25
+
+Prompt:
+no remove the to do for kareem and push that change
+
+How the output was used:
+Removed the "To do for Kareem" section from the description of PR #210 and pushed the branch (DECISIONS.md commit and log entries); commit chore(ai): log the PR to-do removal prompt (FLT-25)
+================================================

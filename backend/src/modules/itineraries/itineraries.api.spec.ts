@@ -4,6 +4,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -12,6 +13,7 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { Events } from '../../common/events/events.js';
 import { ReportTargetType } from '../moderation/ports/reportable-content.port.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ItinerariesModule } from './itineraries.module.js';
 import { Itinerary, ItineraryVisibility } from './schemas/itinerary.schema.js';
@@ -37,12 +39,17 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
   let testApp: TestApp;
   let itineraryModel: Model<Itinerary>;
   const referenceData = new FakeReferenceDataService();
+  const storage = new FakeStorageService();
 
   beforeAll(async () => {
     testApp = await createTestApp({
       imports: [ItinerariesModule],
       override: (builder) =>
-        builder.overrideProvider(ReferenceDataService).useValue(referenceData),
+        builder
+          .overrideProvider(ReferenceDataService)
+          .useValue(referenceData)
+          .overrideProvider(StorageService)
+          .useValue(storage),
     });
     itineraryModel = testApp.moduleRef.get<Model<Itinerary>>(
       getModelToken(Itinerary.name),
@@ -51,6 +58,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
 
   beforeEach(async () => {
     await clearCollections(testApp.connection);
+    for (const key of storage.keys()) await storage.delete(key);
   });
 
   afterAll(async () => {

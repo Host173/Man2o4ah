@@ -69,6 +69,43 @@ describe('SeatInventory unit', () => {
     );
   });
 
+  it('adds a unique cabin with initialized counters in the caller session', async () => {
+    const airlineId = new Types.ObjectId();
+    const input = {
+      cabinClass: 'business' as const,
+      totalSeats: 7,
+      priceMinor: 75000,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    };
+    await inventory.addCabin(
+      flightId.toHexString(),
+      input,
+      airlineId.toHexString(),
+      { session },
+    );
+
+    expect(model.updateOne).toHaveBeenCalledWith(
+      {
+        _id: flightId,
+        airlineId,
+        status: 'scheduled',
+        'cabins.cabinClass': { $ne: 'business' },
+      },
+      {
+        $push: {
+          cabins: {
+            ...input,
+            availableSeats: 7,
+            heldSeats: 0,
+            bookedSeats: 0,
+          },
+        },
+      },
+      { session, runValidators: true },
+    );
+  });
+
   it('reports an unavailable hold when its atomic condition matches no cabin', async () => {
     model.updateOne.mockReturnValue({
       exec: vi.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),

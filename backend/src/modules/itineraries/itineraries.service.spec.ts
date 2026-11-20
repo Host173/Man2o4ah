@@ -4,6 +4,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -13,6 +14,7 @@ import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
 import { ItinerariesModule } from './itineraries.module.js';
@@ -51,12 +53,17 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   let itineraryModel: Model<Itinerary>;
   let eventEmitter: EventEmitter2;
   const referenceData = new FakeReferenceDataService();
+  const storage = new FakeStorageService();
 
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
       override: (builder) =>
-        builder.overrideProvider(ReferenceDataService).useValue(referenceData),
+        builder
+          .overrideProvider(ReferenceDataService)
+          .useValue(referenceData)
+          .overrideProvider(StorageService)
+          .useValue(storage),
     });
     itineraries = t.moduleRef.get(ItinerariesService);
     eventEmitter = t.moduleRef.get(EventEmitter2);
@@ -67,6 +74,7 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
 
   beforeEach(async () => {
     await clearCollections(t.connection);
+    for (const key of storage.keys()) await storage.delete(key);
   });
 
   describe('activity writes (ITN-10)', () => {
@@ -504,7 +512,13 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
               description: 'Guided tour',
               time: '09:30',
               cost: { amountMinor: 2000, currency: 'EGP' },
-              images: [{ _id: imageId.toHexString(), key: 'pyramids.jpg' }],
+              images: [
+                {
+                  _id: imageId.toHexString(),
+                  key: 'pyramids.jpg',
+                  url: '/uploads/pyramids.jpg',
+                },
+              ],
               attractionId: 'att-1',
             },
           ],

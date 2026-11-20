@@ -11710,3 +11710,15 @@ At the end of the turn, append the entry to `ai-prompts/aisha.txt` in the format
 How the output was used:
 Answer only, no files changed (restored the externally deleted ACC-18 files from a4ea157; npm run verify passed 3325 tests, 100% on admin-seed.service.ts; self-review and isolated-agent review run; 2 findings await Aisha's decision; not pushed)
 ================================================
+================================================
+Date: 2026-11-20
+Student: Aisha
+Tool: Claude Code
+Related Requirement: ACC-18
+
+Prompt:
+do both fixes and rerun the self-review
+
+How the output was used:
+Test commit 061b7ad (allSettled parallel test per testing.md §4; schema-invalid email cases), fix commit cd295a4 (export EMAIL from user.schema.ts, check it in admin-seed-input.ts); npm run verify passed (3327 tests, 100% on admin-seed.service.ts); self-review and a second isolated-agent review found no problems; not pushed
+================================================

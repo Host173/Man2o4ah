@@ -1534,3 +1534,14 @@ true
 How the output was used:
 Authorized these correctly attributed Pierre entries and an append-only correction in kareem.txt to fix the PR #192 prompt-log check.
 ================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Implemented owner-approved ITN-16 transport-cost CRUD, DTO validation and API/fake tests in an isolated worktree; full backend verification passed with VITEST_MAX_WORKERS=2.
+================================================

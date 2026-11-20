@@ -713,3 +713,25 @@ List only real problems (bugs, broken rules, missing required tests), most impor
 How the output was used:
 Ran the strict self-review on feature/ITN-12-activity-images: 7 throwaway probes passed, no unresolved problems; final report attached to the existing PR #195.
 ================================================
+Date: 2026-11-20
+Student: Mokhtar (owner-approved work via Pierre)
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+implement itn -16 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Implemented transport-cost CRUD, validated DTOs, shared reference validation, API tests and itinerary fake contract tests; full backend verification passed with VITEST_MAX_WORKERS=2.
+================================================
+Date: 2026-11-20
+Student: Mokhtar (owner-approved work via Pierre)
+Tool: Copilot SDK in VS Code
+Related Requirement: ITN-16
+
+Prompt:
+Approved; proceed as Mokhtar and use mokhtar.txt
+
+How the output was used:
+Authorized itinerary-package changes and the Mokhtar prompt log; GitHub publishing uses the authenticated pierreofficial account, whose log is also appended for CI.
+================================================

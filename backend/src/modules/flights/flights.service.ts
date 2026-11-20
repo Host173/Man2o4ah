@@ -1,22 +1,28 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Connection, Model } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import type { AirportView } from '../reference-data/reference-data.types.js';
 import { convertFlightTimes } from './flight-time.js';
 import { AirlinesService } from './airlines.service.js';
+import { validateCabinInput } from './cabin-input.js';
+import { SeatInventory } from './seat-inventory.js';
 import type {
+  AddCabinInput,
   AirlineView,
   BookabilityResult,
   CreateFlightInput,
@@ -31,7 +37,7 @@ import type {
 } from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
 import { Cabin } from './schemas/flight.schema.js';
-import { Flight } from './schemas/flight.schema.js';
+import { Flight, FlightStatus } from './schemas/flight.schema.js';
 
 type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
   _id: Types.ObjectId;
@@ -40,8 +46,8 @@ type FlightRecord = Omit<Flight, 'airlineId' | 'cabins'> & {
 };
 
 /**
- * What other modules may ask of flights (CTR-02). Seat counters are never
- * changed here: that is `SeatInventory`. Getters return `null`, or leave the
+ * What other modules may ask of flights (CTR-02). Seat counters are initialized
+ * and changed only through `SeatInventory`. Getters return `null`, or leave the
  * key out of the `Map`, when something isn't found: the caller decides
  * between 400 and 404.
  */
@@ -58,6 +64,14 @@ export class FlightsService {
 
     @Inject(ReferenceDataService)
     private readonly referenceData: ReferenceDataService,
+
+    @InjectConnection()
+    private readonly connection: Connection,
+
+    @Inject(SeatInventory)
+    private readonly seatInventory: SeatInventory,
+
+    private readonly events: AppEvents,
   ) {}
 
   /**
@@ -174,6 +188,119 @@ export class FlightsService {
   }
 
   /**
+   * Cancel a scheduled flight owned by the moderator (FLT-06). The conditional
+   * update is atomic; the cancellation event is emitted only after it succeeds.
+   */
+  async cancelFlight(
+    flightId: string,
+    moderatorAirlineId: string | undefined,
+  ): Promise<void> {
+    if (
+      !Types.ObjectId.isValid(flightId) ||
+      !moderatorAirlineId ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+
+    const id = new Types.ObjectId(flightId);
+    const airlineId = new Types.ObjectId(moderatorAirlineId);
+    const flight = await this.flightModel
+      .findOneAndUpdate(
+        { _id: id, airlineId, status: FlightStatus.SCHEDULED },
+        {
+          $set: {
+            status: FlightStatus.CANCELLED,
+            cancelledAt: new Date(),
+          },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .lean<FlightRecord>()
+      .exec();
+
+    if (!flight) {
+      const ownedFlight = await this.flightModel
+        .exists({ _id: id, airlineId })
+        .exec();
+      if (!ownedFlight) throw this.flightNotFound();
+      throw new ConflictException({
+        code: ErrorCode.InvalidStatusTransition,
+        message: 'Only scheduled flights can be cancelled',
+      });
+    }
+
+    this.events.emit(Events.FlightCancelled, {
+      flightId: flight._id.toString(),
+    });
+  }
+
+  /**
+   * Add one cabin to an assigned airline's scheduled flight (FLT-04).
+   * New cabins start with every seat available; the conditional update prevents
+   * duplicate cabin classes when moderators submit concurrently.
+   */
+  async addCabin(
+    flightId: string,
+    input: AddCabinInput,
+    moderatorAirlineId: string | undefined,
+  ): Promise<FlightManagementView> {
+    validateCabinInput(input);
+    const flightObjectId = this.flightObjectId(flightId);
+    if (
+      moderatorAirlineId === undefined ||
+      !Types.ObjectId.isValid(moderatorAirlineId)
+    ) {
+      throw this.flightNotFound();
+    }
+
+    const airlineObjectId = new Types.ObjectId(moderatorAirlineId);
+    const filter = { _id: flightObjectId, airlineId: airlineObjectId };
+    const flight = await this.flightModel
+      .findOne(filter)
+      .lean<FlightRecord>()
+      .exec();
+    if (!flight) throw this.flightNotFound();
+    if (flight.status !== FlightStatus.SCHEDULED) {
+      throw this.flightNotScheduled();
+    }
+    if (flight.cabins.some((cabin) => cabin.cabinClass === input.cabinClass)) {
+      throw this.cabinAlreadyExists();
+    }
+
+    const airports = await this.referenceData.getAirports([
+      flight.departureAirportId,
+      flight.arrivalAirportId,
+    ]);
+    const departureAirport = airports.get(flight.departureAirportId);
+    const arrivalAirport = airports.get(flight.arrivalAirportId);
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException({
+        code: ErrorCode.InternalError,
+        message: 'A flight references an unknown airport',
+      });
+    }
+
+    const session = await this.connection.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        await this.seatInventory.addCabin(flightId, input, moderatorAirlineId, {
+          session,
+        });
+        const updated = await this.flightModel
+          .findOne(filter)
+          .session(session)
+          .lean<FlightRecord>()
+          .exec();
+        if (!updated) throw this.flightNotFound();
+        return this.toManagementView(updated, departureAirport, arrivalAirport);
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
    * Flights with their airlines, by flight ID, for pricing and snapshots (FLT-19, FLT-22, FLT-29).
    * Unknown IDs are left out. Cancelled flights and inactive airlines are still returned:
    * ask `checkBookable` whether they can be booked. Implemented in FLT-17.
@@ -239,6 +366,11 @@ export class FlightsService {
     return new Types.ObjectId(id);
   }
 
+  private flightObjectId(id: string): Types.ObjectId {
+    if (!Types.ObjectId.isValid(id)) throw this.flightNotFound();
+    return new Types.ObjectId(id);
+  }
+
   private toManagementView(
     flight: FlightRecord,
     departureAirport: AirportView,
@@ -284,6 +416,27 @@ export class FlightsService {
     return new NotFoundException({
       code: ErrorCode.NotFound,
       message: 'Airline not found',
+    });
+  }
+
+  private flightNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: ErrorCode.NotFound,
+      message: 'Flight not found',
+    });
+  }
+
+  private flightNotScheduled(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.InvalidStatusTransition,
+      message: 'Only scheduled flights can be edited',
+    });
+  }
+
+  private cabinAlreadyExists(): ConflictException {
+    return new ConflictException({
+      code: ErrorCode.Conflict,
+      message: 'This flight already has that cabin class',
     });
   }
 }

@@ -89,6 +89,15 @@ export interface CreateFlightInput {
   arrivalLocal: string;
 }
 
+/** Cabin fields supplied by an airline moderator when adding a cabin to a flight. */
+export interface AddCabinInput {
+  cabinClass: CabinClass;
+  totalSeats: number;
+  priceMinor: number;
+  freeBags: number;
+  maxBagWeightKg: number;
+}
+
 /** Pagination for a moderator's own-airline flight list. */
 export interface FlightListQuery {
   page: number;

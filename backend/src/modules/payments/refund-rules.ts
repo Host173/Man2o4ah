@@ -38,7 +38,7 @@ export function assertRefundAmount(amountMinor: number): void {
 export function checkRefundRequest(
   request: RefundRequest,
   payment: PaidPayment | null,
-): void {
+): asserts payment is PaidPayment {
   if (!payment || payment.status !== 'succeeded') {
     throw new ConflictException({
       code: ErrorCode.InvalidStatusTransition,

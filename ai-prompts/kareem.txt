@@ -2279,3 +2279,16 @@ ok the needed values are in the .env , you can go now
 How the output was used:
 Ran verify and the payments gates; fixed parseWebhook so a missing Stripe client is a setup error, not BAD_SIGNATURE (stripe-api.gateway.ts); G7 and G8 negative gates failed as expected and were restored.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PAY-01
+
+Prompt:
+ok test the real strip service
+
+How the output was used:
+Ran a throwaway live check (deleted afterwards) of the real StripeApiGateway against Stripe test mode with stripe listen; no code changed.
+================================================

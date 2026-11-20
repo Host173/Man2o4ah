@@ -1234,6 +1234,13 @@ and read also the last comment on the pr
 
 How the output was used:
 Read the latest comment on PR #173 and distinguished its reported cleanup bug from the current pinned merge conflict.
+Related Requirement: ACC-06
+
+Prompt:
+fix all of these then add a comment on the pr
+
+How the output was used:
+Added test-first session-deadline and idempotent-logout fixes for PR #138, synchronized approved contract documentation and diagrams, and passed backend verify with 2078 tests.
 ================================================
 
 ================================================
@@ -1247,6 +1254,13 @@ ok fix all these and push then comment on the pr
 
 How the output was used:
 Merged pinned develop preserving both author-log histories (b1bc81c), committed failing cleanup regressions (0a97f9c), implemented transactional cleanup records and a retry job with model/diagram/index documentation, and passed backend verify (2049 tests) and production audit (0 vulnerabilities).
+Related Requirement: ACC-06
+
+Prompt:
+contract_approval=i dont unsestand what is the problem and what do you want and what is the ticket even, logout_policy=idempotent-refresh-capable
+
+How the output was used:
+Explained ticket #27 and requested approval for the frozen session-schema change; recorded the selected idempotent, refresh-cookie-capable logout behavior.
 ================================================
 
 ================================================
@@ -1260,4 +1274,11 @@ Kareem and Mostafa approve this approach and including it in #173
 
 How the output was used:
 Implemented the requester-approved blog-owned durable cleanup collection and scheduled job in PR #173, including the matching data-model, diagrams and index tests.
+Related Requirement: ACC-06
+
+Prompt:
+approved
+
+How the output was used:
+Applied the approved immutable session deadline and updated the data model, Mermaid diagrams, auth contract and shared test-session helper.
 ================================================

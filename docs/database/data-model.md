@@ -215,13 +215,16 @@ One document per logged-in device. Implements refresh-token revocation and the 3
 | `userId` | ObjectId → users | ✓ | |
 | `refreshTokenHash` | string | ✓ | SHA-256 of the refresh token; the token itself is never stored |
 | `lastActivityAt` | Date | ✓ | |
-| `expiresAt` | Date | ✓ | `lastActivityAt + 30 min` |
+| `expiresAt` | Date | ✓ | `min(lastActivityAt + 30 min, absoluteExpiresAt)` |
+| `absoluteExpiresAt` | Date | ✓ | immutable; login + 8 hours for admins, login + 7 days for other roles (ACC-06, ticket #27) |
 
 Indexes: `{ userId: 1 }` · `{ expiresAt: 1 }` **TTL** (`expireAfterSeconds: 0`)
 
 Rules
-- Every authenticated request checks the session exists and `expiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session).
-- Logout deletes the session. Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
+- Every authenticated request checks the session exists, `expiresAt > now` and `absoluteExpiresAt > now` (TTL deletion can lag ~60 s), then slides `lastActivityAt`/`expiresAt` (at most once per minute per session), never beyond `absoluteExpiresAt`.
+- The absolute deadline is fixed from the role at login, including the refresh cookie's max age; refresh and role changes never extend it. Existing sessions without this field require a new login; no Atlas data migration is needed.
+- Logout is public and idempotent: delete the authenticated session, or use the refresh token's hash if the access cookie cannot authenticate, then clear both cookies and return 204. Missing or already-revoked credentials still clear the cookies. Other sessions are unaffected.
+- Password change, admin password reset, suspension and deactivation delete **all** of the user's sessions.
 - Tokens travel only in httpOnly, Secure, SameSite cookies (ACC-19).
 
 ---

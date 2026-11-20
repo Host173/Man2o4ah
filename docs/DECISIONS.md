@@ -188,6 +188,7 @@ Team: Kareem Sayed Ahmed (leader), Pierre Remon Raafat, Mostafa Elsahy, Aisha Al
 - **One error shape** for every non-2xx response, produced by one global exception filter (Platform package): `{ statusCode, code, message, details?, path, timestamp }`. `details` lists field errors for validation (GEN-02).
 - **Calendar dates** (`DateOnly` in the database) travel as `YYYY-MM-DD` strings in requests and responses. **Money** keeps the data model's names and minor units (`totalMinor`), formatted by the frontend.
 - **Error codes live in one enum** (`common/errors/error-codes.ts`). New codes are added there in the same PR that uses them. Tests assert the status and the code, never the message wording.
+- **Session deadlines and logout (ACC-06, ticket #27):** fix `sessions.absoluteExpiresAt` at login: 8 hours for admins, 7 days for other roles. Both refresh-cookie max age and server enforcement follow this role-at-login deadline. Every idle slide is capped there; sessions without it require a new login. Logout is public and idempotent: revoke the authenticated session, or fall back to the refresh cookie's hash, clear both cookies and return 204 even if already logged out. Other sessions are unaffected. Refresh clears cookies only on 401, not transient server failures.
 
 ## 18. Git rules
 

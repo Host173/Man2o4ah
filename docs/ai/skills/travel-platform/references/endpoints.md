@@ -17,7 +17,7 @@ Auth & accounts · Admin · Reference & supporting · Airlines & flights · Flig
 | POST | /api/auth/register | ACC-01 | Pub | accounts |
 | POST | /api/auth/login | ACC-04, ACC-05 | Pub | accounts |
 | POST | /api/auth/refresh **added** | ACC-06, ACC-19 | Pub (refresh cookie) | accounts |
-| POST | /api/auth/logout | ACC-06 | User | accounts |
+| POST | /api/auth/logout | ACC-06 | Pub (access or refresh cookie when present; idempotent 204) | accounts |
 | GET | /api/auth/me | ACC-04, ACC-19 | User | accounts |
 | PATCH | /api/auth/change-password | ACC-08, ACC-07a | User | accounts |
 | GET | /api/users/me | ACC-09 | User | accounts |

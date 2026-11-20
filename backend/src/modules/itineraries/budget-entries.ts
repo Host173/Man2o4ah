@@ -16,9 +16,9 @@ function invalid(details: { field: string; message: string }[]): never {
 
 /**
  * ITN-14: shared service/fake validation, so direct service calls and the
- * contract fake reject the same input as the HTTP pipe. The ticket requires
- * 400 VALIDATION_FAILED for unsupported currencies, invalid amounts and
- * invalid categories; reference IDs keep the dataset's exact spelling.
+ * contract fake reject the same input as the HTTP pipe. Unknown currency
+ * codes use UNSUPPORTED_CURRENCY; field validation uses VALIDATION_FAILED.
+ * Reference IDs keep the dataset's exact spelling.
  */
 export async function validateBudgetEntry(
   dto: CreateBudgetEntryDto | UpdateBudgetEntryDto,
@@ -40,11 +40,15 @@ export async function validateBudgetEntry(
     dto.currency !== undefined &&
     !(await referenceData.getCurrency(dto.currency))
   ) {
-    invalid([
-      {
-        field: 'currency',
-        message: `${dto.currency} is not a supported currency`,
-      },
-    ]);
+    throw new BadRequestException({
+      code: ErrorCode.UnsupportedCurrency,
+      message: `${dto.currency} is not a supported currency`,
+      details: [
+        {
+          field: 'currency',
+          message: `${dto.currency} is not a supported currency`,
+        },
+      ],
+    });
   }
 }

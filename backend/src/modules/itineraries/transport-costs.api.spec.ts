@@ -1,6 +1,8 @@
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
+import { FxService } from '../fx/fx.service.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -24,6 +26,7 @@ describe('Transport costs HTTP API (ITN-16)', () => {
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
+      providers: [{ provide: FxService, useValue: new FakeFxService() }],
       override: (builder) =>
         builder.overrideProvider(ReferenceDataService).useValue(referenceData),
     });

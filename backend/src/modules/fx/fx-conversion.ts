@@ -45,7 +45,7 @@ export function convertMinor(
   const rounded = (2n * numerator + denominator) / (2n * denominator);
   const result = Number(rounded);
   if (BigInt(result) !== rounded) {
-    throw new Error(`Not a valid amount in minor units: ${rounded}`);
+    throw new RangeError(`Not a valid amount in minor units: ${rounded}`);
   }
   assertMinor(result);
   return result;

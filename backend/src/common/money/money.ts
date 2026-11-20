@@ -5,7 +5,7 @@
  */
 export function assertMinor(n: number): void {
   if (!Number.isSafeInteger(n) || n < 0) {
-    throw new Error(`Not a valid amount in minor units: ${n}`);
+    throw new RangeError(`Not a valid amount in minor units: ${n}`);
   }
 }
 

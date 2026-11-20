@@ -1,6 +1,8 @@
 import { getModelToken } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
+import { FxService } from '../fx/fx.service.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
@@ -32,6 +34,7 @@ describe('ITN-12 activity images (integration, storage fake)', () => {
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
+      providers: [{ provide: FxService, useValue: new FakeFxService() }],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)

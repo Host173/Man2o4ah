@@ -5,6 +5,8 @@ import type { Model } from 'mongoose';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { chromium } from 'playwright';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
+import { FxService } from '../fx/fx.service.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
@@ -22,6 +24,7 @@ describe('Itinerary PDF HTTP API (ITN-28)', () => {
   beforeAll(async () => {
     t = await createTestApp({
       imports: [ItinerariesModule],
+      providers: [{ provide: FxService, useValue: new FakeFxService() }],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)

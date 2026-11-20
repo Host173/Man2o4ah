@@ -112,8 +112,8 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     storage: FakeStorageService = new FakeStorageService(),
     private readonly converter: Converter = buildConverter({
       rateDate: '2026-11-01',
-      rates: { USD: 1, EGP: 50, EUR: 5, JPY: 100 },
-      minorUnits: { USD: 2, EGP: 2, EUR: 2, JPY: 0 },
+      rates: { USD: 1, EGP: 50, EUR: 5, AED: 3.6725, JPY: 100 },
+      minorUnits: { USD: 2, EGP: 2, EUR: 2, AED: 2, JPY: 0 },
     }),
     private readonly preferredCurrency: string = 'USD',
   ) {
@@ -184,7 +184,13 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     itineraryId: string,
     userId: string,
   ): Promise<ItineraryDetailView> {
-    return this.toDetail(this.findOwned(itineraryId, userId));
+    const detail = this.toDetail(this.findOwned(itineraryId, userId));
+    const summary = await this.getBudgetSummary(itineraryId, userId);
+    detail.cityGroups = summary.byCityGroup.map(({ total, ...group }) => ({
+      ...group,
+      subtotal: total,
+    }));
+    return detail;
   }
 
   async update(

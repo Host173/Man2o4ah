@@ -163,7 +163,30 @@ export class ItinerariesService {
       .lean()
       .exec();
     if (!itinerary) throw this.notFound();
-    return this.toDetailView(itinerary as ItineraryRecord);
+    const detail = this.toDetailView(itinerary as ItineraryRecord);
+    if (detail.days.length === 0) return detail;
+    const hasAmounts =
+      detail.days.some(
+        (day) =>
+          day.budgetEntries.some((entry) => entry.amountMinor > 0) ||
+          day.activities.some(
+            (activity) => (activity.cost?.amountMinor ?? 0) > 0,
+          ),
+      ) || detail.transportCosts.some((cost) => cost.amountMinor > 0);
+    if (hasAmounts) {
+      const summary = await this.summarizeBudget(itinerary, userId);
+      detail.cityGroups = summary.byCityGroup.map(({ total, ...group }) => ({
+        ...group,
+        subtotal: total,
+      }));
+    } else {
+      const currency = await this.profile.getPreferredCurrency(userId);
+      detail.cityGroups = detail.cityGroups.map((group) => ({
+        ...group,
+        subtotal: { amountMinor: 0, currency },
+      }));
+    }
+    return detail;
   }
 
   /** ITN-01: edits the owner's title, countries or start date; other fields stay. */
@@ -859,6 +882,7 @@ export class ItinerariesService {
               },
             },
           },
+          ...this.recomputeDayFields(),
         ],
         { returnDocument: 'after', updatePipeline: true },
       )
@@ -930,6 +954,7 @@ export class ItinerariesService {
                 },
               },
             },
+            ...this.recomputeDayFields(),
           ],
           { returnDocument: 'after', updatePipeline: true },
         )
@@ -951,7 +976,34 @@ export class ItinerariesService {
     const ownerId = this.parseId(userId, 'userId');
     const result = await this.itineraryModel.updateOne(
       { ownerId, 'days.budgetEntries._id': targetId },
-      { $pull: { 'days.$[].budgetEntries': { _id: targetId } } },
+      [
+        {
+          $set: {
+            days: {
+              $map: {
+                input: '$days',
+                as: 'day',
+                in: {
+                  $mergeObjects: [
+                    '$$day',
+                    {
+                      budgetEntries: {
+                        $filter: {
+                          input: '$$day.budgetEntries',
+                          as: 'entry',
+                          cond: { $ne: ['$$entry._id', targetId] },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        ...this.recomputeDayFields(),
+      ],
+      { updatePipeline: true },
     );
     if (result.matchedCount === 0) throw this.notFound();
   }
@@ -1097,6 +1149,13 @@ export class ItinerariesService {
       .exec();
     if (!itinerary) throw this.notFound();
 
+    return this.summarizeBudget(itinerary, userId);
+  }
+
+  private async summarizeBudget(
+    itinerary: StoredItinerary,
+    userId: string,
+  ): Promise<BudgetSummaryView> {
     const displayCurrency = await this.profile.getPreferredCurrency(userId);
     if (!(await this.referenceData.getCurrency(displayCurrency))) {
       throw new BadRequestException({

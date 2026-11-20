@@ -221,7 +221,12 @@ describe('FakeItinerariesService budget contract (ITN-14)', () => {
         service.updateBudgetEntry(entry._id, { [field]: value }, 'user-1'),
       ]) {
         await expect(promise).rejects.toMatchObject({
-          response: { code: ErrorCode.ValidationFailed },
+          response: {
+            code:
+              field === 'currency'
+                ? ErrorCode.UnsupportedCurrency
+                : ErrorCode.ValidationFailed,
+          },
         });
       }
     }
@@ -625,6 +630,7 @@ describe('FakeItinerariesService owner-only methods', () => {
         dayCount: 1,
         checkIn: '2027-04-01',
         checkOut: '2027-04-02',
+        subtotal: { amountMinor: 0, currency: 'USD' },
       },
       {
         cityId: 'dubai',
@@ -633,6 +639,7 @@ describe('FakeItinerariesService owner-only methods', () => {
         dayCount: 1,
         checkIn: '2027-04-02',
         checkOut: '2027-04-03',
+        subtotal: { amountMinor: 0, currency: 'USD' },
       },
     ]);
   });
@@ -705,6 +712,7 @@ describe('FakeItinerariesService owner-only methods', () => {
         dayCount: 2,
         checkIn: '2027-04-01',
         checkOut: '2027-04-03',
+        subtotal: { amountMinor: 0, currency: 'USD' },
       },
     ]);
 

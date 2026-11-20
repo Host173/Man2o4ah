@@ -137,6 +137,8 @@ export interface CityGroupView {
   checkIn: string;
   /** The day after the last day's date, `YYYY-MM-DD` (ITN-25). */
   checkOut: string;
+  /** ITN-14: converted subtotal on the full owner read (GET /itineraries/:id). */
+  subtotal?: MoneyView;
 }
 
 /** Intercity transport cost of an itinerary (ITN-16). */

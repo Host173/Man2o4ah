@@ -30,10 +30,11 @@ import { UsersController } from './users/users.controller.js';
  * and `UsersController` serves `/api/users/me` (ACC-09 profile; supported
  * currencies come from `ReferenceDataService`, looked up from the app, so
  * `ReferenceDataModule` must be registered beside this module; ACC-12
- * self-deactivation); `AuthService`, `ProfileService` and
+ * self-deactivation); `AuthService` and
  * `SelfDeactivationService` stay internal. Other
  * modules use the exported `AccountsService` and
- * `ActiveBookingsCheckRegistry`; tests use
+ * `ActiveBookingsCheckRegistry`. ITN-18 also reads the preferred currency
+ * through the exported `ProfileService`; tests use
  * `FakeAccountsService`, `FakeActiveBookingsCheck` and `loginAs`.
  */
 @Module({

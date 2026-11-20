@@ -29,7 +29,8 @@ function toProfile(user: User & { _id: Types.ObjectId }): ProfileDto {
 }
 
 /**
- * ACC-09: the logged-in account's own profile (accounts only, not exported).
+ * ACC-09: the logged-in account's own profile. Exported for ITN-18's
+ * read-only preferred-currency accessor.
  *
  * `ReferenceDataService` is looked up from the app when a currency is checked,
  * instead of `AccountsModule` importing `ReferenceDataModule`: every module

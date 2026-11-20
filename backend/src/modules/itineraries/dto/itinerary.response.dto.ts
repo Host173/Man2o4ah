@@ -16,6 +16,7 @@ import {
   ItineraryVisibility,
   TransportMode,
 } from '../schemas/itinerary.schema.js';
+import { MoneyResponseDto } from './budget-summary.response.dto.js';
 
 /** Swagger response model for an activity image (GEN-08). */
 export class ActivityImageResponseDto implements ActivityImageView {
@@ -126,6 +127,9 @@ export class CityGroupResponseDto implements CityGroupView {
 
   @ApiProperty({ type: String, format: 'date', example: '2027-04-03' })
   checkOut!: string;
+
+  @ApiPropertyOptional({ type: MoneyResponseDto })
+  subtotal?: MoneyResponseDto;
 }
 
 /** Swagger response model for an intercity transport cost (ITN-16). */

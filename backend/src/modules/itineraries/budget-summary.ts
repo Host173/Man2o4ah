@@ -1,3 +1,6 @@
+import { BadRequestException } from '@nestjs/common';
+import { ErrorCode } from '../../common/errors/error-codes.js';
+import { sumMinor } from '../../common/money/money.js';
 import type { Converter } from '../fx/fx.types.js';
 import { cityGroups, dayDate } from './days.js';
 import type {
@@ -33,6 +36,25 @@ function emptyCategories(currency: string): BudgetCategoryTotals {
   };
 }
 
+function checkedAmount(calculate: () => number): number {
+  try {
+    return calculate();
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    throw new BadRequestException({
+      code: ErrorCode.ValidationFailed,
+      message: 'The converted budget exceeds supported integer minor units',
+      details: [
+        {
+          field: 'amountMinor',
+          message:
+            'Converted amounts and totals must be safe integer minor units',
+        },
+      ],
+    });
+  }
+}
+
 /**
  * Converts one amount and adds it to a bucket. Conversion happens per entry
  * (half-up, ITN-18) before summing, as domain-rules.md §5 requires; the FX
@@ -46,18 +68,22 @@ function add(
   converter: Converter,
   displayCurrency: string,
 ): void {
-  bucket[category].amountMinor += converter.convert(
-    amountMinor,
-    currency,
-    displayCurrency,
+  bucket[category].amountMinor = checkedAmount(() =>
+    sumMinor(
+      bucket[category].amountMinor,
+      converter.convert(amountMinor, currency, displayCurrency),
+    ),
   );
 }
 
 function totalOf(bucket: BudgetCategoryTotals, currency: string): MoneyView {
   return money(
-    BUDGET_SUMMARY_CATEGORIES.reduce(
-      (sum, category) => sum + bucket[category].amountMinor,
-      0,
+    checkedAmount(() =>
+      sumMinor(
+        ...BUDGET_SUMMARY_CATEGORIES.map(
+          (category) => bucket[category].amountMinor,
+        ),
+      ),
     ),
     currency,
   );
@@ -121,7 +147,12 @@ export function buildBudgetSummary(
     }
 
     for (const category of BUDGET_SUMMARY_CATEGORIES) {
-      byCategory[category].amountMinor += categories[category].amountMinor;
+      byCategory[category].amountMinor = checkedAmount(() =>
+        sumMinor(
+          byCategory[category].amountMinor,
+          categories[category].amountMinor,
+        ),
+      );
     }
     return {
       dayId: day._id,
@@ -141,9 +172,13 @@ export function buildBudgetSummary(
     checkIn: group.checkIn,
     checkOut: group.checkOut,
     total: money(
-      byDay
-        .slice(group.fromDay - 1, group.toDay)
-        .reduce((sum, day) => sum + day.total.amountMinor, 0),
+      checkedAmount(() =>
+        sumMinor(
+          ...byDay
+            .slice(group.fromDay - 1, group.toDay)
+            .map((day) => day.total.amountMinor),
+        ),
+      ),
       displayCurrency,
     ),
   }));

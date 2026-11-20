@@ -21,8 +21,7 @@ import {
 
 /**
  * HTTP contract of ITN-14 (budget entries) and ITN-18 (converted summary).
- * Written before the implementation: every test in this file fails with 404
- * until the routes exist (TDD, see docs/ai/skills/travel-platform/references/testing.md §2).
+ * Covers entry validation, converted totals, ownership and monetary bounds.
  */
 describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
   let t: TestApp;
@@ -141,9 +140,7 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
       amountMinor: 100,
       currency: 'JPY',
     }).expect(201);
-    // Activity costs are produced by ITN-10. That ticket's HTTP controller is
-    // not on this stack (only its service/schema are), so seed the embedded
-    // activity directly; the budget summary must still count it.
+    // Seed an activity directly to isolate its contribution to the summary.
     const itineraries = t.moduleRef.get<Model<Itinerary>>(
       getModelToken(Itinerary.name),
     );
@@ -312,7 +309,11 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
       ...body,
       [field]: value,
     }).expect(400);
-    expect(invalid.body.code).toBe(ErrorCode.ValidationFailed);
+    const expectedCode =
+      field === 'currency' && value === 'XXX'
+        ? ErrorCode.UnsupportedCurrency
+        : ErrorCode.ValidationFailed;
+    expect(invalid.body.code).toBe(expectedCode);
     expect(invalid.body.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ field })]),
     );
@@ -320,7 +321,7 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
     const patched = await patchBudget(created._id, { [field]: value }).expect(
       400,
     );
-    expect(patched.body.code).toBe(ErrorCode.ValidationFailed);
+    expect(patched.body.code).toBe(expectedCode);
     expect((await getTrip()).days[0].budgetEntries).toEqual([created]);
   });
 

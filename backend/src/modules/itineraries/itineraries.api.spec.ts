@@ -3,6 +3,8 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
+import { FxService } from '../fx/fx.service.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
@@ -41,6 +43,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
   beforeAll(async () => {
     testApp = await createTestApp({
       imports: [ItinerariesModule],
+      providers: [{ provide: FxService, useValue: new FakeFxService() }],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)
@@ -771,6 +774,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
           dayCount: 2,
           checkIn: '2027-04-01',
           checkOut: '2027-04-03',
+          subtotal: { amountMinor: 0, currency: 'USD' },
         },
       ]);
     });
@@ -1090,6 +1094,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
           dayCount: 2,
           checkIn: '2027-04-01',
           checkOut: '2027-04-03',
+          subtotal: { amountMinor: 120, currency: 'USD' },
         },
       ]);
       expect(

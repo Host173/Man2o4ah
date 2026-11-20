@@ -1,15 +1,17 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import bcrypt from 'bcrypt';
-import type { Model, Types } from 'mongoose';
+import type { Connection, Model, Types } from 'mongoose';
 import { ErrorCode } from '../../../common/errors/error-codes.js';
+import type { ChangePasswordDto } from '../dto/change-password.dto.js';
 import type { LoginDto } from '../dto/login.dto.js';
 import type { MeDto } from '../dto/me.response.dto.js';
 import type { RegisterDto } from '../dto/register.dto.js';
@@ -72,6 +74,33 @@ function accountLocked(lockedUntil: Date, now: number) {
   });
 }
 
+/**
+ * A wrong current password on change-password (ACC-08): a 400 on the form
+ * field, not a 401, because the caller is still logged in and the frontend
+ * treats 401 as "log in again".
+ */
+function wrongCurrentPassword() {
+  const message = 'Current password is incorrect';
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details: [{ field: 'currentPassword', message }],
+  });
+}
+
+/**
+ * A forced change (ACC-07a) that keeps the temporary password: the account
+ * must set a *new* password, so this is a 400 on the `newPassword` field.
+ */
+function sameAsTemporaryPassword() {
+  const message = 'New password must be different from the temporary password';
+  return new BadRequestException({
+    code: ErrorCode.ValidationFailed,
+    message,
+    details: [{ field: 'newPassword', message }],
+  });
+}
+
 /** SHA-256 of a refresh token, the only form a session stores (auth.md §3). */
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -101,6 +130,7 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
     private readonly jwt: JwtService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -148,23 +178,39 @@ export class AuthService {
       });
     }
 
-    // A successful login resets the counter and any expired lock (ACC-05).
-    await this.userModel.updateOne(
-      { _id: user._id },
-      { $set: { failedLoginAttempts: 0, lockedUntil: null } },
-    );
-
     const refreshToken = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
-    const now = Date.now();
-    const session = await this.sessionModel.create({
-      userId: user._id,
-      refreshTokenHash: hashRefreshToken(refreshToken),
-      lastActivityAt: new Date(now),
-      expiresAt: new Date(now + SESSION_IDLE_MS),
-      absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(user.role)),
-    });
+    const dbSession = await this.connection.startSession();
+    let sid: Types.ObjectId;
+    try {
+      // Serialize session creation with password changes on the verified hash.
+      sid = await dbSession.withTransaction(async () => {
+        const result = await this.userModel.updateOne(
+          { _id: user._id, passwordHash: hash },
+          { $set: { failedLoginAttempts: 0, lockedUntil: null } },
+          { session: dbSession },
+        );
+        if (result.matchedCount === 0) throw invalidCredentials();
 
-    const accessToken = await this.signAccessToken(user, session._id);
+        const now = Date.now();
+        const [session] = await this.sessionModel.create(
+          [
+            {
+              userId: user._id,
+              refreshTokenHash: hashRefreshToken(refreshToken),
+              lastActivityAt: new Date(now),
+              expiresAt: new Date(now + SESSION_IDLE_MS),
+              absoluteExpiresAt: new Date(now + getSessionMaxAgeMs(user.role)),
+            },
+          ],
+          { session: dbSession },
+        );
+        return session._id;
+      });
+    } finally {
+      await dbSession.endSession();
+    }
+
+    const accessToken = await this.signAccessToken(user, sid);
 
     return { user: toMe(user), accessToken, refreshToken };
   }
@@ -308,6 +354,65 @@ export class AuthService {
     const user = await this.userModel.findById(userId).lean();
     if (!user) throw sessionExpired();
     return toMe(user);
+  }
+
+  /**
+   * ACC-08, ACC-07a (auth.md §4): checks the current password, stores a new
+   * salted bcrypt hash, clears `mustChangePassword` and deletes all of the
+   * user's sessions (data-model.md §3.2). The caller must log in again.
+   * A wrong current password → 400 VALIDATION_FAILED on `currentPassword`.
+   * During a forced change (`mustChangePassword`), a new password that still
+   * matches the temporary one → 400 VALIDATION_FAILED on `newPassword`; a
+   * normal change may keep the same password (not decided otherwise).
+   * The DTO has already applied the password rule to the new password.
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.userModel
+      .findById(userId)
+      .select('+passwordHash')
+      .lean();
+    if (!user) {
+      throw new UnauthorizedException({
+        code: ErrorCode.SessionExpired,
+        message: 'Your session has expired. Please log in again.',
+      });
+    }
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw wrongCurrentPassword();
+    }
+    // Compared with the stored hash, not the typed text, so a new password
+    // that bcrypt can't tell apart from the temporary one is caught too.
+    if (
+      user.mustChangePassword &&
+      (await bcrypt.compare(dto.newPassword, user.passwordHash))
+    ) {
+      throw sameAsTemporaryPassword();
+    }
+
+    // Hashed before the transaction: it's slow and needn't be redone on a retry.
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+
+    // One transaction: the new password and the logout of all sessions
+    // must happen together, so a failure can't leave old sessions alive with
+    // the password already changed (data-model.md §1.9).
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Conditional on the hash just checked: if a parallel change won,
+        // this one's current password is no longer right (no read-then-write).
+        const result = await this.userModel.updateOne(
+          { _id: user._id, passwordHash: user.passwordHash },
+          { $set: { passwordHash, mustChangePassword: false } },
+          { session },
+        );
+        if (result.modifiedCount === 0) {
+          throw wrongCurrentPassword();
+        }
+        await this.sessionModel.deleteMany({ userId: user._id }, { session });
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   /**

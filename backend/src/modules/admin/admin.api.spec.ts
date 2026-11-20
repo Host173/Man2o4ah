@@ -2548,3 +2548,565 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(0);
   });
 });
+
+describe('Admin Provider Deactivation API (ACC-15)', () => {
+  let accApp: TestApp | undefined;
+  const fakeAccounts = new FakeAccountsService();
+  const fakeFlights = new FakeFlightsService();
+  const fakeHotels = new FakeHotelsService();
+  const fakeFlightBookings = new FakeFlightBookingsService();
+  const fakeHotelBookings = new FakeHotelBookingsService();
+  const fakeEvents = new FakeEvents();
+
+  const airline1Id = '6736f0b2c5a1b2c3d4e54101';
+  const airline2Id = '6736f0b2c5a1b2c3d4e54102';
+  const hotel1Id = '6736f0b2c5a1b2c3d4e54201';
+  const hotel2Id = '6736f0b2c5a1b2c3d4e54202';
+
+  const modAirlineActiveId = '6736f0b2c5a1b2c3d4e54301';
+  const modAirlineSuspendedId = '6736f0b2c5a1b2c3d4e54302';
+  const modHotelActiveId = '6736f0b2c5a1b2c3d4e54303';
+  const modHotelDeactivatedId = '6736f0b2c5a1b2c3d4e54304';
+
+  function resetFakes(): void {
+    Object.assign(
+      fakeAccounts,
+      new FakeAccountsService([
+        {
+          id: modAirlineActiveId,
+          name: 'Airline Active Mod',
+          email: 'airline-active@example.com',
+          role: UserRole.AIRLINE_MODERATOR,
+          status: UserStatus.ACTIVE,
+          moderatorOf: {
+            providerType: ProviderType.AIRLINE,
+            providerId: airline1Id,
+          },
+        },
+        {
+          id: modAirlineSuspendedId,
+          name: 'Airline Suspended Mod',
+          email: 'airline-suspended@example.com',
+          role: UserRole.AIRLINE_MODERATOR,
+          status: UserStatus.SUSPENDED,
+          moderatorOf: {
+            providerType: ProviderType.AIRLINE,
+            providerId: airline1Id,
+          },
+        },
+        {
+          id: modHotelActiveId,
+          name: 'Hotel Active Mod',
+          email: 'hotel-active@example.com',
+          role: UserRole.HOTEL_MODERATOR,
+          status: UserStatus.ACTIVE,
+          moderatorOf: {
+            providerType: ProviderType.HOTEL,
+            providerId: hotel1Id,
+          },
+        },
+        {
+          id: modHotelDeactivatedId,
+          name: 'Hotel Deactivated Mod',
+          email: 'hotel-deactivated@example.com',
+          role: UserRole.HOTEL_MODERATOR,
+          status: UserStatus.DEACTIVATED,
+          moderatorOf: {
+            providerType: ProviderType.HOTEL,
+            providerId: hotel1Id,
+          },
+        },
+      ]),
+    );
+
+    const flightsData = new FakeFlightsData();
+    flightsData.addAirline({
+      id: airline1Id,
+      code: 'MS',
+      name: 'EgyptAir',
+      isActive: true,
+    });
+    flightsData.addAirline({
+      id: airline2Id,
+      code: 'RJ',
+      name: 'Royal Jordanian',
+      isActive: false,
+    });
+    Object.assign(fakeFlights, new FakeFlightsService(flightsData));
+
+    Object.assign(
+      fakeHotels,
+      new FakeHotelsService({
+        hotels: [
+          {
+            id: hotel1Id,
+            name: 'Nile Hotel',
+            address: '1 Nile St',
+            cityId: 'cairo',
+            countryCode: 'EG',
+            photos: [],
+            amenities: [],
+            checkInTime: '14:00',
+            checkOutTime: '12:00',
+            cancellationPolicy: { tiers: [] },
+            isActive: true,
+            ratingSummary: { average: null, count: 0 },
+          },
+          {
+            id: hotel2Id,
+            name: 'Oasis Inn',
+            address: '2 Oasis Rd',
+            cityId: 'luxor',
+            countryCode: 'EG',
+            photos: [],
+            amenities: [],
+            checkInTime: '14:00',
+            checkOutTime: '12:00',
+            cancellationPolicy: { tiers: [] },
+            isActive: false,
+            ratingSummary: { average: null, count: 0 },
+          },
+        ],
+      }),
+    );
+
+    Object.assign(
+      fakeFlightBookings,
+      new FakeFlightBookingsService([
+        { ...FLIGHT_SEED[0], providerId: airline1Id },
+      ]),
+    );
+    Object.assign(
+      fakeHotelBookings,
+      new FakeHotelBookingsService([
+        { ...HOTEL_SEED[0], providerId: hotel1Id },
+      ]),
+    );
+    fakeEvents.clear();
+  }
+
+  beforeAll(async () => {
+    resetFakes();
+    accApp = await createTestApp({
+      imports: [AdminModule],
+      override: (builder) =>
+        builder
+          .overrideProvider(FlightBookingsService)
+          .useValue(fakeFlightBookings)
+          .overrideProvider(HotelBookingsService)
+          .useValue(fakeHotelBookings)
+          .overrideProvider(AccountsService)
+          .useValue(fakeAccounts)
+          .overrideProvider(FlightsService)
+          .useValue(fakeFlights)
+          .overrideProvider(HotelsService)
+          .useValue(fakeHotels)
+          .overrideProvider(AppEvents)
+          .useValue(fakeEvents),
+    });
+  }, HOOK_TIMEOUT);
+
+  beforeEach(async () => {
+    await clearCollections(accApp!.connection);
+    resetFakes();
+    vi.restoreAllMocks();
+  });
+
+  afterAll(async () => {
+    await accApp?.close();
+  }, HOOK_TIMEOUT);
+
+  it('registers Swagger metadata for ACC-15 provider deactivation and reactivation routes', () => {
+    const doc = SwaggerModule.createDocument(
+      accApp!.app,
+      new DocumentBuilder()
+        .setTitle('Travel Platform')
+        .setVersion('1.0')
+        .addCookieAuth()
+        .build(),
+    );
+
+    expect(doc.paths['/api/admin/bookings']?.get?.summary).toContain('ACC-17');
+
+    for (const [pathKey, keyword] of [
+      ['/api/admin/providers/{type}/{id}/deactivate', 'Deactivate'],
+      ['/api/admin/providers/{type}/{id}/reactivate', 'Reactivate'],
+    ] as const) {
+      const op = doc.paths[pathKey]?.patch;
+      expect(op).toBeDefined();
+      expect(op?.tags).toContain('admin');
+      expect(op?.summary).toContain('ACC-15');
+      expect(op?.summary).toContain(keyword);
+      expect(op?.security?.length ?? 0).toBeGreaterThan(0);
+
+      const params = (op?.parameters ?? []) as {
+        name: string;
+        in: string;
+        schema?: { enum?: unknown[]; type?: string };
+      }[];
+      const typeParam = params.find(
+        (param) => param.name === 'type' && param.in === 'path',
+      );
+      const idParam = params.find(
+        (param) => param.name === 'id' && param.in === 'path',
+      );
+      expect(typeParam?.schema?.enum).toEqual(['airline', 'hotel']);
+      expect(idParam?.schema?.type).toBe('string');
+
+      const responses = op?.responses ?? {};
+      expect(responses['204']).toBeDefined();
+      expect(responses['400']).toBeDefined();
+      expect(responses['401']).toBeDefined();
+      expect(responses['403']).toBeDefined();
+      expect(responses['404']).toBeDefined();
+    }
+  });
+
+  it('rejects unauthenticated requests (401) and non-admin roles (403) without mutating providers or emitting events', async () => {
+    const getModsSpy = vi.spyOn(fakeAccounts, 'getModeratorIds');
+    const setAirlineSpy = vi.spyOn(fakeFlights, 'setAirlineActive');
+    const setHotelSpy = vi.spyOn(fakeHotels, 'setActive');
+
+    const paths = [
+      `/api/admin/providers/airline/${airline1Id}/deactivate`,
+      `/api/admin/providers/airline/${airline2Id}/reactivate`,
+      `/api/admin/providers/hotel/${hotel1Id}/deactivate`,
+      `/api/admin/providers/hotel/${hotel2Id}/reactivate`,
+    ];
+
+    for (const path of paths) {
+      const res = await accApp!.http().patch(path);
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe(ErrorCode.NotAuthenticated);
+    }
+
+    const actors = [
+      await loginAs(accApp!.connection, UserRole.USER),
+      await loginAs(accApp!.connection, UserRole.AIRLINE_MODERATOR, {
+        providerId: airline1Id,
+      }),
+      await loginAs(accApp!.connection, UserRole.HOTEL_MODERATOR, {
+        providerId: hotel1Id,
+      }),
+    ];
+
+    for (const actor of actors) {
+      for (const path of paths) {
+        const res = await accApp!
+          .http()
+          .patch(path)
+          .set('Cookie', actor.cookie);
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe(ErrorCode.ForbiddenRole);
+      }
+    }
+
+    expect(getModsSpy).not.toHaveBeenCalled();
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect(setHotelSpy).not.toHaveBeenCalled();
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
+    expect((await fakeFlights.getAirline(airline2Id))?.isActive).toBe(false);
+    expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
+    expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(false);
+    expect(fakeEvents.emitted).toHaveLength(0);
+  });
+
+  it('deactivates and reactivates airlines and hotels (204), notifies all moderators (including empty lists), repeats safely, and leaves accounts/bookings untouched', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+
+    const getModsSpy = vi.spyOn(fakeAccounts, 'getModeratorIds');
+    const suspendSpy = vi.spyOn(fakeAccounts, 'suspend');
+    const reactivateAccountSpy = vi.spyOn(fakeAccounts, 'reactivate');
+    const resetPwSpy = vi.spyOn(fakeAccounts, 'resetPassword');
+    const setAirlineSpy = vi.spyOn(fakeFlights, 'setAirlineActive');
+    const setHotelSpy = vi.spyOn(fakeHotels, 'setActive');
+    const listFlightBookingsSpy = vi.spyOn(fakeFlightBookings, 'listForAdmin');
+    const listHotelBookingsSpy = vi.spyOn(fakeHotelBookings, 'listForAdmin');
+
+    // 1) Deactivate active airline (and verify endpoint ignores client-sent body isActive=true)
+    const deactAirline = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline1Id}/deactivate`)
+      .set('Cookie', admin.cookie)
+      .send({ isActive: true });
+    expect(deactAirline.status).toBe(204);
+    expect(deactAirline.text).toBe('');
+    expect(getModsSpy).toHaveBeenCalledWith(ProviderType.AIRLINE, airline1Id);
+    expect(setAirlineSpy).toHaveBeenCalledWith(airline1Id, false);
+    expect(setHotelSpy).not.toHaveBeenCalled();
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
+    expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
+      {
+        providerType: ProviderType.AIRLINE,
+        providerId: airline1Id,
+        moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PROVIDER_DEACTIVATED,
+        target: { type: ProviderType.AIRLINE, id: airline1Id },
+      },
+    ]);
+
+    // 2) Repeated deactivate keeps isActive=false and emits one event pair.
+    fakeEvents.clear();
+    const repeatDeactAirline = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline1Id}/deactivate`)
+      .set('Cookie', admin.cookie);
+    expect(repeatDeactAirline.status).toBe(204);
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(false);
+    expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toHaveLength(1);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PROVIDER_DEACTIVATED,
+        target: { type: ProviderType.AIRLINE, id: airline1Id },
+      },
+    ]);
+
+    // 3) Reactivate airline (and verify endpoint ignores client-sent body isActive=false)
+    fakeEvents.clear();
+    const reactAirline = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline1Id}/reactivate`)
+      .set('Cookie', admin.cookie)
+      .send({ isActive: false });
+    expect(reactAirline.status).toBe(204);
+    expect(reactAirline.text).toBe('');
+    expect(setAirlineSpy).toHaveBeenLastCalledWith(airline1Id, true);
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
+    expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
+      {
+        providerType: ProviderType.AIRLINE,
+        providerId: airline1Id,
+        moderatorIds: [modAirlineActiveId, modAirlineSuspendedId],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PROVIDER_REACTIVATED,
+        target: { type: ProviderType.AIRLINE, id: airline1Id },
+      },
+    ]);
+
+    // 4) Airline with zero moderators succeeds with moderatorIds: []
+    fakeEvents.clear();
+    const reactAirlineNoMods = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline2Id}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactAirlineNoMods.status).toBe(204);
+    expect((await fakeFlights.getAirline(airline2Id))?.isActive).toBe(true);
+    expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
+      {
+        providerType: ProviderType.AIRLINE,
+        providerId: airline2Id,
+        moderatorIds: [],
+      },
+    ]);
+
+    // 5) Hotel deactivate and repeated deactivate isolate FlightsService
+    fakeEvents.clear();
+    setAirlineSpy.mockClear();
+    const deactHotel = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel1Id}/deactivate`)
+      .set('Cookie', admin.cookie);
+    expect(deactHotel.status).toBe(204);
+    expect(deactHotel.text).toBe('');
+    expect(getModsSpy).toHaveBeenCalledWith(ProviderType.HOTEL, hotel1Id);
+    expect(setHotelSpy).toHaveBeenCalledWith(hotel1Id, false);
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(false);
+    expect(fakeEvents.payloadsOf(Events.ProviderDeactivated)).toEqual([
+      {
+        providerType: ProviderType.HOTEL,
+        providerId: hotel1Id,
+        moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PROVIDER_DEACTIVATED,
+        target: { type: ProviderType.HOTEL, id: hotel1Id },
+      },
+    ]);
+
+    // 6) Hotel reactivate + zero-moderator hotel + repeated reactivate
+    fakeEvents.clear();
+    const reactHotel = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel1Id}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactHotel.status).toBe(204);
+    expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
+    expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toEqual([
+      {
+        providerType: ProviderType.HOTEL,
+        providerId: hotel1Id,
+        moderatorIds: [modHotelActiveId, modHotelDeactivatedId],
+      },
+    ]);
+    expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
+      {
+        actorId: admin.id,
+        action: AuditAction.PROVIDER_REACTIVATED,
+        target: { type: ProviderType.HOTEL, id: hotel1Id },
+      },
+    ]);
+
+    fakeEvents.clear();
+    const reactHotelNoMods = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel2Id}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(reactHotelNoMods.status).toBe(204);
+    expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(true);
+
+    const repeatReactHotel = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel2Id}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(repeatReactHotel.status).toBe(204);
+    expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(true);
+    expect(fakeEvents.payloadsOf(Events.ProviderReactivated)).toHaveLength(2);
+
+    // 7) Verify moderators' account statuses, account events, and bookings remained untouched
+    expect(suspendSpy).not.toHaveBeenCalled();
+    expect(reactivateAccountSpy).not.toHaveBeenCalled();
+    expect(resetPwSpy).not.toHaveBeenCalled();
+    expect(listFlightBookingsSpy).not.toHaveBeenCalled();
+    expect(listHotelBookingsSpy).not.toHaveBeenCalled();
+    expect(fakeEvents.payloadsOf(Events.AccountSuspended)).toHaveLength(0);
+    expect(fakeEvents.payloadsOf(Events.AccountReactivated)).toHaveLength(0);
+    expect(fakeAccounts.get(modAirlineActiveId)?.status).toBe(
+      UserStatus.ACTIVE,
+    );
+    expect(fakeAccounts.get(modAirlineSuspendedId)?.status).toBe(
+      UserStatus.SUSPENDED,
+    );
+    expect(fakeAccounts.get(modHotelDeactivatedId)?.status).toBe(
+      UserStatus.DEACTIVATED,
+    );
+    expect(fakeFlightBookings.bookings).toHaveLength(1);
+    expect(fakeHotelBookings.bookings).toHaveLength(1);
+  });
+
+  it('rejects invalid provider types (400), malformed IDs (400), and missing or cross-type providers (404) without mutating or emitting events', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+    const getModsSpy = vi.spyOn(fakeAccounts, 'getModeratorIds');
+    const setAirlineSpy = vi.spyOn(fakeFlights, 'setAirlineActive');
+    const setHotelSpy = vi.spyOn(fakeHotels, 'setActive');
+
+    for (const badType of ['flight', 'user', 'AIRLINE']) {
+      for (const action of ['deactivate', 'reactivate'] as const) {
+        const res = await accApp!
+          .http()
+          .patch(`/api/admin/providers/${badType}/${airline1Id}/${action}`)
+          .set('Cookie', admin.cookie);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((detail: { field: string }) => detail.field),
+        ).toContain('type');
+      }
+    }
+
+    for (const badId of [
+      'not-an-id',
+      '6736f0b2c5a1b2c3d4e5410',
+      '6736f0b2c5a1b2c3d4e54101a',
+    ]) {
+      for (const action of ['deactivate', 'reactivate'] as const) {
+        const res = await accApp!
+          .http()
+          .patch(`/api/admin/providers/airline/${badId}/${action}`)
+          .set('Cookie', admin.cookie);
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+        expect(
+          res.body.details.map((detail: { field: string }) => detail.field),
+        ).toContain('id');
+      }
+    }
+
+    expect(getModsSpy).not.toHaveBeenCalled();
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect(setHotelSpy).not.toHaveBeenCalled();
+
+    const missingId = new Types.ObjectId().toHexString();
+    const notFoundPaths = [
+      `/api/admin/providers/airline/${missingId}/deactivate`,
+      `/api/admin/providers/hotel/${missingId}/reactivate`,
+      `/api/admin/providers/airline/${hotel1Id}/deactivate`,
+      `/api/admin/providers/hotel/${airline1Id}/reactivate`,
+    ];
+
+    for (const path of notFoundPaths) {
+      const res = await accApp!.http().patch(path).set('Cookie', admin.cookie);
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe(ErrorCode.NotFound);
+    }
+
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
+    expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
+    expect(fakeEvents.emitted).toHaveLength(0);
+  });
+
+  it('emits no events and prevents provider mutation when recipient lookup or provider write fails', async () => {
+    const admin = await loginAs(accApp!.connection, UserRole.ADMIN);
+    const getModsSpy = vi.spyOn(fakeAccounts, 'getModeratorIds');
+    const setAirlineSpy = vi.spyOn(fakeFlights, 'setAirlineActive');
+    const setHotelSpy = vi.spyOn(fakeHotels, 'setActive');
+
+    // Recipient lookup failure happens before provider mutation -> state untouched, 0 events
+    getModsSpy.mockRejectedValueOnce(new Error('accounts service unavailable'));
+    const lookupFailRes = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline1Id}/deactivate`)
+      .set('Cookie', admin.cookie);
+    expect(lookupFailRes.status).toBe(500);
+    expect(setAirlineSpy).not.toHaveBeenCalled();
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
+    expect(fakeEvents.emitted).toHaveLength(0);
+
+    getModsSpy.mockRejectedValueOnce(new Error('accounts service unavailable'));
+    const hotelLookupFailRes = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel2Id}/reactivate`)
+      .set('Cookie', admin.cookie);
+    expect(hotelLookupFailRes.status).toBe(500);
+    expect(setHotelSpy).not.toHaveBeenCalled();
+    expect((await fakeHotels.getHotel(hotel2Id))?.isActive).toBe(false);
+    expect(fakeEvents.emitted).toHaveLength(0);
+
+    // Provider write failure -> lookup ran first, state unchanged, 0 events emitted
+    setAirlineSpy.mockRejectedValueOnce(new Error('flights write failed'));
+    const airlineWriteFailRes = await accApp!
+      .http()
+      .patch(`/api/admin/providers/airline/${airline1Id}/deactivate`)
+      .set('Cookie', admin.cookie);
+    expect(airlineWriteFailRes.status).toBe(500);
+    expect(getModsSpy).toHaveBeenLastCalledWith(
+      ProviderType.AIRLINE,
+      airline1Id,
+    );
+    expect((await fakeFlights.getAirline(airline1Id))?.isActive).toBe(true);
+    expect(fakeEvents.emitted).toHaveLength(0);
+
+    setHotelSpy.mockRejectedValueOnce(new Error('hotels write failed'));
+    const hotelWriteFailRes = await accApp!
+      .http()
+      .patch(`/api/admin/providers/hotel/${hotel1Id}/deactivate`)
+      .set('Cookie', admin.cookie);
+    expect(hotelWriteFailRes.status).toBe(500);
+    expect(getModsSpy).toHaveBeenLastCalledWith(ProviderType.HOTEL, hotel1Id);
+    expect((await fakeHotels.getHotel(hotel1Id))?.isActive).toBe(true);
+    expect(fakeEvents.emitted).toHaveLength(0);
+  });
+});

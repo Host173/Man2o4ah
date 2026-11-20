@@ -21,6 +21,7 @@ import { FakeReportableContent } from '../../../test/fakes/reportable-content.fa
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
@@ -37,6 +38,7 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { BlogModule } from '../blog/blog.module.js';
+import { ItineraryReportableContent } from '../itineraries/itinerary-reportable-content.js';
 import {
   Comment,
   type CommentDocument,
@@ -1088,7 +1090,11 @@ describe('Admin Moderation API (GEN-10)', () => {
           .overrideProvider(StorageService)
           .useValue(fakeStorage)
           .overrideProvider(AppEvents)
-          .useValue(fakeEvents),
+          .useValue(fakeEvents)
+          // This suite seeds its own in-memory itinerary provider below; keep
+          // the real ITN-20 provider from registering a second one.
+          .overrideProvider(ItineraryReportableContent)
+          .useValue({ onModuleInit: () => {} }),
     });
 
     const registry = modApp.moduleRef.get(ReportableContentRegistry);
@@ -1330,8 +1336,8 @@ describe('Admin Moderation API (GEN-10)', () => {
     const savedImage = await fakeStorage.save({
       originalname: 'cover.png',
       mimetype: 'image/png',
-      size: 16,
-      buffer: Buffer.from('fake-png-bytes!!'),
+      size: 32,
+      buffer: imageBytes('png'),
     });
     const postDoc = await postModel.create({
       authorId: new Types.ObjectId(author.id),
@@ -1395,6 +1401,7 @@ describe('Admin Moderation API (GEN-10)', () => {
     );
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.REPORT_RESOLVED,
         target: { type: 'report', id: cReport1._id.toHexString() },
@@ -1407,6 +1414,7 @@ describe('Admin Moderation API (GEN-10)', () => {
         },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.CONTENT_HIDDEN,
         target: {
@@ -1560,6 +1568,7 @@ describe('Admin Moderation API (GEN-10)', () => {
     ).toBe(ReportStatus.CONTENT_HIDDEN);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.CONTENT_HIDDEN,
         target: { type: ReportTargetType.REVIEW, id: reviewId },
@@ -1593,6 +1602,7 @@ describe('Admin Moderation API (GEN-10)', () => {
     ).toBe(ReportStatus.CONTENT_DELETED);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.CONTENT_DELETED,
         target: { type: ReportTargetType.ITINERARY, id: itineraryId },
@@ -2148,6 +2158,7 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
 
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.MODERATOR_CREATED,
         target: { type: 'user', id: airlineModRes.body.id },
@@ -2183,6 +2194,7 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
     expect(getAirlineSpy).not.toHaveBeenCalled();
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toHaveLength(1);
     expect(fakeEvents.payloadsOf(Events.AdminAction)[0]).toEqual({
+      eventId: expect.any(String),
       actorId: admin.id,
       action: AuditAction.MODERATOR_CREATED,
       target: { type: 'user', id: hotelModRes.body.id },
@@ -2350,11 +2362,13 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
     const resetEvents = fakeEvents.payloadsOf(Events.AdminAction);
     expect(resetEvents).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PASSWORD_RESET,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PASSWORD_RESET,
         target: { type: 'user', id: modHotelId },
@@ -2445,21 +2459,25 @@ describe('Admin Account Endpoints API (ACC-07a, ACC-13, ACC-14, ACC-16)', () => 
 
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_SUSPENDED,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_REACTIVATED,
         target: { type: 'user', id: userActiveId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_SUSPENDED,
         target: { type: 'user', id: modHotelId },
       },
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.ACCOUNT_REACTIVATED,
         target: { type: 'user', id: modHotelId },
@@ -2845,6 +2863,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
@@ -2868,6 +2887,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ).not.toBe(firstDeactivationId);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
@@ -2895,6 +2915,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.AIRLINE, id: airline1Id },
@@ -2941,6 +2962,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_DEACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotel1Id },
@@ -2965,6 +2987,7 @@ describe('Admin Provider Deactivation API (ACC-15)', () => {
     ]);
     expect(fakeEvents.payloadsOf(Events.AdminAction)).toEqual([
       {
+        eventId: expect.any(String),
         actorId: admin.id,
         action: AuditAction.PROVIDER_REACTIVATED,
         target: { type: ProviderType.HOTEL, id: hotel1Id },

@@ -1545,3 +1545,63 @@ implement itn -16 and make pr then make the self reviewn instructions that exsis
 How the output was used:
 Implemented owner-approved ITN-16 transport-cost CRUD, DTO validation and API/fake tests in an isolated worktree; full backend verification passed with VITEST_MAX_WORKERS=2.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+implement htl21 and make pr then make the self reviewn instructions that exsist in "ACC and BLG reviews" chat and comment on the pr
+
+How the output was used:
+Added hotel cancellation endpoints, service, refund tiers and DTOs with unit, integration and API tests; failing tests committed as 1a1d991 before implementation.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-21
+
+Prompt:
+Yes, Aya approved this work
+
+How the output was used:
+Authorized hotel-bookings changes with Aya's agreement and created the isolated feature/HTL-21-hotel-cancellations branch from latest develop.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+implement htl22 and after you fifnish make a self review according to the md file and fix any bugs if any then make a pr
+
+How the output was used:
+Added hotel moderator DTOs, service, controller, module wiring and integration/API tests; self-reviewed against the project rules; feat(hotel-bookings): add hotel moderator views (HTL-22).
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+Aya and Kareem have approved — proceed
+
+How the output was used:
+Recorded owner/team-leader approval for hotel-bookings work and created the isolated HTL-22 branch from origin/develop.
+================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: HTL-22
+
+Prompt:
+Blocked (not bookable), with reason
+
+How the output was used:
+Documented and tested blocked_range, inactive_room and outside_availability reasons in the room status response DTO and service.
+================================================

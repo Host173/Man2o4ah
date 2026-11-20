@@ -3,6 +3,7 @@ import type { Model } from 'mongoose';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -171,10 +172,10 @@ describe('AirlinesService integration (FLT-01, ACC-15)', () => {
       sid: 'session',
     } as const;
     const image = (content: string) => ({
-      buffer: Buffer.from(content),
+      buffer: Buffer.concat([imageBytes('png'), Buffer.from(content)]),
       originalname: 'logo.png',
       mimetype: 'image/png',
-      size: Buffer.byteLength(content),
+      size: 32 + Buffer.byteLength(content),
     });
 
     const first = await airlines.updateLogo(airline.id, image('first'), user);

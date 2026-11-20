@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
@@ -10,6 +11,7 @@ import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { Events } from '../../common/events/events.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { HotelsService } from '../hotels/hotels.service.js';
@@ -51,6 +53,7 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
   let t: TestApp;
   let itineraries: ItinerariesService;
   let itineraryModel: Model<Itinerary>;
+  let eventEmitter: EventEmitter2;
   const referenceData = new FakeReferenceDataService();
   const storage = new FakeStorageService();
   const fakeHotels = new FakeHotelsService();
@@ -68,6 +71,7 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
           .useValue(fakeHotels),
     });
     itineraries = t.moduleRef.get(ItinerariesService);
+    eventEmitter = t.moduleRef.get(EventEmitter2);
     itineraryModel = t.moduleRef.get<Model<Itinerary>>(
       getModelToken(Itinerary.name),
     );
@@ -1522,6 +1526,466 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       expect(stored?.days).toHaveLength(2);
       expect(stored?.dayCount).toBe(2);
       expect(stored?.cityIds).toEqual(['cairo', 'dubai']);
+    });
+  });
+
+  describe('visibility (ITN-20)', () => {
+    it('lets the owner switch an itinerary between public and private', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      expect(created.visibility).toBe(ItineraryVisibility.PRIVATE);
+
+      const published = await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PUBLIC },
+        owner.id,
+      );
+      expect(published.visibility).toBe(ItineraryVisibility.PUBLIC);
+      expect(
+        (await itineraries.getById(created._id, owner.id)).visibility,
+      ).toBe(ItineraryVisibility.PUBLIC);
+      expect(
+        (await itineraryModel.findById(created._id).lean().exec())?.visibility,
+      ).toBe(ItineraryVisibility.PUBLIC);
+
+      const privatized = await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PRIVATE },
+        owner.id,
+      );
+      expect(privatized.visibility).toBe(ItineraryVisibility.PRIVATE);
+      expect(
+        (await itineraryModel.findById(created._id).lean().exec())?.visibility,
+      ).toBe(ItineraryVisibility.PRIVATE);
+    });
+
+    it('rejects any other visibility value with 400 VALIDATION_FAILED and keeps the state', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+
+      for (const visibility of ['hidden', null, '', 1, true]) {
+        const error = await itineraries
+          .update(created._id, { visibility } as never, owner.id)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        const body = errorDetails(error);
+        expect(body.code).toBe(ErrorCode.ValidationFailed);
+        expect(body.details).toEqual([
+          {
+            field: 'visibility',
+            message: 'visibility must be public or private',
+          },
+        ]);
+      }
+
+      expect(
+        (await itineraryModel.findById(created._id).lean().exec())?.visibility,
+      ).toBe(ItineraryVisibility.PRIVATE);
+    });
+
+    it('does not let another user change visibility (404, unchanged)', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const intruder = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PUBLIC },
+        owner.id,
+      );
+
+      await expect(
+        itineraries.update(
+          created._id,
+          { visibility: ItineraryVisibility.PRIVATE },
+          intruder.id,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(
+        (await itineraryModel.findById(created._id).lean().exec())?.visibility,
+      ).toBe(ItineraryVisibility.PUBLIC);
+    });
+
+    it('leaves the other fields untouched when only visibility changes', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const edited = await itineraries.update(
+        created._id,
+        { title: 'Egypt and Jordan', countryCodes: ['EG', 'AE'] },
+        owner.id,
+      );
+
+      const published = await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PUBLIC },
+        owner.id,
+      );
+      expect(published).toMatchObject({
+        _id: created._id,
+        title: 'Egypt and Jordan',
+        countryCodes: ['EG', 'AE'],
+        startDate: '2027-04-01',
+        visibility: ItineraryVisibility.PUBLIC,
+      });
+      expect(published.updatedAt.getTime()).toBeGreaterThanOrEqual(
+        edited.updatedAt.getTime(),
+      );
+    });
+  });
+
+  describe('listPublicByAuthor (BLG-12, ITN-20)', () => {
+    it('lists only the author’s public, visible itineraries, newest first', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+
+      const newest = await itineraries.create(
+        createDto({ title: 'Newest' }),
+        owner.id,
+      );
+      const older = await itineraries.create(
+        createDto({ title: 'Older' }),
+        owner.id,
+      );
+      const hidden = await itineraries.create(
+        createDto({ title: 'Hidden' }),
+        owner.id,
+      );
+      const deactivated = await itineraries.create(
+        createDto({ title: 'Deactivated' }),
+        owner.id,
+      );
+      const privateTrip = await itineraries.create(
+        createDto({ title: 'Private' }),
+        owner.id,
+      );
+      const otherTrip = await itineraries.create(
+        createDto({ title: 'Other' }),
+        other.id,
+      );
+
+      for (const itinerary of [newest, older, hidden, deactivated, otherTrip]) {
+        await itineraries.update(
+          itinerary._id,
+          { visibility: ItineraryVisibility.PUBLIC },
+          itinerary.ownerId,
+        );
+      }
+      // Add a day so the derived cityIds are visible in the summary.
+      await itineraries.addDay(
+        newest._id,
+        dayDto({ cityId: 'cairo' }),
+        owner.id,
+      );
+      await itineraries.addDay(
+        older._id,
+        dayDto({ cityId: 'dubai' }),
+        owner.id,
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(newest._id) },
+        { $set: { updatedAt: new Date('2030-01-02T00:00:00.000Z') } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(older._id) },
+        { $set: { updatedAt: new Date('2030-01-01T00:00:00.000Z') } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(deactivated._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      const page = await itineraries.listPublicByAuthor(owner.id);
+      expect(page).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(page.items.map((item) => item.id)).toEqual([
+        newest._id,
+        older._id,
+      ]);
+      expect(page.items[0]).toEqual({
+        id: newest._id,
+        ownerId: owner.id,
+        title: 'Newest',
+        countryCodes: ['EG'],
+        startDate: new Date('2027-04-01T00:00:00.000Z'),
+        dayCount: 1,
+        cityIds: ['cairo'],
+        updatedAt: expect.any(Date),
+      });
+      expect(page.items.some((item) => item.id === privateTrip._id)).toBe(
+        false,
+      );
+    });
+
+    it('paginates the author’s public itineraries', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = [];
+      for (const title of ['First', 'Second', 'Third']) {
+        const itinerary = await itineraries.create(
+          createDto({ title }),
+          owner.id,
+        );
+        await itineraries.update(
+          itinerary._id,
+          { visibility: ItineraryVisibility.PUBLIC },
+          owner.id,
+        );
+        created.push(itinerary);
+      }
+
+      const second = await itineraries.listPublicByAuthor(owner.id, {
+        page: 2,
+        limit: 1,
+      });
+      expect(second).toMatchObject({
+        page: 2,
+        limit: 1,
+        total: 3,
+        totalPages: 3,
+      });
+      expect(second.items).toHaveLength(1);
+      expect(second.items[0].id).toBe(created[1]._id);
+
+      const past = await itineraries.listPublicByAuthor(owner.id, {
+        page: 4,
+        limit: 1,
+      });
+      expect(past.items).toEqual([]);
+      expect(past.total).toBe(3);
+    });
+
+    it('returns an empty page when the author has no public itineraries', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      await itineraries.create(createDto(), owner.id);
+
+      await expect(itineraries.listPublicByAuthor(owner.id)).resolves.toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('rejects invalid page, limit and author IDs', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+
+      for (const [query, field] of [
+        [{ page: 0 }, 'page'],
+        [{ page: 1.5 }, 'page'],
+        [{ limit: 0 }, 'limit'],
+        [{ limit: 51 }, 'limit'],
+      ] as const) {
+        const error = await itineraries
+          .listPublicByAuthor(owner.id, query)
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(errorDetails(error).details[0].field).toBe(field);
+      }
+
+      await expect(
+        itineraries.listPublicByAuthor('not-an-id'),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('searchPublic (ITN-20)', () => {
+    it('lists visible public itineraries from every author, newest first', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+      const newest = await itineraries.create(
+        createDto({ title: 'Newest' }),
+        owner.id,
+      );
+      const older = await itineraries.create(
+        createDto({ title: 'Older' }),
+        other.id,
+      );
+      const hidden = await itineraries.create(
+        createDto({ title: 'Hidden' }),
+        owner.id,
+      );
+      const deactivated = await itineraries.create(
+        createDto({ title: 'Deactivated' }),
+        owner.id,
+      );
+      const privateTrip = await itineraries.create(
+        createDto({ title: 'Private' }),
+        owner.id,
+      );
+      for (const itinerary of [newest, older, hidden, deactivated]) {
+        await itineraries.update(
+          itinerary._id,
+          { visibility: ItineraryVisibility.PUBLIC },
+          itinerary.ownerId,
+        );
+      }
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(newest._id) },
+        { $set: { updatedAt: new Date('2030-01-02T00:00:00.000Z') } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(older._id) },
+        { $set: { updatedAt: new Date('2030-01-01T00:00:00.000Z') } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(hidden._id) },
+        { $set: { isHidden: true } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(deactivated._id) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      const page = await itineraries.searchPublic();
+      expect(page).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(page.items.map((item) => item.id)).toEqual([
+        newest._id,
+        older._id,
+      ]);
+      expect(page.items[0]).toEqual({
+        id: newest._id,
+        ownerId: owner.id,
+        title: 'Newest',
+        countryCodes: ['EG'],
+        startDate: new Date('2027-04-01T00:00:00.000Z'),
+        dayCount: 0,
+        cityIds: [],
+        updatedAt: expect.any(Date),
+      });
+      expect(page.items.some((item) => item.id === privateTrip._id)).toBe(
+        false,
+      );
+    });
+
+    it('removes an itinerary from public search immediately when it becomes private', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PUBLIC },
+        owner.id,
+      );
+      expect((await itineraries.searchPublic()).total).toBe(1);
+
+      await itineraries.update(
+        created._id,
+        { visibility: ItineraryVisibility.PRIVATE },
+        owner.id,
+      );
+      await expect(itineraries.searchPublic()).resolves.toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('paginates and rejects an out-of-range limit', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      for (const title of ['One', 'Two', 'Three']) {
+        const created = await itineraries.create(
+          createDto({ title }),
+          owner.id,
+        );
+        await itineraries.update(
+          created._id,
+          { visibility: ItineraryVisibility.PUBLIC },
+          owner.id,
+        );
+      }
+      const page2 = await itineraries.searchPublic({ page: 2, limit: 2 });
+      expect(page2).toMatchObject({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(page2.items).toHaveLength(1);
+      await expect(
+        itineraries.searchPublic({ page: 1, limit: 51 }),
+      ).rejects.toMatchObject({
+        response: { code: ErrorCode.ValidationFailed },
+      });
+    });
+  });
+
+  describe('author deactivation events (ACC-12, ITN-20)', () => {
+    it('hides an author’s itineraries on deactivation and restores them on reactivation, idempotently', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const other = await loginAs(t.connection, UserRole.USER);
+      const ownersTrip = await itineraries.create(createDto(), owner.id);
+      const othersTrip = await itineraries.create(createDto(), other.id);
+      for (const itinerary of [ownersTrip, othersTrip]) {
+        await itineraries.update(
+          itinerary._id,
+          { visibility: ItineraryVisibility.PUBLIC },
+          itinerary.ownerId,
+        );
+      }
+
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: owner.id,
+      });
+      // Delivered twice: the second delivery must change nothing.
+      await eventEmitter.emitAsync(Events.UserDeactivated, {
+        userId: owner.id,
+      });
+
+      const deactivated = await itineraryModel
+        .findById(ownersTrip._id)
+        .lean()
+        .exec();
+      expect(deactivated?.authorDeactivated).toBe(true);
+      expect(
+        (await itineraryModel.findById(othersTrip._id).lean().exec())
+          ?.authorDeactivated,
+      ).toBe(false);
+
+      expect((await itineraries.listPublicByAuthor(owner.id)).total).toBe(0);
+      expect((await itineraries.listPublicByAuthor(other.id)).total).toBe(1);
+      // The owner still sees their own itinerary while deactivated.
+      expect((await itineraries.listMine(owner.id)).total).toBe(1);
+      expect((await itineraries.getById(ownersTrip._id, owner.id))._id).toBe(
+        ownersTrip._id,
+      );
+
+      await eventEmitter.emitAsync(Events.UserReactivated, {
+        userId: owner.id,
+      });
+      await eventEmitter.emitAsync(Events.UserReactivated, {
+        userId: owner.id,
+      });
+
+      expect(
+        (await itineraryModel.findById(ownersTrip._id).lean().exec())
+          ?.authorDeactivated,
+      ).toBe(false);
+      expect((await itineraries.listPublicByAuthor(owner.id)).total).toBe(1);
+    });
+
+    it('ignores malformed user IDs instead of failing the event', async () => {
+      await expect(
+        eventEmitter.emitAsync(Events.UserDeactivated, { userId: 'bad-id' }),
+      ).resolves.toBeDefined();
+      await expect(
+        eventEmitter.emitAsync(Events.UserReactivated, { userId: 'bad-id' }),
+      ).resolves.toBeDefined();
     });
   });
 

@@ -58,6 +58,17 @@ export class ProfileService {
   }
 
   /**
+   * ITN-18: the currency the account chose for display. Read-only and additive
+   * to ACC-09's profile; itineraries uses it for budget conversion. An account
+   * deleted since the guard ran has no session any more (401).
+   */
+  async getPreferredCurrency(userId: string): Promise<string> {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) throw sessionExpired();
+    return user.preferredCurrency;
+  }
+
+  /**
    * ACC-09: saves the fields sent, all or nothing. The DTO has already checked
    * their format; a currency that isn't in reference data → 400
    * UNSUPPORTED_CURRENCY, before anything is written. `phone: null` removes

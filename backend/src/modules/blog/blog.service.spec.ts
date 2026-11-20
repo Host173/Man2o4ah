@@ -9,6 +9,7 @@ import { FakeAccountsService } from '../../../test/fakes/accounts.fake.js';
 import { FakeItinerariesService } from '../../../test/fakes/itineraries.fake.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
+import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -83,10 +84,13 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(RoomNight.name))
       .useValue({})
+      // ItinerariesModule imports ModerationModule for ITN-20.
       .overrideProvider(getModelToken(Report.name))
       .useValue({})
       .overrideProvider(AppEvents)
       .useValue({ emit: vi.fn() })
+      .overrideProvider(StorageService)
+      .useValue(new FakeStorageService())
       // ItinerariesModule imports ReferenceDataModule (ITN-01).
       .overrideProvider(getModelToken(Country.name))
       .useValue({})
@@ -2624,8 +2628,8 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       const savedImage = await fakeStorage.save({
         originalname: 'photo.jpg',
         mimetype: 'image/jpeg',
-        size: 16,
-        buffer: Buffer.from('fake-jpeg-bytes!'),
+        size: 32,
+        buffer: imageBytes('jpg'),
       });
       await postModel.updateOne(
         { _id: new Types.ObjectId(post._id) },
@@ -2681,7 +2685,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
         },
         ownerId,
       );
-      const buffer = Buffer.from('admin-delete-image');
+      const buffer = imageBytes('png');
       const withImage = await service.addImage(
         post._id,
         {
@@ -2716,7 +2720,10 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(fakeStorage.has(key)).toBe(true);
 
       deleteFile.mockRestore();
-      await new PostImageCleanupJob(cleanupModel, fakeStorage).run();
+      await new PostImageCleanupJob(
+        cleanupModel,
+        testApp!.moduleRef.get(StorageService),
+      ).run();
       expect(await cleanupModel.countDocuments({ postId: post._id })).toBe(0);
       expect(fakeStorage.has(key)).toBe(false);
     });
@@ -2888,7 +2895,7 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       name = 'photo.png',
       mimetype = 'image/png',
     ): UploadedImage => {
-      const buffer = Buffer.from(`bytes-for-${name}`);
+      const buffer = imageBytes(mimetype === 'image/jpeg' ? 'jpg' : 'png');
       return {
         buffer,
         originalname: name,
@@ -3338,7 +3345,10 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(pending.map((item) => item.key)).toEqual([img1!.key]);
 
       deleteSpy.mockRestore();
-      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      const restarted = new PostImageCleanupJob(
+        cleanupModel,
+        testApp!.moduleRef.get(StorageService),
+      );
       const settled = await Promise.allSettled([
         restarted.run(),
         testApp!.moduleRef.get(PostImageCleanupJob).run(),
@@ -3411,7 +3421,10 @@ describe('BlogService (BLG-01, BLG-02, BLG-03, BLG-04, ACC-12 integration)', () 
       expect(await cleanupModel.countDocuments({ key })).toBe(1);
       expect(fakeStorage.has(key)).toBe(true);
 
-      const restarted = new PostImageCleanupJob(cleanupModel, fakeStorage);
+      const restarted = new PostImageCleanupJob(
+        cleanupModel,
+        testApp!.moduleRef.get(StorageService),
+      );
       vi.spyOn(cleanupModel, 'deleteOne').mockReturnValueOnce({
         exec: () => Promise.reject(new Error('acknowledgement unavailable')),
       } as never);

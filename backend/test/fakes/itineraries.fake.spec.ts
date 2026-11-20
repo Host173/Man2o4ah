@@ -5,25 +5,30 @@ import type { CreateItineraryDto } from '../../src/modules/itineraries/dto/creat
 import type { CreateTransportCostDto } from '../../src/modules/itineraries/dto/create-transport-cost.dto.js';
 import type { PublicItinerarySummary } from '../../src/modules/itineraries/itineraries.types.js';
 import {
+  BudgetCategory,
   ItineraryVisibility,
   TransportMode,
 } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import type { UploadedImage } from '../../src/modules/storage/image-rules.js';
-import { FakeItinerariesService } from './itineraries.fake.js';
+import {
+  FakeItinerariesService,
+  type FakePublicItinerarySeed,
+} from './itineraries.fake.js';
 import { FakeStorageService } from './storage.fake.js';
+import { imageBytes } from '../support/image-fixtures.js';
 
 const imageFile = (): UploadedImage => ({
-  buffer: Buffer.from('bytes'),
+  buffer: imageBytes('jpg'),
   originalname: 'pyramids.jpg',
   mimetype: 'image/jpeg',
-  size: 5,
+  size: 32,
 });
 
 function itinerary(
   id: string,
   updatedAt: string,
-  overrides: Partial<PublicItinerarySummary> = {},
-): PublicItinerarySummary {
+  overrides: Partial<FakePublicItinerarySeed> = {},
+): FakePublicItinerarySeed {
   return {
     id,
     ownerId: 'user-1',
@@ -128,6 +133,133 @@ describe('FakeItinerariesService transport contract (ITN-16)', () => {
   });
 });
 
+describe('FakeItinerariesService budget contract (ITN-14)', () => {
+  async function setup() {
+    const service = new FakeItinerariesService();
+    const trip = await service.create(
+      { title: 'Budget trip', countryCodes: ['EG'], startDate: '2027-04-01' },
+      'user-1',
+    );
+    const day = await service.addDay(trip._id, { cityId: 'cairo' }, 'user-1');
+    const body = {
+      category: BudgetCategory.FOOD,
+      amountMinor: 1000,
+      currency: 'EGP',
+    };
+    return { service, trip, day, body };
+  }
+
+  it('mirrors partial edits, deletion, independent views and day cascades', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    entry.amountMinor = 999;
+    const edited = await service.updateBudgetEntry(
+      entry._id,
+      { amountMinor: 0, currency: 'JPY' },
+      'user-1',
+    );
+    expect(edited).toEqual({
+      _id: entry._id,
+      category: BudgetCategory.FOOD,
+      amountMinor: 0,
+      currency: 'JPY',
+    });
+    await service.updateBudgetEntry(entry._id, {}, 'user-1');
+    await service.deleteBudgetEntry(entry._id, 'user-1');
+    await expect(
+      service.deleteBudgetEntry(entry._id, 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    const restored = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([restored]);
+    await service.deleteDay(trip._id, day._id, 'user-1');
+    expect((await service.getById(trip._id, 'user-1')).days).toEqual([]);
+  });
+
+  it('mirrors ownership, unknown days and validation errors', async () => {
+    const { service, trip, day, body } = await setup();
+    const entry = await service.addBudgetEntry(
+      trip._id,
+      day._id,
+      body,
+      'user-1',
+    );
+    for (const promise of [
+      service.addBudgetEntry(trip._id, day._id, body, 'user-2'),
+      service.updateBudgetEntry(entry._id, { amountMinor: 0 }, 'user-2'),
+      service.deleteBudgetEntry(entry._id, 'user-2'),
+      service.addBudgetEntry(
+        trip._id,
+        'ffffffffffffffffffffffff',
+        body,
+        'user-1',
+      ),
+    ]) {
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+    }
+    for (const [field, value] of [
+      ['category', 'shopping'],
+      ['amountMinor', -1],
+      ['currency', 'XXX'],
+      ['note', 'x'.repeat(201)],
+    ] as const) {
+      for (const promise of [
+        service.addBudgetEntry(
+          trip._id,
+          day._id,
+          { ...body, [field]: value },
+          'user-1',
+        ),
+        service.updateBudgetEntry(entry._id, { [field]: value }, 'user-1'),
+      ]) {
+        await expect(promise).rejects.toMatchObject({
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    }
+    expect(
+      (await service.getById(trip._id, 'user-1')).days[0].budgetEntries,
+    ).toEqual([entry]);
+  });
+
+  it('computes the same converted summary as the real service', async () => {
+    const { service, trip, day, body } = await setup();
+    await service.addBudgetEntry(trip._id, day._id, body, 'user-1');
+    const summary = await service.getBudgetSummary(trip._id, 'user-1');
+    expect(summary).toMatchObject({
+      displayCurrency: 'USD',
+      rateDate: '2026-11-01',
+      total: { amountMinor: 20, currency: 'USD' },
+      byCategory: { food: { amountMinor: 20, currency: 'USD' } },
+      byDay: [
+        {
+          dayNumber: 1,
+          date: '2027-04-01',
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+      byCityGroup: [
+        {
+          cityId: 'cairo',
+          dayCount: 1,
+          total: { amountMinor: 20, currency: 'USD' },
+        },
+      ],
+    });
+  });
+});
+
 describe('FakeItinerariesService.listPublicByAuthor', () => {
   it('returns an empty page when nothing is seeded', async () => {
     const itineraries = new FakeItinerariesService();
@@ -205,6 +337,151 @@ describe('FakeItinerariesService.listPublicByAuthor', () => {
     first.items[0].title = 'Changed again';
     const second = await itineraries.listPublicByAuthor('user-1');
     expect(second.items[0].title).toBe('Trip i-1');
+  });
+
+  it('leaves out private, hidden and deactivated-author itineraries (ITN-20)', async () => {
+    const itineraries = new FakeItinerariesService([
+      itinerary('public', '2026-11-05T10:00:00.000Z'),
+      itinerary('private', '2026-11-04T10:00:00.000Z', {
+        visibility: ItineraryVisibility.PRIVATE,
+      }),
+      itinerary('hidden', '2026-11-03T10:00:00.000Z', { isHidden: true }),
+      itinerary('deactivated', '2026-11-02T10:00:00.000Z', {
+        authorDeactivated: true,
+      }),
+    ]);
+
+    const page = await itineraries.listPublicByAuthor('user-1');
+    expect(ids(page.items)).toEqual(['public']);
+    expect(page.total).toBe(1);
+  });
+
+  it('lists an owner-created itinerary only while it is public', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    expect((await itineraries.listPublicByAuthor('user-1')).items).toHaveLength(
+      0,
+    );
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-1',
+    );
+    const publicPage = await itineraries.listPublicByAuthor('user-1');
+    expect(publicPage.items.map((item) => item.id)).toEqual([created._id]);
+    expect(publicPage.items[0]).toMatchObject({
+      title: 'Egypt in a week',
+      startDate: new Date('2027-04-01T00:00:00.000Z'),
+      cityIds: [],
+    });
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PRIVATE },
+      'user-1',
+    );
+    expect((await itineraries.listPublicByAuthor('user-1')).items).toHaveLength(
+      0,
+    );
+  });
+
+  it('rejects invalid page and limit values with the real 400 shape', async () => {
+    const itineraries = new FakeItinerariesService(seed);
+    for (const [query, field] of [
+      [{ page: 0 }, 'page'],
+      [{ limit: 0 }, 'limit'],
+      [{ limit: 51 }, 'limit'],
+      [{ page: 1.5 }, 'page'],
+    ] as const) {
+      const error = await itineraries
+        .listPublicByAuthor('user-1', query)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        details: { field: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.details[0].field).toBe(field);
+    }
+  });
+
+  it('hides and restores an author’s itineraries on deactivation events (ACC-12)', async () => {
+    const ownerId = 'a'.repeat(24);
+    const otherId = 'b'.repeat(24);
+    const itineraries = new FakeItinerariesService([
+      itinerary('i-1', '2026-11-01T10:00:00.000Z', { ownerId }),
+      itinerary('i-2', '2026-11-02T10:00:00.000Z', { ownerId: otherId }),
+    ]);
+    const created = await itineraries.create(createDto(), ownerId);
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      ownerId,
+    );
+
+    await itineraries.onUserDeactivated({ userId: ownerId });
+    expect((await itineraries.listPublicByAuthor(ownerId)).items).toHaveLength(
+      0,
+    );
+    expect(
+      (await itineraries.getById(created._id, ownerId)).authorDeactivated,
+    ).toBe(true);
+    expect((await itineraries.listPublicByAuthor(otherId)).items).toHaveLength(
+      1,
+    );
+
+    // A malformed ID is a no-op, like the real service's handler.
+    await itineraries.onUserDeactivated({ userId: 'bad-id' });
+    expect((await itineraries.listPublicByAuthor(otherId)).items).toHaveLength(
+      1,
+    );
+
+    await itineraries.onUserReactivated({ userId: ownerId });
+    expect((await itineraries.listPublicByAuthor(ownerId)).items).toHaveLength(
+      2,
+    );
+    expect(
+      (await itineraries.getById(created._id, ownerId)).authorDeactivated,
+    ).toBe(false);
+  });
+
+  it('searchPublic lists only public, visible items from every author', async () => {
+    const itineraries = new FakeItinerariesService([
+      itinerary('visible', '2026-11-05T10:00:00.000Z'),
+      itinerary('other', '2026-11-04T10:00:00.000Z', { ownerId: 'user-2' }),
+      itinerary('private', '2026-11-03T10:00:00.000Z', {
+        visibility: ItineraryVisibility.PRIVATE,
+      }),
+      itinerary('hidden', '2026-11-02T10:00:00.000Z', { isHidden: true }),
+      itinerary('deactivated', '2026-11-01T10:00:00.000Z', {
+        authorDeactivated: true,
+      }),
+    ]);
+    const created = await itineraries.create(createDto(), 'user-3');
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-3',
+    );
+
+    const page = await itineraries.searchPublic();
+    expect(page.items).toHaveLength(3);
+    expect(ids(page.items)).toEqual(
+      expect.arrayContaining(['visible', 'other', created._id]),
+    );
+    expect(page.total).toBe(3);
+
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PRIVATE },
+      'user-3',
+    );
+    expect(ids((await itineraries.searchPublic()).items)).toEqual([
+      'visible',
+      'other',
+    ]);
   });
 });
 
@@ -430,6 +707,42 @@ describe('FakeItinerariesService owner-only methods', () => {
     ).rejects.toMatchObject({ response: { code: ErrorCode.NotFound } });
   });
 
+  it('sets visibility and rejects anything else with the real 400 shape (ITN-20)', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+
+    const updated = await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-1',
+    );
+    expect(updated.visibility).toBe(ItineraryVisibility.PUBLIC);
+
+    for (const visibility of ['hidden', null, '', 1]) {
+      const error = await itineraries
+        .update(created._id, { visibility } as never, 'user-1')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BadRequestException);
+      const response = (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+        details: { field: string; message: string }[];
+      };
+      expect(response.code).toBe(ErrorCode.ValidationFailed);
+      expect(response.message).toBe('Validation failed');
+      expect(response.details).toEqual([
+        {
+          field: 'visibility',
+          message: 'visibility must be public or private',
+        },
+      ]);
+    }
+
+    // A rejected value never changes the stored visibility.
+    const detail = await itineraries.getById(created._id, 'user-1');
+    expect(detail.visibility).toBe(ItineraryVisibility.PUBLIC);
+  });
+
   it('leaves updatedAt alone when an update changes nothing', async () => {
     vi.useFakeTimers({ now: new Date('2027-01-01T00:00:00.000Z') });
     try {
@@ -443,6 +756,28 @@ describe('FakeItinerariesService owner-only methods', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('leaves every field unchanged when a mixed update has invalid visibility', async () => {
+    const itineraries = new FakeItinerariesService();
+    const created = await itineraries.create(createDto(), 'user-1');
+    const before = await itineraries.getById(created._id, 'user-1');
+
+    await expect(
+      itineraries.update(
+        created._id,
+        {
+          title: 'Changed',
+          countryCodes: ['AE'],
+          startDate: '2027-05-01',
+          visibility: 'hidden',
+        } as never,
+        'user-1',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.ValidationFailed },
+    });
+    expect(await itineraries.getById(created._id, 'user-1')).toEqual(before);
   });
 
   it('adds days numbered and dated from the start date, and groups them by city', async () => {

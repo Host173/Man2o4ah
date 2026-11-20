@@ -47,14 +47,6 @@ export class SelfDeactivationService {
   async deactivate(userId: string): Promise<void> {
     // Resolved first: a missing EventsModule fails before anything changes.
     const events = this.appEvents();
-    if (await this.bookings.hasUpcomingConfirmed(userId)) {
-      throw new ConflictException({
-        code: ErrorCode.ActiveBookingsExist,
-        message:
-          'You have upcoming confirmed bookings. Cancel them or wait until they are completed before deactivating your account.',
-      });
-    }
-
     // One transaction: the status change and the logout of every session
     // happen together, so a failure can't leave a deactivated account logged
     // in (data-model.md §3.2).
@@ -80,6 +72,13 @@ export class SelfDeactivationService {
           throw new ConflictException({
             code: ErrorCode.InvalidStatusTransition,
             message: 'Only an active account can be deactivated',
+          });
+        }
+        if (await this.bookings.hasUpcomingConfirmed(userId, { session })) {
+          throw new ConflictException({
+            code: ErrorCode.ActiveBookingsExist,
+            message:
+              'You have upcoming confirmed bookings. Cancel them or wait until they are completed before deactivating your account.',
           });
         }
         await this.sessionModel.deleteMany({ userId }, { session });

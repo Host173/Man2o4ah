@@ -10204,3 +10204,7 @@ please install whatever you can to allow you to finish and create/edit prs and t
 How the output was used:
 Installed GitHub CLI 2.105.0 (winget) and logged in as AishaAlRawahi; opened PR #196 "ACC-12: Self-deactivation" into develop (closes #30) with the filled-in template; committed this prompt log entry
 ================================================
+
+Review correction (ACC-12, 2026-11-20; appended by the reviewer):
+The earlier "no problems" self-review conclusion was superseded by a strict review that reproduced concurrent login/session recreation and payment/deactivation races.
+Commit 1cae711 changed a previously committed "How the output was used" line. That historical append-only violation cannot be erased without rewriting history. Existing entries and commits are preserved; corrections are appended here instead.

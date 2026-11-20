@@ -1,5 +1,5 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { ClientSession, Model } from 'mongoose';
+import type { Model } from 'mongoose';
 import { BookingType } from '../../src/common/database/booking-type.js';
 import { toDateOnly } from '../../src/common/dates/date-only.js';
 import { AppEvents } from '../../src/common/events/app-events.service.js';
@@ -151,10 +151,16 @@ describe('ACC-12: payment confirmation and self-deactivation', () => {
   it('cannot finish with both a deactivated owner and an upcoming confirmed reservation', async () => {
     const u = await loginAs(t.connection, 'user');
     const hold = await holdFor(u.id);
-    const checked = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
+    let checked!: () => void;
+    const checkFinished = new Promise<void>((resolve) => {
+      checked = resolve;
+    });
+    let release!: () => void;
+    const resumeCheck = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     vi.spyOn(registry, 'hasUpcomingConfirmed').mockImplementationOnce(
-      async (id, options?: { session: ClientSession }) => {
+      async (id, options) => {
         const found = await reservations
           .exists({
             userId: id,
@@ -162,8 +168,8 @@ describe('ACC-12: payment confirmation and self-deactivation', () => {
             checkInDate: { $gt: new Date() },
           })
           .session(options?.session ?? null);
-        checked.resolve();
-        await release.promise;
+        checked();
+        await resumeCheck;
         return Boolean(found);
       },
     );
@@ -173,9 +179,9 @@ describe('ACC-12: payment confirmation and self-deactivation', () => {
       .set('Cookie', u.cookie)
       .send({ confirm: true })
       .then((res) => res);
-    await checked.promise;
+    await checkFinished;
     const payment = confirm(hold.reservationId);
-    release.resolve();
+    release();
     const results = await Promise.allSettled([deactivation, payment]);
     expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
     const res = await deactivation;

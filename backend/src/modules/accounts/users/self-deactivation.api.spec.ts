@@ -144,47 +144,71 @@ describe('DELETE /api/users/me (API, ACC-12)', () => {
       expect(await sessionCount(u.id)).toBe(0);
     });
 
-    it('rejects an in-flight login that resumes after deactivation commits', async () => {
-      const u = await loginAs(t.connection, UserRole.USER);
-      await users.updateOne(
-        { _id: u.id },
-        { $set: { passwordHash: await bcrypt.hash(PASSWORD, 4) } },
-      );
-      const user = await users.findById(u.id).lean();
-      if (!user) throw new Error('Test user missing');
-      const started = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const original = t.connection.startSession.bind(t.connection);
-      const spy = vi
-        .spyOn(t.connection, 'startSession')
-        .mockImplementationOnce(async (options) => {
-          started.resolve();
-          await release.promise;
-          return original(options);
+    it.each([UserStatus.DEACTIVATED, UserStatus.SUSPENDED])(
+      'rejects an in-flight login that resumes after the account becomes %s',
+      async (status) => {
+        const u = await loginAs(t.connection, UserRole.USER);
+        await users.updateOne(
+          { _id: u.id },
+          { $set: { passwordHash: await bcrypt.hash(PASSWORD, 4) } },
+        );
+        const user = await users.findById(u.id).lean();
+        if (!user) throw new Error('Test user missing');
+        let started!: () => void;
+        const loginStarted = new Promise<void>((resolve) => {
+          started = resolve;
         });
-      const pending = t
-        .http()
-        .post('/api/auth/login')
-        .send({ email: user.email, password: PASSWORD })
-        .then((res) => res);
-      try {
-        await started.promise;
-        await t
+        let release!: () => void;
+        const resumeLogin = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const original = t.connection.startSession.bind(t.connection);
+        const spy = vi
+          .spyOn(t.connection, 'startSession')
+          .mockImplementationOnce(async (options) => {
+            started();
+            await resumeLogin;
+            return original(options);
+          });
+        const pending = t
           .http()
-          .delete(URL)
-          .set('Cookie', u.cookie)
-          .send({ confirm: true })
-          .expect(204);
-      } finally {
-        release.resolve();
-        spy.mockRestore();
-      }
+          .post('/api/auth/login')
+          .send({ email: user.email, password: PASSWORD })
+          .then((res) => res);
+        try {
+          await loginStarted;
+          if (status === UserStatus.DEACTIVATED) {
+            await t
+              .http()
+              .delete(URL)
+              .set('Cookie', u.cookie)
+              .send({ confirm: true })
+              .expect(204);
+          } else {
+            await users.updateOne(
+              { _id: u.id, status: UserStatus.ACTIVE },
+              { $set: { status } },
+            );
+          }
+        } finally {
+          release();
+          spy.mockRestore();
+        }
 
-      const res = await pending;
-      expectError(res, 401, ErrorCode.InvalidCredentials);
-      expect(await sessionCount(u.id)).toBe(0);
-      expect(await statusOf(u.id)).toBe(UserStatus.DEACTIVATED);
-    });
+        const res = await pending;
+        expectError(
+          res,
+          status === UserStatus.DEACTIVATED ? 401 : 403,
+          status === UserStatus.DEACTIVATED
+            ? ErrorCode.InvalidCredentials
+            : ErrorCode.AccountSuspended,
+        );
+        expect(await sessionCount(u.id)).toBe(
+          status === UserStatus.DEACTIVATED ? 0 : 1,
+        );
+        expect(await statusOf(u.id)).toBe(status);
+      },
+    );
   });
 
   describe('upcoming confirmed bookings', () => {

@@ -9,6 +9,7 @@ import {
   BOOKING_REFERENCE,
   FlightConfirmationService,
 } from './flight-confirmation.service.js';
+import { FlightCompletionJob } from './flight-completion.job.js';
 import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
 import { FlightHoldService } from './flight-hold.service.js';
@@ -37,6 +38,7 @@ import {
     FlightHoldService,
     FlightPayableBooking,
     FlightHoldExpiryJob,
+    FlightCompletionJob,
     FlightConfirmationService,
     FlightETicket,
     MyFlightBookingsService,

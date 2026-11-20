@@ -184,8 +184,10 @@ export class FlightProviderCancellationService {
         });
       }
     } catch (error) {
-      // The cancellation is committed and the passenger is told; the refund
-      // for this booking needs following up.
+      // The cancellation is committed and the passenger is told; the refund for
+      // this booking needs following up. This is the same known gap as in
+      // `FlightCancellationService.cancel`: a non-Stripe error here leaves no
+      // refund record, and retrying belongs to its own ticket (see there).
       this.logger.error(
         `Could not request the refund of flight booking ${bookingId}`,
         error instanceof Error ? error.stack : undefined,

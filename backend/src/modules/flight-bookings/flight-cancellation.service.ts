@@ -131,6 +131,12 @@ export class FlightCancellationService {
     }
 
     const { currency, ...result } = cancelled;
+    // Known gap, decided for FLT-26: a Stripe failure is recorded by PAY-03 as a
+    // `failed` refund, but any other error thrown here (e.g. the database) leaves
+    // a cancelled booking with no refund record. HTL-21 behaves the same, and the
+    // two booking modules must follow the same rule, so a fix (PAY-03 retrying, or
+    // a job re-requesting refunds for cancelled bookings without one) is its own
+    // ticket. Until then the error propagates and the user is still notified.
     try {
       const refund =
         result.cancellation.refundAmountMinor > 0

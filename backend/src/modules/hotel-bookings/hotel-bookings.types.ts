@@ -177,3 +177,8 @@ export interface HotelReviewView {
   isHidden: boolean;
   createdAt: Date;
 }
+
+/** A review in the public list (HTL-24); `authorName` is "Deleted user" for a deactivated author (ACC-12). */
+export interface HotelReviewListItemView extends HotelReviewView {
+  authorName: string | null;
+}

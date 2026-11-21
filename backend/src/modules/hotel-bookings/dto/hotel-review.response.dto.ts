@@ -20,9 +20,20 @@ export class HotelReviewResponseDto {
   createdAt!: Date;
 }
 
+export class HotelReviewListItemResponseDto extends HotelReviewResponseDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'The author name; "Deleted user" when the account is deactivated (ACC-12)',
+    example: 'Aisha Rawahi',
+  })
+  authorName!: string | null;
+}
+
 export class PaginatedHotelReviewsResponseDto {
-  @ApiProperty({ type: [HotelReviewResponseDto] })
-  items!: HotelReviewResponseDto[];
+  @ApiProperty({ type: [HotelReviewListItemResponseDto] })
+  items!: HotelReviewListItemResponseDto[];
 
   @ApiProperty({ minimum: 1 })
   page!: number;

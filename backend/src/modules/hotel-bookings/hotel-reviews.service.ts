@@ -17,9 +17,11 @@ import type {
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { AccountsService } from '../accounts/accounts.service.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import type {
   CreateHotelReviewInput,
+  HotelReviewListItemView,
   HotelReviewView,
   ListHotelReviewsQuery,
   UpdateHotelReviewInput,
@@ -61,6 +63,7 @@ export class HotelReviewsService {
     @InjectModel(HotelReservation.name)
     private readonly reservationModel: Model<HotelReservation>,
     private readonly hotels: HotelsService,
+    private readonly accounts: AccountsService,
   ) {}
 
   async create(
@@ -217,7 +220,7 @@ export class HotelReviewsService {
   async listForHotel(
     hotelId: string,
     query: ListHotelReviewsQuery = {},
-  ): Promise<Paginated<HotelReviewView>> {
+  ): Promise<Paginated<HotelReviewListItemView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     this.validatePagination(page, limit);
@@ -237,9 +240,20 @@ export class HotelReviewsService {
       { sort: { createdAt: -1, _id: -1 } },
     );
 
+    const reviews = result.items as StoredReview[];
+    const profiles = await this.accounts.getProfiles(
+      reviews.map((review) => review.userId.toHexString()),
+    );
+    const names = new Map(
+      profiles.map((profile) => [profile.id, profile.name]),
+    );
+
     return {
       ...result,
-      items: result.items.map((review) => this.toView(review as StoredReview)),
+      items: reviews.map((review) => ({
+        ...this.toView(review),
+        authorName: names.get(review.userId.toHexString()) ?? null,
+      })),
     };
   }
 

@@ -978,6 +978,52 @@ describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
         isActive: true,
       });
     });
+
+    it('reads reserved and blocked nights of this hotel only, inclusive of both range ends (HTL-08)', async () => {
+      const reservationId = await reserve(fromDate, addDays(fromDate, 2));
+      const { blockId } = await service.manageRoomBlock(
+        hotelId,
+        roomId,
+        blockInput(toDate, addDays(toDate, 1)),
+        hotelId,
+      );
+      await nights.create({
+        roomId: new Types.ObjectId(),
+        hotelId: new Types.ObjectId(),
+        date: addDays(fromDate, 1),
+        kind: 'blocked',
+        blockId: new Types.ObjectId(),
+      });
+
+      expect(
+        await service.getRoomNights(hotelId, addDays(fromDate, 1), toDate),
+      ).toEqual([
+        {
+          roomId,
+          hotelId,
+          date: addDays(fromDate, 1),
+          kind: 'reservation',
+          reservationId,
+        },
+        { roomId, hotelId, date: toDate, kind: 'blocked', blockId },
+      ]);
+      expect(
+        await service.getRoomNights(
+          new Types.ObjectId().toHexString(),
+          fromDate,
+          toDate,
+        ),
+      ).toEqual([]);
+      for (const call of [
+        () => service.getRoomNights('not-an-id', fromDate, toDate),
+        () => service.getRoomNights(hotelId, toDate, fromDate),
+      ]) {
+        await expect(call()).rejects.toMatchObject({
+          status: 400,
+          response: { code: ErrorCode.ValidationFailed },
+        });
+      }
+    });
   });
 
   describe('hotel policies (HTL-09, HTL-10)', () => {

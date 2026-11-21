@@ -21,6 +21,7 @@ export const Events = {
   AccountReactivated: 'account.reactivated',
   ProviderDeactivated: 'provider.deactivated',
   ProviderReactivated: 'provider.reactivated',
+  ModeratorInvited: 'moderator.invited',
   AdminAction: 'admin.action',
 } as const;
 export type EventName = (typeof Events)[keyof typeof Events];

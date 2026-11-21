@@ -2,6 +2,7 @@ export { FakeAccountsService } from './accounts.fake.js';
 export type { FakeAccount, FakeAccountSeed } from './accounts.fake.js';
 export { FakeActiveBookingsCheck } from './active-bookings-check.fake.js';
 export { FakeAuditService } from './audit.fake.js';
+export { FakeEmailRecipientLookup } from './email-recipient.fake.js';
 export { FakeFlightBookingsService } from './flight-bookings.fake.js';
 export { FakeFlightsData } from './flights-data.fake.js';
 export type {

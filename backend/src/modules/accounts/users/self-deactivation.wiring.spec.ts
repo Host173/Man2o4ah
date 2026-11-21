@@ -7,6 +7,8 @@ import { ActiveBookingsCheckRegistry } from '../ports/active-bookings-check.regi
 import { Session } from '../schemas/session.schema.js';
 import { User } from '../schemas/user.schema.js';
 import { SelfDeactivationService } from './self-deactivation.service.js';
+import { Notification } from '../../notifications/schemas/notification.schema.js';
+import { EmailDelivery } from '../../notifications/schemas/email-delivery.schema.js';
 
 describe('SelfDeactivationService wiring (ACC-12)', () => {
   it('compiles AccountsModule without EventsModule, as modules importing accounts do in their tests', async () => {
@@ -16,13 +18,20 @@ describe('SelfDeactivationService wiring (ACC-12)', () => {
       .useMocker((token) => {
         if (token === getConnectionToken()) return {};
         if (token === ConfigService) {
-          return { getOrThrow: () => 'test-secret-with-at-least-32-chars' };
+          return {
+            get: () => undefined,
+            getOrThrow: () => 'test-secret-with-at-least-32-chars',
+          };
         }
         return undefined;
       })
       .overrideProvider(getModelToken(User.name))
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Notification.name))
+      .useValue({})
+      .overrideProvider(getModelToken(EmailDelivery.name))
       .useValue({})
       .compile();
 

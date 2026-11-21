@@ -149,6 +149,11 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
   ],
   // 3.12 notifications
   notifications: [{ key: { userId: 1, readAt: 1, createdAt: -1 } }],
+  email_deliveries: [
+    { key: { deliveryKey: 1 }, unique: true },
+    { key: { status: 1, nextAttemptAt: 1, _id: 1 } },
+    { key: { status: 1, leaseExpiresAt: 1, _id: 1 } },
+  ],
   // 3.13 audit
   audit_logs: [
     { key: { createdAt: -1 } },
@@ -185,11 +190,11 @@ describe('indexes match docs/database/data-model.md', () => {
     await db.stop();
   }, HOOK_TIMEOUT);
 
-  it('covers exactly the 28 collections of the data model', () => {
+  it('covers exactly the 29 collections of the data model', () => {
     expect(Object.keys(ALL_SCHEMAS).sort()).toEqual(
       Object.keys(EXPECTED).sort(),
     );
-    expect(Object.keys(EXPECTED)).toHaveLength(28);
+    expect(Object.keys(EXPECTED)).toHaveLength(29);
   });
 
   it.each(Object.keys(EXPECTED))(

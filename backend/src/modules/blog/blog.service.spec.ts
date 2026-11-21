@@ -45,6 +45,8 @@ import { Country } from '../reference-data/schemas/country.schema.js';
 import { Currency } from '../reference-data/schemas/currency.schema.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
+import { Notification } from '../notifications/schemas/notification.schema.js';
+import { EmailDelivery } from '../notifications/schemas/email-delivery.schema.js';
 import { BlogModule } from './blog.module.js';
 import { BlogService } from './blog.service.js';
 import { PostImageCleanupJob } from './post-image-cleanup.job.js';
@@ -62,7 +64,10 @@ describe('BlogService (skeleton)', () => {
       .useMocker((token) => {
         if (token === getConnectionToken()) return {};
         if (token === ConfigService) {
-          return { getOrThrow: () => 'test-secret-with-at-least-32-chars' };
+          return {
+            get: () => undefined,
+            getOrThrow: () => 'test-secret-with-at-least-32-chars',
+          };
         }
         return undefined;
       })
@@ -77,6 +82,10 @@ describe('BlogService (skeleton)', () => {
       .overrideProvider(getModelToken(User.name))
       .useValue({})
       .overrideProvider(getModelToken(Session.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Notification.name))
+      .useValue({})
+      .overrideProvider(getModelToken(EmailDelivery.name))
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
       .useValue({})

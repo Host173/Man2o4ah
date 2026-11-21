@@ -8,4 +8,6 @@ export const TEST_CONFIG = {
   FRONTEND_URL: 'http://localhost:3000',
   // No app built by a test fetches exchange rates at start-up (ITN-18).
   FX_AUTO_REFRESH: 'false',
+  // Tests opt in with deterministic SMTP configuration/transport overrides.
+  SMTP_ENABLED: 'false',
 };

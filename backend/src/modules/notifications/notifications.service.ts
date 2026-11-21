@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { ClientSession, Connection, Model } from 'mongoose';
+import { SMTP_CONFIG } from '../../config/smtp-config.js';
+import type { SmtpConfig } from '../../config/smtp-config.js';
+import { EmailDeliveryService } from './email-delivery.service.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
@@ -45,6 +49,9 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<StoredNotification>,
+    @InjectConnection() private readonly connection: Connection,
+    @Inject(SMTP_CONFIG) private readonly smtp: SmtpConfig,
+    private readonly deliveries: EmailDeliveryService,
   ) {}
 
   /**
@@ -102,18 +109,6 @@ export class NotificationsService {
       throw new Error(`A non-empty eventId is required for ${item.type}`);
     }
     const userId = new Types.ObjectId(item.userId);
-    const entityFilter = item.entity
-      ? { 'entity.type': item.entity.type, 'entity.id': item.entity.id }
-      : { entity: { $exists: false } };
-
-    const latest = await this.notificationModel
-      .findOne({
-        userId,
-        ...entityFilter,
-      })
-      .sort({ createdAt: -1, _id: -1 })
-      .lean();
-
     const identity = JSON.stringify([
       userId.toHexString(),
       item.type,
@@ -125,35 +120,63 @@ export class NotificationsService {
     const id = new Types.ObjectId(
       createHash('sha256').update(identity).digest().subarray(0, 12),
     );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        if (!this.smtp.enabled) return await this.persist(item, id);
+        return await this.connection.transaction(async (session) => {
+          const inserted = await this.persist(item, id, session);
+          await this.deliveries.enqueueNotification(
+            id.toHexString(),
+            userId.toHexString(),
+            { session },
+          );
+          return inserted;
+        });
+      } catch (error) {
+        const duplicate =
+          error instanceof mongo.MongoServerError &&
+          error.code === 11000 &&
+          ((error.keyValue?._id instanceof Types.ObjectId &&
+            error.keyValue._id.equals(id)) ||
+            error.keyValue?.deliveryKey === `notification:${id.toHexString()}`);
+        if (!duplicate) throw error;
+        if (!this.smtp.enabled) return false;
+        if (attempt === 2) throw error;
+      }
+    }
+    throw new Error('Notification transaction retry exhausted');
+  }
+
+  private async persist(
+    item: NewNotification,
+    id: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<boolean> {
+    const entityFilter = item.entity
+      ? { 'entity.type': item.entity.type, 'entity.id': item.entity.id }
+      : { entity: { $exists: false } };
+    const latest = await this.notificationModel
+      .findOne({ userId: new Types.ObjectId(item.userId), ...entityFilter })
+      .session(session ?? null)
+      .sort({ createdAt: -1, _id: -1 })
+      .lean();
     // Hashed ids are not chronological: keep successive state changes ordered
     // even when the clock returns the same millisecond.
     const createdAt = new Date(
       Math.max(Date.now(), latest ? latest.createdAt.getTime() + 1 : 0),
     );
-    try {
-      const result = await this.notificationModel.updateOne(
-        { _id: id },
-        {
-          $setOnInsert: {
-            ...this.toRecord(item),
-            createdAt,
-            updatedAt: createdAt,
-          },
+    const result = await this.notificationModel.updateOne(
+      { _id: id },
+      {
+        $setOnInsert: {
+          ...this.toRecord(item),
+          createdAt,
+          updatedAt: createdAt,
         },
-        { upsert: true, timestamps: false, runValidators: true },
-      );
-      return result.upsertedCount > 0;
-    } catch (error) {
-      if (
-        error instanceof mongo.MongoServerError &&
-        error.code === 11000 &&
-        error.keyValue?._id instanceof Types.ObjectId &&
-        error.keyValue._id.equals(id)
-      ) {
-        return false;
-      }
-      throw error;
-    }
+      },
+      { upsert: true, timestamps: false, runValidators: true, session },
+    );
+    return result.upsertedCount > 0;
   }
 
   private toRecord(item: NewNotification) {

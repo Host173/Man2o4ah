@@ -73,6 +73,13 @@ export interface ProviderStatusEvent {
   moderatorIds: string[];
 }
 
+/** GEN-01-B: emitted by Accounts after moderator creation; handled by notifications. */
+export interface ModeratorInvitedEvent {
+  /** GEN-01-B: stable identity of the persisted moderator creation. */
+  eventId: string;
+  userId: string;
+}
+
 /** Emitted by admin and moderation; handled by audit. */
 export interface AdminActionEvent {
   /** Generated once per committed action; retained on redelivery. */
@@ -102,6 +109,7 @@ export interface EventPayloads {
   [Events.AccountReactivated]: AccountStatusEvent;
   [Events.ProviderDeactivated]: ProviderStatusEvent;
   [Events.ProviderReactivated]: ProviderStatusEvent;
+  [Events.ModeratorInvited]: ModeratorInvitedEvent;
   [Events.AdminAction]: AdminActionEvent;
 }
 

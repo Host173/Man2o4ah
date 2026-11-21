@@ -1812,3 +1812,70 @@ prScope=Create a draft proposal-review PR on the current branch; do not merge un
 How the output was used:
 Prepared a draft proposal-review PR on feature/GEN-01b-email-notifications with an explicit do-not-merge warning because merging would close #94 before email implementation.
 ================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+does this feature was already implemanted in the project before we implemnt it
+
+How the output was used:
+Checked latest develop and related PRs: GEN-01 in-app notifications were already merged; no SMTP email or moderator-invitation implementation was found; draft PR #225 is proposal-only.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+is it ready to be published ?
+
+How the output was used:
+Confirmed PR #225 is already published as an open draft; explained that the proposal is ready for review, not feature release or merge before approvals, implementation and tests.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+no i want once the pr merged the feature works
+
+How the output was used:
+Requested exact authorization to implement the proposed SMTP channel, shared recipient/invitation contracts and persistent delivery schema in #225 instead of merging a proposal-only PR.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+approval=Kareem and Aisha approve the exact proposal, and Kareem explicitly permits the model/contract changes in #225, invitation=Plain-text invitation and first-login instructions; no login link until that page exists, details=
+
+How the output was used:
+Implemented the approved SMTP adapter/configuration, notifications-owned recipient registry and delivery queue/worker, Accounts adapter and post-persistence moderator invitation event; added integration/unit tests and updated authoritative contracts/model/diagrams. Invitations omit credentials and a nonexistent login link; non-production uses only the required test inbox.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+Mostafa approves this test-fixture-only change in #225
+
+How the output was used:
+Adapted only Blog's skeleton module-wiring test fixture to the newly imported Notifications configuration/models, preserving all behavioral tests and production code. The analogous Accounts fixture was updated too; the two targeted wiring tests passed before rerunning full backend verification.
+================================================
+
+GEN-01-B validation follow-up (2026-11-21): backend npm run verify passed all 3403 tests in 210 files plus format, lint, typecheck, per-service coverage and build; npm audit --omit=dev --audit-level=high reported zero production vulnerabilities. Prepared the working-feature update for existing draft PR #225, with relayed owner authorizations, final-review gates and private SMTP setup documented.

@@ -6,6 +6,7 @@ import {
   Query,
   StreamableFile,
 } from '@nestjs/common';
+import { IsObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
@@ -44,10 +45,11 @@ export class FlightModeratorBookingsController {
   })
   @ApiOkResponse({ type: FlightModeratorBookingsPageResponseDto })
   @ApiBadRequestResponse({
-    description: 'VALIDATION_FAILED: pagination is invalid',
+    description:
+      'VALIDATION_FAILED: malformed flight ID, or pagination is invalid',
   })
   list(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @Query() query: PaginationQueryDto,
     @CurrentUser() user: AuthUser,
   ): Promise<FlightModeratorBookingsPageResponseDto> {
@@ -65,8 +67,11 @@ export class FlightModeratorBookingsController {
       'text/csv': { schema: { type: 'string', format: 'binary' } },
     },
   })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: malformed flight ID',
+  })
   async exportPassengers(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @CurrentUser() user: AuthUser,
   ): Promise<StreamableFile> {
     const csv = await this.moderatorBookings.exportPassengers(

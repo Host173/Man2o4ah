@@ -5,20 +5,28 @@ import {
   IsInt,
   IsObject,
   Matches,
+  Max,
   Min,
   MinLength,
   MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { MAX_AMOUNT_MINOR } from '../../../common/money/money.js';
 import { HH_MM } from '../../../common/database/validators.js';
 import type { ActivityCostView } from '../itineraries.types.js';
 
 /** ITN-10: an activity's non-negative cost in a supported currency. */
 export class ActivityCostDto implements ActivityCostView {
-  @ApiProperty({ type: 'integer', minimum: 0, example: 2000 })
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    maximum: MAX_AMOUNT_MINOR,
+    example: 2000,
+  })
   @IsInt()
   @Min(0)
+  @Max(MAX_AMOUNT_MINOR)
   amountMinor!: number;
 
   @ApiProperty({ example: 'EGP', pattern: '^[A-Z]{3}$' })

@@ -1,3 +1,4 @@
+import { MAX_AMOUNT_MINOR } from '../../common/money/money.js';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Types } from 'mongoose';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
@@ -158,15 +159,16 @@ describe('Transport costs HTTP API (ITN-16)', () => {
     },
   );
 
-  it('preserves the largest exactly representable integer amount', async () => {
+  it('preserves the largest allowed amount and rejects one more', async () => {
     const response = await add({
       ...body,
-      amountMinor: Number.MAX_SAFE_INTEGER,
+      amountMinor: MAX_AMOUNT_MINOR,
     }).expect(201);
-    expect(response.body.amountMinor).toBe(Number.MAX_SAFE_INTEGER);
+    expect(response.body.amountMinor).toBe(MAX_AMOUNT_MINOR);
     expect((await getTrip()).transportCosts[0].amountMinor).toBe(
-      Number.MAX_SAFE_INTEGER,
+      MAX_AMOUNT_MINOR,
     );
+    await add({ ...body, amountMinor: MAX_AMOUNT_MINOR + 1 }).expect(400);
   });
 
   it.each([

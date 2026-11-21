@@ -6,6 +6,7 @@ import { clearCollections } from '../../../test/support/clear-collections.js';
 import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { MAX_PRICE_MINOR } from '../../common/money/money.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -383,12 +384,12 @@ describe('AirlinesController HTTP API (FLT-01)', () => {
       .put(path)
       .set('Cookie', moderator.cookie)
       .send({
-        extraBagPriceMinor: Number.MAX_SAFE_INTEGER,
+        extraBagPriceMinor: MAX_PRICE_MINOR,
         maxExtraBagsPerPassenger: Number.MAX_SAFE_INTEGER,
       })
       .expect(200);
     expect(large.body.baggagePolicy).toEqual({
-      extraBagPriceMinor: Number.MAX_SAFE_INTEGER,
+      extraBagPriceMinor: MAX_PRICE_MINOR,
       maxExtraBagsPerPassenger: Number.MAX_SAFE_INTEGER,
     });
   });

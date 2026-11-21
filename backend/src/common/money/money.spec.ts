@@ -1,4 +1,5 @@
 import {
+  AmountOverflowError,
   assertMinor,
   multiplyMinor,
   percentOfMinor,
@@ -6,6 +7,22 @@ import {
 } from './money.js';
 
 describe('money helpers', () => {
+  it('sumMinor and multiplyMinor throw AmountOverflowError when the result is too large', () => {
+    expect(() =>
+      sumMinor(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+    ).toThrow(AmountOverflowError);
+    expect(() => multiplyMinor(Number.MAX_SAFE_INTEGER, 2)).toThrow(
+      AmountOverflowError,
+    );
+  });
+
+  it('bad input is a plain Error, not AmountOverflowError', () => {
+    for (const run of [() => sumMinor(-1), () => multiplyMinor(1.5, 2)]) {
+      expect(run).toThrow(Error);
+      expect(run).not.toThrow(AmountOverflowError);
+    }
+  });
+
   it('percentOfMinor rounds half up', () => {
     expect(percentOfMinor(15, 10)).toBe(2);
     expect(percentOfMinor(14, 10)).toBe(1);

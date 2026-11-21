@@ -381,6 +381,34 @@ describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
       ).toEqual({ items: [], page: 1, limit: 10, total: 0, totalPages: 0 });
     });
 
+    it('pages many hotels in the sorted order, loading full records only for the page', async () => {
+      const seeded = [];
+      for (let index = 0; index < 25; index += 1) {
+        const { hotel } = await seedHotel({ name: `Hotel ${index}` }, [
+          { pricePerNightMinor: 10_000 + index * 100 },
+        ]);
+        seeded.push(hotel);
+      }
+      const expected = seeded.map((hotel) => hotel._id.toHexString());
+
+      const third = await service.search({
+        ...query,
+        sortBy: 'price',
+        sortOrder: 'desc',
+        page: 3,
+        limit: 10,
+      });
+      expect(third.total).toBe(25);
+      expect(third.items.map((item) => item.id)).toEqual(
+        expected.slice().reverse().slice(20, 25),
+      );
+      expect(third.items[0]).toMatchObject({
+        name: 'Hotel 4',
+        pricePerNightMinor: 10_400,
+        amenities: [],
+      });
+    });
+
     it('uses only the requested number of largest room occupancies, defaulting to one room', async () => {
       await seedHotel(
         {},

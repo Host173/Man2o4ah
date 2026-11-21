@@ -198,3 +198,4 @@ HotelReservationSchema.index({ hotelId: 1, checkInDate: 1 });
 HotelReservationSchema.index({ status: 1, holdExpiresAt: 1 });
 HotelReservationSchema.index({ status: 1, checkOutDate: 1 });
 HotelReservationSchema.index({ status: 1, createdAt: -1 });
+HotelReservationSchema.index({ createdAt: -1, _id: -1 });

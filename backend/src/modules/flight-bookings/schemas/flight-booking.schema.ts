@@ -358,3 +358,4 @@ FlightBookingSchema.index({ 'segments.flightId': 1, status: 1 });
 FlightBookingSchema.index({ status: 1, holdExpiresAt: 1 });
 FlightBookingSchema.index({ status: 1, lastDepartureAt: 1 });
 FlightBookingSchema.index({ status: 1, createdAt: -1 });
+FlightBookingSchema.index({ createdAt: -1, _id: -1 });

@@ -8,6 +8,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { MAX_PRICE_MINOR } from '../../../common/money/money.js';
 
 export class CreateRoomDto {
   @ApiProperty({
@@ -50,12 +51,12 @@ export class CreateRoomDto {
   @ApiProperty({
     type: 'integer',
     minimum: 1,
-    maximum: Number.MAX_SAFE_INTEGER,
+    maximum: MAX_PRICE_MINOR,
     example: 10000,
     description: 'Price per night in USD minor units (cents)',
   })
   @IsInt()
   @Min(1)
-  @Max(Number.MAX_SAFE_INTEGER)
+  @Max(MAX_PRICE_MINOR)
   pricePerNightMinor!: number;
 }

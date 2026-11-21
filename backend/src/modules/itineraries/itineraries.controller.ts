@@ -54,6 +54,7 @@ import {
 } from './dto/itinerary.response.dto.js';
 import {
   PaginatedPublicItinerarySearchResponseDto,
+  PublicItineraryDetailResponseDto,
   type PublicItinerarySearchItemResponseDto,
 } from './dto/public-itinerary.response.dto.js';
 import { UpdateDayDto } from './dto/update-day.dto.js';
@@ -70,6 +71,7 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  PublicItineraryDetailView,
   TransportCostView,
 } from './itineraries.types.js';
 
@@ -131,6 +133,26 @@ export class ItinerariesController {
         startDate: startDate.toISOString().slice(0, 10),
       })),
     };
+  }
+
+  /**
+   * Static prefix: declared after `public/search` (so "search" isn't parsed as
+   * an ID) and before `:id` (endpoints.md).
+   */
+  @Public()
+  @Get('public/:id')
+  @ApiOperation({ summary: 'ITN-21 View a public itinerary read-only' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: PublicItineraryDetailResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
+  @ApiNotFoundResponse({
+    description:
+      'Itinerary not found, private, hidden or by a deactivated author',
+  })
+  getPublic(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+  ): Promise<PublicItineraryDetailView> {
+    return this.itinerariesService.getPublicById(id.toHexString());
   }
 
   @Get(':id/budget-summary')

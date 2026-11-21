@@ -506,6 +506,7 @@ export class HotelsService {
           ? { countryCode: query.countryCode }
           : {}),
       })
+      .select({ _id: 1, ratingSummary: 1 })
       .lean()
       .exec();
     if (!hotels.length) return toPage([], 0, page, limit);
@@ -515,6 +516,7 @@ export class HotelsService {
       hotelIds,
       query.checkIn,
       query.checkOut,
+      { hotelId: 1, maxOccupancy: 1, pricePerNightMinor: 1 },
     );
     const freeByHotel = new Map<string, typeof candidates>();
     for (const room of candidates) {
@@ -524,7 +526,12 @@ export class HotelsService {
       freeByHotel.set(hotelId, free);
     }
 
-    const matches: HotelSearchResult[] = [];
+    // Light records only: the full hotels are loaded for the requested page below.
+    const matches: {
+      id: string;
+      pricePerNightMinor: number;
+      average: number | null;
+    }[] = [];
     for (const hotel of hotels) {
       const free = freeByHotel.get(hotel._id.toHexString()) ?? [];
       const pricePerNightMinor = cheapestQualifyingRoomPrice(
@@ -543,20 +550,20 @@ export class HotelsService {
             hotel.ratingSummary.average < query.minRating))
       )
         continue;
-      matches.push({ ...this.toView(hotel), pricePerNightMinor });
+      matches.push({
+        id: hotel._id.toHexString(),
+        pricePerNightMinor,
+        average: hotel.ratingSummary.average,
+      });
     }
 
     const direction = query.sortOrder === 'desc' ? -1 : 1;
     matches.sort((a, b) => {
       if (query.sortBy) {
         const left =
-          query.sortBy === 'price'
-            ? a.pricePerNightMinor
-            : a.ratingSummary.average;
+          query.sortBy === 'price' ? a.pricePerNightMinor : a.average;
         const right =
-          query.sortBy === 'price'
-            ? b.pricePerNightMinor
-            : b.ratingSummary.average;
+          query.sortBy === 'price' ? b.pricePerNightMinor : b.average;
         if (left === null && right !== null) return 1;
         if (right === null && left !== null) return -1;
         if (left !== null && right !== null && left !== right)
@@ -564,18 +571,31 @@ export class HotelsService {
       }
       return a.id.localeCompare(b.id);
     });
-    return toPage(
-      matches.slice((page - 1) * limit, page * limit),
-      matches.length,
-      page,
-      limit,
+    const pageMatches = matches.slice((page - 1) * limit, page * limit);
+    const pageHotels = await this.hotelModel
+      .find({ _id: { $in: pageMatches.map((match) => match.id) } })
+      .lean()
+      .exec();
+    const byId = new Map(
+      pageHotels.map((hotel) => [hotel._id.toHexString(), hotel]),
     );
+    const items: HotelSearchResult[] = [];
+    for (const match of pageMatches) {
+      const hotel = byId.get(match.id);
+      if (hotel)
+        items.push({
+          ...this.toView(hotel),
+          pricePerNightMinor: match.pricePerNightMinor,
+        });
+    }
+    return toPage(items, matches.length, page, limit);
   }
 
   private async freeRooms(
     hotelIds: Types.ObjectId[],
     checkIn: Date,
     checkOut: Date,
+    projection?: Record<string, 1>,
   ) {
     const [candidates, busyIds] = await Promise.all([
       this.roomModel
@@ -589,6 +609,7 @@ export class HotelsService {
             },
           },
         })
+        .select(projection ?? {})
         .lean()
         .exec(),
       this.roomNightModel

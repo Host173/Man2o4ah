@@ -144,6 +144,8 @@ export interface HotelReservationDetailView extends HotelReservationSummaryView 
   expiredAt?: Date;
   completedAt?: Date;
   cancellation?: HotelReservationCancellationView;
+  /** PAY-03: the reservation's refund and its status; null when none was issued. */
+  refund: RefundView | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -174,4 +176,9 @@ export interface HotelReviewView {
   text?: string;
   isHidden: boolean;
   createdAt: Date;
+}
+
+/** A review in the public list (HTL-24); `authorName` is "Deleted user" for a deactivated author (ACC-12). */
+export interface HotelReviewListItemView extends HotelReviewView {
+  authorName: string | null;
 }

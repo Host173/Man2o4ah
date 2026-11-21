@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { AmountOverflowError } from '../../common/money/money.js';
 import { buildConverter } from './fx-conversion.js';
 
 describe('buildConverter (ITN-18)', () => {
@@ -52,10 +53,10 @@ describe('buildConverter (ITN-18)', () => {
     },
   );
 
-  it('throws a plain Error when the result is not a safe integer', () => {
+  it('throws AmountOverflowError when the result is not a safe integer', () => {
     expect(() =>
       converter.convert(Number.MAX_SAFE_INTEGER, 'USD', 'EGP'),
-    ).toThrow(Error);
+    ).toThrow(AmountOverflowError);
     expect(() =>
       converter.convert(Number.MAX_SAFE_INTEGER, 'USD', 'EGP'),
     ).not.toThrow(BadRequestException);

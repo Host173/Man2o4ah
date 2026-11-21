@@ -129,14 +129,18 @@ export class SeatInventory {
     }
   }
 
-  /** Converts held seats into booked seats with one conditional update per item. */
+  /**
+   * Converts held seats into booked seats with one conditional update per item.
+   * Refuses (409 SEATS_UNAVAILABLE) when the flight is no longer scheduled, so a
+   * booking can never be confirmed on a cancelled or departed flight (FLT-06).
+   */
   async confirm(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    await this.moveHeldSeats(items, options, 'bookedSeats');
+    await this.moveHeldSeats(items, options, 'bookedSeats', true);
   }
 
   /** Returns held seats to availability with one conditional update per item. */
   async release(items: SeatItem[], options: InventoryOptions): Promise<void> {
-    await this.moveHeldSeats(items, options, 'availableSeats');
+    await this.moveHeldSeats(items, options, 'availableSeats', false);
   }
 
   /** Returns booked seats to availability with one conditional update per item. */
@@ -244,6 +248,7 @@ export class SeatInventory {
     items: SeatItem[],
     options: InventoryOptions,
     destination: 'bookedSeats' | 'availableSeats',
+    requireScheduled: boolean,
   ): Promise<void> {
     this.assertValidItems(items);
     for (const item of items) {
@@ -253,6 +258,7 @@ export class SeatInventory {
         .updateOne(
           {
             _id: flightId,
+            ...(requireScheduled ? { status: FlightStatus.SCHEDULED } : {}),
             cabins: {
               $elemMatch: {
                 _id: cabinId,
@@ -269,7 +275,28 @@ export class SeatInventory {
           { session: options.session },
         )
         .exec();
-      if (result.modifiedCount !== 1) throw inventoryCorrupted();
+      if (result.modifiedCount === 1) continue;
+      if (requireScheduled) await this.assertStillScheduled(flightId, options);
+      throw inventoryCorrupted();
+    }
+  }
+
+  /**
+   * Tells a flight that left the schedule apart from broken counters. Read in
+   * the same session, so it sees what the failed update saw.
+   */
+  private async assertStillScheduled(
+    flightId: Types.ObjectId,
+    options: InventoryOptions,
+  ): Promise<void> {
+    const flight = await this.flightModel
+      .findOne({ _id: flightId })
+      .session(options.session)
+      .select({ status: 1 })
+      .lean()
+      .exec();
+    if (flight && flight.status !== FlightStatus.SCHEDULED) {
+      throw flightNoLongerScheduled();
     }
   }
 
@@ -328,6 +355,13 @@ function seatsUnavailable(): ConflictException {
   return new ConflictException({
     code: ErrorCode.SeatsUnavailable,
     message: 'Not enough seats available',
+  });
+}
+
+function flightNoLongerScheduled(): ConflictException {
+  return new ConflictException({
+    code: ErrorCode.SeatsUnavailable,
+    message: 'The flight is no longer scheduled',
   });
 }
 

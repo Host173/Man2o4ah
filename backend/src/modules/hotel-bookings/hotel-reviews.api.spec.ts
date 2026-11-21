@@ -1,4 +1,5 @@
 import { getModelToken } from '@nestjs/mongoose';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { Model } from 'mongoose';
 import { Types } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
@@ -320,6 +321,35 @@ describe('Hotel reviews API (HTL-23, HTL-24)', () => {
       visible.body.items.map((review: { _id: string }) => review._id),
     ).toEqual([first.body._id]);
     expect(visible.body.total).toBe(1);
+  });
+
+  it('names the review author, and "Deleted user" once the author is deactivated (ACC-12)', async () => {
+    const owner = await loginAs(t.connection, UserRole.USER);
+    const reservation = await seedReservation(owner.id);
+    await submitReview(owner.cookie, reservation._id.toString(), {
+      rating: 4,
+      text: 'Lovely',
+    });
+
+    const active = await t.http().get(URL).expect(200);
+    expect(active.body.items[0].authorName).toBe('Test user');
+
+    await t.connection
+      .collection('users')
+      .updateOne(
+        { _id: new Types.ObjectId(owner.id) },
+        { $set: { status: 'deactivated' } },
+      );
+    const deactivated = await t.http().get(URL).expect(200);
+    expect(deactivated.body.items[0].authorName).toBe('Deleted user');
+
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().build(),
+    );
+    expect(
+      document.components?.schemas?.HotelReviewListItemResponseDto,
+    ).toHaveProperty('properties.authorName');
   });
 
   it('returns 404 for a missing public hotel and validates pagination', async () => {

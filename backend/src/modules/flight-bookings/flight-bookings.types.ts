@@ -195,5 +195,7 @@ export interface MyFlightBooking {
   expiredAt?: Date;
   completedAt?: Date;
   cancellation?: Cancellation;
+  /** PAY-03: the booking's refund and its status; null when none was issued. */
+  refund: RefundView | null;
   createdAt: Date;
 }

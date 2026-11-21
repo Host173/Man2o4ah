@@ -3,7 +3,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
-import { assertMinor } from '../../src/common/money/money.js';
+import { assertMinorFits } from '../../src/common/money/money.js';
 import { convertMinor } from '../../src/modules/fx/fx-conversion.js';
 import type { Converter } from '../../src/modules/fx/fx.types.js';
 import type { FxService } from '../../src/modules/fx/fx.service.js';
@@ -83,7 +83,7 @@ export class FakeFxService implements PublicApi<FxService> {
       });
     }
     if (from === to) {
-      assertMinor(amountMinor);
+      assertMinorFits(amountMinor);
       return amountMinor;
     }
     return convertMinor(

@@ -559,8 +559,13 @@ describe('flight-bookings schemas', () => {
           unique: false,
           partialFilterExpression: undefined,
         },
+        {
+          key: { createdAt: -1, _id: -1 },
+          unique: false,
+          partialFilterExpression: undefined,
+        },
       ]),
     );
-    expect(indexes).toHaveLength(7);
+    expect(indexes).toHaveLength(8);
   });
 });

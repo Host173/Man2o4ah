@@ -8,6 +8,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import mongoose from 'mongoose';
+import { AmountOverflowError } from '../money/money.js';
 import { toErrorBody } from './error-body.js';
 import { ErrorCode } from './error-codes.js';
 
@@ -148,6 +149,13 @@ describe('toErrorBody', () => {
     expect(body).not.toHaveProperty('stack');
     expect(body).not.toHaveProperty('details');
     expect(JSON.stringify(body)).not.toContain('secret detail');
+  });
+
+  it('maps AmountOverflowError to 400 VALIDATION_FAILED without its message', () => {
+    const { statusCode, body } = run(new AmountOverflowError('secret'));
+    expect(statusCode).toBe(400);
+    expect(body.code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(body)).not.toContain('secret');
   });
 
   it('maps a thrown non-object to 500', () => {

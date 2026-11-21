@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import mongoose from 'mongoose';
+import { AmountOverflowError } from '../money/money.js';
 import { ErrorCode } from './error-codes.js';
 
 export interface ErrorDetail {
@@ -126,6 +127,14 @@ export function toErrorBody(
     return build(400, ErrorCode.ValidationFailed, 'Invalid value', [
       { field: exception.path, message: 'invalid value' },
     ]);
+  }
+
+  if (exception instanceof AmountOverflowError) {
+    return build(
+      400,
+      ErrorCode.ValidationFailed,
+      'An amount is too large to compute',
+    );
   }
 
   return build(500, ErrorCode.InternalError, 'Internal server error');

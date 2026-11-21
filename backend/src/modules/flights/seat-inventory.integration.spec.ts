@@ -185,6 +185,90 @@ describe('SeatInventory integration (INV-01)', () => {
     });
   });
 
+  it.each(['cancelled', 'departed'] as const)(
+    'refuses to confirm held seats on a %s flight and leaves the counters alone',
+    async (status) => {
+      const flight = await createFlight(flightModel);
+      await inTransaction(testApp!, (session) =>
+        inventory.hold([seat(flight, 2)], { session }),
+      );
+      await flightModel.updateOne({ _id: flight.id }, { $set: { status } });
+
+      await expect(
+        inTransaction(testApp!, (session) =>
+          inventory.confirm([seat(flight, 2)], { session }),
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.SeatsUnavailable },
+      });
+      await expectCounters(flightModel, flight, {
+        totalSeats: 5,
+        availableSeats: 3,
+        heldSeats: 2,
+        bookedSeats: 0,
+      });
+    },
+  );
+
+  it('still releases held and returns booked seats on a cancelled flight', async () => {
+    const flight = await createFlight(flightModel);
+    await inTransaction(testApp!, (session) =>
+      inventory.hold([seat(flight, 3)], { session }),
+    );
+    await inTransaction(testApp!, (session) =>
+      inventory.confirm([seat(flight, 1)], { session }),
+    );
+    await flightModel.updateOne(
+      { _id: flight.id },
+      { $set: { status: 'cancelled' } },
+    );
+
+    await inTransaction(testApp!, (session) =>
+      inventory.release([seat(flight, 2)], { session }),
+    );
+    await inTransaction(testApp!, (session) =>
+      inventory.returnBooked([seat(flight, 1)], { session }),
+    );
+
+    await expectCounters(flightModel, flight, {
+      totalSeats: 5,
+      availableSeats: 5,
+      heldSeats: 0,
+      bookedSeats: 0,
+    });
+  });
+
+  it('rolls back the first segment when a later one is on a cancelled flight', async () => {
+    const outbound = await createFlight(flightModel, {
+      flightNumber: 'MS-OUT',
+    });
+    const inbound = await createFlight(flightModel, { flightNumber: 'MS-RET' });
+    await inTransaction(testApp!, (session) =>
+      inventory.hold([seat(outbound), seat(inbound)], { session }),
+    );
+    await flightModel.updateOne(
+      { _id: inbound.id },
+      { $set: { status: 'cancelled' } },
+    );
+
+    await expect(
+      inTransaction(testApp!, (session) =>
+        inventory.confirm([seat(outbound), seat(inbound)], { session }),
+      ),
+    ).rejects.toMatchObject({
+      response: { code: ErrorCode.SeatsUnavailable },
+    });
+    for (const flight of [outbound, inbound]) {
+      await expectCounters(flightModel, flight, {
+        totalSeats: 5,
+        availableSeats: 4,
+        heldSeats: 1,
+        bookedSeats: 0,
+      });
+    }
+  });
+
   it.each(['confirm', 'release', 'returnBooked'] as const)(
     '%s reports corrupted inventory and does not change counters',
     async (operation) => {

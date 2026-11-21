@@ -1379,3 +1379,86 @@ describe('FakeItinerariesService owner-only methods', () => {
     );
   });
 });
+
+describe('FakeItinerariesService.getPublicById (ITN-21)', () => {
+  async function publicTrip(itineraries: FakeItinerariesService) {
+    const created = await itineraries.create(createDto(), 'user-1');
+    const day = await itineraries.addDay(
+      created._id,
+      { cityId: 'cairo' },
+      'user-1',
+    );
+    await itineraries.addBudgetEntry(
+      created._id,
+      day._id,
+      { category: BudgetCategory.FOOD, amountMinor: 1000, currency: 'EGP' },
+      'user-1',
+    );
+    await itineraries.update(
+      created._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      'user-1',
+    );
+    return created._id;
+  }
+
+  it('returns the read-only view of a public itinerary without moderation fields', async () => {
+    const itineraries = new FakeItinerariesService();
+    const id = await publicTrip(itineraries);
+
+    const view = await itineraries.getPublicById(id);
+
+    expect(view).toMatchObject({
+      _id: id,
+      ownerId: 'user-1',
+      authorName: null,
+      title: 'Egypt in a week',
+      startDate: '2027-04-01',
+      dayCount: 1,
+      cityIds: ['cairo'],
+      budget: {
+        displayCurrency: 'USD',
+        total: { amountMinor: 20, currency: 'USD' },
+      },
+    });
+    for (const key of [
+      'visibility',
+      'isHidden',
+      'authorDeactivated',
+      'createdAt',
+    ]) {
+      expect(view).not.toHaveProperty(key);
+    }
+  });
+
+  it('throws the real 404 for private, deactivated-author and unknown itineraries', async () => {
+    const itineraries = new FakeItinerariesService();
+    const privateTrip = await itineraries.create(createDto(), 'user-1');
+    const owner = 'b'.repeat(24);
+    const owned = await itineraries.create(createDto(), owner);
+    await itineraries.update(
+      owned._id,
+      { visibility: ItineraryVisibility.PUBLIC },
+      owner,
+    );
+    await expect(itineraries.getPublicById(owned._id)).resolves.toBeDefined();
+    await itineraries.onUserDeactivated({ userId: owner });
+
+    for (const id of [privateTrip._id, owned._id, 'f'.repeat(24)]) {
+      await expect(itineraries.getPublicById(id)).rejects.toMatchObject({
+        status: 404,
+        response: { code: ErrorCode.NotFound },
+      });
+    }
+  });
+
+  it('copies its data, so a caller cannot change the stored itinerary', async () => {
+    const itineraries = new FakeItinerariesService();
+    const id = await publicTrip(itineraries);
+
+    const view = await itineraries.getPublicById(id);
+    view.days[0].cityId = 'changed';
+
+    expect((await itineraries.getPublicById(id)).days[0].cityId).toBe('cairo');
+  });
+});

@@ -10,6 +10,7 @@ import { imageBytes } from '../../../test/support/image-fixtures.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp } from '../../../test/support/test-app.js';
 import type { TestApp } from '../../../test/support/test-app.js';
+import { MAX_PRICE_MINOR } from '../../common/money/money.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { Role } from '../accounts/auth/auth.types.js';
@@ -1451,7 +1452,7 @@ describe('Hotels API (HTL-01 / HTL-03 / HTL-06)', () => {
       const fields = {
         beds: Number.MAX_SAFE_INTEGER,
         maxOccupancy: Number.MAX_SAFE_INTEGER,
-        pricePerNightMinor: Number.MAX_SAFE_INTEGER,
+        pricePerNightMinor: MAX_PRICE_MINOR,
       };
       const response = await t
         .http()

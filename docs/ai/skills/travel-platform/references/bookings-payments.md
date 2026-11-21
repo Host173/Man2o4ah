@@ -118,7 +118,7 @@ catch { throw new BadRequestException({ code: ErrorCode.BadSignature, message: '
 **The booking module confirms** on `payment.succeeded`, in one transaction:
 - call `AccountsService.tryLockForBookingConfirmation(userId, { session })` to serialize with self-deactivation (ACC-12). If the account is missing/deactivated, expire the pending hotel hold and release nights in that transaction, then request a full `late_payment` refund after commit. Suspended accounts keep existing bookings valid. Future flight confirmation must use this same fence and release held seats when expiry wins.
 - conditional `pending_payment → confirmed`, set `confirmedAt` and the reference (§8);
-- flight: `SeatInventory.confirm(segments)` (held → booked); hotel: nothing (the nights stay);
+- flight: `SeatInventory.confirm(segments)` (held → booked); it refuses with `SEATS_UNAVAILABLE` when a flight is no longer `scheduled` (FLT-06), and then the booking expires, its seats are released and the payment gets a full `late_payment` refund. Hotel: nothing (the nights stay);
 - after commit: emit `…confirmed` (→ notifications).
 - **Late payment:** if the booking is no longer `pending_payment` (it expired), don't confirm. Ask payments for a full refund with `reason: 'late_payment'`.
 
@@ -137,6 +137,7 @@ In one transaction: conditional `confirmed → cancelled` with `cancellation { c
 After commit: if `refundAmountMinor > 0`, call `PaymentsService.refund(...)` (creates `refunds { status: 'pending' }`, calls Stripe with idempotency key `refund-<refundId>`, maps the result). Then emit `…cancelled`. A Stripe failure leaves the booking cancelled and the refund `failed`, visible on the booking (PAY-03), never lost.
 
 **Provider cancels a flight (FLT-06):** flights sets `scheduled → cancelled` and emits `flight.cancelled`. flight-bookings cancels every `confirmed` booking containing it (round trips included) with **100%** and `cancelledBy: 'provider'`, and expires its `pending_payment` ones. Everyone affected is notified.
+A booking confirmed by a payment that lands after the cancellation is impossible: `SeatInventory.confirm` only works on a `scheduled` flight (§6). The handler also re-scans bookings it skipped, so one that was confirmed between its scan and its expiry is cancelled at 100% on the next pass.
 A deactivated provider (ACC-15) is hidden from search and can't be booked; existing confirmed bookings stay valid.
 
 ## 8. References, e-ticket, completion

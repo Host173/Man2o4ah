@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,6 +13,7 @@ import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
 import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { getPlatformCurrency } from '../../common/money/platform-currency.js';
 import { escapeRegex } from '../../common/text/escape-regex.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
@@ -26,6 +28,7 @@ import type {
 } from '../flights/flights.types.js';
 import { HotelSearchQuery, HotelSearchResult } from '../hotels/hotels.types.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { AccountsService } from '../accounts/accounts.service.js';
 import { ProfileService } from '../accounts/users/profile.service.js';
 import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -62,6 +65,7 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  PublicItineraryDetailView,
   PublicItineraryQuery,
   PublicItinerarySummary,
   TransportCostView,
@@ -121,6 +125,7 @@ export class ItinerariesService {
     private readonly moduleRef: ModuleRef,
     private readonly profile: ProfileService,
     private readonly hotels: HotelsService,
+    private readonly accounts: AccountsService,
   ) {}
 
   /**
@@ -184,6 +189,50 @@ export class ItinerariesService {
       .exec();
     if (!itinerary) throw this.notFound();
     return this.toDetailView(itinerary as ItineraryRecord);
+  }
+
+  /**
+   * ITN-21: one public itinerary, read-only, for guests and users alike. The
+   * filter is the one `clone` uses, so a private, hidden or deactivated-author
+   * itinerary is a 404 for everyone, the owner and admins included (ACC-11,
+   * GEN-10); the owner opens it through `getById`.
+   */
+  async getPublicById(itineraryId: string): Promise<PublicItineraryDetailView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const itinerary = await this.itineraryModel
+      .findOne({
+        _id: id,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const ownerId = record.ownerId.toHexString();
+    const [profiles, budget] = await Promise.all([
+      this.accounts.getProfiles([ownerId]),
+      this.publicBudget(record),
+    ]);
+    const detail = this.toDetailView(record);
+    return {
+      _id: detail._id,
+      ownerId,
+      authorName: profiles[0]?.name ?? null,
+      title: detail.title,
+      countryCodes: detail.countryCodes,
+      startDate: detail.startDate,
+      dayCount: detail.dayCount,
+      cityIds: [...record.cityIds],
+      updatedAt: detail.updatedAt,
+      days: detail.days,
+      cityGroups: detail.cityGroups,
+      transportCosts: detail.transportCosts,
+      ...(detail.clonedFrom ? { clonedFrom: detail.clonedFrom } : {}),
+      budget,
+    };
   }
 
   /** ITN-21: deep-clones a visible public itinerary into a private copy. */
@@ -1338,8 +1387,51 @@ export class ItinerariesService {
       });
     }
     const converter = await this.fx().getConverter();
+    return buildBudgetSummary(
+      this.toBudgetInput(itinerary as ItineraryRecord),
+      converter,
+      displayCurrency,
+    );
+  }
 
-    const input: BudgetSummaryInput = {
+  /**
+   * ITN-21: the budget of a public itinerary, in the platform currency. It is
+   * the same for every viewer (the public page is cached), so a viewer's
+   * preferred currency is not used. Raw amounts stay visible in the days and
+   * transport costs. `null` when the amounts cannot be converted: the rest of
+   * the page is still worth showing.
+   */
+  private async publicBudget(
+    itinerary: ItineraryRecord,
+  ): Promise<BudgetSummaryView | null> {
+    try {
+      const converter = await this.fx().getConverter();
+      return buildBudgetSummary(
+        this.toBudgetInput(itinerary),
+        converter,
+        getPlatformCurrency(),
+      );
+    } catch (error) {
+      const code =
+        error instanceof HttpException
+          ? (error.getResponse() as { code?: string }).code
+          : undefined;
+      if (
+        code === ErrorCode.RatesUnavailable ||
+        code === ErrorCode.UnsupportedCurrency
+      ) {
+        this.logger.warn(
+          `ITN-21 public budget unavailable for ${itinerary._id.toHexString()}: ${code}`,
+        );
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** The plain input the budget calculator takes (ITN-14). */
+  private toBudgetInput(itinerary: ItineraryRecord): BudgetSummaryInput {
+    return {
       startDate: itinerary.startDate,
       days: (itinerary.days ?? []).map((day) => ({
         _id: day._id.toHexString(),
@@ -1353,7 +1445,6 @@ export class ItinerariesService {
         currency: cost.currency,
       })),
     };
-    return buildBudgetSummary(input, converter, displayCurrency);
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */

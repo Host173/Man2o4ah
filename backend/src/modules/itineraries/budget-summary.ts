@@ -1,3 +1,4 @@
+import { sumMinor } from '../../common/money/money.js';
 import type { Converter } from '../fx/fx.types.js';
 import { cityGroups, dayDate } from './days.js';
 import type {
@@ -46,18 +47,18 @@ function add(
   converter: Converter,
   displayCurrency: string,
 ): void {
-  bucket[category].amountMinor += converter.convert(
-    amountMinor,
-    currency,
-    displayCurrency,
+  bucket[category].amountMinor = sumMinor(
+    bucket[category].amountMinor,
+    converter.convert(amountMinor, currency, displayCurrency),
   );
 }
 
 function totalOf(bucket: BudgetCategoryTotals, currency: string): MoneyView {
   return money(
-    BUDGET_SUMMARY_CATEGORIES.reduce(
-      (sum, category) => sum + bucket[category].amountMinor,
-      0,
+    sumMinor(
+      ...BUDGET_SUMMARY_CATEGORIES.map(
+        (category) => bucket[category].amountMinor,
+      ),
     ),
     currency,
   );
@@ -121,7 +122,10 @@ export function buildBudgetSummary(
     }
 
     for (const category of BUDGET_SUMMARY_CATEGORIES) {
-      byCategory[category].amountMinor += categories[category].amountMinor;
+      byCategory[category].amountMinor = sumMinor(
+        byCategory[category].amountMinor,
+        categories[category].amountMinor,
+      );
     }
     return {
       dayId: day._id,
@@ -141,9 +145,11 @@ export function buildBudgetSummary(
     checkIn: group.checkIn,
     checkOut: group.checkOut,
     total: money(
-      byDay
-        .slice(group.fromDay - 1, group.toDay)
-        .reduce((sum, day) => sum + day.total.amountMinor, 0),
+      sumMinor(
+        ...byDay
+          .slice(group.fromDay - 1, group.toDay)
+          .map((day) => day.total.amountMinor),
+      ),
       displayCurrency,
     ),
   }));

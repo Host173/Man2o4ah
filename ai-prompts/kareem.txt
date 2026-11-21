@@ -3946,3 +3946,237 @@ Report: the worktree findings, the eol result, the PR link, and CI status once i
 
 How the output was used:
 Checked the reused worktree (no unpushed work lost: the branch it held, claude/execute-this-1a6c9e, sits on origin/main) and the line endings (all files i/lf in the index), then pushed chore/PLT-08-demo-data-seed and opened the PLT-08 PR into develop.
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+execute this . work from the latest develop!
+if there was any task take you can just leave it working and go next then let it work in the back ground  and continue untill the point you will need it  then wait again, if this isn't clear ask me to clarify it more.
+
+[Follow-up during the run]
+in the exec file you shuold report the problem only: i want you to check and report the problem to another opus agent to design how to solve it, then this agent pass it to anothe sonnet agent to execute it,( this proces should happen the moment you find a problem not after you finish  so we save tiem)
+and the final report should be the problem/bug and how did you fix it 
+ok?
+
+[Follow-up during the run]
+can you go faster, and i don't wan to over engineer this, try to finish as much as you can, the priority is all end points work as they should . if you can estemate that  the current flow will finish in 15 more mins then ignore . and care about the token usage also
+
+[Follow-up during the run]
+continue but try to optimize token usage , like shorter prompts , and fewer agents , i don't mind taking time but i want it to finish with the pro 5 hours session limit
+
+[Follow-up during the run]
+first thing the defualt branch that we should branch from is develop not main.
+and did you finish scaaning ?
+
+[Follow-up during the run]
+ok the faster comman, i'm  was on a rush so i asked you to be faster, now i have time so it's ok to take your time
+
+[Attached: TST03_EXECUTION.md]
+# Execution — TST-03: System stress and failure check
+
+A harsh, whole-system check run **after every mandatory feature is merged and PLT-08 (demo seed) is in**, before TST-01. It looks for what makes the system **fall**: oversold seats, double charges or refunds, stuck bookings, data leaking between users, 500s, crashes, unbounded queries. It isn't a hunt for exotic edge cases; each attack below is something real users, a busy day, or a careless client will do.
+
+**Report, don't fix.** Every finding becomes a **failing reproduction test** plus a row in the report with its cause in the code. It is fixed afterwards on its own branch, starting from that test (the team rule: every bug fix starts with a failing test). Probes that pass stay as stress regression tests.
+
+## Before you start
+
+1. Kareem has created the issue **TST-03: System stress and failure check** (package 1, module `test/stress`). If `gh issue list --search "TST-03 in:title"` finds nothing, stop and report.
+2. `git fetch origin`. All mandatory issues are closed (only TST-01, TST-02, TST-03, PLT-07 and bonus issues may be open), and PLT-08 is merged. If not, stop and report.
+3. `git worktree add ../man2o4ah-TST-03 -b test/TST-03-system-stress-check origin/develop`; work only there. If the branch exists, stop and report.
+4. `cd backend && npm ci && npm run verify` passes. Note `git rev-parse --short origin/develop` for the report.
+
+## What "correct" means (read before writing any probe)
+
+Every probe asserts the **documented** behaviour, never what the code happens to do:
+- `docs/ai/skills/travel-platform/references/requirements.md` (the workbook, authoritative), `domain-rules.md`, `bookings-payments.md` (lifecycle, holds, expiry, webhook, refunds, §10 "Proving concurrency"), `auth.md`, `endpoints.md`, `backend.md` (errors: every error is JSON `{ code, message, details? }`, never a raw Mongoose error, never 200 with an error), `docs/DECISIONS.md`, `docs/database/data-model.md` (invariants, e.g. seat totals, one refund per booking, unique indexes).
+- When the docs don't say what should happen, the probe asserts only "no 5xx, no corrupted data" and the report lists it under "Undocumented behaviour" for Kareem.
+
+## The harness
+
+New `backend/vitest.config.stress.ts` (copy `vitest.config.e2e.ts`; `include: ['**/*.stress-spec.ts']`; `testTimeout: 180_000`; `hookTimeout: 300_000`; `fileParallelism: false`) and the script `"test:stress": "vitest run --config ./vitest.config.stress.ts"`. Check that `vitest.config.ts` and `vitest.config.e2e.ts` don't pick up `*.stress-spec.ts` (CI never runs the stress suite: it's slow and some specs are red on purpose until fixed).
+
+New `backend/test/stress/support/stress-app.ts`:
+- The **whole app** on the in-memory replica set: `createTestApp({ imports: [<every feature module app.module.ts imports that createTestApp doesn't add>], override })`. Only external services are faked: `STRIPE_GATEWAY` → `FakeStripeGateway`, the FX client → its fake. Modules talk to each other for real.
+- Reference data seeded (`ReferenceDataSeedService.run()`), one `exchange_rates` document, the admin created as ACC-18 does, and the **demo world** created by running PLT-08's `runDemoSeed` against `t.app.listen(0)` (so the stress starts from the same world graders see).
+- Helpers: `as(role|email)` returning a logged-in Supertest agent; `world` ids; `parallel(n, fn)` (fires `n` calls at once with `Promise.allSettled` and returns the results); `jobs` handles to run each scheduled job's method directly (`flight-hold-expiry.job.ts`, `hotel-hold-expiry.job.ts`, `flight-completion.job.ts`, `hotel-stay-completion.job.ts`, `post-image-cleanup.job.ts`, `FlightsService.markFlightsDeparted(now)`, the FX refresh); `payWebhook(paymentIntentId, type)` and `refundWebhook(...)` posting signed fake events to `/api/payments/webhook`.
+- `invariants()`: one function that checks the global invariants after every attack and returns the broken ones:
+  - every cabin: `total = available + held + booked`, none negative (data model §4.1);
+  - every room night: at most one reservation or block per `{ roomId, date }` (§4.2), and every `pending_payment`/`confirmed` reservation has all its nights;
+  - every booking's status is one of the lifecycle states, and only allowed moves happened (GEN-11): no `confirmed` booking without a `succeeded` payment, no `pending_payment` booking past its hold after an expiry job run;
+  - payments: at most one per booking; refunds: at most one per booking, `amountMinor ≤` the paid amount;
+  - every amount uses the platform currency (PAY-04).
+
+Findings are collected, not thrown: each probe pushes `{ area, attack, expected, got, broken: string[] }` and the spec asserts at the end. Results also go to `backend/test/stress/out/<area>.json` (gitignored).
+
+## The attacks
+
+One spec file per area: `backend/test/stress/<area>.stress-spec.ts`. Each bullet is at least one probe. Use the demo world; create extra data through the API, or through models **only** to set up a state the API can't reach quickly (e.g. a hold already in the past), and say so in a comment.
+
+### A. Races on money and inventory (`races`)
+1. Last seats: a cabin with 3 seats left, 10 users hold 1 seat each in parallel → exactly 3 holds, 7 × 409 `SEATS_UNAVAILABLE`, invariants hold.
+2. Same with 2 seats each on a cabin with 5 left; and the outbound of a round trip sold out while its return isn't → the whole round-trip hold fails, nothing held.
+3. Overlapping stays: 8 parallel holds on the same room for overlapping dates → exactly one wins; adjacent stays (check-out = next check-in) both win.
+4. Payment start: one user fires 5 parallel `POST /api/payments` for one booking → one payment, one PaymentIntent.
+5. Webhook vs expiry: a pending booking at the end of its hold; run the expiry job and deliver `payment_intent.succeeded` at the same time, 20 rounds → each round ends either `confirmed` (job lost) or `expired` + a `late_payment` refund (job won), never both, never neither; seats/nights consistent.
+6. Double cancel: 5 parallel `POST …/cancel` on one confirmed booking → one cancellation, one refund, one notification.
+7. Cancel vs completion: cancel at the moment the completion job runs (departure just passed) → the documented rule (cancellation after departure blocked) holds; no refund on a completed booking.
+8. Provider cancels a flight (FLT-06) while users hold, pay and cancel on it in parallel → every confirmed booking cancelled with 100%, every pending one expired, no booking left confirmed on a cancelled flight.
+9. Register the same email 5 times in parallel → one account. Like a post 10 times in parallel → one like, `likeCount` 1. Report the same content 5 times in parallel → the documented rule (one report per user per item, if stated).
+10. Moderator edits a flight's cabin seats (FLT-05) while users hold seats → the documented rule (can't go below held + booked) holds; invariants hold.
+
+### B. Time and the lifecycle (`lifecycle`)
+1. Hold boundaries: pay at `holdExpiresAt − 1 s` → allowed; at `+1 s` → 409 `HOLD_EXPIRED`; run the job → booking `expired`, seats/nights released, PaymentIntent cancelled.
+2. Late payment: the hold expired, then `payment_intent.succeeded` arrives → not confirmed, full `late_payment` refund, user notified.
+3. Failed payment then retry inside the hold → confirmed once; failed payment and the hold expires → expired, nothing charged.
+4. Out-of-order webhooks: `payment_failed` after `succeeded` → stays succeeded; a refund `failed` after `refunded` → follows PAY-03's table; replayed old events → no change.
+5. Jobs run twice at once (two app instances): run each job method twice in parallel → every transition happens once, one event each (idempotent handlers).
+6. Time zones: a flight departing 23:30 local in one zone and arriving next day in another; search by the local departure date (FLT-11) finds it on the right day; DST change weekend in Europe/London (create flights across the last Sunday of March/October) → stored UTC correct, displayed local correct (GEN-06).
+7. Dates: `2026-02-29` (not a leap year), `2028-02-29`, check-in = check-out, check-out before check-in, a stay of 1 night, a stay at the documented maximum and maximum + 1.
+
+### C. Who can do what (`access`)
+1. Every route in `endpoints.md` (non-bonus): without a cookie → 401 (public ones excepted); with an expired access token → 401 then a refresh works (ACC-06/ACC-19); after logout → 401 with the old cookie; after the user is suspended → 403/401 per `auth.md`, and their existing session no longer works; after a password change → every old session revoked.
+2. Role escalation: a USER calls every admin and moderator route → 403. An airline moderator of airline A calls every airline-moderator route with airline B's ids → 403/404 per `endpoints.md`; same for hotel moderators.
+3. Someone else's data (ACC-11): user B calls every "Own" route with user A's booking/payment/refund/itinerary/notification ids → 404, never 200, never 403 that reveals existence. Private itineraries invisible in public search.
+4. Mass assignment: send `role`, `status`, `userId`, `providerId`, `totalMinor`, `price`, `isActive`, `mustChangePassword`, `createdAt` in every create/update body → 400 (`forbidNonWhitelisted`) and nothing changed.
+5. Injection: query params like `q[$ne]=x`, `status[$gt]=`, `page[$gt]=0`, `id={"$ne":null}`, JSON bodies with `{ "$where": … }` or `{ "email": { "$ne": null } }` on login → 400, never a match; regex-heavy search strings (`.*.*.*.*`, `(a+)+$`, 5 000 characters) on every search → answers fast (< 1 s) and safely (regex escaped).
+6. Lockout (ACC-05): 5 wrong passwords in parallel → locked once; the 6th correct password during the lock → locked message; a successful login after the lock resets the counter.
+
+### D. Bad input that crashes servers (`input`)
+1. Malformed JSON, an empty body with `Content-Type: application/json`, a 2 MB and a 20 MB JSON body, an array instead of an object, deeply nested JSON (depth 10 000) → 400/413 with our JSON error shape, never 500, and the app keeps answering.
+2. Every `:id` route with `abc`, `000000000000000000000000`, a 25-char hex string, `%00` → 400 or 404, never 500.
+3. Strings at max length and max + 1 for every documented limit; emoji and RTL text in names, posts, comments; `NaN`, `Infinity`, `-0`, `1e309`, `2^53` in every number field; numbers as strings.
+4. Pagination: `limit=0`, `limit=-1`, `limit=1000000`, `page=999999`, `page=1.5` → validation errors or the documented cap, never an unbounded query.
+5. Uploads (GEN-08, every upload route): a PNG renamed `.exe`, an `.exe` renamed `.png` (signature check), a 0-byte file, a file just over the size limit, a filename `../../etc/passwd`, many files at once beyond the documented count → rejected cleanly; nothing written outside the upload folder; no orphan files after a rejected upload.
+6. Unknown routes and wrong methods → 404/405 JSON, not HTML.
+
+### E. External failures (`externals`)
+1. Stripe down: `FakeStripeGateway.failNext` on `createPaymentIntent` → a clean 5xx/502 with our error shape per the docs (or what PAY-01 specifies), no payment document left half-made, retry later works.
+2. Stripe refund fails → the cancellation stays, the refund is `failed` and visible, the user is told (PAY-03).
+3. Stripe cancel fails at hold expiry → booking still expires; the late-payment path covers a last-second success.
+4. FX API down at the daily refresh → the last rates stay in use (ITN-18); with no rates at all → the documented 503 `RATES_UNAVAILABLE`, not a crash, on every endpoint that converts.
+5. Webhook with a bad signature, no signature, a huge body, an unknown event type, an event for an unknown PaymentIntent → 400 or 200 as documented, nothing changed.
+
+### F. Partial failures inside one operation (`atomicity`)
+For each multi-step write (flight hold, hotel hold, confirmation, cancellation with inventory release, flight cancellation by provider, itinerary clone with images, room delete/deactivate, provider deactivation, account deactivation): make the **second** internal step fail once (`vi.spyOn(t.moduleRef.get(<Service>), '<method>').mockRejectedValueOnce(new Error('boom'))`) and assert: the request fails cleanly, **nothing** from the first step remains (the transaction rolled back), invariants hold, and the same request succeeds afterwards. Also: after the failure, the process still serves requests (no unhandled rejection; listen for `unhandledRejection` during the spec and fail if one fires).
+
+### G. Data integrity across modules (`integrity`)
+1. Deactivate a provider (ACC-15) with confirmed and pending bookings → hidden from search, can't be booked, existing confirmed bookings stay valid, pending ones follow the docs.
+2. Deactivate a user (ACC-12) with an upcoming confirmed booking → blocked; without one → posts and public itineraries hidden, comments/reviews show "Deleted user".
+3. Delete/deactivate a room with future reservations → the documented rule (blocked or allowed with consequences) holds; no reservation points to a missing room.
+4. Edit a flight's times (FLT-05) after bookings → passengers notified, booking segments updated, e-ticket shows the new times.
+5. Clone a public itinerary (ITN-21), then delete the original and its images → the clone and its copied images still work.
+6. Each event delivered twice (notifications, audit, booking confirmation, refund updates) → one effect each.
+7. Reference data is read-only: no route creates, edits or deletes countries, cities, airports, attractions or currencies.
+
+### H. Load and query shape (`load`)
+Turn on the profiler on the in-memory database (`db.setProfilingLevel(2)`) for this spec. Create volume through models (test-only, documented in the spec): 5 000 flights over 60 days across the demo routes, 1 000 hotels with 4 rooms each and 90 days of availability, 2 000 users, 5 000 bookings in mixed states, 3 000 posts, 500 itineraries.
+1. 50 concurrent requests, 5 rounds, on: flight search (one-way and round trip), hotel search, hotel availability, public itinerary search, blog list/search, admin bookings list, notifications list → no errors; record p50/p95 per endpoint. Budget: p95 < 500 ms on the in-memory database (report anything above; it isn't a hard failure unless > 2 s).
+2. From the profiler: every query those endpoints ran on a collection with > 1 000 documents uses an index (`planSummary` not `COLLSCAN`), and no endpoint runs more than ~20 queries for one page (an N+1 sign). List each violation with the query shape and the index that would fix it.
+3. Every list endpoint caps `limit` (no endpoint returns 5 000 items).
+4. The hold-expiry jobs with 2 000 expired holds → finish in batches (§5: batches of 100) and leave nothing behind.
+
+### I. Restart safety (`restart`)
+1. Close the app in the middle of a flow (hold created, payment started) and create a fresh app on the same database → the hold expires on schedule, the webhook for that payment still confirms or refunds correctly, nothing is stuck.
+2. Indexes: on a fresh app, every unique index the data model lists exists (`indexes.spec.ts` covers declarations; this checks the live database after start).
+
+## Diagnose and report
+
+1. `cd backend && npm run test:stress`. Expected: some specs fail. That's the point.
+2. For every failure: reproduce it alone, read the code, and find the **cause** with `file:line`. Then decide:
+   - **Probe wrong** (bad setup, wrong expectation, the docs say otherwise) → fix the probe; list it under "Probe corrections".
+   - **Real finding** → keep the probe as a **focused failing reproduction**: move it into `backend/test/stress/findings/<id>-<short-name>.stress-spec.ts` with a header comment: finding id (`S-01`…), severity, the rule it breaks (quote it), the cause (`file:line`), and a one-line suggested fix. It must fail today and pass once the bug is fixed.
+3. Severity:
+   - **CRITICAL**: money or inventory wrong (oversell, double charge/refund, lost refund), another user's data readable or changeable, privilege escalation, data corruption.
+   - **HIGH**: a 500/crash/unhandled rejection, a booking or payment stuck in a state forever, partial writes after a failure, an unbounded query.
+   - **MEDIUM**: wrong status code or error code, a documented rule not enforced without data loss, p95 over budget, missing index on a large collection.
+   - **LOW**: inconsistencies (messages, field names) and undocumented behaviour.
+4. Write `docs/qa/stress-report.md`:
+```
+# System stress and failure check — <date>, develop <short sha>
+
+## Summary
+<n> probes in <areas> areas. Findings: CRITICAL <c>, HIGH <h>, MEDIUM <m>, LOW <l>. Invariants broken after any attack: <yes/no>.
+
+## Findings (most serious first: CRITICAL, HIGH, MEDIUM, LOW)
+| ID | Severity | Area | What breaks (one sentence) | Rule broken | Cause | Reproduction |
+| S-03 | CRITICAL | races | 10 parallel holds on 3 seats gave 4 holds | data model §4.1 total = available + held + booked | seat-inventory.ts:88 reads then writes | test/stress/findings/S-03-oversell.stress-spec.ts |
+
+## Load results
+| Endpoint | p50 | p95 | queries/page | COLLSCAN on |
+
+## Undocumented behaviour (Kareem decides)
+## Probe corrections
+## What held up (one line per area)
+```
+**Commit order:** the harness, then each area's specs, then the findings and the report, as below.
+
+## Commits
+
+1. `test(stress): add the whole-system stress harness and invariants (TST-03)`
+2. `test(stress): attack races, lifecycle and access (TST-03)` (areas A–C)
+3. `test(stress): attack input, externals, atomicity and integrity (TST-03)` (areas D–G)
+4. `test(stress): measure load and restart safety (TST-03)` (areas H–I)
+5. `test(stress): keep each finding as a failing reproduction (TST-03)`
+6. `docs(qa): add the system stress report (TST-03)`
+7. `chore(ai): log the TST-03 prompt (TST-03)` (course format, `Related Requirement: TST-03`, prompt copied exactly plus `[Attached: TST03_EXECUTION.md]` and its content)
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 (the stress suite isn't part of it) |
+| G2 | `npx vitest run --reporter=verbose 2>&1 \| grep -c "stress-spec"` and the same with `--config ./vitest.config.e2e.ts` | `0` and `0` |
+| G3 | `npm run test:stress` | runs to the end; the only failing specs are under `test/stress/findings/` |
+| G4 | each findings spec, run alone | fails, with a message naming the broken rule |
+| G5 | the report's counts match the findings folder and the JSON files | equal |
+| G6 | every finding row has severity, rule, cause `file:line`, reproduction path | no empty cell |
+| G7 | `git diff --name-only origin/develop...HEAD` | only `backend/test/stress/**`, `backend/vitest.config.stress.ts`, `backend/package.json` (one script), `.gitignore` (one line), `docs/qa/stress-report.md`, `ai-prompts/kareem.txt` |
+| G8 | `git log --format=%s origin/develop..HEAD` | 7 commits, each ending in `(TST-03)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- **No product code changes** (`backend/src/**`, other modules' tests, `common/`, the fakes, CI, docs except the report). The fixes come afterwards, starting from the reproduction tests.
+- Never call Stripe, FXRatesAPI or Atlas. Everything runs on the in-memory database with the fakes.
+- Never weaken an assertion to turn a real finding green. A probe changes only when it was wrong, and each change is listed.
+- No new package. Stage files by name. Don't push. Don't open a PR.
+
+## Report back (to Kareem, in chat)
+
+- Branch, worktree, commits; the audited `develop` commit; each gate in one line.
+- The summary block, the CRITICAL and HIGH findings in one line each, and the count per area.
+- What you couldn't attack and why.
+
+How the output was used:
+Built the whole-system stress harness and 58 probes in 9 areas on test/TST-03-system-stress-check (from develop), kept 11 findings (S-01 to S-11) as failing reproductions, and wrote docs/qa/stress-report.md. Following the follow-up instructions, each finding went to an Opus agent for a fix design and a Sonnet agent for a test-first implementation on its own fix/TST-03-* branch (5 branches); every reproduction passes on its fix branch. Nothing pushed, no PR.
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+Push and open PRs
+
+How the output was used:
+Pushed test/TST-03-system-stress-check and the five fix/TST-03-* branches and opened one PR per branch into develop (the stress check PR first; the fix PRs build on its harness commit).
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+ok i want you to close them and compine them into one pr and  give me the report here in chat , and finally is the so the stress-app.ts is like an e2e test ?
+
+[Follow-up]
+if the pr didn't pass the ci fix the problem
+
+How the output was used:
+Merged the five fix branches into test/TST-03-stress-check-and-fixes with the stress check, re-ran the stress suite (20/20 files) and npm run verify (3,439 tests), opened one PR into develop and closed PRs #226-#231 in its favour.

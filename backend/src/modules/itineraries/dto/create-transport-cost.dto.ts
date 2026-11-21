@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { TransportMode } from '../schemas/itinerary.schema.js';
+import { MAX_AMOUNT_MINOR } from '../../../common/money/money.js';
 
 /** ITN-16: a transport cost linked to a day of the same itinerary. */
 export class CreateTransportCostDto {
@@ -33,10 +34,10 @@ export class CreateTransportCostDto {
   @IsNotEmpty()
   toCityId!: string;
 
-  @ApiProperty({ example: 30000, minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
+  @ApiProperty({ example: 30000, minimum: 0, maximum: MAX_AMOUNT_MINOR })
   @IsInt()
   @Min(0)
-  @Max(Number.MAX_SAFE_INTEGER)
+  @Max(MAX_AMOUNT_MINOR)
   amountMinor!: number;
 
   @ApiProperty({ example: 'EGP' })

@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { MAX_PRICE_MINOR } from '../../../common/money/money.js';
 import { UpdateAirlineBaggagePolicyDto } from './update-airline-baggage-policy.dto.js';
 import { UpdateAirlineCancellationPolicyDto } from './update-airline-cancellation-policy.dto.js';
 
@@ -14,7 +15,7 @@ describe('UpdateAirlineBaggagePolicyDto', () => {
     { extraBagPriceMinor: 1, maxExtraBagsPerPassenger: 0 },
     { extraBagPriceMinor: 1, maxExtraBagsPerPassenger: 1 },
     {
-      extraBagPriceMinor: Number.MAX_SAFE_INTEGER,
+      extraBagPriceMinor: MAX_PRICE_MINOR,
       maxExtraBagsPerPassenger: Number.MAX_SAFE_INTEGER,
     },
   ])('accepts baggage policy field boundaries: %o', (input) => {

@@ -199,7 +199,7 @@ The supported currencies (GEN-12, ITN-18) are the distinct `currency` values in 
 | `failedLoginAttempts` | int | ✓ | default 0 (ACC-05) |
 | `lockedUntil` | Date \| null | | set to now + 15 min on the 5th consecutive failure |
 
-Indexes: `{ email: 1 }` unique · `{ role: 1, status: 1, createdAt: -1 }` (ACC-14) · `{ 'moderatorOf.providerId': 1 }`
+Indexes: `{ email: 1 }` unique · `{ role: 1, status: 1, createdAt: -1 }` (ACC-14) · `{ 'moderatorOf.providerId': 1 }` · `{ name: 1 }` (blog author-name search, BLG-09)
 
 Rules
 - Admins exist only through the seed (ACC-18). Registration always creates `role: user`.
@@ -361,6 +361,7 @@ Indexes
 - `{ status: 1, holdExpiresAt: 1 }` (expiry job)
 - `{ status: 1, lastDepartureAt: 1 }` (completion job)
 - `{ status: 1, createdAt: -1 }` (admin list, ACC-17)
+- `{ createdAt: -1, _id: -1 }` (unfiltered admin list, ACC-17)
 
 ---
 
@@ -463,6 +464,7 @@ Indexes
 - `{ status: 1, holdExpiresAt: 1 }` (expiry job)
 - `{ status: 1, checkOutDate: 1 }` (completion job)
 - `{ status: 1, createdAt: -1 }` (admin list)
+- `{ createdAt: -1, _id: -1 }` (unfiltered admin list)
 
 #### `reviews`
 | Field | Type | Req | Rules |

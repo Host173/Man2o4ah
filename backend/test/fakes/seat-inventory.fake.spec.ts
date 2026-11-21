@@ -213,6 +213,40 @@ describe('FakeSeatInventory', () => {
       },
     );
 
+    it('confirm refuses a cancelled flight with 409 SEATS_UNAVAILABLE and changes nothing', async () => {
+      const { data, inventory } = setup();
+      await inventory.hold([hold('out', 2), hold('ret', 1)]);
+      data.flight('ret')!.status = 'cancelled';
+
+      await expect(
+        inventory.confirm([hold('out', 2), hold('ret', 1)]),
+      ).rejects.toMatchObject(conflict(ErrorCode.SeatsUnavailable));
+      expect(inventory.counters('out', 'out-eco')).toMatchObject({
+        heldSeats: 2,
+        bookedSeats: 0,
+      });
+      expect(inventory.counters('ret', 'ret-eco')).toMatchObject({
+        heldSeats: 1,
+        bookedSeats: 0,
+      });
+    });
+
+    it('release and returnBooked still work on a cancelled flight', async () => {
+      const { data, inventory } = setup();
+      await inventory.hold([hold('out', 3)]);
+      await inventory.confirm([hold('out', 1)]);
+      data.flight('out')!.status = 'cancelled';
+
+      await inventory.release([hold('out', 2)]);
+      await inventory.returnBooked([hold('out', 1)]);
+
+      expect(inventory.counters('out', 'out-eco')).toMatchObject({
+        availableSeats: 5,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+    });
+
     it('answers INVENTORY_CORRUPTED for an unknown flight', async () => {
       const { inventory } = setup();
       await expect(inventory.confirm([hold('nope', 1)])).rejects.toMatchObject({

@@ -1,13 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, Max, Min, ValidateIf } from 'class-validator';
 import type { BaggagePolicyView } from '../flights.types.js';
+import { MAX_PRICE_MINOR } from '../../../common/money/money.js';
 
 export class UpdateAirlineBaggagePolicyDto implements BaggagePolicyView {
   @ApiProperty({
     type: 'integer',
     nullable: true,
     minimum: 1,
-    maximum: Number.MAX_SAFE_INTEGER,
+    maximum: MAX_PRICE_MINOR,
     example: 2500,
     description:
       'Price per extra bag in USD minor units; null is allowed when maximum is zero',
@@ -15,7 +16,7 @@ export class UpdateAirlineBaggagePolicyDto implements BaggagePolicyView {
   @ValidateIf((_object: object, value: unknown) => value !== null)
   @IsInt()
   @Min(1)
-  @Max(Number.MAX_SAFE_INTEGER)
+  @Max(MAX_PRICE_MINOR)
   extraBagPriceMinor!: number | null;
 
   @ApiProperty({

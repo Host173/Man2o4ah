@@ -28,7 +28,7 @@ interface ActiveBooking {
   segments: { flightId: Types.ObjectId; cabinId: Types.ObjectId }[];
 }
 
-/** `done`: changed by this call. `skipped`: it moved on meanwhile (look again). `failed`: left for a redelivery. */
+/** `done`: changed by this call. `skipped`: it moved on meanwhile (look again). `failed`: gave up after a retry. */
 type Outcome = 'done' | 'skipped' | 'failed';
 
 /**
@@ -36,9 +36,9 @@ type Outcome = 'done' | 'skipped' | 'failed';
  * `confirmed` booking containing it (round trips included) is cancelled at
  * 100% with `cancelledBy: 'provider'` and refunded, and every
  * `pending_payment` one expires. Each booking is handled in its own
- * transaction, so one failure doesn't block the others, and the handler is
- * idempotent: it only touches bookings still confirmed or pending, so a
- * redelivered event finishes what failed and does nothing else.
+ * transaction, so one failure doesn't block the others (a failed booking is
+ * retried once, as the event is never redelivered), and the handler is
+ * idempotent: it only touches bookings still confirmed or pending.
  */
 @Injectable()
 export class FlightProviderCancellationService {
@@ -72,7 +72,7 @@ export class FlightProviderCancellationService {
   async cancelBookingsOf(flightId: string, now: Date): Promise<number> {
     if (!Types.ObjectId.isValid(flightId)) return 0;
     let handled = 0;
-    // Bookings that failed in this run: skipped by the next batches, retried by a redelivery.
+    // Bookings that failed twice in this run: left out of the next batches.
     const failed: Types.ObjectId[] = [];
     for (;;) {
       const batch = await this.bookings
@@ -102,15 +102,21 @@ export class FlightProviderCancellationService {
         .limit(BATCH_SIZE)
         .lean<ActiveBooking[]>();
 
+      let skippedInBatch = 0;
       for (const booking of batch) {
-        const outcome = await this.handle(booking, now);
+        let outcome = await this.handle(booking, now);
+        // S-08: flight.cancelled is never redelivered; try once more now.
+        if (outcome === 'failed') outcome = await this.handle(booking, now);
         if (outcome === 'done') handled += 1;
         if (outcome === 'failed') failed.push(booking._id);
-        // A skipped booking changed status meanwhile (e.g. a payment confirmed
-        // it); it is found again with its new status, so it can't be stranded.
+        if (outcome === 'skipped') skippedInBatch += 1;
       }
 
-      if (batch.length < BATCH_SIZE) return handled;
+      // A skipped booking changed status after the scan (e.g. a payment
+      // confirmed it), so scan again: it is found with its new status unless it
+      // is finished. This ends: a skip means the booking moved forward in GEN-11
+      // (at most two steps), and `failed` ones stay out of the scan.
+      if (batch.length < BATCH_SIZE && skippedInBatch === 0) return handled;
     }
   }
 

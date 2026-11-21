@@ -3,7 +3,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
+import { vi } from 'vitest';
 import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
+import { FakeFxService } from '../../../test/fakes/fx.fake.js';
 import { FakeReferenceDataService } from '../../../test/fakes/reference-data.fake.js';
 import { FakeStorageService } from '../../../test/fakes/storage.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
@@ -12,6 +14,7 @@ import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { FlightsService } from '../flights/flights.service.js';
+import { FxService } from '../fx/fx.service.js';
 import { Events } from '../../common/events/events.js';
 import { ReportTargetType } from '../moderation/ports/reportable-content.port.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -43,10 +46,17 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
   const referenceData = new FakeReferenceDataService();
   const storage = new FakeStorageService();
   const fakeFlights = new FakeFlightsService();
+  const fx = new FakeFxService({
+    rates: { USD: 1, EGP: 50, EUR: 10, JPY: 100 },
+    rateDate: '2026-11-01',
+  });
 
   beforeAll(async () => {
     testApp = await createTestApp({
       imports: [ItinerariesModule],
+      // FxService is looked up from the app (not imported by ItinerariesModule),
+      // so register the FX contract fake as a root provider (ITN-21 budget).
+      providers: [{ provide: FxService, useValue: fx }],
       override: (builder) =>
         builder
           .overrideProvider(ReferenceDataService)
@@ -189,6 +199,18 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       properties: {
         _id: { type: 'string' },
         startDate: { type: 'string', format: 'date' },
+      },
+    });
+    expect(document.paths['/api/itineraries/public/{id}']?.get).toBeDefined();
+    expect(
+      document.paths['/api/itineraries/public/{id}']?.get?.responses['200'],
+    ).toMatchObject({
+      content: {
+        'application/json': {
+          schema: {
+            $ref: '#/components/schemas/PublicItineraryDetailResponseDto',
+          },
+        },
       },
     });
     expect(document.paths['/api/itineraries/{id}']?.get).toBeDefined();
@@ -1688,6 +1710,175 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         expect(bad.status).toBe(400);
         expect(bad.body.code).toBe(ErrorCode.ValidationFailed);
       }
+    });
+  });
+
+  describe('GET /api/itineraries/public/:id (ITN-21)', () => {
+    async function publish(cookie: string, id: string): Promise<void> {
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', cookie)
+        .send({ visibility: ItineraryVisibility.PUBLIC })
+        .expect(200);
+    }
+
+    function openPublic(id: string, cookie?: string) {
+      const call = testApp.http().get(`/api/itineraries/public/${id}`);
+      return cookie ? call.set('Cookie', cookie) : call;
+    }
+
+    it('lets a guest read a public itinerary with author, days, activities and budget', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      const { dayIds, costIds } = await seedTrip(id);
+      await publish(owner.cookie, id);
+
+      const response = await openPublic(id);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        _id: id,
+        ownerId: owner.id,
+        authorName: `Test ${UserRole.USER}`,
+        title: 'Egypt in a week',
+        countryCodes: ['EG'],
+        startDate: validBody.startDate,
+        dayCount: 3,
+        cityIds: ['cairo', 'dubai'],
+      });
+      expect(response.body.days.map((day: { _id: string }) => day._id)).toEqual(
+        dayIds,
+      );
+      expect(response.body.days[0]).toMatchObject({
+        dayNumber: 1,
+        date: '2027-04-01',
+        cityId: 'cairo',
+        activities: [
+          {
+            name: 'cairo 1',
+            images: [{ key: 'cairo-1.jpg', url: storage.urlOf('cairo-1.jpg') }],
+          },
+        ],
+        budgetEntries: [
+          { category: 'food', amountMinor: 1000, currency: 'EGP' },
+        ],
+      });
+      expect(response.body.cityGroups).toHaveLength(3);
+      expect(
+        response.body.transportCosts.map((cost: { _id: string }) => cost._id),
+      ).toEqual(costIds);
+      expect(response.body.budget).toMatchObject({
+        displayCurrency: 'USD',
+        rateDate: '2026-11-01',
+      });
+      for (const key of [
+        'visibility',
+        'isHidden',
+        'authorDeactivated',
+        'createdAt',
+      ]) {
+        expect(response.body).not.toHaveProperty(key);
+      }
+    });
+
+    it('returns the same body to a logged-in user who is not the owner', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const other = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await seedTrip(id);
+      await publish(owner.cookie, id);
+
+      const asGuest = await openPublic(id);
+      const asOther = await openPublic(id, other.cookie);
+
+      expect(asOther.status).toBe(200);
+      expect(asOther.body).toEqual(asGuest.body);
+    });
+
+    it('answers 404 NOT_FOUND for private, hidden, deactivated-author and unknown itineraries', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const privateId = await createOwnedItinerary(owner.cookie);
+      const hiddenId = await createOwnedItinerary(owner.cookie);
+      const deactivatedId = await createOwnedItinerary(owner.cookie);
+      await publish(owner.cookie, hiddenId);
+      await publish(owner.cookie, deactivatedId);
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(hiddenId) },
+        { $set: { isHidden: true } },
+      );
+      await itineraryModel.collection.updateOne(
+        { _id: new Types.ObjectId(deactivatedId) },
+        { $set: { authorDeactivated: true } },
+      );
+
+      for (const id of [
+        privateId,
+        hiddenId,
+        deactivatedId,
+        new Types.ObjectId().toHexString(),
+      ]) {
+        for (const cookie of [undefined, owner.cookie]) {
+          const response = await openPublic(id, cookie);
+          expect(response.status).toBe(404);
+          expect(response.body.code).toBe(ErrorCode.NotFound);
+        }
+      }
+    });
+
+    it('rejects a malformed ID with 400 VALIDATION_FAILED', async () => {
+      const response = await openPublic('not-an-id');
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+
+    it('keeps /public/search working next to /public/:id', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await publish(owner.cookie, id);
+
+      const response = await testApp
+        .http()
+        .get('/api/itineraries/public/search');
+
+      expect(response.status).toBe(200);
+      expect(response.body.total).toBe(1);
+      expect(response.body.items[0]._id).toBe(id);
+    });
+
+    it('still answers 200 with budget null when exchange rates are unavailable', async () => {
+      const down = new FakeFxService();
+      down.setNoRates();
+      vi.spyOn(fx, 'getConverter').mockImplementationOnce(() =>
+        down.getConverter(),
+      );
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await seedTrip(id);
+      await publish(owner.cookie, id);
+
+      const response = await openPublic(id);
+
+      expect(response.status).toBe(200);
+      expect(response.body.budget).toBeNull();
+      expect(response.body.days).toHaveLength(3);
+    });
+
+    it('answers 404 at once when the owner switches the itinerary back to private', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await publish(owner.cookie, id);
+      expect((await openPublic(id)).status).toBe(200);
+
+      await testApp
+        .http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', owner.cookie)
+        .send({ visibility: ItineraryVisibility.PRIVATE })
+        .expect(200);
+
+      expect((await openPublic(id)).status).toBe(404);
     });
   });
 

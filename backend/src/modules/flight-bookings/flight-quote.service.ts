@@ -6,6 +6,7 @@ import {
 import { toDateOnly } from '../../common/dates/date-only.js';
 import type { ErrorDetail } from '../../common/errors/error-body.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { MAX_BOOKING_TOTAL_MINOR } from '../../common/money/money.js';
 import { getPlatformCurrency } from '../../common/money/platform-currency.js';
 import { FlightsService } from '../flights/flights.service.js';
 import type {
@@ -123,6 +124,14 @@ export class FlightQuoteService {
       })),
       request.passengers,
     );
+    if (price.totalMinor > MAX_BOOKING_TOTAL_MINOR) {
+      throw invalid([
+        {
+          field: 'passengers',
+          message: `The total is more than ${MAX_BOOKING_TOTAL_MINOR} minor units, the most one payment can be`,
+        },
+      ]);
+    }
 
     return {
       tripType: request.tripType,

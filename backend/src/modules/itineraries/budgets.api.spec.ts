@@ -1,3 +1,4 @@
+import { MAX_AMOUNT_MINOR } from '../../common/money/money.js';
 import { getModelToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Types } from 'mongoose';
@@ -266,15 +267,19 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
     },
   );
 
-  it('preserves the largest exactly representable integer amount', async () => {
+  it('preserves the largest allowed amount and rejects one more', async () => {
     const response = await addBudget(dayIds[0], {
       ...body,
-      amountMinor: Number.MAX_SAFE_INTEGER,
+      amountMinor: MAX_AMOUNT_MINOR,
     }).expect(201);
-    expect(response.body.amountMinor).toBe(Number.MAX_SAFE_INTEGER);
+    expect(response.body.amountMinor).toBe(MAX_AMOUNT_MINOR);
     expect((await getTrip()).days[0].budgetEntries[0].amountMinor).toBe(
-      Number.MAX_SAFE_INTEGER,
+      MAX_AMOUNT_MINOR,
     );
+    await addBudget(dayIds[0], {
+      ...body,
+      amountMinor: MAX_AMOUNT_MINOR + 1,
+    }).expect(400);
   });
 
   it.each(['category', 'amountMinor', 'currency'] as const)(
@@ -483,6 +488,28 @@ describe('Budgets and budget summary HTTP API (ITN-14, ITN-18)', () => {
       amountMinor: 20,
       currency: 'USD',
     });
+  });
+
+  it('answers 400, not 500, when stored amounts are too large to add up', async () => {
+    const itineraries = t.moduleRef.get<Model<Itinerary>>(
+      getModelToken(Itinerary.name),
+    );
+    // The API caps amounts; old data written before the cap can hold more.
+    await itineraries.updateOne(
+      { _id: new Types.ObjectId(itineraryId) },
+      {
+        $push: {
+          'days.0.activities': {
+            _id: new Types.ObjectId(),
+            name: 'Huge',
+            cost: { amountMinor: 1e300, currency: 'EGP' },
+            images: [],
+          },
+        },
+      },
+    );
+    const response = await summary().expect(400);
+    expect(response.body.code).toBe('VALIDATION_FAILED');
   });
 
   it('sums to a zero, complete summary for an itinerary without amounts', async () => {

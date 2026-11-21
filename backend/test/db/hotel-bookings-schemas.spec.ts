@@ -403,9 +403,10 @@ describe('hotel-bookings schemas', () => {
           plain({ status: 1, holdExpiresAt: 1 }),
           plain({ status: 1, checkOutDate: 1 }),
           plain({ status: 1, createdAt: -1 }),
+          plain({ createdAt: -1, _id: -1 }),
         ]),
       );
-      expect(indexes).toHaveLength(7);
+      expect(indexes).toHaveLength(8);
     });
   });
 

@@ -23,7 +23,10 @@ export async function paginate<T>(
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
-    model.countDocuments(filter),
+    // An unfiltered count would scan the whole collection; the stored count is exact here.
+    Object.keys(filter).length === 0
+      ? model.estimatedDocumentCount()
+      : model.countDocuments(filter),
   ]);
   return toPage(items, total, page, limit);
 }

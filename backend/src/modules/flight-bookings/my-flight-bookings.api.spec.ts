@@ -28,6 +28,7 @@ describe('my flight bookings (FLT-25)', () => {
   let model: Model<FlightBooking>;
   let owner: LoggedInUser;
   let references = 0;
+  const payments = new FakePaymentsService();
 
   beforeAll(async () => {
     t = await createTestApp({
@@ -39,7 +40,7 @@ describe('my flight bookings (FLT-25)', () => {
           .overrideProvider(SeatInventory)
           .useValue(new FakeSeatInventory())
           .overrideProvider(PaymentsService)
-          .useValue(new FakePaymentsService()),
+          .useValue(payments),
     });
     model = t.moduleRef.get<Model<FlightBooking>>(
       getModelToken(FlightBooking.name),
@@ -48,6 +49,7 @@ describe('my flight bookings (FLT-25)', () => {
 
   beforeEach(async () => {
     await clearCollections(t.connection);
+    payments.refunds.length = 0;
     owner = await loginAs(t.connection, UserRole.USER);
   }, HOOK_TIMEOUT);
 
@@ -340,6 +342,69 @@ describe('my flight bookings (FLT-25)', () => {
     });
   });
 
+  describe('the refund on the details (PAY-03)', () => {
+    it('shows a failed refund on a cancelled booking', async () => {
+      const id = await seed('cancelled', 30 * DAY);
+      const refund = await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 10_000,
+        currency: 'USD',
+        reason: 'user_cancellation',
+      });
+      payments.setStatus(refund.refundId, 'failed');
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toEqual({ ...refund, status: 'failed' });
+    });
+
+    it('shows a late-payment refund on an expired booking with no cancellation', async () => {
+      const id = await seed('expired', 30 * DAY);
+      await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 20_000,
+        currency: 'USD',
+        reason: 'late_payment',
+      });
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'late_payment',
+        status: 'pending',
+      });
+      expect(res.body.cancellation).toBeUndefined();
+    });
+
+    it('shows a refunded provider cancellation', async () => {
+      const id = await seed('cancelled', 30 * DAY);
+      const refund = await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 20_000,
+        currency: 'USD',
+        reason: 'provider_cancellation',
+      });
+      payments.setStatus(refund.refundId, 'refunded');
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'provider_cancellation',
+        status: 'refunded',
+      });
+    });
+
+    it('answers refund null when none was issued', async () => {
+      const id = await seed('confirmed', 30 * DAY);
+
+      const res = await details(id).expect(200);
+      expect(res.body).toHaveProperty('refund', null);
+    });
+  });
+
   it('documents both routes in Swagger with their requirement ID', () => {
     const document = SwaggerModule.createDocument(
       t.app,
@@ -351,5 +416,8 @@ describe('my flight bookings (FLT-25)', () => {
     expect(document.paths['/api/flight-bookings/{id}']?.get?.summary).toMatch(
       /^FLT-25 /,
     );
+    expect(
+      document.components?.schemas?.MyFlightBookingResponseDto,
+    ).toHaveProperty('properties.refund');
   });
 });

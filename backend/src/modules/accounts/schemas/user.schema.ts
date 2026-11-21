@@ -137,3 +137,5 @@ export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ role: 1, status: 1, createdAt: -1 });
 UserSchema.index({ 'moderatorOf.providerId': 1 });
+// Author-name search (BLG-09) scans index keys, not documents.
+UserSchema.index({ name: 1 });

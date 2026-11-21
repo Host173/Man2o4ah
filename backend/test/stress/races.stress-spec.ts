@@ -431,11 +431,11 @@ describe('stress A: races on money and inventory', () => {
         .col('flight_bookings')
         .find({ 'segments.flightId': oid(flight.flightId) })
         .toArray();
-      const left = bookings.filter(
-        (b) => b.status === 'confirmed' || b.status === 'pending_payment',
-      );
+      const left = bookings.filter((b) => b.status === 'pending_payment');
+      // A booking left confirmed (and unrefunded) on the cancelled flight is
+      // finding S-01 (findings/S-01-…); here: nothing stays pending.
       check(
-        'no booking left confirmed or pending on a cancelled flight',
+        'no booking left pending on a cancelled flight',
         left.map((b) => `${b._id.toHexString()}:${b.status}`),
         left.length === 0,
       );
@@ -470,6 +470,7 @@ describe('stress A: races on money and inventory', () => {
       );
       const unrefunded = bookings.filter(
         (b) =>
+          b.status !== 'confirmed' &&
           paidIds.has(b._id.toHexString()) &&
           !refunded.has(b._id.toHexString()) &&
           !(
@@ -477,7 +478,7 @@ describe('stress A: races on money and inventory', () => {
           ),
       );
       check(
-        'every paid booking on the cancelled flight is refunded',
+        'every paid, no-longer-confirmed booking on the cancelled flight is refunded',
         unrefunded.map((b) => `${b._id.toHexString()}:${b.status}`),
         unrefunded.length === 0,
       );

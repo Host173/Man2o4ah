@@ -102,15 +102,19 @@ export class FlightProviderCancellationService {
         .limit(BATCH_SIZE)
         .lean<ActiveBooking[]>();
 
+      let skippedInBatch = 0;
       for (const booking of batch) {
         const outcome = await this.handle(booking, now);
         if (outcome === 'done') handled += 1;
         if (outcome === 'failed') failed.push(booking._id);
-        // A skipped booking changed status meanwhile (e.g. a payment confirmed
-        // it); it is found again with its new status, so it can't be stranded.
+        if (outcome === 'skipped') skippedInBatch += 1;
       }
 
-      if (batch.length < BATCH_SIZE) return handled;
+      // A skipped booking changed status after the scan (e.g. a payment
+      // confirmed it), so scan again: it is found with its new status unless it
+      // is finished. This ends: a skip means the booking moved forward in GEN-11
+      // (at most two steps), and `failed` ones stay out of the scan.
+      if (batch.length < BATCH_SIZE && skippedInBatch === 0) return handled;
     }
   }
 

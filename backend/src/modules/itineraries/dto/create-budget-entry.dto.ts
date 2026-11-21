@@ -10,6 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { BudgetCategory } from '../schemas/itinerary.schema.js';
+import { MAX_AMOUNT_MINOR } from '../../../common/money/money.js';
 
 /** ITN-14: a non-negative budget amount for one day and category. */
 export class CreateBudgetEntryDto {
@@ -20,10 +21,10 @@ export class CreateBudgetEntryDto {
   @IsEnum(BudgetCategory)
   category!: BudgetCategory;
 
-  @ApiProperty({ example: 1500, minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
+  @ApiProperty({ example: 1500, minimum: 0, maximum: MAX_AMOUNT_MINOR })
   @IsInt()
   @Min(0)
-  @Max(Number.MAX_SAFE_INTEGER)
+  @Max(MAX_AMOUNT_MINOR)
   amountMinor!: number;
 
   @ApiProperty({ example: 'EGP' })

@@ -7,6 +7,7 @@ import { FakeRoomNightInventory } from '../../../test/fakes/room-night-inventory
 import { loginAs } from '../../../test/support/auth.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { MAX_PRICE_MINOR } from '../../common/money/money.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { HotelsService } from '../hotels/hotels.service.js';
@@ -17,6 +18,8 @@ import { HotelReservation } from './schemas/hotel-reservation.schema.js';
 const HOTEL = '6553a1f0c2b4e8a9d0f1a701';
 const ROOM = '6553a1f0c2b4e8a9d0f1a702';
 const SUITE = '6553a1f0c2b4e8a9d0f1a703';
+const HUGE = '6553a1f0c2b4e8a9d0f1a704';
+const DEAR = '6553a1f0c2b4e8a9d0f1a705';
 
 const hotels = new FakeHotelsService({
   hotels: [
@@ -35,14 +38,20 @@ const hotels = new FakeHotelsService({
       ratingSummary: { average: null, count: 0 },
     },
   ],
-  rooms: [ROOM, SUITE].map((id, i) => ({
+  rooms: [ROOM, SUITE, HUGE, DEAR].map((id, i) => ({
     id,
     hotelId: HOTEL,
     name: `10${i + 1}`,
     type: 'Double',
     beds: 1,
     maxOccupancy: 2,
-    pricePerNightMinor: 10_000,
+    // Old data can hold a price past the cap; the stay total must still be a 400.
+    pricePerNightMinor:
+      id === HUGE
+        ? Number.MAX_SAFE_INTEGER
+        : id === DEAR
+          ? MAX_PRICE_MINOR
+          : 10_000,
     isActive: true,
     availability: [
       { fromDate: toDateOnly('2027-01-01'), toDate: toDateOnly('2027-12-31') },
@@ -159,6 +168,30 @@ describe('POST /api/hotel-bookings (HTL-16, HTL-18)', () => {
     expect(res.body.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'rooms[0]' })]),
     );
+  });
+
+  it('answers 400, not 500, when the stay total overflows a safe integer', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const res = await t
+      .http()
+      .post(URL)
+      .set('Cookie', user.cookie)
+      .send(body(HUGE));
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+  });
+
+  it('answers 400 on checkOutDate when the total is more than one payment can be', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const res = await t
+      .http()
+      .post(URL)
+      .set('Cookie', user.cookie)
+      .send({ ...body(DEAR), checkOutDate: '2027-03-22' }); // 12 nights
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      expect.objectContaining({ field: 'checkOutDate' }),
+    ]);
   });
 
   it('answers 409 ROOMS_UNAVAILABLE when the room is already held for those nights', async () => {

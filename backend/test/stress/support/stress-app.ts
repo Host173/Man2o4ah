@@ -15,6 +15,7 @@ import { HealthModule } from '../../../src/health/health.module.js';
 import { AccountsModule } from '../../../src/modules/accounts/accounts.module.js';
 import { AccountsSeedModule } from '../../../src/modules/accounts/seed/accounts-seed.module.js';
 import { AdminSeedService } from '../../../src/modules/accounts/seed/admin-seed.service.js';
+import { HealthModule } from '../../../src/health/health.module.js';
 import { AdminModule } from '../../../src/modules/admin/admin.module.js';
 import { AuditModule } from '../../../src/modules/audit/audit.module.js';
 import { BlogModule } from '../../../src/modules/blog/blog.module.js';
@@ -405,6 +406,7 @@ export async function createStressApp(
     imports: [
       HealthModule,
       AccountsSeedModule,
+      HealthModule,
       ReferenceDataModule,
       FlightsModule,
       FlightBookingsModule,

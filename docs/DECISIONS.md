@@ -94,6 +94,7 @@ Infrastructure (not domain modules):
 ## 9. Data conventions (from the data model)
 
 - **Money:** integers in minor units (`priceMinor`). **Platform currency: USD** (PAY-04; to be confirmed in the team review).
+- **Money limits (stress finding S-04):** one priced unit (cabin seat, room night, extra bag) is at most 10,000,000 minor units ($100,000.00); one booking total is at most 99,999,999 (Stripe's per-charge maximum); a booking has at most 9 passengers (infants included) or 9 rooms; one itinerary amount is at most 1,000,000,000,000 in its own currency's minor units. Over a limit is a 400; a sum or product that is not a safe integer is a 400 too (`AmountOverflowError`). Existing data over a cap is not migrated; quoting it answers 400.
 - **Times:** instants in UTC; calendar dates stored as midnight UTC (`DateOnly`); "today" for date-only rules is the UTC date. Flight times are entered and shown in the airport's local time.
 - **Snapshots:** bookings copy prices and provider policies at hold time; refunds use the snapshot.
 - **Concurrency:** seats are held with one atomic conditional update on the cabin; rooms are held with one `room_nights` document per room per night (unique index). Status changes are conditional updates (`{ _id, status: from }`).

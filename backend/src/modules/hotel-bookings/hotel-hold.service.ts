@@ -5,6 +5,7 @@ import type { Connection, Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import type { ErrorDetail } from '../../common/errors/error-body.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { MAX_BOOKING_TOTAL_MINOR } from '../../common/money/money.js';
 import { getPlatformCurrency } from '../../common/money/platform-currency.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import type { RoomView } from '../hotels/hotels.types.js';
@@ -89,6 +90,14 @@ export class HotelHoldService {
     );
     const chosen = request.rooms.map((r) => roomsById.get(r.roomId)!);
     const price = priceStay(checkInDate, checkOutDate, chosen);
+    if (price.totalMinor > MAX_BOOKING_TOTAL_MINOR) {
+      throw invalid([
+        {
+          field: 'checkOutDate',
+          message: `The total is more than ${MAX_BOOKING_TOTAL_MINOR} minor units, the most one payment can be`,
+        },
+      ]);
+    }
     const rooms: HeldRoom[] = request.rooms.map((requested, i) => ({
       roomId: requested.roomId,
       roomName: chosen[i].name,

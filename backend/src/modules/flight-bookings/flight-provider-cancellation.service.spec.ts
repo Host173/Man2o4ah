@@ -222,28 +222,16 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
     expect(events.payloadsOf(Events.FlightBookingCancelled)).toHaveLength(1);
   });
 
-  it('keeps going when one booking fails, and a redelivery finishes it', async () => {
+  // S-08: flight.cancelled is never redelivered, so a failed booking is tried once more.
+  it('retries a booking that fails once, so every booking ends cancelled', async () => {
     const first = await seed();
     const second = await seed();
-    const failure = new Error('Seat inventory unavailable');
-    vi.spyOn(seats, 'returnBooked').mockRejectedValueOnce(failure);
+    vi.spyOn(seats, 'returnBooked').mockRejectedValueOnce(
+      new Error('Seat inventory unavailable'),
+    );
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-    await service.cancelBookingsOf(OUT, NOW);
-
-    const statuses = [
-      (await find(first.id))?.status,
-      (await find(second.id))?.status,
-    ];
-    expect(statuses).toHaveLength(2);
-    expect(statuses).toEqual(
-      expect.arrayContaining(['cancelled', 'confirmed']),
-    );
-    // The failed booking was rolled back: seats and refunds belong to the cancelled one only.
-    expect(counters(OUT, OUT_ECO)).toMatchObject({ bookedSeats: 2 });
-    expect(payments.refunds).toHaveLength(1);
-
-    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(2);
 
     expect((await find(first.id))?.status).toBe('cancelled');
     expect((await find(second.id))?.status).toBe('cancelled');
@@ -252,6 +240,28 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
       availableSeats: 50,
     });
     expect(payments.refunds).toHaveLength(2);
+  });
+
+  it('parks a booking that fails twice and finishes the others', async () => {
+    const first = await seed();
+    const second = await seed();
+    vi.spyOn(seats, 'returnBooked')
+      .mockRejectedValueOnce(new Error('Seat inventory unavailable'))
+      .mockRejectedValueOnce(new Error('Seat inventory unavailable'));
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+
+    const statuses = [
+      (await find(first.id))?.status,
+      (await find(second.id))?.status,
+    ];
+    expect(statuses).toEqual(
+      expect.arrayContaining(['cancelled', 'confirmed']),
+    );
+    // The parked booking was rolled back: seats and refunds belong to the cancelled one only.
+    expect(counters(OUT, OUT_ECO)).toMatchObject({ bookedSeats: 2 });
+    expect(payments.refunds).toHaveLength(1);
   });
 
   it('keeps the cancellation, notifies and carries on if a refund request throws', async () => {
@@ -287,6 +297,78 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
     });
     expect(payments.refunds).toHaveLength(1);
     expect(events.payloadsOf(Events.FlightBookingCancelled)).toHaveLength(1);
+  });
+
+  describe('a booking that moves on between the scan and its expiry', () => {
+    // Runs `change` once, right before the handler opens its transaction: after
+    // the scan saw the booking as pending_payment, like a payment would.
+    function movesOnAfterTheScan(change: () => Promise<void>) {
+      const startSession = t.connection.startSession.bind(t.connection);
+      vi.spyOn(t.connection, 'startSession').mockImplementationOnce(
+        async (options) => {
+          await change();
+          return startSession(options);
+        },
+      );
+    }
+    const items = [{ flightId: OUT, cabinId: OUT_ECO, seats: 2 }];
+
+    it('re-handles a booking a payment confirmed between the scan and its expiry', async () => {
+      const booking = await seed({ status: 'pending_payment' });
+      movesOnAfterTheScan(async () => {
+        await bookings.updateOne(
+          { _id: booking._id },
+          {
+            $set: {
+              status: 'confirmed',
+              reference: 'FBRACE01',
+              confirmedAt: NOW,
+            },
+          },
+        );
+        await seats.confirm(items);
+      });
+
+      await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+
+      const saved = await find(booking.id);
+      expect(saved?.status).toBe('cancelled');
+      expect(saved?.cancellation).toMatchObject({
+        cancelledBy: 'provider',
+        refundPercent: 100,
+        refundAmountMinor: 40_000,
+      });
+      expect(payments.refunds).toEqual([
+        expect.objectContaining({
+          bookingId: booking.id,
+          amountMinor: 40_000,
+          reason: 'provider_cancellation',
+        }),
+      ]);
+      expect(events.payloadsOf(Events.FlightBookingCancelled)).toEqual([
+        { bookingId: booking.id, userId: USER, reference: 'FBRACE01' },
+      ]);
+      expect(counters(OUT, OUT_ECO)).toMatchObject({
+        bookedSeats: 0,
+        availableSeats: 50,
+      });
+    });
+
+    it('stops when the booking that moved on is finished, without refunds or events', async () => {
+      const booking = await seed({ status: 'pending_payment' });
+      movesOnAfterTheScan(async () => {
+        await bookings.updateOne(
+          { _id: booking._id },
+          { $set: { status: 'expired', expiredAt: NOW } },
+        );
+      });
+
+      await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(0);
+
+      expect((await find(booking.id))?.status).toBe('expired');
+      expect(payments.refunds).toHaveLength(0);
+      expect(events.emitted).toHaveLength(0);
+    });
   });
 
   it('handles the flight.cancelled event', async () => {

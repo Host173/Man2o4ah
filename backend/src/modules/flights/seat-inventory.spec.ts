@@ -15,6 +15,7 @@ describe('SeatInventory unit', () => {
     updateOne: vi.fn(() => ({
       exec: vi.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
     })),
+    findOne: vi.fn(),
   };
   let moduleRef: TestingModule;
   let inventory: SeatInventory;
@@ -125,6 +126,89 @@ describe('SeatInventory unit', () => {
     ).rejects.toMatchObject({
       response: { code: ErrorCode.SeatsUnavailable },
     });
+  });
+
+  describe('seat movement and the flight status', () => {
+    const item = {
+      flightId: flightId.toHexString(),
+      cabinId: cabinId.toHexString(),
+      seats: 2,
+    };
+    const unmodified = {
+      exec: vi.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+    };
+
+    function mockFollowUp(flight: { status: string } | null) {
+      const query = {
+        session: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        lean: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockResolvedValue(flight),
+      };
+      model.findOne.mockReturnValue(query);
+      return query;
+    }
+
+    it('only confirms held seats on a scheduled flight', async () => {
+      await inventory.confirm([item], { session });
+
+      expect(model.updateOne).toHaveBeenCalledWith(
+        {
+          _id: flightId,
+          status: 'scheduled',
+          cabins: { $elemMatch: { _id: cabinId, heldSeats: { $gte: 2 } } },
+        },
+        {
+          $inc: { 'cabins.$.heldSeats': -2, 'cabins.$.bookedSeats': 2 },
+        },
+        { session },
+      );
+    });
+
+    it.each(['release', 'returnBooked'] as const)(
+      '%s does not look at the flight status',
+      async (method) => {
+        await inventory[method]([item], { session });
+
+        expect(model.updateOne).toHaveBeenCalledWith(
+          expect.not.objectContaining({ status: expect.anything() }),
+          expect.anything(),
+          { session },
+        );
+      },
+    );
+
+    it('reports SEATS_UNAVAILABLE when the flight is no longer scheduled', async () => {
+      model.updateOne.mockReturnValue(unmodified);
+      const query = mockFollowUp({ status: 'cancelled' });
+
+      await expect(
+        inventory.confirm([item], { session }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: ErrorCode.SeatsUnavailable },
+      });
+      expect(model.findOne).toHaveBeenCalledWith({ _id: flightId });
+      expect(query.session).toHaveBeenCalledWith(session);
+    });
+
+    it.each([
+      ['a scheduled flight', { status: 'scheduled' }],
+      ['a missing flight', null],
+    ])(
+      'reports corrupted inventory when the flight is %s',
+      async (_name, flight) => {
+        model.updateOne.mockReturnValue(unmodified);
+        mockFollowUp(flight);
+
+        await expect(
+          inventory.confirm([item], { session }),
+        ).rejects.toMatchObject({
+          status: 500,
+          response: { code: ErrorCode.InventoryCorrupted },
+        });
+      },
+    );
   });
 
   it('does not issue updates for an empty item list', async () => {

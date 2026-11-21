@@ -251,9 +251,10 @@ describe('accounts schemas', () => {
           { key: { email: 1 }, unique: true },
           { key: { role: 1, status: 1, createdAt: -1 }, unique: false },
           { key: { 'moderatorOf.providerId': 1 }, unique: false },
+          { key: { name: 1 }, unique: false },
         ]),
       );
-      expect(indexes).toHaveLength(4);
+      expect(indexes).toHaveLength(5);
     });
   });
 

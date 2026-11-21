@@ -33,6 +33,7 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { email: 1 }, unique: true },
     { key: { role: 1, status: 1, createdAt: -1 } },
     { key: { 'moderatorOf.providerId': 1 } },
+    { key: { name: 1 } },
   ],
   // expiresAt is capped at absoluteExpiresAt, so one TTL index still suffices.
   sessions: [{ key: { userId: 1 } }, { key: { expiresAt: 1 }, ttl: 0 }],
@@ -62,6 +63,7 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { status: 1, holdExpiresAt: 1 } },
     { key: { status: 1, lastDepartureAt: 1 } },
     { key: { status: 1, createdAt: -1 } },
+    { key: { createdAt: -1, _id: -1 } },
   ],
   // 3.5 hotels
   hotels: [
@@ -87,6 +89,7 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { status: 1, holdExpiresAt: 1 } },
     { key: { status: 1, checkOutDate: 1 } },
     { key: { status: 1, createdAt: -1 } },
+    { key: { createdAt: -1, _id: -1 } },
   ],
   reviews: [
     { key: { reservationId: 1 }, unique: true },

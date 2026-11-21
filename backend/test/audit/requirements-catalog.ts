@@ -45,9 +45,19 @@ const fe = (id: string, note: string): CatalogEntry => ({
 export const CATALOG: CatalogEntry[] = [
   // Accounts & Admin
   api('ACC-01', 'accounts', op('POST', '/api/auth/register')),
-  api('ACC-04', 'accounts', op('POST', '/api/auth/login'), op('GET', '/api/auth/me')),
+  api(
+    'ACC-04',
+    'accounts',
+    op('POST', '/api/auth/login'),
+    op('GET', '/api/auth/me'),
+  ),
   api('ACC-05', 'accounts', op('POST', '/api/auth/login')),
-  api('ACC-06', 'accounts', op('POST', '/api/auth/logout'), op('POST', '/api/auth/refresh')),
+  api(
+    'ACC-06',
+    'accounts',
+    op('POST', '/api/auth/logout'),
+    op('POST', '/api/auth/refresh'),
+  ),
   api(
     'ACC-07a',
     'admin',
@@ -55,7 +65,12 @@ export const CATALOG: CatalogEntry[] = [
     op('PATCH', '/api/auth/change-password'),
   ),
   api('ACC-08', 'accounts', op('PATCH', '/api/auth/change-password')),
-  api('ACC-09', 'accounts', op('GET', '/api/users/me'), op('PATCH', '/api/users/me')),
+  api(
+    'ACC-09',
+    'accounts',
+    op('GET', '/api/users/me'),
+    op('PATCH', '/api/users/me'),
+  ),
   fe('ACC-10', 'Frontend: send guests to login and back (backend returns 401)'),
   api(
     'ACC-11',
@@ -82,7 +97,12 @@ export const CATALOG: CatalogEntry[] = [
   ),
   api('ACC-17', 'admin', op('GET', '/api/admin/bookings')),
   api('ACC-18', 'accounts', op('POST', '/api/auth/login')),
-  api('ACC-19', 'accounts', op('POST', '/api/auth/login'), op('GET', '/api/auth/me')),
+  api(
+    'ACC-19',
+    'accounts',
+    op('POST', '/api/auth/login'),
+    op('GET', '/api/auth/me'),
+  ),
 
   // Flights
   api(
@@ -146,7 +166,12 @@ export const CATALOG: CatalogEntry[] = [
     op('GET', '/api/flights/{id}/bookings'),
     op('GET', '/api/flights/{id}/passengers/export'),
   ),
-  api('FLT-30', 'flights', op('GET', '/api/flights/{id}'), op('GET', '/api/flights/search')),
+  api(
+    'FLT-30',
+    'flights',
+    op('GET', '/api/flights/{id}'),
+    op('GET', '/api/flights/search'),
+  ),
 
   // Hotels
   api(
@@ -163,7 +188,11 @@ export const CATALOG: CatalogEntry[] = [
     op('POST', '/api/hotels/{id}/rooms'),
     op('GET', '/api/hotels/{id}/rooms'),
   ),
-  api('HTL-04', 'hotels', op('POST', '/api/hotels/{id}/rooms/{roomId}/availability')),
+  api(
+    'HTL-04',
+    'hotels',
+    op('POST', '/api/hotels/{id}/rooms/{roomId}/availability'),
+  ),
   api(
     'HTL-05',
     'hotels',
@@ -256,8 +285,16 @@ export const CATALOG: CatalogEntry[] = [
     op('POST', '/api/itineraries/{id}/days'),
     op('PATCH', '/api/itineraries/{id}/days/{dayId}'),
   ),
-  api('ITN-07', 'itineraries', op('DELETE', '/api/itineraries/{id}/days/{dayId}')),
-  api('ITN-08', 'itineraries', op('PATCH', '/api/itineraries/{id}/days/reorder')),
+  api(
+    'ITN-07',
+    'itineraries',
+    op('DELETE', '/api/itineraries/{id}/days/{dayId}'),
+  ),
+  api(
+    'ITN-08',
+    'itineraries',
+    op('PATCH', '/api/itineraries/{id}/days/reorder'),
+  ),
   api('ITN-09', 'itineraries', op('GET', '/api/itineraries/{id}')),
   api(
     'ITN-10',
@@ -312,7 +349,12 @@ export const CATALOG: CatalogEntry[] = [
   api('BLG-01', 'blog', op('POST', '/api/posts')),
   api('BLG-02', 'blog', op('GET', '/api/posts'), op('GET', '/api/posts/{id}')),
   api('BLG-03', 'blog', op('GET', '/api/posts/mine')),
-  api('BLG-04', 'blog', op('PATCH', '/api/posts/{id}'), op('DELETE', '/api/posts/{id}')),
+  api(
+    'BLG-04',
+    'blog',
+    op('PATCH', '/api/posts/{id}'),
+    op('DELETE', '/api/posts/{id}'),
+  ),
   api(
     'BLG-05',
     'blog',
@@ -331,7 +373,12 @@ export const CATALOG: CatalogEntry[] = [
     op('PATCH', '/api/comments/{id}'),
     op('DELETE', '/api/comments/{id}'),
   ),
-  api('BLG-08', 'blog', op('GET', '/api/tags/{tag}/posts'), op('PATCH', '/api/posts/{id}')),
+  api(
+    'BLG-08',
+    'blog',
+    op('GET', '/api/tags/{tag}/posts'),
+    op('PATCH', '/api/posts/{id}'),
+  ),
   api('BLG-09', 'blog', op('GET', '/api/posts')),
   api(
     'BLG-10',
@@ -352,8 +399,20 @@ export const CATALOG: CatalogEntry[] = [
   api('GEN-02', 'common', op('POST', '/api/auth/register')),
   fe('GEN-03', 'Frontend: confirmation dialogs'),
   fe('GEN-04', 'Frontend: empty states'),
-  api('GEN-05', 'common', op('GET', '/api/posts'), op('GET', '/api/admin/accounts')),
-  api('GEN-06', 'flights', op('GET', '/api/flights/{id}'), op('GET', '/api/flights/search')),
+  api(
+    'GEN-05',
+    'common',
+    op('GET', '/api/posts'),
+    op('GET', '/api/admin/accounts'),
+    op('GET', '/api/posts/{id}/comments'),
+  ),
+  api(
+    'GEN-06',
+    'flights',
+    op('GET', '/api/flights/{id}'),
+    op('GET', '/api/flights/search'),
+    op('GET', '/api/flight-bookings/{id}/e-ticket'),
+  ),
   api('GEN-07', 'admin', op('GET', '/api/admin/audit-logs')),
   api(
     'GEN-08',

@@ -24,6 +24,7 @@
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "test:stress": "vitest run --config ./vitest.config.stress.ts",
+    "test:audit": "vitest run --config ./vitest.config.audit.ts",
     "seed:reference": "nest build && node dist/seed/seed-reference-data.js",
     "seed:admin": "nest build && node dist/seed/seed-admin.js",
     "seed:demo": "nest build && node dist/seed/seed-demo-data.js",

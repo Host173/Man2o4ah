@@ -72,7 +72,7 @@ export class FlightBookingsController {
   @ApiOperation({
     summary: 'FLT-19 Price a flight booking and show its summary (FLT-21)',
     description:
-      'Validates the passengers and baggage against the selected flights and returns the summary. Nothing is saved; POST /flight-bookings/hold reserves the seats.',
+      'Validates the passengers and baggage against the selected flights and returns the summary. Nothing is saved; POST /flight-bookings/hold reserves the seats. All prices are in the single platform currency, USD (PAY-04).',
   })
   @ApiOkResponse({ type: FlightQuoteResponseDto })
   @ApiBadRequestResponse({
@@ -131,6 +131,8 @@ export class FlightBookingsController {
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
     summary: 'FLT-25 Show the full details of my flight booking',
+    description:
+      'Only the owner can see a booking, in any status; anyone else gets 404 (ACC-11). The status shows the booking lifecycle: pending_payment, confirmed, cancelled, expired or completed (GEN-11).',
   })
   @ApiOkResponse({ type: MyFlightBookingResponseDto })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })

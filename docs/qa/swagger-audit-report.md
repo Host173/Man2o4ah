@@ -197,3 +197,5 @@ Decisions taken while fixing:
 - **Malformed ids answer 400, not 404.** `backend.md:78` and every other `:id` route answer 400 `VALIDATION_FAILED`, and a 400 reveals nothing about other users' bookings. The 4 existing specs that expected 404 for `abc` now expect 400; unknown and other-user ids still answer 404 (ACC-11).
 - **GET /api/itineraries/{id}/flights returns `_id`, not `id`** (approved by Kareem), so it matches GET /api/flights/search and the id contract.
 - **`hotels.contract.spec.ts` is deleted.** Its only test pinned the INV-02 stub, which no longer exists. A new API spec covers HTL-08 on the real hotels service, which the fake-based moderator spec could not.
+
+Re-run on the merged branch `test/TST-02-swagger-audit-and-fixes`: coverage 732 checks, 0 failed; smoke 539 probes, 0 failed; all 97 API-testable requirements pass. `npm run verify` passes (211 files / 3,455 tests, 48 e2e tests).

@@ -346,6 +346,7 @@ describe('my flight bookings (FLT-25)', () => {
     it('shows a failed refund on a cancelled booking', async () => {
       const id = await seed('cancelled', 30 * DAY);
       const refund = await payments.refund({
+        userId: owner.id,
         bookingType: 'flight',
         bookingId: id,
         amountMinor: 10_000,
@@ -361,6 +362,7 @@ describe('my flight bookings (FLT-25)', () => {
     it('shows a late-payment refund on an expired booking with no cancellation', async () => {
       const id = await seed('expired', 30 * DAY);
       await payments.refund({
+        userId: owner.id,
         bookingType: 'flight',
         bookingId: id,
         amountMinor: 20_000,
@@ -379,6 +381,7 @@ describe('my flight bookings (FLT-25)', () => {
     it('shows a refunded provider cancellation', async () => {
       const id = await seed('cancelled', 30 * DAY);
       const refund = await payments.refund({
+        userId: owner.id,
         bookingType: 'flight',
         bookingId: id,
         amountMinor: 20_000,

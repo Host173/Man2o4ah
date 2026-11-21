@@ -231,6 +231,7 @@ describe('HotelReservationsService (HTL-20)', () => {
       checkOutDate: '2027-07-02',
     });
     const refund = await payments.refund({
+      userId: USER_A,
       bookingType: 'hotel',
       bookingId: cancelled._id.toHexString(),
       amountMinor: 10_000,

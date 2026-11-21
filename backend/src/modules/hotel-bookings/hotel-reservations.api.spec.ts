@@ -477,10 +477,12 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     }
 
     const refundRequest = (
+      userId: string,
       bookingId: string,
       reason: 'user_cancellation' | 'provider_cancellation' | 'late_payment',
       amountMinor = 10_000,
     ) => ({
+      userId,
       bookingType: 'hotel' as const,
       bookingId,
       amountMinor,
@@ -493,7 +495,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       const row = await seedStatus(owner.id, HotelReservationStatus.CANCELLED);
       const id = row._id.toHexString();
       const refund = await payments.refund(
-        refundRequest(id, 'user_cancellation'),
+        refundRequest(owner.id, id, 'user_cancellation'),
       );
       payments.setStatus(refund.refundId, 'failed');
 
@@ -505,7 +507,9 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       const owner = await loginAs(t.connection, UserRole.USER);
       const row = await seedStatus(owner.id, HotelReservationStatus.EXPIRED);
       const id = row._id.toHexString();
-      await payments.refund(refundRequest(id, 'late_payment', 20_000));
+      await payments.refund(
+        refundRequest(owner.id, id, 'late_payment', 20_000),
+      );
 
       const res = await detail(id, owner.cookie).expect(200);
       expect(res.body.refund).toMatchObject({
@@ -520,7 +524,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
       const row = await seedStatus(owner.id, HotelReservationStatus.CANCELLED);
       const id = row._id.toHexString();
       const refund = await payments.refund(
-        refundRequest(id, 'provider_cancellation'),
+        refundRequest(owner.id, id, 'provider_cancellation'),
       );
       payments.setStatus(refund.refundId, 'refunded');
 

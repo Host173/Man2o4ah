@@ -107,7 +107,10 @@ export class FakeSeatInventory implements PublicApi<SeatInventory> {
   }
 
   confirm(items: SeatItem[]): Promise<void> {
-    return this.atomically(items, (_flight, cabin, seats) => {
+    return this.atomically(items, (flight, cabin, seats) => {
+      // Like the real class: a flight that left the schedule is refused (FLT-06);
+      // a flight that doesn't exist is still corrupted inventory.
+      if (flight && flight.status !== 'scheduled') throw seatsUnavailable();
       if (!cabin || cabin.heldSeats < seats) throw inventoryCorrupted();
       cabin.heldSeats -= seats;
       cabin.bookedSeats += seats;

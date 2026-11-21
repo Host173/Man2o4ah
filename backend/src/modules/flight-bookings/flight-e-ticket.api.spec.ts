@@ -222,13 +222,16 @@ describe('GET /api/flight-bookings/:id/e-ticket (FLT-23)', () => {
     expect(res.body.code).toBe(ErrorCode.NotFound);
   });
 
-  it.each([
-    ['an unknown id', () => new Types.ObjectId().toHexString()],
-    ['a malformed id', () => 'not-an-id'],
-  ])('answers 404 NOT_FOUND for %s', async (_label, id) => {
+  it('answers 404 NOT_FOUND for an unknown id', async () => {
     await reseed();
-    const res = await eTicket(id()).expect(404);
+    const res = await eTicket(new Types.ObjectId().toHexString()).expect(404);
     expect(res.body.code).toBe(ErrorCode.NotFound);
+  });
+
+  it('answers 400 VALIDATION_FAILED for a malformed id', async () => {
+    await reseed();
+    const res = await eTicket('not-an-id').expect(400);
+    expect(res.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
   it('answers 409 CONFLICT before the booking is paid', async () => {

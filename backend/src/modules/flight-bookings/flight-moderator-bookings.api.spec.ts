@@ -176,18 +176,14 @@ describe('airline moderator flight bookings (FLT-29)', () => {
     expect(response.text).toBe('Reference,Passenger Name,Cabin,Seats,Status');
   });
 
-  it('hides another airline’s flight, unknown flights and malformed IDs with 404', async () => {
+  it('hides another airline’s flight and unknown flights with 404', async () => {
     const otherModerator = await loginAs(
       t.connection,
       UserRole.AIRLINE_MODERATOR,
       { providerId: OTHER_AIRLINE },
     );
 
-    for (const id of [
-      FLIGHT,
-      new Types.ObjectId().toHexString(),
-      'not-an-object-id',
-    ]) {
+    for (const id of [FLIGHT, new Types.ObjectId().toHexString()]) {
       const response = await list(id, otherModerator).expect(404);
       expect(response.body.code).toBe(ErrorCode.NotFound);
     }
@@ -196,6 +192,14 @@ describe('airline moderator flight bookings (FLT-29)', () => {
       404,
     );
     expect(hiddenExport.body.code).toBe(ErrorCode.NotFound);
+  });
+
+  it('rejects a malformed flight ID with 400 on both routes', async () => {
+    const listed = await list('not-an-object-id').expect(400);
+    expect(listed.body.code).toBe(ErrorCode.ValidationFailed);
+
+    const exported = await exportPassengers('not-an-object-id').expect(400);
+    expect(exported.body.code).toBe(ErrorCode.ValidationFailed);
   });
 
   it('requires an airline moderator and a login', async () => {
@@ -248,5 +252,11 @@ describe('airline moderator flight bookings (FLT-29)', () => {
         status: { enum: ['confirmed', 'cancelled'] },
       },
     });
+    for (const path of [
+      '/api/flights/{id}/bookings',
+      '/api/flights/{id}/passengers/export',
+    ]) {
+      expect(document.paths[path]?.get?.responses).toHaveProperty('400');
+    }
   });
 });

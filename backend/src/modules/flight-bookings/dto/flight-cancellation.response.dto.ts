@@ -35,7 +35,7 @@ class FlightCancellationResponseDto implements FlightCancellation {
   refundAmountMinor!: number;
 }
 
-class FlightRefundResponseDto implements RefundView {
+export class FlightRefundResponseDto implements RefundView {
   @ApiProperty()
   refundId!: string;
 

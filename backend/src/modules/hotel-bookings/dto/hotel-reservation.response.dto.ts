@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CancelledBy } from '../../../common/database/cancellation.schema.js';
 import type { Paginated } from '../../../common/pagination/paginated.js';
+import type { RefundView } from '../../payments/payments.types.js';
 import type {
   HeldRoom,
   HotelReservationCancellationView,
@@ -8,6 +9,7 @@ import type {
   HotelReservationPolicyView,
   HotelReservationSummaryView,
 } from '../hotel-bookings.types.js';
+import { HotelRefundResponseDto } from './hotel-cancellation.response.dto.js';
 import { HotelReservationStatus } from '../schemas/hotel-reservation.schema.js';
 
 export class HotelReservationRoomResponseDto implements HeldRoom {
@@ -168,6 +170,14 @@ export class HotelReservationDetailResponseDto
 
   @ApiPropertyOptional({ type: HotelReservationCancellationResponseDto })
   cancellation?: HotelReservationCancellationResponseDto;
+
+  @ApiProperty({
+    type: HotelRefundResponseDto,
+    nullable: true,
+    description:
+      'PAY-03 refund and its status (pending, refunded, failed); null when no refund was issued',
+  })
+  refund!: RefundView | null;
 
   @ApiProperty({
     type: String,

@@ -38,6 +38,7 @@ import {
 import { ListHotelReviewsQueryDto } from './dto/list-hotel-reviews-query.dto.js';
 import { UpdateHotelReviewDto } from './dto/update-hotel-review.dto.js';
 import type {
+  HotelReviewListItemView,
   HotelReviewView,
   ListHotelReviewsQuery,
 } from './hotel-bookings.types.js';
@@ -120,7 +121,7 @@ export class HotelReviewsController {
   listForHotel(
     @Param('id', ParseObjectIdPipe) hotelId: Types.ObjectId,
     @Query() query: ListHotelReviewsQueryDto,
-  ): Promise<Paginated<HotelReviewView>> {
+  ): Promise<Paginated<HotelReviewListItemView>> {
     const pagination: ListHotelReviewsQuery = {
       page: query.page,
       limit: query.limit,

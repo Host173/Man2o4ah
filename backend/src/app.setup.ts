@@ -7,6 +7,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
 import { validationExceptionFactory } from './common/errors/validation-exception.factory.js';
+import { rejectDeepBodies } from './common/http/body-depth.js';
 
 /**
  * The wiring every request goes through: cookies, the `/api` prefix, the
@@ -32,6 +33,10 @@ export function configureApp(
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors({ origin: options.frontendUrl, credentials: true });
+  // Parse JSON here (Nest then skips its own jsonParser) so the depth check runs right after it,
+  // before guards and pipes. Same parser and 100 kb limit as Nest's default; rawBody kept.
+  app.useBodyParser('json');
+  app.use(rejectDeepBodies);
 
   mkdirSync(options.uploadDir, { recursive: true });
   app.useStaticAssets(resolve(options.uploadDir), { prefix: '/uploads/' });

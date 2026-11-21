@@ -6,12 +6,14 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
+import { notFoundOutsidePrefix } from './common/errors/not-found-outside-prefix.js';
 import { validationExceptionFactory } from './common/errors/validation-exception.factory.js';
 import { rejectDeepBodies } from './common/http/body-depth.js';
 
 /**
  * The wiring every request goes through: cookies, the `/api` prefix, the
- * validation pipe, the error filter, CORS and static `/uploads`.
+ * validation pipe, the error filter, CORS, static `/uploads` and a JSON 404
+ * for every other path outside `/api`.
  *
  * The app must be created with `{ rawBody: true }` (Stripe webhook signatures
  * need the raw request body). Tests call `configureApp` too, so they run with
@@ -40,6 +42,10 @@ export function configureApp(
 
   mkdirSync(options.uploadDir, { recursive: true });
   app.useStaticAssets(resolve(options.uploadDir), { prefix: '/uploads/' });
+
+  // Must stay the last line: Nest only answers unknown paths under `/api`, so
+  // anything else nothing served would get Express's HTML 404.
+  app.use(notFoundOutsidePrefix('api'));
 }
 
 /** Swagger UI at `/api/docs`; the cookie scheme lets Swagger send the login cookie. */

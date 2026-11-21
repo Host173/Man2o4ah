@@ -8,7 +8,7 @@ TST-03 (#222). Branch `test/TST-03-system-stress-check`. Run with `cd backend &&
 
 Findings: CRITICAL 2, HIGH 3, MEDIUM 5, LOW 1 (11 in total). Every one has a failing reproduction under `backend/test/stress/findings/` and a fix on its own branch, where that reproduction passes. Invariants broken after any attack: yes, by S-01 (a paid booking left `confirmed` on a cancelled flight). No oversold seats, double charges or double refunds were found.
 
-Process: each finding was handed, as soon as it was found, to an Opus agent that designed the fix (for S-09 and S-10/S-11 the main session designed it), then to a Sonnet agent that implemented it test-first in its own worktree. None of the fixes is merged, pushed or opened as a PR.
+Process: each finding was handed, as soon as it was found, to an Opus agent that designed the fix (for S-09 and S-10/S-11 the main session designed it), then to a Sonnet agent that implemented it test-first in its own worktree. The fix branches were then merged into one branch, `test/TST-03-stress-check-and-fixes`, with this check, and opened as one PR.
 
 ## Findings and fixes (most serious first)
 
@@ -109,15 +109,23 @@ Volume, written through the models for the test only: 5 000 flights over 60 days
 5. The flight confirmation still lacks the ACC-12 account fence that hotels have (bookings-payments.md §6).
 6. Pending holders on a cancelled flight get no notification ("everyone affected is notified", FLT-06).
 
-## Branches (local only)
+## Branches
 
-| Branch | Base | Fixes |
-|---|---|---|
-| `test/TST-03-system-stress-check` | origin/develop 5514761 | the harness, the probes and the reproductions |
-| `fix/TST-03-S-01-confirmed-on-cancelled-flight` | 79c745a | S-01, S-07, S-08 |
-| `fix/TST-03-S-02-public-itinerary-page` | 79c745a | S-02 |
-| `fix/TST-03-S-03-S-04-S-05-input-hardening` | 79c745a | S-03, S-04, S-05 |
-| `fix/TST-03-S-06-S-09-refund-status-and-review-author` | 79c745a | S-06, S-09 |
-| `fix/TST-03-S-10-S-11-query-performance` | 79c745a | S-10, S-11 |
+Everything ships in one branch, `test/TST-03-stress-check-and-fixes` (from develop 5514761): the stress check plus the five fix branches, merged with `--no-ff` so each fix keeps its own commits.
 
-79c745a is this branch's harness commit on top of develop. Expect a trivial conflict in `test/stress/support/stress-app.ts` (HealthModule added on two branches) and in `flows.ts` (`copy`) when the fix branches are merged together.
+| Fix branch (merged) | Fixes |
+|---|---|
+| `fix/TST-03-S-01-confirmed-on-cancelled-flight` | S-01, S-07, S-08 |
+| `fix/TST-03-S-02-public-itinerary-page` | S-02 |
+| `fix/TST-03-S-03-S-04-S-05-input-hardening` | S-03, S-04, S-05 |
+| `fix/TST-03-S-06-S-09-refund-status-and-review-author` | S-06, S-09 |
+| `fix/TST-03-S-10-S-11-query-performance` | S-10, S-11 |
+
+The merges had no conflicts. One follow-up commit removes a HealthModule import that two branches had both added to `stress-app.ts`.
+
+### Combined run
+
+With every fix merged, on this branch:
+
+- `npm run test:stress`: 20 of 20 spec files and 75 tests pass, 2 skipped (F6, G5). That includes all 11 finding reproductions.
+- `npm run verify`: format, lint, typecheck, 209 test files / 3,439 tests (96.72 % lines) and the build all pass, exit 0.

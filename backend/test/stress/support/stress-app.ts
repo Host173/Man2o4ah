@@ -1,9 +1,18 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { Test } from '@nestjs/testing';
 import type { Connection } from 'mongoose';
 import request from 'supertest';
+import { configureApp } from '../../../src/app.setup.js';
+import { EventsModule } from '../../../src/common/events/events.module.js';
 import { HealthModule } from '../../../src/health/health.module.js';
+import { AccountsModule } from '../../../src/modules/accounts/accounts.module.js';
 import { AccountsSeedModule } from '../../../src/modules/accounts/seed/accounts-seed.module.js';
 import { AdminSeedService } from '../../../src/modules/accounts/seed/admin-seed.service.js';
 import { AdminModule } from '../../../src/modules/admin/admin.module.js';
@@ -40,7 +49,12 @@ import {
   FAKE_STRIPE_SIGNATURE,
   FakeStripeGateway,
 } from '../../fakes/stripe-gateway.fake.js';
-import { createTestApp, type TestApp } from '../../support/test-app.js';
+import {
+  type MemoryMongo,
+  startMemoryMongo,
+} from '../../support/mongo-memory.js';
+import type { TestApp, TestAppOptions } from '../../support/test-app.js';
+import { TEST_CONFIG } from '../../support/test-config.js';
 
 export const DEMO_PASSWORD = 'Demo12345';
 export const ADMIN = { email: 'admin@example.com', password: 'Admin12345' };
@@ -253,6 +267,9 @@ export interface Stress {
     eventId?: string,
   ) => request.Test;
   invariants: (options?: { expiryRanAt?: Date }) => Promise<string[]>;
+  /** The database and upload folder, to start a second app on the same data (area I). */
+  mongo: MemoryMongo;
+  uploadDir: string;
   close: () => Promise<void>;
 }
 
@@ -312,14 +329,79 @@ let userSequence = 0;
  * document, the admin (as ACC-18 does) and PLT-08's demo world through the
  * HTTP API, so every attack starts from the world graders see.
  */
-export async function createStressApp(): Promise<Stress> {
+/**
+ * createTestApp's wiring (test/support/test-app.ts), but on a database the
+ * caller may share: a second app on the same data is a restart (area I).
+ * Only an app that started the database stops it.
+ */
+async function buildApp(
+  mongo: MemoryMongo,
+  uploadDir: string,
+  ownsData: boolean,
+  options: TestAppOptions,
+): Promise<TestApp> {
+  let builder = Test.createTestingModule({
+    imports: [
+      ConfigModule.forRoot({
+        isGlobal: true,
+        ignoreEnvFile: true,
+        load: [() => ({ ...TEST_CONFIG, UPLOAD_DIR: uploadDir })],
+      }),
+      MongooseModule.forRoot(mongo.uri, { dbName: 'test' }),
+      EventEmitterModule.forRoot(),
+      EventsModule,
+      AccountsModule,
+      ...(options.imports ?? []),
+    ],
+  });
+  if (options.override) builder = options.override(builder);
+  const moduleRef = await builder.compile();
+  const app = moduleRef.createNestApplication<NestExpressApplication>({
+    rawBody: true,
+  });
+  configureApp(app, { uploadDir, frontendUrl: TEST_CONFIG.FRONTEND_URL });
+  await app.init();
+  const connection = moduleRef.get<Connection>(getConnectionToken());
+  await Promise.all(Object.values(connection.models).map((m) => m.init()));
+  return {
+    app,
+    moduleRef,
+    connection,
+    http: () => request(app.getHttpServer()),
+    uploadDir,
+    close: async () => {
+      await app.close();
+      if (ownsData) {
+        await mongo.stop();
+        rmSync(uploadDir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
+export interface StressOptions {
+  /** Reuse this database (and its upload folder) instead of starting one: a restart. */
+  mongo?: MemoryMongo;
+  uploadDir?: string;
+  /** false: the data is already there (a restart), seed nothing. */
+  seed?: boolean;
+}
+
+export async function createStressApp(
+  options: StressOptions = {},
+): Promise<Stress> {
+  const ownsData = !options.mongo;
+  const mongo = options.mongo ?? (await startMemoryMongo());
+  const uploadDir =
+    options.uploadDir ?? mkdtempSync(join(tmpdir(), 'stress-uploads-'));
+  const seed = options.seed !== false;
   const stripe = new FakeStripeGateway();
   const fx = new FakeFxClient();
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
   process.on('unhandledRejection', onUnhandled);
 
-  const t = await createTestApp({
+  const t = await buildApp(mongo, uploadDir, ownsData, {
     imports: [
       HealthModule,
       AccountsSeedModule,
@@ -345,11 +427,13 @@ export async function createStressApp(): Promise<Stress> {
         .overrideProvider(FX_RATES_CLIENT)
         .useValue(fx),
   });
-  await t.moduleRef.get(ReferenceDataSeedService).run();
-  await t.moduleRef.get(FxRatesService, { strict: false }).refresh();
-  await t.moduleRef
-    .get(AdminSeedService, { strict: false })
-    .run({ email: ADMIN.email, password: ADMIN.password });
+  if (seed) {
+    await t.moduleRef.get(ReferenceDataSeedService).run();
+    await t.moduleRef.get(FxRatesService, { strict: false }).refresh();
+    await t.moduleRef
+      .get(AdminSeedService, { strict: false })
+      .run({ email: ADMIN.email, password: ADMIN.password });
+  }
   await t.app.listen(0, '127.0.0.1');
   const { port } = t.app.getHttpServer().address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -360,7 +444,9 @@ export async function createStressApp(): Promise<Stress> {
     adminPassword: ADMIN.password,
     today,
   });
-  await runDemoSeed(createDemoApi(`${baseUrl}/api`), plan, () => undefined);
+  if (seed) {
+    await runDemoSeed(createDemoApi(`${baseUrl}/api`), plan, () => undefined);
+  }
 
   const http = () => request(t.app.getHttpServer());
 
@@ -473,6 +559,8 @@ export async function createStressApp(): Promise<Stress> {
     world,
     baseUrl,
     unhandled,
+    mongo,
+    uploadDir,
     as,
     guest: () => actor('', { id: '', email: '', role: 'guest' }),
     newUser,

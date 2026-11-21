@@ -298,3 +298,16 @@ export function isErrorShape(body: unknown): boolean {
     typeof (body as { message?: unknown }).message === 'string'
   );
 }
+
+/** A deep copy that keeps ObjectIds and Dates (structuredClone turns ObjectIds into plain objects). */
+export function copy<T>(value: T): T {
+  if (value instanceof Types.ObjectId) return value;
+  if (value instanceof Date) return new Date(value.getTime()) as T;
+  if (Array.isArray(value)) return value.map((v) => copy(v)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, copy(v)]),
+    ) as T;
+  }
+  return value;
+}

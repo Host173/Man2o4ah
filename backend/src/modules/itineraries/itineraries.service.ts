@@ -1574,9 +1574,10 @@ export class ItinerariesService {
     const days = itinerary.days ?? [];
     const order = this.parseDayOrder(dto?.dayIds, days);
     const ordered = orderDaysById(days, order, (day) => day._id.toHexString());
-    const unchanged = days.every(
-      (day, index) =>
-        day._id.toHexString() === ordered[index]._id.toHexString(),
+    // `ordered` may be shorter than `days` when the client's list predates an
+    // overlapping add: the omitted days are a tail that stays where it is.
+    const unchanged = ordered.every(
+      (day, index) => day._id.toHexString() === days[index]._id.toHexString(),
     );
     if (unchanged) return this.toDetailView(itinerary as ItineraryRecord);
 
@@ -1631,7 +1632,10 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-08: `dayIds` must be a permutation of the itinerary's current day IDs.
+   * ITN-08: `dayIds` must list every current day ID once, in the new order.
+   * Days added after the client read the itinerary are appended, so a list
+   * that predates an overlapping add may leave out a trailing run of `days`;
+   * those keep their place at the end. Leaving out any other day is rejected.
    * Checked here as well as in the DTO because the service is used directly by
    * other modules and by tests, and only it knows the current IDs.
    */
@@ -1643,18 +1647,26 @@ export class ItinerariesService {
       throw this.invalidField('dayIds', 'dayIds must contain day IDs');
     }
     const ids = (value as string[]).map((id) => id.toLowerCase());
-    if (ids.length !== days.length) {
-      throw this.invalidField(
-        'dayIds',
-        `dayIds must list all ${days.length} days`,
-      );
-    }
     const known = new Set(days.map((day) => day._id.toHexString()));
     if (ids.some((id) => !OBJECT_ID_HEX_RE.test(id) || !known.has(id))) {
       throw this.invalidField('dayIds', 'dayIds must be current day IDs');
     }
     if (new Set(ids).size !== ids.length) {
       throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
+    }
+    // Every ID is known and distinct, so the list is complete up to a tail
+    // exactly when it names the first `ids.length` days.
+    const listed = new Set(ids);
+    if (
+      (ids.length === 0 && days.length > 0) ||
+      days
+        .slice(0, ids.length)
+        .some((day) => !listed.has(day._id.toHexString()))
+    ) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
     }
     return ids;
   }

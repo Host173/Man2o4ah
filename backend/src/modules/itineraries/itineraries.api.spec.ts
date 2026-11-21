@@ -1463,7 +1463,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         {},
         { dayIds: 'not-a-list' },
         { dayIds: [] },
-        { dayIds: [first, middle] },
+        { dayIds: [first, last] },
         { dayIds: [first, middle, last, unknown] },
         { dayIds: [first, middle, middle] },
         { dayIds: [first, middle, unknown] },

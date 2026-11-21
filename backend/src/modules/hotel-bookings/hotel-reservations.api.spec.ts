@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakePaymentsService } from '../../../test/fakes/payments.fake.js';
 import { FakeRoomNightInventory } from '../../../test/fakes/room-night-inventory.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
@@ -12,6 +13,7 @@ import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
 import { HotelBookingsModule } from './hotel-bookings.module.js';
 import {
@@ -87,6 +89,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
   let t: TestApp;
   let reservations: Model<HotelReservation>;
   const hotels = new FakeHotelsService();
+  const payments = new FakePaymentsService();
 
   beforeAll(async () => {
     t = await createTestApp({
@@ -96,7 +99,9 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
           .overrideProvider(HotelsService)
           .useValue(hotels)
           .overrideProvider(RoomNightInventory)
-          .useValue(new FakeRoomNightInventory(hotels)),
+          .useValue(new FakeRoomNightInventory(hotels))
+          .overrideProvider(PaymentsService)
+          .useValue(payments),
     });
     reservations = t.moduleRef.get<Model<HotelReservation>>(
       getModelToken(HotelReservation.name),
@@ -106,6 +111,7 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
   beforeEach(async () => {
     Object.assign(hotels, seededHotels());
     await clearCollections(t.connection);
+    payments.refunds.length = 0;
   });
 
   afterAll(() => t.close(), HOOK_TIMEOUT);
@@ -457,6 +463,83 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     }
   });
 
+  describe('the refund on the details (PAY-03)', () => {
+    const detail = (id: string, cookie: string) =>
+      t.http().get(`/api/hotel-bookings/${id}`).set('Cookie', cookie);
+
+    async function seedStatus(userId: string, status: HotelReservationStatus) {
+      return seedReservation({
+        userId,
+        status,
+        checkInDate: '2028-06-01',
+        checkOutDate: '2028-06-03',
+      });
+    }
+
+    const refundRequest = (
+      bookingId: string,
+      reason: 'user_cancellation' | 'provider_cancellation' | 'late_payment',
+      amountMinor = 10_000,
+    ) => ({
+      bookingType: 'hotel' as const,
+      bookingId,
+      amountMinor,
+      currency: 'USD',
+      reason,
+    });
+
+    it('shows a failed refund on a cancelled reservation', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const row = await seedStatus(owner.id, HotelReservationStatus.CANCELLED);
+      const id = row._id.toHexString();
+      const refund = await payments.refund(
+        refundRequest(id, 'user_cancellation'),
+      );
+      payments.setStatus(refund.refundId, 'failed');
+
+      const res = await detail(id, owner.cookie).expect(200);
+      expect(res.body.refund).toEqual({ ...refund, status: 'failed' });
+    });
+
+    it('shows a late-payment refund on an expired reservation with no cancellation', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const row = await seedStatus(owner.id, HotelReservationStatus.EXPIRED);
+      const id = row._id.toHexString();
+      await payments.refund(refundRequest(id, 'late_payment', 20_000));
+
+      const res = await detail(id, owner.cookie).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'late_payment',
+        status: 'pending',
+      });
+      expect(res.body.cancellation).toBeUndefined();
+    });
+
+    it('shows a refunded provider cancellation', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const row = await seedStatus(owner.id, HotelReservationStatus.CANCELLED);
+      const id = row._id.toHexString();
+      const refund = await payments.refund(
+        refundRequest(id, 'provider_cancellation'),
+      );
+      payments.setStatus(refund.refundId, 'refunded');
+
+      const res = await detail(id, owner.cookie).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'provider_cancellation',
+        status: 'refunded',
+      });
+    });
+
+    it('answers refund null when none was issued', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const row = await seedStatus(owner.id, HotelReservationStatus.CONFIRMED);
+
+      const res = await detail(row._id.toHexString(), owner.cookie).expect(200);
+      expect(res.body).toHaveProperty('refund', null);
+    });
+  });
+
   it('documents HTL-20 endpoints in Swagger while preserving POST /api/hotel-bookings', () => {
     const document = SwaggerModule.createDocument(
       t.app,
@@ -475,6 +558,9 @@ describe('GET /api/hotel-bookings & /api/hotel-bookings/:id (HTL-20)', () => {
     expect(detailOp?.summary).toMatch(/^HTL-20 /);
     expect(detailOp?.responses['200']).toBeDefined();
     expect(detailOp?.responses['404']).toBeDefined();
+    expect(
+      document.components?.schemas?.HotelReservationDetailResponseDto,
+    ).toHaveProperty('properties.refund');
   });
 
   it('places overdue pending_payment holds in past rather than upcoming without mutating status', async () => {

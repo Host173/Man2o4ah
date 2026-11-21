@@ -5,6 +5,9 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
+import { BookingType } from '../../common/database/booking-type.js';
+import { PaymentsService } from '../payments/payments.service.js';
+import type { RefundView } from '../payments/payments.types.js';
 import { groupQuery } from './booking-groups.js';
 import type { BookingGroup } from './booking-groups.js';
 import type {
@@ -44,6 +47,7 @@ export class MyFlightBookingsService {
   constructor(
     @InjectModel(FlightBooking.name)
     private readonly bookings: Model<FlightBooking>,
+    private readonly payments: PaymentsService,
   ) {}
 
   /** One group (upcoming, past or cancelled) of the user's bookings, one page at a time. */
@@ -74,7 +78,11 @@ export class MyFlightBookingsService {
       .findOne({ _id: bookingId, userId: new Types.ObjectId(userId) })
       .lean<LeanBookingWithTimestamps>();
     if (!booking) throw notFound();
-    return toDetails(booking);
+    const refund = await this.payments.getRefund(
+      BookingType.FLIGHT,
+      booking._id.toHexString(),
+    );
+    return toDetails(booking, refund);
   }
 }
 
@@ -106,7 +114,10 @@ function toSummary(b: LeanBooking): MyFlightBookingSummary {
   };
 }
 
-function toDetails(b: LeanBookingWithTimestamps): MyFlightBooking {
+function toDetails(
+  b: LeanBookingWithTimestamps,
+  refund: RefundView | null,
+): MyFlightBooking {
   return {
     _id: b._id.toHexString(),
     reference: b.reference,
@@ -160,6 +171,7 @@ function toDetails(b: LeanBookingWithTimestamps): MyFlightBooking {
       refundPercent: b.cancellation.refundPercent,
       refundAmountMinor: b.cancellation.refundAmountMinor,
     },
+    refund,
     createdAt: b.createdAt,
   };
 }

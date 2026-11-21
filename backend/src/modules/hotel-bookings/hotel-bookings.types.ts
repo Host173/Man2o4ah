@@ -144,6 +144,8 @@ export interface HotelReservationDetailView extends HotelReservationSummaryView 
   expiredAt?: Date;
   completedAt?: Date;
   cancellation?: HotelReservationCancellationView;
+  /** PAY-03: the reservation's refund and its status; null when none was issued. */
+  refund: RefundView | null;
   createdAt: Date;
   updatedAt: Date;
 }

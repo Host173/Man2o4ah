@@ -3,12 +3,14 @@ import { CabinClass } from '../../../common/database/cabin-class.js';
 import { CancelledBy } from '../../../common/database/cancellation.schema.js';
 import type { Cancellation } from '../../../common/database/cancellation.schema.js';
 import type { Paginated } from '../../../common/pagination/paginated.js';
+import type { RefundView } from '../../payments/payments.types.js';
 import type {
   MyFlightBooking,
   MyFlightBookingSegment,
   MyFlightBookingSegmentSummary,
   MyFlightBookingSummary,
 } from '../flight-bookings.types.js';
+import { FlightRefundResponseDto } from './flight-cancellation.response.dto.js';
 import {
   FlightBookingStatus,
   PassengerType,
@@ -205,6 +207,14 @@ export class MyFlightBookingResponseDto implements MyFlightBooking {
 
   @ApiPropertyOptional({ type: CancellationResponseDto })
   cancellation?: CancellationResponseDto;
+
+  @ApiProperty({
+    type: FlightRefundResponseDto,
+    nullable: true,
+    description:
+      'PAY-03 refund and its status (pending, refunded, failed); null when no refund was issued',
+  })
+  refund!: RefundView | null;
 
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;

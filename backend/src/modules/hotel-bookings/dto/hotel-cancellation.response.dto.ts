@@ -32,7 +32,7 @@ class HotelCancellationResponseDto implements HotelCancellation {
   refundAmountMinor!: number;
 }
 
-class HotelRefundResponseDto implements RefundView {
+export class HotelRefundResponseDto implements RefundView {
   @ApiProperty()
   refundId!: string;
 

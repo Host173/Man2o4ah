@@ -5,7 +5,7 @@ import { BookingType } from '../../../common/database/booking-type.js';
 import { integerValidator } from '../../../common/database/validators.js';
 import { getPlatformCurrency } from '../../../common/money/platform-currency.js';
 
-/** `late_payment` = confirmation after hold expiry, including ACC-12 deactivation. */
+/** `late_payment` = confirmation after hold expiry, ACC-12 deactivation, or the flight was cancelled (FLT-06). */
 export const RefundReason = {
   USER_CANCELLATION: 'user_cancellation',
   PROVIDER_CANCELLATION: 'provider_cancellation',

@@ -18,6 +18,7 @@ import {
   ApiCookieAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -25,12 +26,9 @@ import {
   ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
-import type {
-  FlightSearchItem,
-  RoundTripSearchResult,
-} from '../flights/flights.types.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import { PublicSearchQueryDto } from './dto/public-search-query.dto.js';
@@ -64,6 +62,10 @@ import {
   HotelSearchResponseDto,
   PaginatedHotelSearchResponseDto,
 } from '../hotels/dto/hotel-search.response.dto.js';
+import {
+  PaginatedFlightSearchResponseDto,
+  RoundTripFlightSearchResponseDto,
+} from '../flights/dto/flight-search.response.dto.js';
 import { ItineraryPdf } from './itinerary-pdf.js';
 import type {
   BudgetEntryView,
@@ -201,7 +203,11 @@ export class ItinerariesController {
 
   @Get(':id')
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
-  @ApiOperation({ summary: 'ITN-03 Open one of my itineraries' })
+  @ApiOperation({
+    summary: 'ITN-03 Open one of my itineraries',
+    description:
+      'Private: only the owner can open it; another user gets 404 (ACC-11). Consecutive days in the same city are grouped with their day count and budget subtotal (ITN-09).',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: ItineraryDetailResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID' })
@@ -240,19 +246,37 @@ export class ItinerariesController {
       'ITN-26 One-way or round-trip flights from an origin to the first day city',
   })
   @ApiParam({ name: 'id', type: String })
-  @ApiOkResponse({ description: 'Flight search results' })
+  @ApiExtraModels(
+    PaginatedFlightSearchResponseDto,
+    RoundTripFlightSearchResponseDto,
+  )
+  @ApiOkResponse({
+    description:
+      'One-way: a page of flights. Round trip: { outbound, inbound } pages',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(PaginatedFlightSearchResponseDto) },
+        { $ref: getSchemaPath(RoundTripFlightSearchResponseDto) },
+      ],
+    },
+  })
   @ApiBadRequestResponse({ description: 'Invalid itinerary ID or query' })
   @ApiNotFoundResponse({ description: 'Itinerary not found' })
-  getFlightsForItinerary(
+  async getFlightsForItinerary(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @Query() query: ItineraryFlightsQueryDto,
     @CurrentUser() user: AuthUser,
-  ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
-    return this.itinerariesService.getFlightsForItinerary(
+  ): Promise<
+    PaginatedFlightSearchResponseDto | RoundTripFlightSearchResponseDto
+  > {
+    const result = await this.itinerariesService.getFlightsForItinerary(
       id.toHexString(),
       query,
       user.id,
     );
+    return 'outbound' in result
+      ? RoundTripFlightSearchResponseDto.fromView(result)
+      : PaginatedFlightSearchResponseDto.fromView(result);
   }
 
   @Get(':id/hotels')

@@ -61,7 +61,11 @@ export class FlightsController {
 
   @Get('flights/search')
   @Public()
-  @ApiOperation({ summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights' })
+  @ApiOperation({
+    summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights',
+    description:
+      'Only scheduled flights are returned; cancelled and departed flights are never searchable or bookable (FLT-30).',
+  })
   @ApiExtraModels(
     PaginatedFlightSearchResponseDto,
     RoundTripFlightSearchResponseDto,
@@ -90,7 +94,11 @@ export class FlightsController {
 
   @Get('flights/:id')
   @Public()
-  @ApiOperation({ summary: 'FLT-17 Get flight details' })
+  @ApiOperation({
+    summary: 'FLT-17 Get flight details',
+    description:
+      'Includes the flight status: scheduled, cancelled or departed (FLT-30). Only a scheduled flight can be booked.',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: FlightDetailsResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid flight ID' })

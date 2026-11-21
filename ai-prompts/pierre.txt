@@ -1734,3 +1734,148 @@ In G5, `\|` is a shell pipe; type it as `|`.
 How the output was used:
 Added pdf-fonts.spec.ts, scripts/fonts/subset-cjk-font.py, the subset NotoSansCJKsc.otf and updated fonts/SOURCES.txt in fix/ITN-28-cjk-font-subset; committed test afcaa08 and fix 5280850.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+scheduling=Wait until mandatory GEN-01 is merged, emailDesign=
+
+How the output was used:
+Paused GEN-01b pending GEN-01 PR #168 merging and approved email contracts/design; created the isolated ticket branch from origin/develop at 852d597; no feature files changed.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+why it is paused
+
+How the output was used:
+Explained the earlier wait decision and refreshed prerequisite status: GEN-01 issue #19 is closed and PR #168 is merged; email contracts and configuration still need approval.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+ca you start in the ticket
+
+How the output was used:
+Checked the merged GEN-01 implementation and current develop contracts; requested specific approval for the recipient port, invitation event, SMTP configuration and prerequisite delivery schema.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+approval=Kareem and Aisha approved this approach; prepare the exact prerequisite contract/schema proposal for their separate PR, details=
+
+How the output was used:
+Prepared the exact GEN-01b prerequisite proposal in session files, including the port/event/model, ownership boundaries, configuration, tests and SMTP reliability limitations; no runtime code, commits, pushes or PR changes.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+make a pr and add to its comment what was kareem and aisha should approve on before merging
+
+How the output was used:
+Prepared the tracked email-contract proposal and draft PR description/owner approval comment; preserved all develop and local prompt entries while fast-forwarding the isolated ticket branch.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+prScope=Create a draft proposal-review PR on the current branch; do not merge until implementation is complete, ticketKey=
+
+How the output was used:
+Prepared a draft proposal-review PR on feature/GEN-01b-email-notifications with an explicit do-not-merge warning because merging would close #94 before email implementation.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+does this feature was already implemanted in the project before we implemnt it
+
+How the output was used:
+Checked latest develop and related PRs: GEN-01 in-app notifications were already merged; no SMTP email or moderator-invitation implementation was found; draft PR #225 is proposal-only.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+is it ready to be published ?
+
+How the output was used:
+Confirmed PR #225 is already published as an open draft; explained that the proposal is ready for review, not feature release or merge before approvals, implementation and tests.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+no i want once the pr merged the feature works
+
+How the output was used:
+Requested exact authorization to implement the proposed SMTP channel, shared recipient/invitation contracts and persistent delivery schema in #225 instead of merging a proposal-only PR.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+approval=Kareem and Aisha approve the exact proposal, and Kareem explicitly permits the model/contract changes in #225, invitation=Plain-text invitation and first-login instructions; no login link until that page exists, details=
+
+How the output was used:
+Implemented the approved SMTP adapter/configuration, notifications-owned recipient registry and delivery queue/worker, Accounts adapter and post-persistence moderator invitation event; added integration/unit tests and updated authoritative contracts/model/diagrams. Invitations omit credentials and a nonexistent login link; non-production uses only the required test inbox.
+================================================
+
+================================================
+Date: 2026-11-21
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: GEN-01-B
+
+Prompt:
+Mostafa approves this test-fixture-only change in #225
+
+How the output was used:
+Adapted only Blog's skeleton module-wiring test fixture to the newly imported Notifications configuration/models, preserving all behavioral tests and production code. The analogous Accounts fixture was updated too; the two targeted wiring tests passed before rerunning full backend verification.
+================================================
+
+GEN-01-B validation follow-up (2026-11-21): backend npm run verify passed all 3403 tests in 210 files plus format, lint, typecheck, per-service coverage and build; npm audit --omit=dev --audit-level=high reported zero production vulnerabilities. Prepared the working-feature update for existing draft PR #225, with relayed owner authorizations, final-review gates and private SMTP setup documented.

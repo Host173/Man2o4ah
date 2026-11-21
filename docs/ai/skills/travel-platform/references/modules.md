@@ -43,7 +43,7 @@ Needs that cross packages: use a fake of the other side until it's merged (`test
 | fx | Daily exchange rates and conversion | exchange_rates |
 | blog | Posts, tags, images, comments, likes, author page, deleted-post file cleanup | posts, comments, likes, post_image_cleanups |
 | moderation | Reports on posts, comments, reviews, itineraries | reports |
-| notifications | In-app notifications (listens to events) | notifications |
+| notifications | In-app and optional SMTP notifications (listens to events) | notifications, email_deliveries |
 | audit | Append-only admin action log (listens to events) | audit_logs |
 | admin | Admin endpoints; calls other modules' services | **none** |
 | storage (infra) | Image upload validation, files on disk (GEN-08) | none |
@@ -73,7 +73,7 @@ backend/seed-data/        course CSVs (never edit)
 | Module | May import services of |
 |---|---|
 | reference-data, storage, notifications, audit | — |
-| accounts | reference-data |
+| accounts | reference-data, notifications (registers `EmailRecipientLookup` only) |
 | fx | reference-data |
 | flights | reference-data, storage |
 | hotels | reference-data, storage |
@@ -96,6 +96,7 @@ When a lower module needs something from a higher one, the lower module owns an 
 | `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)`, `getPolicies(bookingId, userId)` |
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
 | `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId)` |
+| `EmailRecipientLookup` (notifications) | accounts | `getRecipient(userId)` -> `{ userId, email }` or null; via `EmailRecipientRegistry` |
 
 Ports are registered with injection tokens defined in the owning module; implementers provide them. Until the implementer exists, the owner tests against a fake.
 
@@ -116,9 +117,10 @@ duplicate delivery never inserts twice or modifies the original entry.
 | `user.deactivated`, `user.reactivated` | accounts | blog, itineraries → set `authorDeactivated` |
 | `account.suspended`, `account.reactivated` | accounts | notifications |
 | `provider.deactivated`, `provider.reactivated` | admin | notifications |
+| `moderator.invited { eventId, userId }` | accounts, after creation persists | notifications email channel |
 | `admin.action { eventId, actorId, action, target, details? }` | admin, moderation | audit |
 
-Events carry the recipients' user IDs, so listeners don't look them up. Emit after the transaction commits.
+Events carry recipients' user IDs; in-app handlers need no account lookup. The email channel resolves addresses through the Accounts-owned recipient adapter. Emit after the transaction commits.
 
 `flight-booking.rescheduled`, account suspension/reactivation and provider deactivation/reactivation also carry `eventId`: a non-empty opaque ID generated once per committed change and reused for retries. Distinct changes use distinct IDs, regardless of whether earlier notifications were read (`data-model.md` §6.3).
 
@@ -134,6 +136,7 @@ Each job lives in the module that owns the data and only uses conditional update
 | Expire hotel holds (+ `RoomNightInventory.release`) | hotel-bookings | 30 s |
 | Complete stays (check-out date passed) | hotel-bookings | 1 h |
 | Refresh exchange rates | fx | daily |
+| Deliver queued email | notifications | 30 s |
 | Retry post image cleanup | blog | 30 s |
 
 ## 8. Where an endpoint lives

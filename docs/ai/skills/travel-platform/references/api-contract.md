@@ -51,6 +51,22 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 Only `NEXT_PUBLIC_*` reaches the browser. Never prefix a secret with it.
 Each variable is added to `.env.example` by the ticket that first needs it (today's `.env.example` only has what exists). `BACKEND_URL` replaces the scaffold's `NEXT_PUBLIC_API_URL` when the rewrite is added.
 
+### SMTP (GEN-01-B)
+
+Backend-only names: `SMTP_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TEST_INBOX`.
+`SMTP_ENABLED` defaults to disabled and accepts only `true`/`false`; disabled
+SMTP has no effect on in-app alerts and does not enqueue or backfill mail.
+When enabled, require a host, integer port 1-65535, `SMTP_SECURE=true|false`,
+and a single valid sender mailbox; auth user/password must both be set or both
+absent. Production requires TLS (implicit TLS or mandatory STARTTLS).
+Enabled non-production requires a valid test inbox: both To and SMTP envelope
+recipients go exclusively there, with no actual account address in headers/body.
+Use a local SMTP sink or the team's private test-inbox settings, never real user
+delivery in development. Configure through ConfigService; never log credentials,
+raw SMTP replies or inbox data. Tests override transport and never read `.env`.
+No verification/password-reset endpoint is added by this feature.
+
 ## 3. Response shapes
 
 **Success:** the resource JSON itself (no `{ data: … }` wrapper). IDs keep Mongo's field name `_id` (a 24-hex string in JSON; reference data uses its dataset id, such as `"CAI"`). Don't rename to `id`; `.lean()` results then need no mapping. Instants are ISO-8601 UTC strings (`2026-12-01T12:30:00.000Z`). Calendar dates (`DateOnly` in the database) travel as `YYYY-MM-DD` strings in requests and responses, converted with `common/dates`. Money keeps the data model's names and minor units: `{ totalMinor: 12550, currency: 'USD' }`, `priceMinor`, `amountMinor`; the frontend formats it (`lib/format.ts`). Enum values are the data model's lowercase values (`pending_payment`).

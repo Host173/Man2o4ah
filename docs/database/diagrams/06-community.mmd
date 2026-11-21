@@ -53,6 +53,20 @@ classDiagram
       entity : type, id
       readAt : Date?
     }
+    class EmailDelivery {
+      deliveryKey : string (unique)
+      kind : notification/moderator_invitation
+      userId : ObjectId
+      notificationId : ObjectId?
+      invitationEventId : string?
+      status : pending/sending/sent/failed
+      attempts : int
+      nextAttemptAt : Date
+      leaseToken : string?
+      leaseExpiresAt : Date?
+      sentAt : Date?
+      lastError : string?
+    }
   }
   namespace audit {
     class AuditLog {
@@ -72,3 +86,4 @@ classDiagram
   PostImageCleanup "*" --> "0..1" Post : postId (survives deletion)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId
+  EmailDelivery "*" --> "0..1" Notification : notificationId

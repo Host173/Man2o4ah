@@ -120,7 +120,11 @@ export class NotificationsListener {
     try {
       await this.notifications.create(build());
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason =
+        error instanceof Error &&
+        error.message.startsWith('A non-empty eventId is required for ')
+          ? 'invalid eventId'
+          : 'storage failure';
       this.logger.error(
         `Failed to store notifications for ${event}: ${reason}`,
       );

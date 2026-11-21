@@ -99,6 +99,8 @@ The notifications module **listens to events** (`modules.md` §6); no module cal
 Repeatable changes use the stable `eventId` in data-model §6.3. Retries never create another alert or make a read alert unread; each distinct reschedule or account/provider change notifies, even while an earlier alert is unread.
 Endpoints: `GET /api/notifications` (paginated), `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`.
 
+GEN-01-B adds optional SMTP delivery for those same events and credential-free moderator invitations from `moderator.invited`. Addresses go through `EmailRecipientRegistry`, never a cross-module user-model query. Queue and notification writes commit together; SMTP runs later with conditional ownership leases and bounded retries (data-model §3.12). Email is disabled by default; enabling does not backfill old events. Non-production sends only to the configured test inbox. Sent delivery identities are retained; SMTP crash/acknowledgement races are at-least-once, not exactly-once. Invitations explain admin-supplied credentials and first-login password change, without a nonexistent login link.
+
 ## 9. Accounts and providers, admin side
 
 - **Moderator creation (ACC-13):** `{ name, email, role, providerId, temporaryPassword }`. The provider must exist (flights/hotels service) and match the role. accounts creates the user with `moderatorOf` and `mustChangePassword: true`.

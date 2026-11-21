@@ -4,6 +4,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AccountsService } from './accounts.service.js';
+import { AccountEmailRecipient } from './account-email-recipient.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 import {
   ACCESS_TOKEN_ALGORITHM,
   ACCESS_TOKEN_TTL_SECONDS,
@@ -38,6 +40,7 @@ import { UsersController } from './users/users.controller.js';
  */
 @Module({
   imports: [
+    NotificationsModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Session.name, schema: SessionSchema },
@@ -56,6 +59,7 @@ import { UsersController } from './users/users.controller.js';
   controllers: [AuthController, UsersController],
   providers: [
     AccountsService,
+    AccountEmailRecipient,
     AuthService,
     ProfileService,
     SelfDeactivationService,

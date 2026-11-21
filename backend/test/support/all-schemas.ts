@@ -18,6 +18,7 @@ import { RoomSchema } from '../../src/modules/hotels/schemas/room.schema.js';
 import { ItinerarySchema } from '../../src/modules/itineraries/schemas/itinerary.schema.js';
 import { ReportSchema } from '../../src/modules/moderation/schemas/report.schema.js';
 import { NotificationSchema } from '../../src/modules/notifications/schemas/notification.schema.js';
+import { EmailDeliverySchema } from '../../src/modules/notifications/schemas/email-delivery.schema.js';
 import { PaymentSchema } from '../../src/modules/payments/schemas/payment.schema.js';
 import { PolicyAcceptanceSchema } from '../../src/modules/payments/schemas/policy-acceptance.schema.js';
 import { RefundSchema } from '../../src/modules/payments/schemas/refund.schema.js';
@@ -28,7 +29,7 @@ import { CitySchema } from '../../src/modules/reference-data/schemas/city.schema
 import { CountrySchema } from '../../src/modules/reference-data/schemas/country.schema.js';
 import { CurrencySchema } from '../../src/modules/reference-data/schemas/currency.schema.js';
 
-/** The 28 collections of data-model §2, each with its Mongoose schema. */
+/** The 29 collections of data-model §2, each with its Mongoose schema. */
 export const ALL_SCHEMAS: Record<string, Schema> = {
   countries: CountrySchema,
   cities: CitySchema,
@@ -57,5 +58,6 @@ export const ALL_SCHEMAS: Record<string, Schema> = {
   post_image_cleanups: PostImageCleanupSchema,
   reports: ReportSchema,
   notifications: NotificationSchema,
+  email_deliveries: EmailDeliverySchema,
   audit_logs: AuditLogSchema,
 };

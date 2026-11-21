@@ -245,11 +245,16 @@ describe('flight cancellation endpoints (FLT-26)', () => {
       expect(hidden.status).toBe(404);
       expect(hidden.body.code).toBe(ErrorCode.NotFound);
 
-      for (const id of [new Types.ObjectId().toHexString(), 'not-an-id']) {
-        const missing = await call(id).set('Cookie', user.cookie);
-        expect(missing.status).toBe(404);
-        expect(missing.body.code).toBe(ErrorCode.NotFound);
-      }
+      const missing = await call(new Types.ObjectId().toHexString()).set(
+        'Cookie',
+        user.cookie,
+      );
+      expect(missing.status).toBe(404);
+      expect(missing.body.code).toBe(ErrorCode.NotFound);
+
+      const malformed = await call('not-an-id').set('Cookie', user.cookie);
+      expect(malformed.status).toBe(400);
+      expect(malformed.body.code).toBe(ErrorCode.ValidationFailed);
       expect((await bookings.findById(booking.id).lean())?.status).toBe(
         'confirmed',
       );

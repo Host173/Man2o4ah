@@ -7,7 +7,7 @@ import type {
   DemoPlan,
   DemoUser,
 } from './demo-plan.js';
-import { addDays, arrivalLocalOf } from './demo-time.js';
+import { addDays, arrivalLocalOf, firstFlightDay } from './demo-time.js';
 
 export const DEMO_KINDS = [
   'airlines',
@@ -302,7 +302,13 @@ async function seedAirlineSchedule(
       );
       continue;
     }
-    for (let day = 1; day <= plan.flightDays; day += 1) {
+    const firstDay = firstFlightDay(
+      plan.today,
+      route.departureTime,
+      fromZone,
+      Date.now(),
+    );
+    for (let day = firstDay; day < firstDay + plan.flightDays; day += 1) {
       const date = addDays(plan.today, day);
       const label = `${route.flightNumber} on ${date}`;
       const found = existing.get(`${route.flightNumber}|${date}`);

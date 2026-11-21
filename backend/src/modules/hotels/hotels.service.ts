@@ -3,9 +3,9 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
@@ -43,7 +43,11 @@ import type {
   RoomNightView,
   RoomView,
 } from './hotels.types.js';
-import { assertStayDates, parseAvailabilityRange } from './room-date-ranges.js';
+import {
+  assertDateRange,
+  assertStayDates,
+  parseAvailabilityRange,
+} from './room-date-ranges.js';
 import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
@@ -479,18 +483,31 @@ export class HotelsService {
     );
   }
 
-  /** Taken nights in the inclusive date range, for HTL-08's room status view. */
-  getRoomNights(
+  /**
+   * HTL-08: the hotel's taken nights (reserved or blocked) from fromDate to toDate,
+   * both inclusive, by date then room. Missing valid hotel IDs return [];
+   * malformed IDs throw 400 VALIDATION_FAILED. Reads use the caller's session.
+   */
+  async getRoomNights(
     hotelId: string,
     fromDate: Date,
     toDate: Date,
     options?: HotelTransactionOptions,
   ): Promise<RoomNightView[]> {
-    void hotelId;
-    void fromDate;
-    void toDate;
-    void options;
-    throw new NotImplementedException('getRoomNights: implemented in INV-02');
+    assertDateRange(fromDate, toDate);
+    const nights = await this.roomNightModel
+      .find(
+        {
+          hotelId: this.parseId(hotelId),
+          date: { $gte: fromDate, $lte: toDate },
+        },
+        undefined,
+        options,
+      )
+      .sort({ date: 1, roomId: 1 })
+      .lean()
+      .exec();
+    return nights.map((night) => this.toRoomNightView(night));
   }
 
   /** HTL-11/12: reads inventory without holding it; reusable by ITN-25. */
@@ -864,6 +881,28 @@ export class HotelsService {
       );
     }
     throw failure;
+  }
+
+  private toRoomNightView(night: RoomNight): RoomNightView {
+    const base = {
+      roomId: night.roomId.toHexString(),
+      hotelId: night.hotelId.toHexString(),
+      date: night.date,
+    };
+    if (night.kind === RoomNightKind.RESERVATION && night.reservationId) {
+      return {
+        ...base,
+        kind: 'reservation',
+        reservationId: night.reservationId.toHexString(),
+      };
+    }
+    if (night.kind === RoomNightKind.BLOCKED && night.blockId) {
+      return { ...base, kind: 'blocked', blockId: night.blockId.toHexString() };
+    }
+    throw new InternalServerErrorException({
+      code: ErrorCode.InventoryCorrupted,
+      message: 'Room night has no reservation or block',
+    });
   }
 
   private parseId(value: string, field = 'hotelId'): Types.ObjectId {

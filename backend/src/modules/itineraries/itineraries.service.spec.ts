@@ -1387,7 +1387,7 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
         undefined,
         'not-a-list',
         [],
-        [first, middle],
+        [first, last],
         [first, middle, last, unknown],
         [first, middle, middle],
         [first, middle, unknown],
@@ -1507,6 +1507,114 @@ describe('ItinerariesService (ITN-01, ITN-03)', () => {
       const stored = await itineraryModel.findById(created._id).lean().exec();
       expect(stored?.days).toHaveLength(4);
       expect(stored?.dayCount).toBe(4);
+    });
+
+    it('accepts a day list read before an overlapping add committed', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+      // The client read three days; the add commits before the reorder reads.
+      const added = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'new_york' }),
+        owner.id,
+      );
+
+      const reordered = await itineraries.reorderDays(
+        created._id,
+        { dayIds: [last, first, middle] },
+        owner.id,
+      );
+
+      expect(reordered.days.map((day) => day._id)).toEqual([
+        last,
+        first,
+        middle,
+        added._id,
+      ]);
+      expect(reordered.days.map((day) => day.dayNumber)).toEqual([1, 2, 3, 4]);
+      expect(reordered.dayCount).toBe(4);
+    });
+
+    it('treats a stale list in the current order as a no-op', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const added = await itineraries.addDay(
+        created._id,
+        dayDto({ cityId: 'new_york' }),
+        owner.id,
+      );
+      const before = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
+
+      const result = await itineraries.reorderDays(
+        created._id,
+        { dayIds: seeded.dayIds },
+        owner.id,
+      );
+
+      expect(result.days.map((day) => day._id)).toEqual([
+        ...seeded.dayIds,
+        added._id,
+      ]);
+      const after = (await itineraryModel
+        .findById(created._id)
+        .lean()
+        .exec()) as { updatedAt: Date } | null;
+      expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
+    });
+
+    it('keeps a day added between the reorder read and its write', async () => {
+      const owner = await loginAs(t.connection, UserRole.USER);
+      const created = await itineraries.create(createDto(), owner.id);
+      const seeded = await seedTrip(created._id);
+      const [first, middle, last] = seeded.dayIds;
+      type Write = (...args: unknown[]) => {
+        lean: () => { exec: () => Promise<unknown> };
+      };
+      const model = itineraryModel as unknown as { findOneAndUpdate: Write };
+      const write = model.findOneAndUpdate.bind(model);
+      let added: string | undefined;
+      // The reorder's write is the first findOneAndUpdate: commit the add just
+      // before it runs. The add's own write goes through the real method.
+      const spy = vi
+        .spyOn(model, 'findOneAndUpdate')
+        .mockImplementationOnce((...args: unknown[]) => ({
+          lean: () => ({
+            exec: async () => {
+              added = (
+                await itineraries.addDay(
+                  created._id,
+                  dayDto({ cityId: 'new_york' }),
+                  owner.id,
+                )
+              )._id;
+              return write(...args)
+                .lean()
+                .exec();
+            },
+          }),
+        }));
+      try {
+        const reordered = await itineraries.reorderDays(
+          created._id,
+          { dayIds: [last, first, middle] },
+          owner.id,
+        );
+
+        expect(reordered.days.map((day) => day._id)).toEqual([
+          last,
+          first,
+          middle,
+          added,
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

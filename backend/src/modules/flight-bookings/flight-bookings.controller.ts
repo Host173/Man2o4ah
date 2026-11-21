@@ -10,6 +10,7 @@ import {
   Query,
   StreamableFile,
 } from '@nestjs/common';
+import { IsObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -72,7 +73,7 @@ export class FlightBookingsController {
   @ApiOperation({
     summary: 'FLT-19 Price a flight booking and show its summary (FLT-21)',
     description:
-      'Validates the passengers and baggage against the selected flights and returns the summary. Nothing is saved; POST /flight-bookings/hold reserves the seats.',
+      'Validates the passengers and baggage against the selected flights and returns the summary. Nothing is saved; POST /flight-bookings/hold reserves the seats. All prices are in the single platform currency, USD (PAY-04).',
   })
   @ApiOkResponse({ type: FlightQuoteResponseDto })
   @ApiBadRequestResponse({
@@ -131,14 +132,19 @@ export class FlightBookingsController {
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
     summary: 'FLT-25 Show the full details of my flight booking',
+    description:
+      'Only the owner can see a booking, in any status; anyone else gets 404 (ACC-11). The status shows the booking lifecycle: pending_payment, confirmed, cancelled, expired or completed (GEN-11).',
   })
   @ApiOkResponse({ type: MyFlightBookingResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: malformed booking ID',
+  })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiNotFoundResponse({
     description: 'NOT_FOUND: no such booking, or another user’s',
   })
   getMine(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @CurrentUser() user: AuthUser,
   ): Promise<MyFlightBooking> {
     return this.mine.getMine(id, user.id);
@@ -158,6 +164,9 @@ export class FlightBookingsController {
       'application/pdf': { schema: { type: 'string', format: 'binary' } },
     },
   })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: malformed booking ID',
+  })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiNotFoundResponse({
     description: 'NOT_FOUND: no such booking, or another user’s',
@@ -166,7 +175,7 @@ export class FlightBookingsController {
     description: 'CONFLICT: the booking is not confirmed',
   })
   async eTicket(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @CurrentUser() user: AuthUser,
   ): Promise<StreamableFile> {
     const ticket = await this.eTickets.render(id, user.id);
@@ -186,6 +195,9 @@ export class FlightBookingsController {
       'Uses the booking’s snapshot of the airline’s cancellation tiers and the full days until the outbound departure. Nothing is changed.',
   })
   @ApiOkResponse({ type: FlightRefundPreviewResponseDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED: malformed booking ID',
+  })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({
@@ -196,7 +208,7 @@ export class FlightBookingsController {
       'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
   })
   refundPreview(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @CurrentUser() user: AuthUser,
   ): Promise<FlightRefundPreview> {
     return this.cancellations.refundPreview(id, user.id);
@@ -213,7 +225,8 @@ export class FlightBookingsController {
   })
   @ApiOkResponse({ type: CancelledFlightBookingResponseDto })
   @ApiBadRequestResponse({
-    description: 'VALIDATION_FAILED: the body is not an empty object',
+    description:
+      'VALIDATION_FAILED: malformed booking ID, or the body is not an empty object',
   })
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
@@ -225,7 +238,7 @@ export class FlightBookingsController {
       'INVALID_STATUS_TRANSITION: not confirmed, or the first flight has departed',
   })
   cancel(
-    @Param('id') id: string,
+    @Param('id', IsObjectIdPipe) id: string,
     @Body(FlightCancellationBodyPipe) _body: CancelFlightBookingDto,
     @CurrentUser() user: AuthUser,
   ): Promise<CancelledFlightBooking> {

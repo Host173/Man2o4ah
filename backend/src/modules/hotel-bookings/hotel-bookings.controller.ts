@@ -112,7 +112,7 @@ export class HotelBookingsController {
   @ApiOperation({
     summary: 'HTL-20 View full details of one of my hotel reservations',
     description:
-      'Returns complete customer-facing details for a single reservation owned by the authenticated user, including room/price/policy snapshots and lifecycle timestamps. Unknown or another user’s reservations return 404.',
+      'Returns complete customer-facing details for a single reservation owned by the authenticated user, including room/price/policy snapshots and lifecycle timestamps. Unknown or another user’s reservations return 404 (ACC-11). The status shows the booking lifecycle: pending_payment, confirmed, cancelled, expired or completed (GEN-11). After a successful payment the reservation is confirmed with a reference and the user is notified (HTL-17).',
   })
   @ApiParam({
     name: 'id',

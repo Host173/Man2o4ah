@@ -1,6 +1,7 @@
 import {
   addDays,
   arrivalLocalOf,
+  firstFlightDay,
   localToUtcMs,
   utcMsToLocal,
 } from './demo-time.js';
@@ -27,5 +28,19 @@ describe('demo time helpers (PLT-08)', () => {
 
   it('adds days across a month end', () => {
     expect(addDays('2027-01-30', 3)).toBe('2027-02-02');
+  });
+
+  it('starts a route tomorrow when its first departure is still ahead', () => {
+    // 2027-01-15 12:00 UTC: Cairo 08:30 on the 16th is ahead.
+    const now = Date.parse('2027-01-15T12:00:00Z');
+    expect(firstFlightDay('2027-01-15', '08:30', 'Africa/Cairo', now)).toBe(1);
+  });
+
+  it('starts a route a day later when its first departure already passed', () => {
+    // 2027-01-15 23:36 UTC is 03:36 on the 16th in Dubai (UTC+4), so a
+    // 02:30 departure on the 16th is in the past and the API would reject it.
+    const now = Date.parse('2027-01-15T23:36:00Z');
+    expect(firstFlightDay('2027-01-15', '02:30', 'Asia/Dubai', now)).toBe(2);
+    expect(firstFlightDay('2027-01-15', '08:30', 'Africa/Cairo', now)).toBe(1);
   });
 });

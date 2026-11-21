@@ -48,6 +48,25 @@ export function addDays(date: string, days: number): string {
     .slice(0, 10);
 }
 
+/**
+ * The first day offset (from `today`) on which a route's flights are seeded:
+ * tomorrow (1), or the day after (2) when tomorrow's departure is already in
+ * the past. That happens east of UTC late in the UTC day, e.g. a 02:30 Dubai
+ * departure from 22:30 UTC on, which the API rejects as a past departure.
+ */
+export function firstFlightDay(
+  today: string,
+  departureTime: string,
+  departureTimeZone: string,
+  nowMs: number,
+): 1 | 2 {
+  const departure = localToUtcMs(
+    `${addDays(today, 1)}T${departureTime}`,
+    departureTimeZone,
+  );
+  return departure > nowMs ? 1 : 2;
+}
+
 /** The arrival wall-clock time of a flight leaving at `departureLocal`. */
 export function arrivalLocalOf(
   departureLocal: string,

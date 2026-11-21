@@ -326,12 +326,14 @@ describe('my flight bookings (FLT-25)', () => {
       expect(res.body.code).toBe(ErrorCode.NotFound);
     });
 
-    it.each([
-      ['an unknown id', () => new Types.ObjectId().toHexString()],
-      ['a malformed id', () => 'not-an-id'],
-    ])('answers 404 NOT_FOUND for %s', async (_label, id) => {
-      const res = await details(id()).expect(404);
+    it('answers 404 NOT_FOUND for an unknown id', async () => {
+      const res = await details(new Types.ObjectId().toHexString()).expect(404);
       expect(res.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('answers 400 VALIDATION_FAILED for a malformed id', async () => {
+      const res = await details('not-an-id').expect(400);
+      expect(res.body.code).toBe(ErrorCode.ValidationFailed);
     });
 
     it('answers 401 NOT_AUTHENTICATED without a login', async () => {
@@ -419,5 +421,20 @@ describe('my flight bookings (FLT-25)', () => {
     expect(
       document.components?.schemas?.MyFlightBookingResponseDto,
     ).toHaveProperty('properties.refund');
+  });
+
+  it('documents 400 for a malformed ID on every booking :id route', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().build(),
+    );
+    for (const [path, method] of [
+      ['/api/flight-bookings/{id}', 'get'],
+      ['/api/flight-bookings/{id}/e-ticket', 'get'],
+      ['/api/flight-bookings/{id}/refund-preview', 'get'],
+      ['/api/flight-bookings/{id}/cancel', 'post'],
+    ] as const) {
+      expect(document.paths[path]?.[method]?.responses).toHaveProperty('400');
+    }
   });
 });

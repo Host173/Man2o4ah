@@ -12,8 +12,11 @@ import { loginAs } from '../../../test/support/auth.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { CabinClass } from '../../common/database/cabin-class.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { FlightsService } from '../flights/flights.service.js';
+import type { FlightSearchItem } from '../flights/flights.types.js';
+import { FlightStatus } from '../flights/schemas/flight.schema.js';
 import { FxService } from '../fx/fx.service.js';
 import { Events } from '../../common/events/events.js';
 import { ReportTargetType } from '../moderation/ports/reportable-content.port.js';
@@ -27,6 +30,46 @@ const validBody = {
   title: '  Egypt in a week  ',
   countryCodes: ['EG'],
   startDate: '2027-04-01',
+};
+
+const FLIGHT_ITEM: FlightSearchItem = {
+  flight: {
+    id: new Types.ObjectId().toHexString(),
+    airlineId: new Types.ObjectId().toHexString(),
+    flightNumber: 'XY100',
+    departureAirportId: 'DXB',
+    arrivalAirportId: 'CAI',
+    departureAt: new Date('2027-04-01T08:00:00.000Z'),
+    arrivalAt: new Date('2027-04-01T11:00:00.000Z'),
+    departureLocalDate: '2027-04-01',
+    durationMinutes: 180,
+    status: FlightStatus.SCHEDULED,
+    hasBookings: false,
+    cabins: [],
+    departureTimeZone: 'Asia/Dubai',
+    arrivalTimeZone: 'Africa/Cairo',
+  },
+  airline: {
+    id: new Types.ObjectId().toHexString(),
+    name: 'Test Air',
+    code: 'XY',
+    isActive: true,
+    baggagePolicy: { extraBagPriceMinor: 5000, maxExtraBagsPerPassenger: 2 },
+    cancellationTiers: [{ daysBefore: 7, refundPercent: 100 }],
+  },
+  matchingCabins: [
+    {
+      id: new Types.ObjectId().toHexString(),
+      cabinClass: CabinClass.ECONOMY,
+      totalSeats: 100,
+      availableSeats: 100,
+      heldSeats: 0,
+      bookedSeats: 0,
+      priceMinor: 20000,
+      freeBags: 1,
+      maxBagWeightKg: 23,
+    },
+  ],
 };
 
 function errorDetails(body: { details?: { field: string }[] }): string[] {
@@ -1420,7 +1463,7 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
         {},
         { dayIds: 'not-a-list' },
         { dayIds: [] },
-        { dayIds: [first, middle] },
+        { dayIds: [first, last] },
         { dayIds: [first, middle, last, unknown] },
         { dayIds: [first, middle, middle] },
         { dayIds: [first, middle, unknown] },
@@ -2502,6 +2545,57 @@ describe('ItinerariesController HTTP API (ITN-01, ITN-03)', () => {
       expect(
         document.paths['/api/itineraries/{id}/flights']?.get,
       ).toBeDefined();
+    });
+
+    it('answers with the flight search shape (_id keys) and documents it in Swagger', async () => {
+      const owner = await loginAs(testApp.connection, UserRole.USER);
+      const id = await createOwnedItinerary(owner.cookie);
+      await testApp
+        .http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', owner.cookie)
+        .send({ cityId: 'cairo' });
+      vi.spyOn(fakeFlights, 'search').mockResolvedValueOnce({
+        items: [FLIGHT_ITEM],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+
+      const response = await testApp
+        .http()
+        .get(`/api/itineraries/${id}/flights?origin=DXB&tripType=one_way`)
+        .set('Cookie', owner.cookie);
+      expect(response.status).toBe(200);
+      expect(response.body.items[0].flight._id).toBe(FLIGHT_ITEM.flight.id);
+      expect(response.body.items[0].flight).not.toHaveProperty('id');
+      expect(response.body.items[0].matchingCabins[0]._id).toBe(
+        FLIGHT_ITEM.matchingCabins[0].id,
+      );
+
+      const document = SwaggerModule.createDocument(
+        testApp.app,
+        new DocumentBuilder().addCookieAuth('access_token').build(),
+      );
+      expect(
+        document.paths['/api/itineraries/{id}/flights']?.get?.responses['200'],
+      ).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              oneOf: [
+                {
+                  $ref: '#/components/schemas/PaginatedFlightSearchResponseDto',
+                },
+                {
+                  $ref: '#/components/schemas/RoundTripFlightSearchResponseDto',
+                },
+              ],
+            },
+          },
+        },
+      });
     });
   });
 });

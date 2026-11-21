@@ -98,6 +98,7 @@ for each booking with status pending_payment and holdExpiresAt ≤ now (batches 
   after commit: emit flight-booking.expired / hotel-reservation.expired
 payments listens: cancels the PaymentIntent (if pending/failed), sets the payment canceled.
   Ignore "already succeeded" errors: the late-payment path refunds those (§6).
+  A payment that already `succeeded` (the booking was never confirmed) is refunded in full with `late_payment`; one refund per booking, so it can't double up with §6.
 ```
 
 ## 6. Stripe webhook and confirmation

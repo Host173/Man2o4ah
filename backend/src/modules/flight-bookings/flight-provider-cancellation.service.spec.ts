@@ -222,28 +222,16 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
     expect(events.payloadsOf(Events.FlightBookingCancelled)).toHaveLength(1);
   });
 
-  it('keeps going when one booking fails, and a redelivery finishes it', async () => {
+  // S-08: flight.cancelled is never redelivered, so a failed booking is tried once more.
+  it('retries a booking that fails once, so every booking ends cancelled', async () => {
     const first = await seed();
     const second = await seed();
-    const failure = new Error('Seat inventory unavailable');
-    vi.spyOn(seats, 'returnBooked').mockRejectedValueOnce(failure);
+    vi.spyOn(seats, 'returnBooked').mockRejectedValueOnce(
+      new Error('Seat inventory unavailable'),
+    );
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-    await service.cancelBookingsOf(OUT, NOW);
-
-    const statuses = [
-      (await find(first.id))?.status,
-      (await find(second.id))?.status,
-    ];
-    expect(statuses).toHaveLength(2);
-    expect(statuses).toEqual(
-      expect.arrayContaining(['cancelled', 'confirmed']),
-    );
-    // The failed booking was rolled back: seats and refunds belong to the cancelled one only.
-    expect(counters(OUT, OUT_ECO)).toMatchObject({ bookedSeats: 2 });
-    expect(payments.refunds).toHaveLength(1);
-
-    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(2);
 
     expect((await find(first.id))?.status).toBe('cancelled');
     expect((await find(second.id))?.status).toBe('cancelled');
@@ -252,6 +240,28 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
       availableSeats: 50,
     });
     expect(payments.refunds).toHaveLength(2);
+  });
+
+  it('parks a booking that fails twice and finishes the others', async () => {
+    const first = await seed();
+    const second = await seed();
+    vi.spyOn(seats, 'returnBooked')
+      .mockRejectedValueOnce(new Error('Seat inventory unavailable'))
+      .mockRejectedValueOnce(new Error('Seat inventory unavailable'));
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+
+    const statuses = [
+      (await find(first.id))?.status,
+      (await find(second.id))?.status,
+    ];
+    expect(statuses).toEqual(
+      expect.arrayContaining(['cancelled', 'confirmed']),
+    );
+    // The parked booking was rolled back: seats and refunds belong to the cancelled one only.
+    expect(counters(OUT, OUT_ECO)).toMatchObject({ bookedSeats: 2 });
+    expect(payments.refunds).toHaveLength(1);
   });
 
   it('keeps the cancellation, notifies and carries on if a refund request throws', async () => {

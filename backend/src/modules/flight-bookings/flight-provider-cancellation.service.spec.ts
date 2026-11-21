@@ -289,6 +289,78 @@ describe('FlightProviderCancellationService (FLT-06 bookings side, GEN-11)', () 
     expect(events.payloadsOf(Events.FlightBookingCancelled)).toHaveLength(1);
   });
 
+  describe('a booking that moves on between the scan and its expiry', () => {
+    // Runs `change` once, right before the handler opens its transaction: after
+    // the scan saw the booking as pending_payment, like a payment would.
+    function movesOnAfterTheScan(change: () => Promise<void>) {
+      const startSession = t.connection.startSession.bind(t.connection);
+      vi.spyOn(t.connection, 'startSession').mockImplementationOnce(
+        async (options) => {
+          await change();
+          return startSession(options);
+        },
+      );
+    }
+    const items = [{ flightId: OUT, cabinId: OUT_ECO, seats: 2 }];
+
+    it('re-handles a booking a payment confirmed between the scan and its expiry', async () => {
+      const booking = await seed({ status: 'pending_payment' });
+      movesOnAfterTheScan(async () => {
+        await bookings.updateOne(
+          { _id: booking._id },
+          {
+            $set: {
+              status: 'confirmed',
+              reference: 'FBRACE01',
+              confirmedAt: NOW,
+            },
+          },
+        );
+        await seats.confirm(items);
+      });
+
+      await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(1);
+
+      const saved = await find(booking.id);
+      expect(saved?.status).toBe('cancelled');
+      expect(saved?.cancellation).toMatchObject({
+        cancelledBy: 'provider',
+        refundPercent: 100,
+        refundAmountMinor: 40_000,
+      });
+      expect(payments.refunds).toEqual([
+        expect.objectContaining({
+          bookingId: booking.id,
+          amountMinor: 40_000,
+          reason: 'provider_cancellation',
+        }),
+      ]);
+      expect(events.payloadsOf(Events.FlightBookingCancelled)).toEqual([
+        { bookingId: booking.id, userId: USER, reference: 'FBRACE01' },
+      ]);
+      expect(counters(OUT, OUT_ECO)).toMatchObject({
+        bookedSeats: 0,
+        availableSeats: 50,
+      });
+    });
+
+    it('stops when the booking that moved on is finished, without refunds or events', async () => {
+      const booking = await seed({ status: 'pending_payment' });
+      movesOnAfterTheScan(async () => {
+        await bookings.updateOne(
+          { _id: booking._id },
+          { $set: { status: 'expired', expiredAt: NOW } },
+        );
+      });
+
+      await expect(service.cancelBookingsOf(OUT, NOW)).resolves.toBe(0);
+
+      expect((await find(booking.id))?.status).toBe('expired');
+      expect(payments.refunds).toHaveLength(0);
+      expect(events.emitted).toHaveLength(0);
+    });
+  });
+
   it('handles the flight.cancelled event', async () => {
     const booking = await seed();
 

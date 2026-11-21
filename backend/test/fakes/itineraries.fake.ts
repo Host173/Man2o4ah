@@ -26,6 +26,7 @@ import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
 import { ErrorCode } from '../../src/common/errors/error-codes.js';
+import { getPlatformCurrency } from '../../src/common/money/platform-currency.js';
 import type { PayloadOf } from '../../src/common/events/event-payloads.js';
 import { Events } from '../../src/common/events/events.js';
 import {
@@ -59,6 +60,7 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  PublicItineraryDetailView,
   PublicItineraryQuery,
   PublicItinerarySummary,
   TransportCostView,
@@ -175,8 +177,40 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     return this.findPublic(undefined, query);
   }
 
-  async clone(sourceId: string, userId: string): Promise<ItineraryDetailView> {
-    const source = this.owned.get(sourceId);
+  /**
+   * ITN-21: the read-only public page, over the itineraries created through the
+   * owner methods (seeded summaries have no days). Same visibility filter and
+   * 404 as the real service; the author name is `null` (no accounts here) and
+   * the budget is in the platform currency.
+   */
+  async getPublicById(itineraryId: string): Promise<PublicItineraryDetailView> {
+    const source = this.visibleOwned(itineraryId);
+    const detail = this.toDetail(source);
+    return {
+      _id: detail._id,
+      ownerId: detail.ownerId,
+      authorName: null,
+      title: detail.title,
+      countryCodes: detail.countryCodes,
+      startDate: detail.startDate,
+      dayCount: detail.dayCount,
+      cityIds: [...new Set(detail.days.map((day) => day.cityId))].sort(),
+      updatedAt: detail.updatedAt,
+      days: detail.days,
+      cityGroups: detail.cityGroups,
+      transportCosts: detail.transportCosts,
+      ...(detail.clonedFrom ? { clonedFrom: detail.clonedFrom } : {}),
+      budget: buildBudgetSummary(
+        this.toBudgetInput(detail),
+        this.converter,
+        getPlatformCurrency(),
+      ),
+    };
+  }
+
+  /** An owner-created itinerary that is public, not hidden, author active. */
+  private visibleOwned(itineraryId: string): ItineraryDetailView {
+    const source = this.owned.get(itineraryId);
     if (
       !source ||
       source.visibility !== ItineraryVisibility.PUBLIC ||
@@ -188,6 +222,11 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
         message: 'Itinerary not found',
       });
     }
+    return source;
+  }
+
+  async clone(sourceId: string, userId: string): Promise<ItineraryDetailView> {
+    const source = this.visibleOwned(sourceId);
 
     const now = new Date();
     const dayIdMap = new Map<string, string>();
@@ -854,7 +893,15 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
     userId: string,
   ): Promise<BudgetSummaryView> {
     const itinerary = this.toDetail(this.findOwned(itineraryId, userId));
-    const input: BudgetSummaryInput = {
+    return buildBudgetSummary(
+      this.toBudgetInput(itinerary),
+      this.converter,
+      this.preferredCurrency,
+    );
+  }
+
+  private toBudgetInput(itinerary: ItineraryDetailView): BudgetSummaryInput {
+    return {
       startDate: toDateOnly(itinerary.startDate),
       days: itinerary.days.map((day) => ({
         _id: day._id,
@@ -868,7 +915,6 @@ export class FakeItinerariesService implements PublicApi<ItinerariesService> {
         currency: cost.currency,
       })),
     };
-    return buildBudgetSummary(input, this.converter, this.preferredCurrency);
   }
 
   async addTransportCost(

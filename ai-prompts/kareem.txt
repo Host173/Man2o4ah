@@ -4436,6 +4436,17 @@ Pushed test/TST-02-swagger-audit-and-fixes and opened PR #234 into develop; expl
 Date: 2026-11-22
 Student: Kareem
 Tool: Claude Code
+Related Requirement: ITN-08
+Prompt:
+Keep new behaviour
+
+How the output was used:
+On test/ITN-08-e2e-reorder-partial-list (from develop 572c1a0): updated the itinerary-to-clone E2E journey to the reorder behaviour of 54f0a34 (a list omitting only trailing days is accepted and keeps them at the end; omitting a middle day is 400). npm run test:e2e: 48/48 pass. Not pushed.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
 Related Requirement: PLT-07
 Prompt:
 execute this . work from the latest develop!

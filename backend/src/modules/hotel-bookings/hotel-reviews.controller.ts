@@ -65,6 +65,7 @@ export class HotelReviewsController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: absent or not owned' })
+  @ApiParam({ name: 'id', type: String })
   create(
     @Param('id', ParseObjectIdPipe) reservationId: Types.ObjectId,
     @Body() body: CreateHotelReviewDto,
@@ -83,6 +84,7 @@ export class HotelReviewsController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: absent or not owned' })
+  @ApiParam({ name: 'id', type: String })
   update(
     @Param('id', ParseObjectIdPipe) reviewId: Types.ObjectId,
     @Body() body: UpdateHotelReviewDto,
@@ -102,6 +104,7 @@ export class HotelReviewsController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: absent or not owned' })
+  @ApiParam({ name: 'id', type: String })
   async delete(
     @Param('id', ParseObjectIdPipe) reviewId: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -118,6 +121,7 @@ export class HotelReviewsController {
   @ApiOkResponse({ type: PaginatedHotelReviewsResponseDto })
   @ApiBadRequestResponse({ description: 'VALIDATION_FAILED' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: hotel does not exist' })
+  @ApiParam({ name: 'id', type: String })
   listForHotel(
     @Param('id', ParseObjectIdPipe) hotelId: Types.ObjectId,
     @Query() query: ListHotelReviewsQueryDto,

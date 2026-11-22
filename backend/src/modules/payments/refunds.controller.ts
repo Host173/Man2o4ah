@@ -7,6 +7,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -35,6 +36,7 @@ export class RefundsController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: not your refund' })
+  @ApiParam({ name: 'id', type: String })
   get(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,

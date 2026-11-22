@@ -116,6 +116,7 @@ Comments and reviews of a deactivated user stay visible but show **"Deleted user
 | 26 | `notifications` | notifications | In-app notifications |
 | 27 | `audit_logs` | audit | Append-only log of admin actions |
 | 28 | `post_image_cleanups` | blog | Durable file cleanup for deleted posts (BLG-10) |
+| 29 | `email_deliveries` | notifications | Persistent email delivery/retry identities (GEN-01-B) |
 
 `admin` owns no collection. `storage` owns no collection (files on disk). `common` owns no collection.
 
@@ -704,6 +705,33 @@ Resolving a report applies the action once and closes **all** open reports on th
 
 Indexes: `{ userId: 1, readAt: 1, createdAt: -1 }`
 
+#### `email_deliveries` (GEN-01-B)
+
+Approved by Kareem/Aisha, including the same-PR frozen-model exception, as confirmed by Pierre (DECISIONS §3).
+
+| Field               | Type                                        | Req         | Rules                                                                                                                                                              |
+| ------------------- | ------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `deliveryKey`       | string                                      | yes         | non-empty, unique; `notification:<notificationId>` or `invitation:<eventId>:<userId>`                                                                              |
+| `kind`              | enum `notification \| moderator_invitation` | yes         |                                                                                                                                                                    |
+| `userId`            | ObjectId                                    | yes         | recipient, resolved by the Accounts-owned port adapter                                                                                                             |
+| `notificationId`    | ObjectId                                    | conditional | required only for notifications; references this module's notification                                                                                             |
+| `invitationEventId` | string                                      | conditional | non-empty, required only for invitations                                                                                                                           |
+| `status`            | enum `pending \| sending \| sent \| failed` | yes         | default `pending`                                                                                                                                                  |
+| `attempts`          | non-negative safe integer                   | yes         | default 0; at most five delivery claims                                                                                                                            |
+| `nextAttemptAt`     | Date                                        | yes         | default now, UTC                                                                                                                                                   |
+| `leaseToken`        | string                                      | conditional | non-empty, only while sending                                                                                                                                      |
+| `leaseExpiresAt`    | Date                                        | conditional | only while sending; 120-second ownership lease                                                                                                                     |
+| `sentAt`            | Date                                        | conditional | only after SMTP acceptance and successful acknowledgement                                                                                                          |
+| `lastError`         | enum                                        |             | `recipient_missing`, `recipient_lookup_failed`, `smtp_transient`, `smtp_rejected`, `smtp_unknown`, `notification_missing`, `attempts_exhausted`; no raw exceptions |
+
+Indexes: `{ deliveryKey: 1 }` **unique** · `{ status: 1, nextAttemptAt: 1, _id: 1 }` · `{ status: 1, leaseExpiresAt: 1, _id: 1 }`.
+Default ObjectId `_id`, timestamps; no TTL, recipient email, credentials or raw SMTP replies are stored.
+
+When enabled, notification and queue upsert commit together in a notifications-owned transaction. SMTP runs afterwards. Delivery identities preserve existing notification IDs and stable repeatable-event IDs; reading an alert never resends it.
+Claims are conditional on pending/due/attempts; acknowledgement and retry filter on sending and the claim token. Missing recipients/notifications and SMTP 5xx are terminal; lookup/network/SMTP 4xx errors retry after 30, 60, 120 and 240 seconds. Five claims exhaust the record. Expired leases are recovered conditionally; exhausted ones fail explicitly. Sent/failed identities never reset on redelivery.
+The job runs every 30 seconds, processing up to 20 deliveries sequentially. Logging contains only fixed categories and delivery IDs.
+SMTP acceptance followed by process failure before acknowledgement may duplicate mail; a stable Message-ID is not an exactly-once guarantee. In-process source events may be lost before enqueue: this is not a durable source outbox. Disabled email does not queue or backfill historical events.
+
 ---
 
 ### 3.13 audit
@@ -814,7 +842,7 @@ pending_payment ──payment succeeded──▶ confirmed ──end of trip/sta
 | Module | May call services of |
 |---|---|
 | reference-data, storage, notifications, audit | — |
-| accounts | reference-data |
+| accounts | reference-data, notifications (registers `EmailRecipientLookup` only) |
 | fx | reference-data |
 | flights | reference-data, storage |
 | hotels | reference-data, storage |
@@ -836,6 +864,9 @@ A URL path does not decide the module. Endpoints that combine provider data with
 | `PayableBooking` (payments) | flight-bookings, hotel-bookings | `getPayable(bookingId, userId)` → `{ amountMinor, currency, status, holdExpiresAt }`; `getPolicies(bookingId, userId)` |
 | `ReportableContent` (moderation) | blog (post, comment), hotel-bookings (review), itineraries (itinerary) | `exists(id)`, `hide(id)`, `delete(id)` |
 | `ActiveBookingsCheck` (accounts) | flight-bookings, hotel-bookings | `hasUpcomingConfirmed(userId, { session? })` (blocks ACC-12; caller transaction used when supplied) |
+| `EmailRecipientLookup` (notifications) | accounts | `getRecipient(userId)` returns `{ userId, email }` or null for unknown account; malformed ID is 400 VALIDATION_FAILED; storage errors reject |
+
+`EmailRecipientRegistry` is exported by notifications; `AccountEmailRecipient` registers in `onModuleInit`. Only the Accounts adapter reads users. Suspended/deactivated accounts still receive required alerts; `AccountProfile` continues to exclude email. Notifications never imports Accounts or its model.
 
 **ACC-12 serialization.** Before confirming a pending booking, the booking owner calls `AccountsService.tryLockForBookingConfirmation(userId, { session })` with its active transaction. Accounts conditionally increments the existing Mongoose `users.__v` for active or suspended accounts; false means missing/deactivated. Deactivation writes the same user document, then reads both booking checks sequentially with its caller session before deleting sessions. A conflicting transaction retries against current account/booking state. If deactivation wins, hotel confirmation expires the pending reservation and releases its nights together, then requests the full `late_payment` refund after commit. A duplicate event reuses payments' one-refund-per-booking contract. Future flight confirmation must use this same fence and release its held seats when expiry wins.
 
@@ -868,11 +899,14 @@ Repeatable notification changes carry a required, non-empty opaque `eventId`: ge
 | `account.reactivated` | `{ eventId, userId }` | accounts | notifications |
 | `provider.deactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
 | `provider.reactivated` | `{ eventId, providerType, providerId, moderatorIds }` | admin | notifications |
+| `moderator.invited` | `{ eventId, userId }` | accounts, after moderator creation persists | notifications email channel |
 | `admin.action` | `{ eventId, actorId, action, target: { type, id }, details? }` | admin, moderation | audit |
 
 `admin.action.eventId` is a non-empty string generated once per committed action and
 reused on every delivery retry. A later action gets a new identity, including repeated
 password resets or suspension/reactivation cycles.
+
+`moderator.invited.eventId` is `moderator-created:<userId>`, retained on redelivery. Failed/duplicate account creation emits nothing. No email address or temporary password travels in the event; invitations contain first-login instructions with credentials supplied separately by the administrator.
 
 ---
 
@@ -888,6 +922,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Complete stays | hotel-bookings | 1 h | `confirmed` with `checkOutDate < today` → `completed` |
 | Refresh rates | fx | daily | fetch FXRatesAPI, insert today's `exchange_rates` |
 | Retry post image cleanup | blog | 30 s | Delete queued files via storage; remove each cleanup record only after success |
+| Deliver queued email | notifications | 30 s | Recover expired leases, claim up to 20 due deliveries, send outside transactions, acknowledge by lease token |
 
 Sessions need no job (TTL index).
 

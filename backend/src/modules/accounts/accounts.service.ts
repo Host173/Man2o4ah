@@ -242,7 +242,8 @@ export class AccountsService {
    * bcrypt hash of the temporary password. Admin has already checked that the
    * provider exists. A taken email throws 409 EMAIL_TAKEN (the unique index
    * decides, so parallel requests can't both win); a malformed `providerId`
-   * or a field the schema rejects throws 400 VALIDATION_FAILED.
+   * or a field the schema rejects throws 400 VALIDATION_FAILED. After persistence,
+   * emits the credential-free GEN-01-B moderator invitation once per account.
    */
   async createModerator(input: CreateModeratorInput): Promise<AccountListItem> {
     if (!OBJECT_ID_HEX.test(input.providerId)) {
@@ -253,10 +254,12 @@ export class AccountsService {
       });
     }
 
+    const events = this.appEvents();
     const passwordHash = await bcrypt.hash(
       input.temporaryPassword,
       BCRYPT_ROUNDS,
     );
+    let created: AccountListItem;
     try {
       const user = await this.userModel.create({
         name: input.name,
@@ -269,7 +272,7 @@ export class AccountsService {
         },
         mustChangePassword: true,
       });
-      return toListItem(user.toObject<ListedUser>());
+      created = toListItem(user.toObject<ListedUser>());
     } catch (error) {
       if (isDuplicateEmail(error)) {
         throw new ConflictException({
@@ -292,6 +295,11 @@ export class AccountsService {
       }
       throw error;
     }
+    events.emit(Events.ModeratorInvited, {
+      eventId: `moderator-created:${created.id}`,
+      userId: created.id,
+    });
+    return created;
   }
 
   /**

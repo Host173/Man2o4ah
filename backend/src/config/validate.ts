@@ -1,3 +1,5 @@
+import { smtpConfig } from './smtp-config.js';
+
 export function validate(config: Record<string, unknown>) {
   if (!config.MONGODB_URI) {
     throw new Error(
@@ -56,5 +58,6 @@ export function validate(config: Record<string, unknown>) {
   ) {
     throw new Error('STRIPE_WEBHOOK_SECRET must start with whsec_.');
   }
+  smtpConfig(config);
   return config;
 }

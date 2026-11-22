@@ -9,7 +9,7 @@ Generated from `data-model.md`. If they disagree, `data-model.md` wins.
 - **Solid arrow = reference by ID inside the same module.**
 - **Dashed arrow = reference by ID to another module's collection.** Only that module's service may read it.
 - `<<embedded>>` marks subdocuments, not collections. Enum values are written `a/b/c`.
-- Rendered SVGs are in `diagrams/` next to each `.mmd` source.
+- Rendered SVGs are snapshots in `diagrams/`; use the `.mmd` sources and this file for the current model. The overview/community SVG snapshots predate GEN-01-B.
 
 ## Overview
 
@@ -66,6 +66,7 @@ classDiagram
   }
   namespace notifications {
     class notifications_["notifications"]
+    class email_deliveries
   }
   namespace audit {
     class audit_logs
@@ -97,6 +98,8 @@ classDiagram
   likes --> posts
   post_image_cleanups --> posts : deleted postId (parent may be absent)
   reports ..> posts : target (post, comment, review, itinerary)
+  email_deliveries --> notifications_ : notificationId (optional)
+  email_deliveries ..> users : recipient
 ```
 
 ## Accounts Reference
@@ -538,6 +541,20 @@ classDiagram
       entity : type, id
       readAt : Date?
     }
+    class EmailDelivery {
+      deliveryKey : string (unique)
+      kind : notification/moderator_invitation
+      userId : ObjectId
+      notificationId : ObjectId?
+      invitationEventId : string?
+      status : pending/sending/sent/failed
+      attempts : int
+      nextAttemptAt : Date
+      leaseToken : string?
+      leaseExpiresAt : Date?
+      sentAt : Date?
+      lastError : string?
+    }
   }
   namespace audit {
     class AuditLog {
@@ -557,4 +574,5 @@ classDiagram
   PostImageCleanup "*" --> "0..1" Post : postId (survives deletion)
   Report ..> Post : targetType + targetId
   Report ..> Comment : targetType + targetId
+  EmailDelivery "*" --> "0..1" Notification : notificationId
 ```

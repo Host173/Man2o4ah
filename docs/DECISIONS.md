@@ -3,7 +3,7 @@
 Decisions the team has agreed on. Don't change a locked decision without the team leader (Kareem).
 If a question isn't answered here and can't be decided alone, don't assume: ask the team leader.
 
-Last updated: 2026-11-20 (durable blog image cleanup)
+Last updated: 2026-11-21 (email notifications)
 
 ---
 
@@ -29,7 +29,7 @@ Last updated: 2026-11-20 (durable blog image cleanup)
 | fx | FXRatesAPI integration and rate caching | cached exchange rates |
 | blog | Community content | posts (with tags), comments, likes, post_image_cleanups |
 | moderation | Reports on any content type | reports |
-| notifications | In-app notifications, triggered by events | notifications |
+| notifications | In-app notifications and SMTP email delivery, triggered by events | notifications, email_deliveries |
 | audit | Logs of important admin and moderation actions, triggered by events | audit logs |
 | admin | Admin endpoints; calls other modules' services | **no data** |
 
@@ -49,6 +49,7 @@ Infrastructure (not domain modules):
 - **Background jobs live in the module that owns the data:** hold expiry and completion in flight-bookings and hotel-bookings (they own the pending bookings), marking flights departed in flights, rate refresh in fx. No separate jobs module.
 - **Blog image cleanup (BLG-10, 20 Nov):** post deletion transactionally retains image keys in blog-owned `post_image_cleanups`. Files are deleted after commit; failures are logged and retried every 30 seconds, including after restarts, while the committed deletion returns 204. Kareem and Mostafa's approval of this model/job change and its inclusion in PR #173 was confirmed by the requester.
 - **A hold is a pending booking.** There is no separate holds collection; the inventory counters/nights live in the provider modules.
+- **Email notifications (GEN-01-B, 21 Nov):** Pierre confirmed Kareem and Aisha's approval of the exact recipient port, Accounts invitation hook, SMTP dependency/configuration and persistent retry design, and Kareem's explicit exception permitting the frozen model/shared contracts in PR #225. Pierre also confirmed Mostafa's approval of the coupled Blog wiring test-fixture adjustment only; no Blog production behavior changes. Notifications owns `email_deliveries` and `EmailRecipientRegistry`; Accounts registers its own email-only adapter and emits `moderator.invited` after creation persists. Invitations contain first-login instructions, never the temporary password, and no login link until a login page exists. SMTP is disabled by default; enabled non-production sends only to a test inbox. Five attempts, 30/60/120/240-second backoff, a 120-second lease, a 30-second scan and batch 20. Sent/failed identities are retained without TTL. SMTP acceptance is not exactly-once delivery: a crash before acknowledgement can duplicate mail; in-process source events are not durable. See data model §3.12/§6 and the API-contract configuration section.
 - **Modules talk through services, ports and events.** Lower modules never import higher ones; when they must, the lower module owns an interface (port) or emits an event. The allowed imports, ports and events are listed in `data-model.md` §6.
 - **Notification change identity (GEN-01, 20 Nov):** with Kareem/affected owners' approval, reschedule and account/provider notification events require a stable `eventId`, reused on redelivery. Different committed changes have different IDs. Read state and intervening opposite changes never identify an event; distinct reschedules notify even when earlier alerts are unread. No collection schema or index changes.
 - **Booking rules are implemented in each booking module.** The GEN-11 lifecycle (allowed status moves) and the FLT-09/HTL-10 refund tiers are needed by both flight-bookings and hotel-bookings. Each module has its own copy, with its own tests; neither imports the other, and they don't go in `common/` (no business logic there). The two copies must follow the same rule (HTL-10 uses FLT-09's selection rule); only the start date differs (flight: outbound departure; hotel: check-in at 00:00 UTC). Why: each module owns all of its logic, there's no coupling between the booking modules, and one owner (Bookings) keeps both copies in step. Decided 17 Nov (PR #130).

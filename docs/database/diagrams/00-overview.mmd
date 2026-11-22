@@ -53,6 +53,7 @@ classDiagram
   }
   namespace notifications {
     class notifications_["notifications"]
+    class email_deliveries
   }
   namespace audit {
     class audit_logs
@@ -84,3 +85,5 @@ classDiagram
   likes --> posts
   post_image_cleanups --> posts : deleted postId (parent may be absent)
   reports ..> posts : target (post, comment, review, itinerary)
+  email_deliveries --> notifications_ : notificationId (optional)
+  email_deliveries ..> users : recipient

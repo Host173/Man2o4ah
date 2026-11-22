@@ -36,14 +36,54 @@ There is no root `package.json`. Each app has its own.
 ## Prerequisites
 
 - Node.js: the version in `.nvmrc` (`nvm use`)
-- npm
+- npm (ships with Node.js)
+- A MongoDB Atlas cluster, or any MongoDB 7+ **replica set** (bookings use transactions, which need a replica set; a single standalone `mongod` does not work)
+- Optional, only to test payments: a Stripe account in test mode and the [Stripe CLI](https://docs.stripe.com/stripe-cli)
 
 ## Setup
 
 1. Clone the repository.
-2. Copy the `backend/.env` values from `.env.example` into `backend/.env` and fill in `MONGODB_URI` (get it from the team leader) and `JWT_ACCESS_SECRET` (any long random string; `.env.example` shows how to generate one).
-3. Copy the frontend values from `.env.example` into `frontend/.env.local`.
-4. Run `npm install` in `backend/` and in `frontend/`.
+2. Copy the `backend/.env` block of `.env.example` into `backend/.env` and fill it in (see [Environment](#environment)).
+3. Copy the `frontend/.env.local` block of `.env.example` into `frontend/.env.local`.
+4. Install and seed, in `backend/`, in this order (every seed is safe to re-run):
+
+   ```bash
+   npm ci
+   npm run seed:reference
+   npm run seed:admin
+   npm run seed:demo
+   ```
+
+   `npm ci` also downloads Chromium for the E-ticket PDFs (Playwright). In `frontend/`, run `npm ci`.
+
+### Environment
+
+Values never go in the README or in git; `.env` files are gitignored.
+
+**`backend/.env`**
+
+| Variable | Required | What it is and how to get it |
+|---|---|---|
+| `MONGODB_URI` | yes | MongoDB connection string. Atlas: Database → Connect → Drivers, copy the `mongodb+srv://` string, put the database user's password in it, and add your IP under Network Access (IP access list). |
+| `JWT_ACCESS_SECRET` | yes | Signs the login cookies. Any long random string: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `PORT` | no (default `4000`) | Port of the API. |
+| `FRONTEND_URL` | no (default `http://localhost:3000`) | The only origin CORS allows. |
+| `PLATFORM_CURRENCY` | no (default `USD`) | The single platform currency, a 3-letter uppercase code. |
+| `UPLOAD_DIR` | no (default `uploads`) | Folder for uploaded images, served under `/uploads`. |
+| `FXRATES_API_KEY` | no | FXRatesAPI key (ITN-18); the API works without one at low volume. |
+| `FX_AUTO_REFRESH` | no (default `true`) | `false` = never fetch exchange rates (offline development). |
+| `STRIPE_SECRET_KEY` | only for payments | A **test-mode** key, `sk_test_…` (Stripe Dashboard → Developers → API keys, sandbox). A live key is rejected at start-up. |
+| `STRIPE_WEBHOOK_SECRET` | only for payments | `whsec_…`, printed by `stripe listen`. `npm run dev:stripe` sets it for you. |
+| `SEED_ADMIN_EMAIL` | for `seed:admin` and `seed:demo` | Email of the admin account (ACC-18; there is no admin registration). |
+| `SEED_ADMIN_PASSWORD` | for `seed:admin` and `seed:demo` | Its password: 8-72 characters, a letter and a digit. |
+| `DEMO_PASSWORD` | for `seed:demo` | Shared password of every demo account; same rule. |
+
+**`frontend/.env.local`**
+
+| Variable | Required | What it is |
+|---|---|---|
+| `BACKEND_URL` | yes | Where the frontend sends `/api` and `/uploads`, e.g. `http://localhost:4000`. |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | no (Milestone 2) | Stripe publishable test key, `pk_test_…`. |
 
 ## Run
 
@@ -59,7 +99,53 @@ There is no root `package.json`. Each app has its own.
 
 - API: http://localhost:4000/api
 - Swagger: http://localhost:4000/api/docs
+- OpenAPI JSON: http://localhost:4000/api/docs-json
+- Health: http://localhost:4000/api/health
 - Frontend: http://localhost:3000
+
+## Testing in Swagger
+
+1. Start the backend (`npm run start:dev`, or `npm run dev:stripe` to confirm payments) and open http://localhost:4000/api/docs.
+2. Log in with `POST /api/auth/login` ("Try it out", body `{ "email": "...", "password": "..." }`). The browser keeps the login cookie, so every later call in Swagger is authenticated. `GET /api/auth/me` shows who you are; `POST /api/auth/logout` logs out.
+3. Use the admin (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`) or a demo account from [Demo data](#demo-data) (password: your `DEMO_PASSWORD`).
+4. Every endpoint's summary starts with its requirement ID (e.g. `FLT-22`), and endpoints are grouped by tag.
+
+Try this first, per area:
+
+- **Book a flight** (as `sara@example.com`): `GET /api/flights/search` → `POST /api/flight-bookings` (quote) → `POST /api/flight-bookings/hold` (10-minute hold) → `GET /api/bookings/{type}/{id}/policies` → `POST /api/bookings/{type}/{id}/accept-policies` → `POST /api/payments`. Confirming the payment needs `npm run dev:stripe` running and Stripe's test card `4242 4242 4242 4242` (any future date, any CVC); then `GET /api/flight-bookings/{id}` shows it confirmed and `GET /api/flight-bookings/{id}/e-ticket` downloads the E-ticket.
+- **Book a hotel**: `GET /api/hotels/search` → `GET /api/hotels/{id}/rooms/available` → `POST /api/hotel-bookings` → policies and payment as above.
+- **Itineraries**: `POST /api/itineraries` → `POST /api/itineraries/{id}/days` → `GET /api/itineraries/{id}/budget-summary`.
+- **Blog**: `POST /api/posts` → `GET /api/posts` → `POST /api/posts/{id}/comments`.
+- **Moderators** (e.g. `nile.mod@example.com`): `GET /api/airlines/{id}/flights`, `GET /api/flights/{id}/bookings`.
+- **Admin**: `GET /api/admin/accounts`, `POST /api/admin/moderators`.
+
+## Tests
+
+In `backend/` (tests use an in-memory MongoDB replica set and never touch Atlas or Stripe; no `.env` is needed):
+
+| Command | What it runs |
+|---|---|
+| `npm test` | unit, integration and API tests |
+| `npm run test:e2e` | the end-to-end journeys on the whole app |
+| `npm run verify` | everything CI runs: format, lint, typecheck, tests with coverage (≥ 80% per service file), E2E, build |
+| `npm run test:audit` | the Swagger audit (TST-02); manual, not in CI |
+| `npm run test:stress` | the stress and concurrency suite (TST-03); manual, not in CI |
+| `npm run openapi:export` | regenerates `docs/api/openapi.json` from the app |
+
+## API reference
+
+- Swagger UI: http://localhost:4000/api/docs (the course evaluates the backend through it).
+- The OpenAPI document of the release: [`docs/api/openapi.json`](docs/api/openapi.json), regenerated with `npm run openapi:export` in `backend/`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Start-up hangs, then `MongoServerSelectionError` / `querySrv` timeout | Atlas refuses your IP: add it under Network Access (IP access list) in Atlas, and check the user and password in `MONGODB_URI`. |
+| `MONGODB_URI is not set. Add it to backend/.env (see .env.example).` (or the same for `JWT_ACCESS_SECRET`, or a Stripe key message) | A required variable is missing or invalid in `backend/.env`; see [Environment](#environment). The file must be in `backend/`, not the repo root. |
+| `EADDRINUSE: address already in use :::4000` | Another process uses port 4000: stop it, or set `PORT` in `backend/.env`. |
+| `seed:demo` fails to log in as the admin, or finds no airports/cities | Seeds ran in the wrong order: run `seed:reference`, then `seed:admin`, then `seed:demo` (all re-runnable). |
+| `npm run dev:stripe` exits, or payments never confirm | The Stripe CLI is missing or not logged in: install it and run `stripe login` once; check `STRIPE_SECRET_KEY` is an `sk_test_` key. |
 
 ## Workflow
 

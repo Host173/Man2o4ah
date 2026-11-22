@@ -1038,7 +1038,7 @@
         "operationId": "FlightsController_updateCabin",
         "parameters": [
           {
-            "name": "cabinId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -1046,7 +1046,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "cabinId",
             "required": true,
             "in": "path",
             "schema": {
@@ -1152,6 +1152,14 @@
         "operationId": "FlightsController_listAirlineFlights",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -1170,14 +1178,6 @@
               "maximum": 50,
               "default": 10,
               "type": "number"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -2123,7 +2123,16 @@
       "post": {
         "description": "Puts a failed payment back to pending and returns the same client secret, until the hold expires.",
         "operationId": "PaymentsController_retry",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -2165,7 +2174,16 @@
     "/api/payments/{id}": {
       "get": {
         "operationId": "PaymentsController_get",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -2349,7 +2367,16 @@
       "get": {
         "description": "Pending until Stripe confirms it; then Refunded or Failed.",
         "operationId": "RefundsController_get",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -2563,6 +2590,14 @@
         "operationId": "HotelsController_availableRooms",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -2602,14 +2637,6 @@
             "schema": {
               "format": "date",
               "example": "2026-12-03",
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
               "type": "string"
             }
           }
@@ -2752,7 +2779,7 @@
         "operationId": "HotelsController_patchRoom",
         "parameters": [
           {
-            "name": "roomId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -2760,7 +2787,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "roomId",
             "required": true,
             "in": "path",
             "schema": {
@@ -2819,7 +2846,7 @@
         "operationId": "HotelsController_deleteRoom",
         "parameters": [
           {
-            "name": "roomId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -2827,7 +2854,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "roomId",
             "required": true,
             "in": "path",
             "schema": {
@@ -2871,7 +2898,7 @@
         "operationId": "HotelsController_addRoomAvailability",
         "parameters": [
           {
-            "name": "roomId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -2879,7 +2906,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "roomId",
             "required": true,
             "in": "path",
             "schema": {
@@ -2935,7 +2962,7 @@
         "operationId": "HotelsController_patchRoomAvailability",
         "parameters": [
           {
-            "name": "roomId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -2943,7 +2970,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "roomId",
             "required": true,
             "in": "path",
             "schema": {
@@ -3070,6 +3097,14 @@
         "operationId": "HotelsController_listRooms",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -3088,14 +3123,6 @@
               "maximum": 50,
               "default": 10,
               "type": "number"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -3267,7 +3294,7 @@
         "operationId": "HotelsController_removePhoto",
         "parameters": [
           {
-            "name": "photoId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -3275,7 +3302,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "photoId",
             "required": true,
             "in": "path",
             "schema": {
@@ -3809,8 +3836,9 @@
             "name": "id",
             "required": true,
             "in": "path",
-            "description": "Completed reservation ObjectId",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3869,8 +3897,9 @@
             "name": "id",
             "required": true,
             "in": "path",
-            "description": "Review ObjectId",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3924,8 +3953,9 @@
             "name": "id",
             "required": true,
             "in": "path",
-            "description": "Review ObjectId",
-            "schema": {}
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3961,6 +3991,14 @@
         "operationId": "HotelReviewsController_listForHotel",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -3980,13 +4018,6 @@
               "default": 10,
               "type": "number"
             }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "Hotel ObjectId",
-            "schema": {}
           }
         ],
         "responses": {
@@ -4347,7 +4378,7 @@
         "operationId": "ItinerariesController_addBudgetEntry",
         "parameters": [
           {
-            "name": "dayId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -4355,7 +4386,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "dayId",
             "required": true,
             "in": "path",
             "schema": {
@@ -4593,6 +4624,14 @@
         "operationId": "ItinerariesController_getFlightsForItinerary",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -4679,14 +4718,6 @@
                 "first"
               ]
             }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -4732,6 +4763,14 @@
       "get": {
         "operationId": "ItinerariesController_getHotelsForCityGroup",
         "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "page",
             "required": false,
@@ -4838,14 +4877,6 @@
                 "desc"
               ]
             }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -4931,7 +4962,7 @@
         "operationId": "ItinerariesController_deleteDay",
         "parameters": [
           {
-            "name": "dayId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -4939,7 +4970,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "dayId",
             "required": true,
             "in": "path",
             "schema": {
@@ -4978,7 +5009,7 @@
         "operationId": "ItinerariesController_updateDay",
         "parameters": [
           {
-            "name": "dayId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -4986,7 +5017,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "dayId",
             "required": true,
             "in": "path",
             "schema": {
@@ -5206,7 +5237,7 @@
         "operationId": "ItinerariesController_addActivity",
         "parameters": [
           {
-            "name": "dayId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -5214,7 +5245,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "dayId",
             "required": true,
             "in": "path",
             "schema": {
@@ -5427,7 +5458,7 @@
         "operationId": "ActivitiesController_removeImage",
         "parameters": [
           {
-            "name": "imageId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -5435,7 +5466,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "imageId",
             "required": true,
             "in": "path",
             "schema": {
@@ -5970,6 +6001,14 @@
         "operationId": "BlogController_listComments",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -5988,14 +6027,6 @@
               "maximum": 50,
               "default": 10,
               "type": "number"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -6327,7 +6358,7 @@
         "operationId": "BlogController_removeImage",
         "parameters": [
           {
-            "name": "imageId",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -6335,7 +6366,7 @@
             }
           },
           {
-            "name": "id",
+            "name": "imageId",
             "required": true,
             "in": "path",
             "schema": {
@@ -6428,6 +6459,14 @@
         "operationId": "BlogController_getAuthorPage",
         "parameters": [
           {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -6475,14 +6514,6 @@
                   "$ref": "#/components/schemas/Object"
                 }
               ]
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
             }
           }
         ],

@@ -62,7 +62,36 @@ export function buildOpenApiDocument(
     .setVersion(version)
     .addCookieAuth('access_token')
     .build();
-  return SwaggerModule.createDocument(app, swaggerConfig);
+  return orderPathParamsFirst(SwaggerModule.createDocument(app, swaggerConfig));
+}
+
+type DocParameter = { in?: string; name?: string };
+
+/**
+ * Path parameters first, in URL order, then the others as listed. The order
+ * Swagger reads from decorator metadata depends on the compiler (`nest build`
+ * lists `{id}` first, Vitest last), so the exported file and `/api/docs-json`
+ * would differ without it. The production build already uses this order.
+ */
+function orderPathParamsFirst(doc: OpenAPIObject): OpenAPIObject {
+  for (const [path, item] of Object.entries(doc.paths)) {
+    const names = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+    for (const operation of Object.values(item) as {
+      parameters?: DocParameter[];
+    }[]) {
+      const params = operation?.parameters;
+      if (!Array.isArray(params)) continue;
+      const rank = (p: DocParameter) =>
+        p.in === 'path' && p.name !== undefined && names.includes(p.name)
+          ? names.indexOf(p.name)
+          : names.length;
+      operation.parameters = params
+        .map((p, index) => ({ p, index }))
+        .sort((a, b) => rank(a.p) - rank(b.p) || a.index - b.index)
+        .map(({ p }) => p);
+    }
+  }
+  return doc;
 }
 
 /** Swagger UI at `/api/docs`; the cookie scheme lets Swagger send the login cookie. */

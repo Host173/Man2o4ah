@@ -3,3 +3,17 @@ AI prompt log
 The log is kept per team member in the ai-prompts/ folder (one file per member),
 so entries never conflict between members. Every prompt is logged there by the
 member's agent, with date, branch, requirement and outcome.
+
+Index (one line per member: name, file, entries, first and last entry date)
+Milestone 1 (m1): index generated on 2026-11-22
+
+Aisha    ai-prompts/aisha.txt    75 entries   2026-11-12 to 2026-11-20
+Aya      ai-prompts/aya.txt     129 entries   2026-11-13 to 2026-11-20
+Jana     ai-prompts/jana.txt     18 entries   2026-11-17 to 2026-11-20
+Kareem   ai-prompts/kareem.txt   75 entries   2026-11-10 to 2026-11-22
+Mokhtar  ai-prompts/mokhtar.txt  35 entries   2026-11-14 to 2026-11-20
+Mostafa  ai-prompts/mostafa.txt  37 entries   2026-11-13 to 2026-11-20
+Pierre   ai-prompts/pierre.txt  121 entries   2026-11-12 to 2026-11-20
+
+Entries are counted by their "Prompt:" lines. Each entry uses the course fields:
+Date, Student, Tool, Related Requirement, Prompt, How the output was used.

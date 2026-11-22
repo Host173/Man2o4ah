@@ -4464,3 +4464,137 @@ ok fix all this and add the e2e to the ci , and tell me how to start swager (bec
 
 How the output was used:
 On fix/TST-02-swagger-objectid-params (stacked on chore/TST-01-e2e-in-ci): added @ApiParam({ name: 'id', type: String }) to the 7 handlers whose ObjectId path param showed as a Function schema in the production Swagger UI, with assertions in the payments, refunds and hotel-reviews API specs (they fail without the fix). Found by PLT-07 R6.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-07
+Prompt:
+execute this . work from the latest develop!
+if there was any task take you can just leave it working and go next then let it work in the back ground  and continue untill the point you will need it  then wait again, if this isn't clear ask me to clarify it more. at the same time try to optimize token usage so don't make the prompts big, and use fewer agents
+[Attached: PLT07_EXECUTION.md]
+# Execution — PLT-07: Milestone 1 release
+
+Issue #91. Package 1, owner Kareem. TDD not required. **The last ticket before Milestone 1.**
+Run it after PLT-08, TST-03 (CRITICAL/HIGH findings fixed), TST-01 and TST-02 (report reviewed, its failures fixed or accepted by Kareem) are all merged into `develop`.
+
+## Goal
+
+Make `develop` releasable and hand Kareem a checked release. The course's Milestone 1 submission must contain (course §13.1): a fully implemented NestJS backend, MongoDB Atlas integration, a REST API documented with Swagger, a README with setup instructions, an updated `AI_PROMPTS.txt`, and git history showing team contributions; "the backend will be evaluated through Swagger UI".
+
+Done means:
+1. `docs/api/openapi.json` is exported from the app (`references/backend.md` §Swagger: "At each milestone, export `/api/docs-json` to `docs/api/openapi.json`"), by a repeatable command.
+2. The README's setup is complete and **every command in it was run and works**.
+3. `AI_PROMPTS.txt` (the root file the course names) points to every member's log and shows it is current.
+4. A release checklist report (`docs/qa/m1-release-check.md`) with every check's result.
+5. A PR `PLT-07: Milestone 1 release` into `develop`. Then **Kareem** merges `develop` → `main` and tags `m1` (git rule 11: releases are Kareem's; agents never touch `develop`/`main`).
+
+**Out of scope:** product code changes, fixing findings (they must be fixed before this ticket), the frontend, bonus features, deployment (PLT-09).
+
+## Before you start
+
+1. `git fetch origin`. Check, and **stop and report** if any fails:
+   - No open issue without the `bonus` label except PLT-07 itself and PLT-02 (backlog): `gh issue list --state open --json number,title,labels`.
+   - PLT-08 (#89), TST-01 (#90), TST-02, TST-03 are closed or their PRs merged.
+   - CI on the latest `develop` commit is green: `gh api repos/Host173/Man2o4ah/commits/$(git rev-parse origin/develop)/check-runs --jq '.check_runs[] | "\(.name): \(.conclusion)"'` (all success or skipped).
+   - `docs/qa/swagger-audit-report.md` (TST-02) and `docs/qa/stress-report.md` (TST-03) exist on `develop`.
+2. `git worktree add ../man2o4ah-PLT-07 -b chore/PLT-07-milestone-1-release origin/develop`; work only there. If the branch exists, stop and report.
+3. `cd backend && npm ci && npm run verify` (includes E2E since TST-01) passes.
+
+## Step 1: export the OpenAPI document
+
+- `backend/src/app.setup.ts`: extract the document building out of `setupSwagger` into `export function buildOpenApiDocument(app: INestApplication, version: string): OpenAPIObject` (same `DocumentBuilder`: title, version, cookie auth), and make `setupSwagger` call it. **No behaviour change**: Swagger UI shows exactly the same document.
+- `backend/test/openapi/export-openapi.openapi-spec.ts`: builds the whole app on the in-memory database (`backend/test/support/full-app.ts` from TST-01, or `createTestApp` with every feature module; data isn't needed), reads the version from `backend/package.json`, calls `buildOpenApiDocument`, and writes `docs/api/openapi.json` with `JSON.stringify(doc, null, 2) + '\n'`. Then asserts the written file parses, has `openapi`, `info.version`, and ≥ the number of non-bonus routes in `endpoints.md`.
+- `backend/vitest.config.openapi.ts` (`include: ['**/*.openapi-spec.ts']`, long hook timeout) and the script `"openapi:export": "vitest run --config ./vitest.config.openapi.ts"`. CI doesn't run it (check `vitest.config.ts` and the E2E config don't include it).
+- Run `npm run openapi:export`; commit the generated file.
+- Bump `backend/package.json` `version` to `1.0.0` **before** exporting, so the document and Swagger UI say `1.0.0` for M1. (If Kareem's message says another version, use that.)
+**Commit:** `chore(api): export the OpenAPI document for Milestone 1 (PLT-07)`
+
+## Step 2: README, complete and proven
+
+Rewrite only what is missing or wrong; keep the existing structure and the "Team rules" section untouched. The README must let a grader who has never seen the repo go from clone to testing in Swagger:
+1. **Prerequisites:** Node version (`.nvmrc`), npm, a MongoDB Atlas cluster (or any MongoDB 7+ replica set; transactions need a replica set), optional Stripe account in test mode and the Stripe CLI (for payments).
+2. **Environment:** a table of **every** variable in `.env.example` (`backend/.env` and `frontend/.env.local`): what it is, required or optional, how to get it (Atlas connection string and IP access list; `JWT_ACCESS_SECRET` generation; Stripe `sk_test_`/`whsec_`; `DEMO_PASSWORD`; admin seed variables from ACC-18). Values never appear in the README.
+3. **Install and seed, in order:** `npm ci`; `npm run seed:reference`; `npm run seed:admin`; `npm run seed:demo` (all re-runnable).
+4. **Run:** `npm run start:dev` (and `npm run dev:stripe` for payments, already documented), the URLs.
+5. **Testing in Swagger:** open `/api/docs`; log in with `POST /api/auth/login` (the browser keeps the cookie, so later calls are authenticated); the demo accounts table (from PLT-08); a short "try this first" path per area (book a flight: search → quote → hold → policies → accept → pay; with the note that confirming a payment needs `dev:stripe` and a test card `4242 4242 4242 4242`).
+6. **Tests:** `npm test`, `npm run test:e2e`, `npm run verify`, `npm run test:audit` / `npm run test:stress` (manual suites, not in CI), `npm run openapi:export`.
+7. **API reference:** `docs/api/openapi.json` and the Swagger URL.
+8. **Troubleshooting:** the 5 most likely setup errors (Atlas IP not allowed; missing env variable message from `validate.ts`; port 4000 busy; seeds run in the wrong order; Stripe CLI not logged in) with the fix.
+
+**Prove it:** in a **fresh clone** (`git clone` the worktree's branch into a temporary folder), follow the README literally on the in-memory/local setup you can run: every command that doesn't need Atlas or Stripe must run as written (`npm ci`, `npm run build`, `npm test`, `npm run test:e2e`, `npm run verify`, `npm run openapi:export`). Commands that need Atlas or Stripe are listed in the report for Kareem's manual check. Fix the README where a command or a path is wrong.
+**Commit:** `docs(readme): complete the setup and Swagger testing guide for Milestone 1 (PLT-07)`
+
+## Step 3: AI_PROMPTS.txt
+
+Keep the root file's explanation and add an index generated from the folder (a small script you run once; don't commit the script unless it's under `backend/test/openapi/` or similar and tiny): one line per member file in `ai-prompts/` with the member's name, the file path, the number of entries (count `Prompt:` lines), the first and last entry dates. Add the line "Milestone 1 (m1): index generated on <date>". Never edit anything inside `ai-prompts/`.
+Check, and report (don't fix other members' files): every member has a file with at least one entry; entries use the course fields (`Date`, `Student`, `Tool`, `Related Requirement`, `Prompt`, `How the output was used`).
+**Commit:** `docs(ai): index every member's prompt log for Milestone 1 (PLT-07)`
+
+## Step 4: the release check (report only)
+
+Write `docs/qa/m1-release-check.md` with one row per check (✅/❌ and the evidence):
+
+| # | Check | How |
+|---|---|---|
+| R1 | Every mandatory requirement is implemented and visible in Swagger | re-run `npm run test:audit` (TST-02); 0 failures, or each remaining one listed with Kareem's decision from the TST-02 report |
+| R2 | No stubs left | `git grep -n "implemented in [A-Z]\+-[0-9]" -- backend/src` empty |
+| R3 | No CRITICAL/HIGH stress finding open | `npm run test:stress`; the findings specs for CRITICAL/HIGH pass |
+| R4 | All tests pass | `npm run verify` (unit, integration, API, E2E, coverage ≥ 80% per service file, build) |
+| R5 | OpenAPI exported and current | `npm run openapi:export` produces no diff |
+| R6 | Swagger UI loads and cookie login works | start the app on the in-memory database (or `full-app.ts`), `GET /api/docs` 200, `GET /api/docs-json` equals `docs/api/openapi.json`, `POST /api/auth/login` then `GET /api/auth/me` with the cookie 200 |
+| R7 | Every endpoint has a REQ-ID summary and a tag | from the exported document: no operation without a summary starting with an ID or without a tag |
+| R8 | No secrets in the repository | `git grep -nE "mongodb(\+srv)?://[^<]+@|sk_(test\|live)_[A-Za-z0-9]{10,}\|whsec_[A-Za-z0-9]{10,}" -- . ':!*.md'` empty; no `.env` tracked (`git ls-files \| grep -E "(^\|/)\.env$"` empty) |
+| R9 | Dependencies | `npm audit --omit=dev --audit-level=high` clean in `backend/` |
+| R10 | Team contributions visible | `git shortlog -sne origin/develop` (or `--no-merges`): every member appears; list commits per member |
+| R11 | Every member's prompt log present and current | from step 3 |
+| R12 | Requirement traceability | `gh pr list --state merged --base develop --limit 300 --json title` : every merged PR title has a requirement ID (CI enforces it; list exceptions) |
+| R13 | README proven | step 2's fresh-clone run |
+| R14 | Atlas integration | **manual, Kareem:** with the real `backend/.env`, `npm run build && npm run start:prod`, `GET /api/health` 200, seeds run (see "Kareem's release steps") |
+
+**Commit:** `docs(qa): add the Milestone 1 release check (PLT-07)`
+
+## Step 5: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Related Requirement: PLT-07`; `Prompt` = Kareem's message copied exactly plus `[Attached: PLT07_EXECUTION.md]` and its content).
+**Commit:** `chore(ai): log the PLT-07 prompt (PLT-07)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `npm run openapi:export && git status --porcelain docs/api` | no diff after the commit |
+| G3 | the modules' existing Swagger tests (part of G1) and R6 | still pass: `/api/docs-json` equals the exported file (no Swagger behaviour change) |
+| G4 | the release check has no ❌ except R14 (manual) and items Kareem accepted in TST-02/TST-03 | stated per row |
+| G5 | `git diff --name-only origin/develop...HEAD` | only `backend/src/app.setup.ts`, `backend/test/openapi/**`, `backend/vitest.config.openapi.ts`, `backend/package.json` (script + version), `docs/api/openapi.json`, `README.md`, `AI_PROMPTS.txt`, `docs/qa/m1-release-check.md`, `ai-prompts/kareem.txt` |
+| G6 | `git log --format=%s origin/develop..HEAD` | 5 commits, each ending in `(PLT-07)` |
+| G7 | `git status --porcelain` | empty |
+
+In the tables, `\|` inside a command is a shell pipe or regex `|`; type it as `|`.
+
+## Kareem's release steps (after the PLT-07 PR is merged)
+
+The agent prepares these and prints them in its report; **Kareem runs them** (or explicitly asks the agent to).
+1. On your machine with the real `backend/.env`: `cd backend && npm ci && npm run build && npm run seed:reference && npm run seed:admin && npm run seed:demo`, then `npm run start:prod`; open `/api/docs`, log in as the admin and a demo user, try one booking. This is R14.
+2. Open the release PR: `gh pr create --base main --head develop --title "Release m1: Milestone 1 backend" --body "<the release check summary>"` (exempt from the branch/title rules). Wait for CI green.
+3. Merge it with a **merge commit** (git rule 7): `gh pr merge <n> --merge`.
+4. Tag the merge commit on `main`: `git fetch origin && git tag -a m1 origin/main -m "Milestone 1: backend and API" && git push origin m1`.
+5. Optional: `gh release create m1 --title "Milestone 1" --notes-file docs/qa/m1-release-check.md`.
+6. Close #91; keep `develop` as the default branch for Milestone 2.
+
+## Constraints
+
+- No product code changes beyond extracting `buildOpenApiDocument` (no behaviour change). If a release check fails, report it; don't fix it here.
+- Never edit lines inside `ai-prompts/`. Never write to Atlas. No new package.
+- Stage files by name. Don't push, don't open a PR, never touch `develop`/`main`, never create the tag (Kareem's steps).
+
+## Report
+
+- Branch, worktree, commits; each gate in one line.
+- The release check table's summary (✅ count, ❌ with one line each).
+- Kareem's release steps, ready to copy, with anything specific you found (e.g. a variable the README now requires).
+
+How the output was used:
+On chore/PLT-07-milestone-1-release (from develop 572c1a0): extracted buildOpenApiDocument and exported docs/api/openapi.json (v1.0.0, npm run openapi:export), completed the README (environment table, Swagger testing guide, tests, troubleshooting) and proved it in a fresh clone, indexed every prompt log in AI_PROMPTS.txt, and wrote docs/qa/m1-release-check.md (10 pass, 3 fail: the E2E reorder journey fails on develop, docs-json differs from the export and shows 7 ObjectId params as Function in the production build, README run blocked by the same E2E; R14 manual). Not pushed.

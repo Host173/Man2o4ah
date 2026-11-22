@@ -507,8 +507,18 @@ describe(
         4000, 1000, 2000, 13000,
       ]);
 
+      // A list that only omits trailing days (it predates an add) is accepted
+      // and keeps the omitted tail at the end (ITN-08, 54f0a34).
+      const tailOmitted = await owner
+        .patch(`/api/itineraries/${trip._id}/days/reorder`)
+        .send({ dayIds: [c._id, a._id, b._id] })
+        .expect(200);
+      expect(
+        (tailOmitted.body as ItineraryBody).days.map((day) => day._id),
+      ).toEqual([c._id, a._id, b._id, d._id]);
+
       for (const dayIds of [
-        [c._id, a._id, b._id],
+        [c._id, b._id, d._id],
         [a._id, a._id, b._id, c._id],
       ]) {
         const bad = await owner

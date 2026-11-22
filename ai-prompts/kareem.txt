@@ -4453,3 +4453,14 @@ ok fix all this and add the e2e to the ci , and tell me how to start swager (bec
 
 How the output was used:
 On chore/TST-01-e2e-in-ci (on top of test/ITN-08-e2e-reorder-partial-list): added the E2E journeys step (npm run test:e2e) to the backend CI job and updated the README quality gates table. The Swagger ObjectId param fix went to fix/TST-02-swagger-objectid-params.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-02
+Prompt:
+ok fix all this and add the e2e to the ci , and tell me how to start swager (because i don't know how
+
+How the output was used:
+On fix/TST-02-swagger-objectid-params (stacked on chore/TST-01-e2e-in-ci): added @ApiParam({ name: 'id', type: String }) to the 7 handlers whose ObjectId path param showed as a Function schema in the production Swagger UI, with assertions in the payments, refunds and hotel-reviews API specs (they fail without the fix). Found by PLT-07 R6.

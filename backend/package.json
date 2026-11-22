@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "",
   "author": "",
   "private": true,
@@ -25,6 +25,7 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "test:stress": "vitest run --config ./vitest.config.stress.ts",
     "test:audit": "vitest run --config ./vitest.config.audit.ts",
+    "openapi:export": "vitest run --config ./vitest.config.openapi.ts",
     "seed:reference": "nest build && node dist/seed/seed-reference-data.js",
     "seed:admin": "nest build && node dist/seed/seed-admin.js",
     "seed:demo": "nest build && node dist/seed/seed-demo-data.js",

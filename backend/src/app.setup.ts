@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { OpenAPIObject } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
 import { notFoundOutsidePrefix } from './common/errors/not-found-outside-prefix.js';
@@ -48,16 +49,23 @@ export function configureApp(
   app.use(notFoundOutsidePrefix('api'));
 }
 
-/** Swagger UI at `/api/docs`; the cookie scheme lets Swagger send the login cookie. */
-export function setupSwagger(app: INestApplication, version: string): void {
+/**
+ * The OpenAPI document Swagger UI shows. `npm run openapi:export` writes it to
+ * `docs/api/openapi.json`.
+ */
+export function buildOpenApiDocument(
+  app: INestApplication,
+  version: string,
+): OpenAPIObject {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Travel Platform API')
     .setVersion(version)
     .addCookieAuth('access_token')
     .build();
-  SwaggerModule.setup(
-    'api/docs',
-    app,
-    SwaggerModule.createDocument(app, swaggerConfig),
-  );
+  return SwaggerModule.createDocument(app, swaggerConfig);
+}
+
+/** Swagger UI at `/api/docs`; the cookie scheme lets Swagger send the login cookie. */
+export function setupSwagger(app: INestApplication, version: string): void {
+  SwaggerModule.setup('api/docs', app, buildOpenApiDocument(app, version));
 }

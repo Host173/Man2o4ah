@@ -385,5 +385,12 @@ describe('refunds API and webhook (PAY-03)', () => {
     const operation = document.paths['/api/refunds/{id}']?.get;
     expect(operation?.summary).toContain('PAY-03');
     expect(operation?.tags).toEqual(['payments']);
+    expect(operation?.parameters).toContainEqual(
+      expect.objectContaining({
+        name: 'id',
+        in: 'path',
+        schema: { type: 'string' },
+      }),
+    );
   });
 });

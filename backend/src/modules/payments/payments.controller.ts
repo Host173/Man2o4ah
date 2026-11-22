@@ -20,6 +20,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -103,6 +104,7 @@ export class PaymentsController {
     description:
       'HOLD_EXPIRED, POLICIES_NOT_ACCEPTED or INVALID_STATUS_TRANSITION',
   })
+  @ApiParam({ name: 'id', type: String })
   retry(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -119,6 +121,7 @@ export class PaymentsController {
   @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
   @ApiNotFoundResponse({ description: 'NOT_FOUND: not your payment' })
+  @ApiParam({ name: 'id', type: String })
   get(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,

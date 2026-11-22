@@ -166,7 +166,7 @@ Every pull request into `develop` or `main`, and every push to those branches, r
 | Lint | `oxlint`, 0 errors | ESLint, 0 errors |
 | Typecheck | `npm run typecheck` | `npm run typecheck` |
 | Tests and coverage | all tests pass; at least 80% line coverage on `src/modules/**/*.service.ts` | no tests yet |
-| E2E journeys | all journeys pass (`npm run test:e2e`, part of `npm run verify`; not a CI step yet) | no tests yet |
+| E2E journeys | all journeys pass (`npm run test:e2e`, part of `npm run verify`) | no tests yet |
 | Build | `npm run build` | `npm run build` |
 | Security | `npm audit --omit=dev --audit-level=high` | same |
 

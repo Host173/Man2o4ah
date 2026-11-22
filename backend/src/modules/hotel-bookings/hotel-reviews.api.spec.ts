@@ -350,6 +350,20 @@ describe('Hotel reviews API (HTL-23, HTL-24)', () => {
     expect(
       document.components?.schemas?.HotelReviewListItemResponseDto,
     ).toHaveProperty('properties.authorName');
+    for (const operation of [
+      document.paths['/api/hotel-bookings/{id}/review']?.post,
+      document.paths['/api/hotels/{id}/reviews']?.get,
+      document.paths['/api/reviews/{id}']?.patch,
+      document.paths['/api/reviews/{id}']?.delete,
+    ]) {
+      expect(operation?.parameters).toContainEqual(
+        expect.objectContaining({
+          name: 'id',
+          in: 'path',
+          schema: { type: 'string' },
+        }),
+      );
+    }
   });
 
   it('returns 404 for a missing public hotel and validates pagination', async () => {

@@ -318,6 +318,7 @@ describe('payments schemas', () => {
         'user_cancellation',
         'provider_cancellation',
         'late_payment',
+        'booking_change',
       ]) {
         for (const status of ['pending', 'refunded', 'failed']) {
           await expect(
@@ -362,12 +363,37 @@ describe('payments schemas', () => {
       ).resolves.toBeDefined();
     });
 
+    it('allows one refund per change of a booking, apart from its cancellation refund (FLT-27)', async () => {
+      const bookingId = new Types.ObjectId();
+      const changeId = new Types.ObjectId();
+      await refunds.create(refundDoc({ bookingId }));
+      await expect(
+        refunds.create(
+          refundDoc({ bookingId, changeId, reason: 'booking_change' }),
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        refunds.create(
+          refundDoc({ bookingId, changeId, reason: 'booking_change' }),
+        ),
+      ).rejects.toMatchObject({ code: 11000 });
+      await expect(
+        refunds.create(
+          refundDoc({
+            bookingId,
+            changeId: new Types.ObjectId(),
+            reason: 'booking_change',
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
     it('has exactly the indexes from the data model', async () => {
       const indexes = await refunds.collection.indexes();
       expect(indexSummary(indexes)).toEqual(
         expect.arrayContaining([
           plain({ _id: 1 }),
-          plain({ bookingType: 1, bookingId: 1 }, true),
+          plain({ bookingType: 1, bookingId: 1, changeId: 1 }, true),
           {
             ...plain({ stripeRefundId: 1 }, true),
             partialFilterExpression: { stripeRefundId: { $type: 'string' } },

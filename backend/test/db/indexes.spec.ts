@@ -111,7 +111,7 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { userId: 1 } },
   ],
   refunds: [
-    { key: { bookingType: 1, bookingId: 1 }, unique: true },
+    { key: { bookingType: 1, bookingId: 1, changeId: 1 }, unique: true },
     {
       key: { stripeRefundId: 1 },
       unique: true,

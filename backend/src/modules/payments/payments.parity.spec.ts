@@ -105,6 +105,29 @@ describe('PaymentsService and FakePaymentsService agree (PAY-03)', () => {
   );
 
   it.each(services)(
+    '%s: each change gets its own refund, apart from the cancellation refund (FLT-27)',
+    async (_name, get) => {
+      const req = await request();
+      const change = {
+        ...req,
+        amountMinor: 2_000,
+        reason: 'booking_change' as const,
+        changeId: new Types.ObjectId().toHexString(),
+      };
+
+      const changeRefund = await get().refund(change);
+      const sameChange = await get().refund(change);
+      const cancellation = await get().refund(req);
+
+      expect(sameChange.refundId).toBe(changeRefund.refundId);
+      expect(cancellation.refundId).not.toBe(changeRefund.refundId);
+      await expect(
+        get().getRefund('flight', req.bookingId),
+      ).resolves.toMatchObject({ refundId: cancellation.refundId });
+    },
+  );
+
+  it.each(services)(
     '%s: getRefund is null for a booking without a refund',
     async (_name, get) => {
       await expect(

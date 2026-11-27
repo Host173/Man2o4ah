@@ -133,6 +133,18 @@ export interface FlightChangePreview {
   differenceMinor: number;
 }
 
+/** FLT-27: a change that was applied at once (same or lower fare). */
+export interface ChangedFlightBooking extends FlightChangePreview {
+  bookingId: string;
+  reference: string;
+  /** A change never moves the booking out of `confirmed`. */
+  status: 'confirmed';
+  /** The `_id` of the change in the booking's `changes`. */
+  changeId: string;
+  /** The lower fare refunded in full; null when the fare is the same. */
+  refund: RefundView | null;
+}
+
 /** FLT-26: what cancelling would refund right now. Nothing is saved. */
 export interface FlightRefundPreview {
   percent: number;

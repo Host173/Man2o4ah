@@ -1,23 +1,35 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Connection, Model } from 'mongoose';
+import { BookingType } from '../../common/database/booking-type.js';
 import type { ErrorDetail } from '../../common/errors/error-body.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { MAX_BOOKING_TOTAL_MINOR } from '../../common/money/money.js';
 import { FlightsService } from '../flights/flights.service.js';
-import type { FlightChangeQueryDto } from './dto/flight-change.dto.js';
-import type { FlightChangePreview } from './flight-bookings.types.js';
+import { SeatInventory } from '../flights/seat-inventory.js';
+import { PaymentsService } from '../payments/payments.service.js';
+import type {
+  FlightChangeQueryDto,
+  FlightChangeRequestDto,
+} from './dto/flight-change.dto.js';
+import type {
+  ChangedFlightBooking,
+  FlightChangePreview,
+  QuotedSegment,
+} from './flight-bookings.types.js';
 import { quoteFlightChange } from './flight-change.js';
 import { assertChangeable, checkNewFlight } from './flight-change-rules.js';
 import type { ChangeableSegment } from './flight-change-rules.js';
 import { FlightQuoteService } from './flight-quote.service.js';
 import {
   FlightBooking,
+  FlightBookingStatus,
   FlightSegment,
 } from './schemas/flight-booking.schema.js';
 
@@ -39,6 +51,24 @@ function toChangeable(segment: FlightSegment): ChangeableSegment {
     cabinClass: segment.cabinClass,
     departureAt: segment.departureAt,
     arrivalAt: segment.arrivalAt,
+  };
+}
+
+/** The snapshot to save for the new flight: the quoted segment without its display-only airline name. */
+function toSegmentDocument(s: QuotedSegment) {
+  return {
+    direction: s.direction,
+    flightId: new Types.ObjectId(s.flightId),
+    cabinId: new Types.ObjectId(s.cabinId),
+    cabinClass: s.cabinClass,
+    airlineId: new Types.ObjectId(s.airlineId),
+    flightNumber: s.flightNumber,
+    departureAirportId: s.departureAirportId,
+    arrivalAirportId: s.arrivalAirportId,
+    departureAt: s.departureAt,
+    arrivalAt: s.arrivalAt,
+    fareMinor: s.fareMinor,
+    policy: s.policy,
   };
 }
 
@@ -64,10 +94,13 @@ function renameQuoteErrors(error: unknown): unknown {
 @Injectable()
 export class FlightChangeService {
   constructor(
+    @InjectConnection() private readonly connection: Connection,
     @InjectModel(FlightBooking.name)
     private readonly bookings: Model<FlightBooking>,
     private readonly flights: FlightsService,
     private readonly quotes: FlightQuoteService,
+    private readonly seatInventory: SeatInventory,
+    private readonly payments: PaymentsService,
   ) {}
 
   /**
@@ -84,7 +117,143 @@ export class FlightChangeService {
     query: FlightChangeQueryDto,
     now: Date = new Date(),
   ): Promise<FlightChangePreview> {
+    return this.price(await this.findOwned(id, userId), query, now);
+  }
+
+  /**
+   * Applies a change that costs the same or less (FLT-27), checked and priced
+   * exactly as `preview` does. In one transaction: the booking is updated in
+   * place (new segment snapshot, pricing, departure dates, the change appended
+   * to `changes`) and the seats move: held then booked on the new flight,
+   * returned on the old one. The update only matches the booking as it was
+   * priced (same segment `_id` and total), so of two parallel changes exactly
+   * one wins and the other answers 409, even when the transaction is retried.
+   * After the commit a lower fare is refunded in full (PAY-03).
+   */
+  async change(
+    id: string,
+    userId: string,
+    request: FlightChangeRequestDto,
+    now: Date = new Date(),
+  ): Promise<ChangedFlightBooking> {
     const booking = await this.findOwned(id, userId);
+    const priced = await this.price(booking, request, now);
+    if (priced.differenceMinor > 0) {
+      throw new ConflictException({
+        code: ErrorCode.Conflict,
+        message:
+          'A change that costs more needs a payment, which is not available yet',
+      });
+    }
+
+    const index = booking.segments.findIndex(
+      (s) => s.direction === request.direction,
+    );
+    const old = booking.segments[index] as FlightSegment & {
+      _id: Types.ObjectId;
+    };
+    const newSegment = toSegmentDocument(priced.segment);
+    const segmentsAfter = booking.segments.map((s, i) =>
+      i === index ? newSegment : s,
+    );
+    const changeId = new Types.ObjectId();
+    const seats = booking.seatCount;
+
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const result = await this.bookings.updateOne(
+          {
+            _id: booking._id,
+            status: FlightBookingStatus.CONFIRMED,
+            pendingChange: { $exists: false },
+            [`segments.${index}._id`]: old._id,
+            'pricing.totalMinor': booking.pricing.totalMinor,
+          },
+          {
+            $set: {
+              [`segments.${index}`]: newSegment,
+              pricing: priced.pricing,
+              firstDepartureAt: segmentsAfter[0].departureAt,
+              lastDepartureAt:
+                segmentsAfter[segmentsAfter.length - 1].departureAt,
+            },
+            $push: {
+              changes: {
+                _id: changeId,
+                direction: request.direction,
+                previousSegment: old,
+                newFlightId: newSegment.flightId,
+                previousTotalMinor: booking.pricing.totalMinor,
+                newTotalMinor: priced.pricing.totalMinor,
+                differenceMinor: priced.differenceMinor,
+                changedAt: now,
+              },
+            },
+          },
+          { session, runValidators: true },
+        );
+        if (result.modifiedCount !== 1) {
+          throw new ConflictException({
+            code: ErrorCode.ConcurrentChange,
+            message: 'The booking changed meanwhile; preview the change again',
+          });
+        }
+        const newSeats = {
+          flightId: priced.segment.flightId,
+          cabinId: priced.segment.cabinId,
+          seats,
+        };
+        // SEATS_UNAVAILABLE here rolls the booking update back too.
+        await this.seatInventory.hold([newSeats], { session });
+        await this.seatInventory.confirm([newSeats], { session });
+        await this.seatInventory.returnBooked(
+          [
+            {
+              flightId: old.flightId.toString(),
+              cabinId: old.cabinId.toString(),
+              seats,
+            },
+          ],
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    // The same known gap as FLT-26: if this call fails for a reason other than
+    // Stripe (which PAY-03 records as `failed`), the change stays applied
+    // without a refund record, and the error propagates.
+    const refund =
+      priced.differenceMinor < 0
+        ? await this.payments.refund({
+            bookingType: BookingType.FLIGHT,
+            bookingId: booking._id.toHexString(),
+            userId,
+            amountMinor: -priced.differenceMinor,
+            currency: priced.pricing.currency,
+            reason: 'booking_change',
+            changeId: changeId.toHexString(),
+          })
+        : null;
+
+    return {
+      ...priced,
+      bookingId: booking._id.toHexString(),
+      reference: booking.reference ?? '',
+      status: FlightBookingStatus.CONFIRMED,
+      changeId: changeId.toHexString(),
+      refund,
+    };
+  }
+
+  /** Checks and prices a change of `booking` (see `preview`); reads but writes nothing. */
+  private async price(
+    booking: FlightBooking,
+    query: FlightChangeQueryDto,
+    now: Date,
+  ): Promise<FlightChangePreview> {
     const segments = booking.segments.map(toChangeable);
     assertChangeable(
       {
@@ -188,7 +357,7 @@ export class FlightChangeService {
   }
 
   /** The user's own booking; someone else's and an unknown id look the same (ACC-11). */
-  private async findOwned(id: string, userId: string): Promise<FlightBooking> {
+  private async findOwned(id: string, userId: string) {
     if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) {
       throw this.notFound();
     }

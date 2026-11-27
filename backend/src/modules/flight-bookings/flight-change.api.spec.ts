@@ -467,7 +467,7 @@ describe('flight change endpoints (FLT-27)', () => {
       seats.counters(FLIGHT, CABIN),
       seats.counters(CHEAPER, CHEAPER_CABIN),
       seats.counters(SAME_FARE, SAME_FARE_CABIN),
-    ].map((c) => c.bookedSeats + c.heldSeats);
+    ].map((c) => (c?.bookedSeats ?? 0) + (c?.heldSeats ?? 0));
     expect(booked.reduce((a, b) => a + b, 0)).toBe(2);
   });
 
@@ -485,7 +485,7 @@ describe('flight change endpoints (FLT-27)', () => {
     const stored = await bookings.findById(booking.id).lean();
     expect(stored?.segments[0]?.flightId.toString()).toBe(FLIGHT);
     expect(stored?.changes).toBeUndefined();
-    expect(seats.counters(FLIGHT, CABIN).bookedSeats).toBe(2);
+    expect(seats.counters(FLIGHT, CABIN)?.bookedSeats).toBe(2);
   });
 
   it('answers 404 for another user’s booking and 409 for one that is not confirmed', async () => {
@@ -516,7 +516,7 @@ describe('flight change endpoints (FLT-27)', () => {
     expect(res.status).toBe(409);
     const stored = await bookings.findById(booking.id).lean();
     expect(stored?.segments[0]?.flightId.toString()).toBe(FLIGHT);
-    expect(seats.counters(LATER, LATER_CABIN).heldSeats).toBe(0);
+    expect(seats.counters(LATER, LATER_CABIN)?.heldSeats).toBe(0);
   });
 
   it('validates the body', async () => {

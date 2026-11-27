@@ -1,7 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsMongoId } from 'class-validator';
-import type { FlightChangePreview } from '../flight-bookings.types.js';
+import type {
+  ChangedFlightBooking,
+  FlightChangePreview,
+} from '../flight-bookings.types.js';
 import { SegmentDirection } from '../schemas/flight-booking.schema.js';
+import { FlightRefundResponseDto } from './flight-cancellation.response.dto.js';
 import {
   QuotePricingResponseDto,
   QuotedSegmentResponseDto,
@@ -23,6 +27,9 @@ export class FlightChangeQueryDto {
   flightId!: string;
 }
 
+/** `PATCH /api/flight-bookings/:id/change-flight` body: the same two fields as the preview (FLT-27). */
+export class FlightChangeRequestDto extends FlightChangeQueryDto {}
+
 /** What a change would cost now (FLT-27). */
 export class FlightChangePreviewResponseDto implements FlightChangePreview {
   @ApiProperty({ enum: DIRECTIONS })
@@ -43,4 +50,30 @@ export class FlightChangePreviewResponseDto implements FlightChangePreview {
       'New total − paid total, minor units: > 0 to pay, < 0 refunded in full, 0 nothing moves',
   })
   differenceMinor!: number;
+}
+
+/** A change applied at once (FLT-27): same or lower fare. */
+export class ChangedFlightBookingResponseDto
+  extends FlightChangePreviewResponseDto
+  implements ChangedFlightBooking
+{
+  @ApiProperty({ example: '6553a1f0c2b4e8a9d0f1a2b3' })
+  bookingId!: string;
+
+  @ApiProperty({ example: 'FBABC123' })
+  reference!: string;
+
+  @ApiProperty({ enum: ['confirmed'] })
+  status!: 'confirmed';
+
+  @ApiProperty({ description: 'The change’s id in the booking’s history' })
+  changeId!: string;
+
+  @ApiProperty({
+    type: FlightRefundResponseDto,
+    nullable: true,
+    description:
+      'The lower fare refunded in full; null when the fare is the same',
+  })
+  refund!: FlightRefundResponseDto | null;
 }

@@ -52,7 +52,12 @@ export class FlightRefundResponseDto implements RefundView {
   currency!: string;
 
   @ApiProperty({
-    enum: ['user_cancellation', 'provider_cancellation', 'late_payment'],
+    enum: [
+      'user_cancellation',
+      'provider_cancellation',
+      'late_payment',
+      'booking_change',
+    ],
   })
   reason!: RefundView['reason'];
 

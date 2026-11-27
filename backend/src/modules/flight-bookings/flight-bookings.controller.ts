@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   StreamableFile,
@@ -38,14 +39,17 @@ import {
   FlightRefundPreviewResponseDto,
 } from './dto/flight-cancellation.response.dto.js';
 import {
+  ChangedFlightBookingResponseDto,
   FlightChangePreviewResponseDto,
   FlightChangeQueryDto,
+  FlightChangeRequestDto,
 } from './dto/flight-change.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import type {
   CancelledFlightBooking,
+  ChangedFlightBooking,
   FlightChangePreview,
   FlightHold,
   FlightQuote,
@@ -250,6 +254,36 @@ export class FlightBookingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<FlightChangePreview> {
     return this.changes.preview(id, user.id, query);
+  }
+
+  /** Same checks as the preview; only the owner, anyone else's answers 404 (ACC-11). */
+  @Patch(':id/change-flight')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'FLT-27 Change one flight of my booking',
+    description:
+      'Moves one direction to another flight on the same route, in the same cabin class, and moves the seats. A lower fare is refunded in full; the same fare moves no money. A higher fare needs a payment, not available yet (409).',
+  })
+  @ApiOkResponse({ type: ChangedFlightBookingResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: malformed ID or body, no such direction, or a new flight that is unknown, the same, on another route, without the cabin class, not bookable, or out of order with the other flight',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, a change already waits for payment, or that flight has departed. SEATS_UNAVAILABLE: not enough seats on the new flight. CONCURRENT_CHANGE: the booking changed meanwhile. CONFLICT: a higher fare (payment not available yet)',
+  })
+  changeFlight(
+    @Param('id', IsObjectIdPipe) id: string,
+    @Body() body: FlightChangeRequestDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ChangedFlightBooking> {
+    return this.changes.change(id, user.id, body);
   }
 
   /** Cancels the whole booking; the body is an empty object that confirms it. */

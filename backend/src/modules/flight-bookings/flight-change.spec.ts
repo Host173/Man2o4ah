@@ -1,4 +1,4 @@
-import { quoteFlightChange } from './flight-change.js';
+import { quoteFlightChange, splitCancellationRefund } from './flight-change.js';
 import type { ChangeSegment } from './flight-change.js';
 import type { PricedPassenger } from './flight-pricing.js';
 
@@ -89,5 +89,43 @@ describe('quoteFlightChange (FLT-27)', () => {
     expect(() =>
       quoteFlightChange([outbound(20_000)], [adult()], 20_000, inbound(10_000)),
     ).toThrow(/return/);
+  });
+});
+
+describe('splitCancellationRefund (FLT-27)', () => {
+  it('takes the whole refund from the first payment when no change was paid', () => {
+    expect(splitCancellationRefund(25_000, 50, 0)).toEqual({
+      firstPaymentMinor: 25_000,
+      changePaymentMinor: 0,
+    });
+  });
+
+  it('refunds the paid change by the same percent and the rest from the first payment', () => {
+    // Booking 40 000 + paid change 10 000 = 50 000; 50% = 25 000.
+    expect(splitCancellationRefund(25_000, 50, 10_000)).toEqual({
+      firstPaymentMinor: 20_000,
+      changePaymentMinor: 5_000,
+    });
+  });
+
+  it('refunds both payments in full at 100% (provider cancellation)', () => {
+    expect(splitCancellationRefund(50_000, 100, 10_000)).toEqual({
+      firstPaymentMinor: 40_000,
+      changePaymentMinor: 10_000,
+    });
+  });
+
+  it('rounds the change part half up and keeps the total exact', () => {
+    // 50% of 10 001 is 5 000.5 → 5 001; the first payment gets the rest.
+    const split = splitCancellationRefund(25_001, 50, 10_001);
+    expect(split.changePaymentMinor).toBe(5_001);
+    expect(split.firstPaymentMinor + split.changePaymentMinor).toBe(25_001);
+  });
+
+  it('refunds nothing from either payment at 0%', () => {
+    expect(splitCancellationRefund(0, 0, 10_000)).toEqual({
+      firstPaymentMinor: 0,
+      changePaymentMinor: 0,
+    });
   });
 });

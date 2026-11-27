@@ -42,6 +42,7 @@ const booking = (
 ): ChangeableBooking => ({
   status: 'confirmed',
   hasPendingChange: false,
+  alreadyChanged: false,
   segments: [outbound(), inbound()],
   ...overrides,
 });
@@ -98,6 +99,16 @@ describe('assertChangeable (FLT-27)', () => {
       });
     },
   );
+
+  it('refuses a booking that was already changed once (409, one change per booking)', () => {
+    const error = thrownBy(() =>
+      assertChangeable(booking({ alreadyChanged: true }), 'return', now),
+    );
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: ErrorCode.InvalidStatusTransition,
+    });
+  });
 
   it('refuses a second change while one is waiting for payment (409)', () => {
     const error = thrownBy(() =>

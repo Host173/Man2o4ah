@@ -355,12 +355,50 @@ describe('flight change endpoints (FLT-27)', () => {
     }
   });
 
+  /** PATCH change-flight; the new flight's policies are accepted unless `body` says otherwise. */
   const change = (id: string, cookie: string, body: object) =>
     t
       .http()
       .patch(`${URL}/${id}/change-flight`)
       .set('Cookie', cookie)
-      .send(body);
+      .send({ acceptPolicies: true, ...body });
+
+  it('allows one change per booking: a second change answers 409', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const booking = await seed(user.id);
+    const first = await change(booking.id, user.cookie, {
+      direction: 'outbound',
+      flightId: CHEAPER,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await change(booking.id, user.cookie, {
+      direction: 'outbound',
+      flightId: SAME_FARE,
+    });
+
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe(ErrorCode.InvalidStatusTransition);
+    expect(seats.counters(SAME_FARE, SAME_FARE_CABIN)?.bookedSeats).toBe(0);
+  });
+
+  it('requires the new flight’s policies to be accepted (PAY-02)', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const booking = await seed(user.id);
+
+    for (const acceptPolicies of [false, undefined, 'yes']) {
+      const res = await change(booking.id, user.cookie, {
+        direction: 'outbound',
+        flightId: CHEAPER,
+        acceptPolicies,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+    }
+    expect(
+      (await bookings.findById(booking.id).lean())?.changes,
+    ).toBeUndefined();
+  });
 
   it('changes to a cheaper flight at once: moves the seats, updates the booking and refunds the difference', async () => {
     const user = await loginAs(t.connection, UserRole.USER);

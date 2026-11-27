@@ -26,7 +26,7 @@ import type {
 import { quoteFlightChange } from './flight-change.js';
 import { assertChangeable, checkNewFlight } from './flight-change-rules.js';
 import type { ChangeableSegment } from './flight-change-rules.js';
-import { FlightQuoteService } from './flight-quote.service.js';
+import { FlightQuoteService, HOLD_MINUTES } from './flight-quote.service.js';
 import {
   FlightBooking,
   FlightBookingStatus,
@@ -121,14 +121,19 @@ export class FlightChangeService {
   }
 
   /**
-   * Applies a change that costs the same or less (FLT-27), checked and priced
-   * exactly as `preview` does. In one transaction: the booking is updated in
-   * place (new segment snapshot, pricing, departure dates, the change appended
-   * to `changes`) and the seats move: held then booked on the new flight,
-   * returned on the old one. The update only matches the booking as it was
-   * priced (same segment `_id` and total), so of two parallel changes exactly
-   * one wins and the other answers 409, even when the transaction is retried.
-   * After the commit a lower fare is refunded in full (PAY-03).
+   * Requests a change (FLT-27), checked and priced exactly as `preview` does.
+   * Everything happens in one transaction:
+   * - Same or lower fare: applied now. The booking is updated in place (new
+   *   segment snapshot, pricing, departure dates, the change appended to
+   *   `changes`) and the seats move: held then booked on the new flight,
+   *   returned on the old one. After the commit a lower fare is refunded in
+   *   full (PAY-03).
+   * - Higher fare: the change is stored as `pendingChange` and the new seats
+   *   are held for HOLD_MINUTES, like a seat hold. Nothing else changes until
+   *   the difference is paid; `FlightChangeExpiryJob` drops it if unpaid.
+   * The update only matches the booking as it was priced (same segment `_id`
+   * and total, no pending change), so of two parallel changes exactly one wins
+   * and the other answers 409, even when the transaction is retried.
    */
   async change(
     id: string,
@@ -138,13 +143,10 @@ export class FlightChangeService {
   ): Promise<ChangedFlightBooking> {
     const booking = await this.findOwned(id, userId);
     const priced = await this.price(booking, request, now);
-    if (priced.differenceMinor > 0) {
-      throw new ConflictException({
-        code: ErrorCode.Conflict,
-        message:
-          'A change that costs more needs a payment, which is not available yet',
-      });
-    }
+    const needsPayment = priced.differenceMinor > 0;
+    const holdExpiresAt = needsPayment
+      ? new Date(now.getTime() + HOLD_MINUTES * 60_000)
+      : null;
 
     const index = booking.segments.findIndex(
       (s) => s.direction === request.direction,
@@ -159,6 +161,42 @@ export class FlightChangeService {
     const changeId = new Types.ObjectId();
     const seats = booking.seatCount;
 
+    const update = needsPayment
+      ? {
+          $set: {
+            pendingChange: {
+              _id: changeId,
+              direction: request.direction,
+              segment: newSegment,
+              pricing: priced.pricing,
+              differenceMinor: priced.differenceMinor,
+              holdExpiresAt,
+              requestedAt: now,
+            },
+          },
+        }
+      : {
+          $set: {
+            [`segments.${index}`]: newSegment,
+            pricing: priced.pricing,
+            firstDepartureAt: segmentsAfter[0].departureAt,
+            lastDepartureAt:
+              segmentsAfter[segmentsAfter.length - 1].departureAt,
+          },
+          $push: {
+            changes: {
+              _id: changeId,
+              direction: request.direction,
+              previousSegment: old,
+              newFlightId: newSegment.flightId,
+              previousTotalMinor: booking.pricing.totalMinor,
+              newTotalMinor: priced.pricing.totalMinor,
+              differenceMinor: priced.differenceMinor,
+              changedAt: now,
+            },
+          },
+        };
+
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
@@ -170,27 +208,7 @@ export class FlightChangeService {
             [`segments.${index}._id`]: old._id,
             'pricing.totalMinor': booking.pricing.totalMinor,
           },
-          {
-            $set: {
-              [`segments.${index}`]: newSegment,
-              pricing: priced.pricing,
-              firstDepartureAt: segmentsAfter[0].departureAt,
-              lastDepartureAt:
-                segmentsAfter[segmentsAfter.length - 1].departureAt,
-            },
-            $push: {
-              changes: {
-                _id: changeId,
-                direction: request.direction,
-                previousSegment: old,
-                newFlightId: newSegment.flightId,
-                previousTotalMinor: booking.pricing.totalMinor,
-                newTotalMinor: priced.pricing.totalMinor,
-                differenceMinor: priced.differenceMinor,
-                changedAt: now,
-              },
-            },
-          },
+          update,
           { session, runValidators: true },
         );
         if (result.modifiedCount !== 1) {
@@ -206,6 +224,9 @@ export class FlightChangeService {
         };
         // SEATS_UNAVAILABLE here rolls the booking update back too.
         await this.seatInventory.hold([newSeats], { session });
+        // A paid change keeps the new seats held until payment, and the old
+        // ones booked: the user flies the old flight until then.
+        if (needsPayment) return;
         await this.seatInventory.confirm([newSeats], { session });
         await this.seatInventory.returnBooked(
           [
@@ -243,6 +264,8 @@ export class FlightChangeService {
       bookingId: booking._id.toHexString(),
       reference: booking.reference ?? '',
       status: FlightBookingStatus.CONFIRMED,
+      applied: !needsPayment,
+      holdExpiresAt,
       changeId: changeId.toHexString(),
       refund,
     };

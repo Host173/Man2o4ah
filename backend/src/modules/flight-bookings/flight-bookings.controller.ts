@@ -262,7 +262,7 @@ export class FlightBookingsController {
   @ApiOperation({
     summary: 'FLT-27 Change one flight of my booking',
     description:
-      'Moves one direction to another flight on the same route, in the same cabin class, and moves the seats. A lower fare is refunded in full; the same fare moves no money. A higher fare needs a payment, not available yet (409).',
+      'Moves one direction to another flight on the same route, in the same cabin class, and moves the seats. A lower fare is refunded in full; the same fare moves no money. A higher fare waits for payment: the new seats are held for 10 minutes (applied: false) and the change applies once the difference is paid.',
   })
   @ApiOkResponse({ type: ChangedFlightBookingResponseDto })
   @ApiBadRequestResponse({
@@ -276,7 +276,7 @@ export class FlightBookingsController {
   })
   @ApiConflictResponse({
     description:
-      'INVALID_STATUS_TRANSITION: not confirmed, a change already waits for payment, or that flight has departed. SEATS_UNAVAILABLE: not enough seats on the new flight. CONCURRENT_CHANGE: the booking changed meanwhile. CONFLICT: a higher fare (payment not available yet)',
+      'INVALID_STATUS_TRANSITION: not confirmed, a change already waits for payment, or that flight has departed. SEATS_UNAVAILABLE: not enough seats on the new flight. CONCURRENT_CHANGE: the booking changed meanwhile',
   })
   changeFlight(
     @Param('id', IsObjectIdPipe) id: string,

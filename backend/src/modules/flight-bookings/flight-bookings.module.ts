@@ -14,6 +14,7 @@ import {
   FlightConfirmationService,
 } from './flight-confirmation.service.js';
 import { FlightCancellationService } from './flight-cancellation.service.js';
+import { FlightChangeExpiryJob } from './flight-change-expiry.job.js';
 import { FlightChangeService } from './flight-change.service.js';
 import { FlightCompletionJob } from './flight-completion.job.js';
 import { FlightETicket } from './flight-e-ticket.js';
@@ -53,6 +54,7 @@ import {
     FlightETicket,
     FlightCancellationService,
     FlightChangeService,
+    FlightChangeExpiryJob,
     FlightProviderCancellationService,
     FlightRescheduleSyncService,
     MyFlightBookingsService,

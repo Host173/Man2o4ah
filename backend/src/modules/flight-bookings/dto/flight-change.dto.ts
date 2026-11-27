@@ -52,7 +52,7 @@ export class FlightChangePreviewResponseDto implements FlightChangePreview {
   differenceMinor!: number;
 }
 
-/** A change applied at once (FLT-27): same or lower fare. */
+/** A requested change (FLT-27): applied at once, or waiting for payment. */
 export class ChangedFlightBookingResponseDto
   extends FlightChangePreviewResponseDto
   implements ChangedFlightBooking
@@ -65,6 +65,21 @@ export class ChangedFlightBookingResponseDto
 
   @ApiProperty({ enum: ['confirmed'] })
   status!: 'confirmed';
+
+  @ApiProperty({
+    description:
+      'True when applied now (same or lower fare); false when it waits for payment',
+  })
+  applied!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When the held seats are released if unpaid; null when applied',
+  })
+  holdExpiresAt!: Date | null;
 
   @ApiProperty({ description: 'The change’s id in the booking’s history' })
   changeId!: string;

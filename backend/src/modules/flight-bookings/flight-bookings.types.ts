@@ -133,13 +133,20 @@ export interface FlightChangePreview {
   differenceMinor: number;
 }
 
-/** FLT-27: a change that was applied at once (same or lower fare). */
+/**
+ * FLT-27: a requested change. A same or lower fare is applied at once; a
+ * higher one waits for payment with the new seats held until `holdExpiresAt`.
+ */
 export interface ChangedFlightBooking extends FlightChangePreview {
   bookingId: string;
   reference: string;
   /** A change never moves the booking out of `confirmed`. */
   status: 'confirmed';
-  /** The `_id` of the change in the booking's `changes`. */
+  /** True when applied now; false when it waits for the payment of `differenceMinor`. */
+  applied: boolean;
+  /** When the held seats are released if unpaid; null when applied. */
+  holdExpiresAt: Date | null;
+  /** The change's `_id`: in the booking's `changes`, or of its `pendingChange`. */
   changeId: string;
   /** The lower fare refunded in full; null when the fare is the same. */
   refund: RefundView | null;

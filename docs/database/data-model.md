@@ -909,6 +909,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Job | Module | Every | Does |
 |---|---|---|---|
 | Expire flight holds | flight-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `SeatInventory.release` |
+| Drop unpaid flight changes (FLT-27) | flight-bookings | 30 s | `pendingChange.holdExpiresAt ≤ now` → `$unset pendingChange` + `SeatInventory.release` of its seats; the booking keeps its flight |
 | Complete flight bookings | flight-bookings | 15 min | `confirmed` with `lastDepartureAt ≤ now` → `completed` |
 | Mark flights departed | flights | 1 min | `scheduled` with `departureAt ≤ now` → `departed` |
 | Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |

@@ -1944,3 +1944,15 @@ can you stop now and continue when i tell you to go
 How the output was used:
 Answer only, no files changed (work paused)
 ================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Added the change-preview endpoint (flight-change.service.ts, dto/flight-change.dto.ts, controller route, module provider, FlightChangePreview type, exported QuotedSegmentResponseDto; fixed a type in flight-change.api.spec.ts); committed feat(flight-bookings): add change preview endpoint (FLT-27)
+================================================

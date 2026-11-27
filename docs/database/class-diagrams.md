@@ -410,7 +410,8 @@ classDiagram
       stripeRefundId : string?
       amountMinor : int
       currency : string
-      reason : user_cancellation/provider_cancellation/late_payment
+      reason : user_cancellation/provider_cancellation/late_payment/booking_change
+      changeId : ObjectId? FLT-27
       status : pending/refunded/failed
     }
     class PolicyAcceptance {

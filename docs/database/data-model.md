@@ -535,10 +535,11 @@ Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 
 | `stripeRefundId` | string | | set once Stripe accepts the request |
 | `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
 | `currency` | string | ✓ | |
-| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment \| booking_change` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation; `booking_change` = the lower fare of a flight change, refunded in full (FLT-27) |
+| `changeId` | ObjectId | | the `flight_bookings` change refunded (FLT-27); absent for a cancellation refund |
 | `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
 
-Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
+Indexes: `{ bookingType: 1, bookingId: 1, changeId: 1 }` unique (one cancellation refund per booking, since a missing `changeId` indexes as null, plus one per change, FLT-27) · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
 
 #### `policy_acceptances`
 | Field | Type | Req | Rules |

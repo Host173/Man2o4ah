@@ -10,9 +10,14 @@ import type {
 import type { RefundStatus } from '../../src/modules/payments/schemas/refund.schema.js';
 import type { PublicApi } from './public-api.js';
 
-/** A working `PaymentsService` for other modules' tests: one pending refund per booking, kept in memory. */
+/**
+ * A working `PaymentsService` for other modules' tests: one pending refund per
+ * booking, plus one per booking change (FLT-27), kept in memory.
+ */
 export class FakePaymentsService implements PublicApi<PaymentsService> {
   readonly refunds: RefundView[] = [];
+  /** The change each refund is for (FLT-27); missing for a cancellation refund. */
+  readonly changeIds = new Map<string, string>();
 
   // async: a validation failure rejects the promise, like the real service.
   async refund(request: RefundRequest): Promise<RefundView> {
@@ -23,7 +28,11 @@ export class FakePaymentsService implements PublicApi<PaymentsService> {
         details: [{ field: 'amountMinor', message: 'must be greater than 0' }],
       });
     }
-    const existing = this.find(request.bookingType, request.bookingId);
+    const existing = this.find(
+      request.bookingType,
+      request.bookingId,
+      request.changeId,
+    );
     if (existing) return existing;
     const view: RefundView = {
       refundId: new Types.ObjectId().toHexString(),
@@ -35,6 +44,7 @@ export class FakePaymentsService implements PublicApi<PaymentsService> {
       status: 'pending',
     };
     this.refunds.push(view);
+    if (request.changeId) this.changeIds.set(view.refundId, request.changeId);
     return view;
   }
 
@@ -55,10 +65,13 @@ export class FakePaymentsService implements PublicApi<PaymentsService> {
   private find(
     bookingType: BookingType,
     bookingId: string,
+    changeId?: string,
   ): RefundView | undefined {
     return this.refunds.find(
       (refund) =>
-        refund.bookingType === bookingType && refund.bookingId === bookingId,
+        refund.bookingType === bookingType &&
+        refund.bookingId === bookingId &&
+        this.changeIds.get(refund.refundId) === changeId,
     );
   }
 }

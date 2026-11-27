@@ -1968,3 +1968,27 @@ commit it when verify passes
 How the output was used:
 Added payments change refunds (refund changeId and booking_change reason, schema, fake, data model, diagrams, DECISIONS.md) and the PATCH /api/flight-bookings/:id/change-flight endpoint for same-or-lower fares; committed test(payments): add booking change refund tests (FLT-27), feat(payments): add refunds for booking changes (FLT-27), test(flight-bookings): add change-flight API tests (FLT-27), feat(flight-bookings): apply same or cheaper flight changes (FLT-27)
 ================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+can you do the rest of steps and finish the rest of the endpoint
+
+How the output was used:
+Part 1 of paid changes: a dearer change now holds the new seats in pendingChange and FlightChangeExpiryJob drops unpaid ones (flight-change.service.ts, flight-change-expiry.job.ts, types, DTO, controller, module, data-model jobs table); committed test(flight-bookings): add paid change hold and expiry tests (FLT-27), feat(flight-bookings): hold seats for paid changes and drop unpaid ones (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Committed part 1 after npm run verify passed (see the entry above)
+================================================

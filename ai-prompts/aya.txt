@@ -1956,3 +1956,15 @@ commit it when verify passes
 How the output was used:
 Added the change-preview endpoint (flight-change.service.ts, dto/flight-change.dto.ts, controller route, module provider, FlightChangePreview type, exported QuotedSegmentResponseDto; fixed a type in flight-change.api.spec.ts); committed feat(flight-bookings): add change preview endpoint (FLT-27)
 ================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Added payments change refunds (refund changeId and booking_change reason, schema, fake, data model, diagrams, DECISIONS.md) and the PATCH /api/flight-bookings/:id/change-flight endpoint for same-or-lower fares; committed test(payments): add booking change refund tests (FLT-27), feat(payments): add refunds for booking changes (FLT-27), test(flight-bookings): add change-flight API tests (FLT-27), feat(flight-bookings): apply same or cheaper flight changes (FLT-27)
+================================================

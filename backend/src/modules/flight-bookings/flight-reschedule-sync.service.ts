@@ -68,6 +68,17 @@ export class FlightRescheduleSyncService {
     const { flightId, departureAt, arrivalAt } = payload;
     if (!Types.ObjectId.isValid(flightId)) return;
     const flight = new Types.ObjectId(flightId);
+    // FLT-27: a change waiting for payment on this flight takes the new times
+    // too, so they are right if it is paid. Nobody is notified: it isn't booked.
+    await this.bookings.updateMany(
+      { 'pendingChange.segment.flightId': flight },
+      {
+        $set: {
+          'pendingChange.segment.departureAt': departureAt,
+          'pendingChange.segment.arrivalAt': arrivalAt,
+        },
+      },
+    );
     // A booking is stale while its segment for this flight differs from the new times.
     const stale: QueryFilter<FlightBooking> = {
       status: { $in: ACTIVE },

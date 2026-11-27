@@ -24,6 +24,8 @@ export interface ChangeableBooking {
   status: FlightBookingStatus;
   /** True while an earlier change waits for its payment. */
   hasPendingChange: boolean;
+  /** True once a change was applied: one change per booking (FLT-27). */
+  alreadyChanged: boolean;
   segments: readonly ChangeableSegment[];
 }
 
@@ -41,7 +43,8 @@ export interface NewFlight {
 
 /**
  * Checks the booking can be changed in `direction` (FLT-27): it is confirmed,
- * no other change is waiting for payment, and that segment hasn't departed
+ * it was never changed (one change per booking), no other change is waiting
+ * for payment, and that segment hasn't departed
  * (at departure is too late, as for FLT-26). Throws 409
  * INVALID_STATUS_TRANSITION for those, and 400 VALIDATION_FAILED if the booking
  * has no segment in that direction (e.g. the return of a one-way booking).
@@ -53,6 +56,9 @@ export function assertChangeable(
 ): void {
   if (booking.status !== 'confirmed') {
     throw notChangeable('Only confirmed bookings can be changed');
+  }
+  if (booking.alreadyChanged) {
+    throw notChangeable('A booking can be changed only once');
   }
   if (booking.hasPendingChange) {
     throw notChangeable(

@@ -376,7 +376,7 @@ Refund for a user cancellation uses the **outbound segment's snapshot tiers** wi
 | `differenceMinor` | int | new − previous: > 0 paid, < 0 refunded, 0 nothing moved |
 | `changedAt` | Date | |
 
-Change (FLT-27): a `confirmed` booking changes one direction to another `scheduled` flight on the same route with the same cabin class, before that segment departs. The whole booking is repriced with the new segment (extra bags are charged once per airline). A change that costs the same or less is applied at once (a lower total is refunded in full, no tiers). One that costs more waits in `pendingChange`, with the new seats held, until its payment succeeds. Then `segments`, `pricing` and `first/lastDepartureAt` are updated in place, and the change is appended to `changes`. The booking stays `confirmed` throughout.
+Change (FLT-27): a `confirmed` booking that was never changed (**one change per booking**) changes one direction to another `scheduled` flight on the same route with the same cabin class, before that segment departs. The whole booking is repriced with the new segment (extra bags are charged once per airline). A change that costs the same or less is applied at once (a lower total is refunded in full, no tiers). One that costs more waits in `pendingChange`, with the new seats held, until its payment succeeds. Then `segments`, `pricing` and `first/lastDepartureAt` are updated in place, and the change is appended to `changes`. The booking stays `confirmed` throughout. The request accepts the new flight's policies (`acceptPolicies: true`, PAY-02); the acceptance time is `requestedAt`/`changedAt`. The difference is paid with `POST /api/payments` and the `changeId`; an unpaid change is dropped after 10 minutes, and so is a waiting change when the booking is cancelled or its new flight is cancelled. Cancelling after a paid change refunds both payments by the same percent.
 
 Indexes
 - `{ reference: 1 }` unique, partial `{ reference: { $type: 'string' } }`
@@ -518,12 +518,15 @@ Stores only what PAY-01 allows: Stripe ID, amount, currency, status (+ links).
 | `bookingType` | enum `flight \| hotel` | ✓ | |
 | `bookingId` | ObjectId | ✓ | → `flight_bookings` or `hotel_reservations` |
 | `userId` | ObjectId → users | ✓ | |
+| `changeId` | ObjectId | | the `flight_bookings` change this pays (FLT-27); absent for the booking's own payment |
 | `stripePaymentIntentId` | string | ✓ | unique |
-| `amountMinor` | int | ✓ | = booking total |
+| `amountMinor` | int | ✓ | = booking total, or the change's `differenceMinor` |
 | `currency` | string | ✓ | |
 | `status` | enum `pending \| failed \| succeeded \| canceled` | ✓ | section 5.3 |
 
-Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 1 }` unique (one PaymentIntent per booking; retries reuse it) · `{ userId: 1 }`
+Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 1, changeId: 1 }` unique (one PaymentIntent per booking, since a missing `changeId` indexes as null, plus one per change; retries reuse it) · `{ userId: 1 }`
+
+A refund comes from the change's own payment when it has one, otherwise from the booking's first payment (FLT-27).
 
 #### `refunds`
 | Field | Type | Req | Rules |
@@ -878,8 +881,9 @@ Repeatable notification changes carry a required, non-empty opaque `eventId`: ge
 
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
-| `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
+| `payment.succeeded` | `{ bookingType, bookingId, changeId? }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund); with `changeId`, flight-bookings applies that change (FLT-27) |
 | `flight-booking.expired` | `{ bookingId, userId }` | flight-bookings | payments → cancel the PaymentIntent |
+| `flight-booking.change-expired` | `{ bookingId, userId, changeId }` | flight-bookings | payments → cancel the change's PaymentIntent, or refund it in full if already paid (FLT-27) |
 | `hotel-reservation.expired` | `{ bookingId, userId }` | hotel-bookings | payments → cancel the PaymentIntent |
 | `flight-booking.confirmed` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
 | `flight-booking.cancelled` | `{ bookingId, userId, reference }` | flight-bookings | notifications |

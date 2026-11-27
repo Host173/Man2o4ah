@@ -262,7 +262,7 @@ export class FlightBookingsController {
   @ApiOperation({
     summary: 'FLT-27 Change one flight of my booking',
     description:
-      'Moves one direction to another flight on the same route, in the same cabin class, and moves the seats. A lower fare is refunded in full; the same fare moves no money. A higher fare waits for payment: the new seats are held for 10 minutes (applied: false) and the change applies once the difference is paid.',
+      'Moves one direction to another flight on the same route, in the same cabin class, and moves the seats. A lower fare is refunded in full; the same fare moves no money. A higher fare waits for payment: the new seats are held for 10 minutes (applied: false) and the change applies once the difference is paid with POST /api/payments and the changeId. The body accepts the new flight’s policies (acceptPolicies: true). A booking can be changed once.',
   })
   @ApiOkResponse({ type: ChangedFlightBookingResponseDto })
   @ApiBadRequestResponse({

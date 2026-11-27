@@ -205,6 +205,8 @@ export class FlightChangeService {
             _id: booking._id,
             status: FlightBookingStatus.CONFIRMED,
             pendingChange: { $exists: false },
+            // One change per booking, even against a parallel request.
+            'changes.0': { $exists: false },
             [`segments.${index}._id`]: old._id,
             'pricing.totalMinor': booking.pricing.totalMinor,
           },
@@ -282,6 +284,7 @@ export class FlightChangeService {
       {
         status: booking.status,
         hasPendingChange: booking.pendingChange != null,
+        alreadyChanged: (booking.changes?.length ?? 0) > 0,
         segments,
       },
       query.direction,

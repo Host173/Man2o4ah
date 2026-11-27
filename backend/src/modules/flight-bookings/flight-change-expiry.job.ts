@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Interval } from '@nestjs/schedule';
 import type { Connection, Model, Types } from 'mongoose';
+import { AppEvents } from '../../common/events/app-events.service.js';
+import { Events } from '../../common/events/events.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
+import { dropPendingChange } from './pending-change.js';
 import { FlightBooking } from './schemas/flight-booking.schema.js';
 
 /** Same rhythm as the seat-hold expiry (data-model §7). */
@@ -12,6 +15,7 @@ const BATCH_SIZE = 100;
 /** The fields the job needs from a booking whose change is due. */
 interface DueChange {
   _id: Types.ObjectId;
+  userId: Types.ObjectId;
   seatCount: number;
   pendingChange: {
     _id: Types.ObjectId;
@@ -23,8 +27,9 @@ interface DueChange {
  * Drops unpaid flight changes (FLT-27): a `pendingChange` whose
  * `holdExpiresAt` has passed is removed and its held seats are released, in
  * one transaction per booking. The booking itself is untouched: it keeps its
- * current flight. Safe to run twice and on several app instances: the removal
- * is conditional on that exact change still being pending.
+ * current flight. After the commit payments is told, so it cancels the
+ * change's PaymentIntent. Safe to run twice and on several app instances: the
+ * removal is conditional on that exact change still being pending.
  */
 @Injectable()
 export class FlightChangeExpiryJob {
@@ -35,6 +40,7 @@ export class FlightChangeExpiryJob {
     @InjectModel(FlightBooking.name)
     private readonly bookingModel: Model<FlightBooking>,
     private readonly seatInventory: SeatInventory,
+    private readonly events: AppEvents,
   ) {}
 
   @Interval(EVERY_30_SECONDS)
@@ -55,6 +61,7 @@ export class FlightChangeExpiryJob {
             'pendingChange.holdExpiresAt': { $lte: now },
           },
           {
+            userId: 1,
             seatCount: 1,
             'pendingChange._id': 1,
             'pendingChange.segment.flightId': 1,
@@ -75,30 +82,15 @@ export class FlightChangeExpiryJob {
     }
   }
 
-  /** One change: remove it and release its held seats together. */
+  /** One change: remove it and release its held seats together, then tell payments. */
   private async expire(due: DueChange): Promise<boolean> {
     const session = await this.connection.startSession();
+    let dropped: boolean;
     try {
-      return await session.withTransaction(async () => {
-        const result = await this.bookingModel.updateOne(
-          { _id: due._id, 'pendingChange._id': due.pendingChange._id },
-          { $unset: { pendingChange: 1 } },
-          { session },
-        );
-        // Lost the race: the change was paid and applied, or dropped meanwhile.
-        if (result.modifiedCount !== 1) return false;
-        await this.seatInventory.release(
-          [
-            {
-              flightId: due.pendingChange.segment.flightId.toString(),
-              cabinId: due.pendingChange.segment.cabinId.toString(),
-              seats: due.seatCount,
-            },
-          ],
-          { session },
-        );
-        return true;
-      });
+      // False: lost the race (the change was paid and applied, or dropped meanwhile).
+      dropped = await session.withTransaction(() =>
+        dropPendingChange(this.bookingModel, this.seatInventory, due, session),
+      );
     } catch (error) {
       this.logger.error(
         `Could not drop the pending change of flight booking ${due._id.toString()}`,
@@ -108,5 +100,15 @@ export class FlightChangeExpiryJob {
     } finally {
       await session.endSession();
     }
+
+    // After the commit: an event can't be rolled back.
+    if (dropped) {
+      this.events.emit(Events.FlightBookingChangeExpired, {
+        bookingId: due._id.toString(),
+        userId: due.userId.toString(),
+        changeId: due.pendingChange._id.toString(),
+      });
+    }
+    return dropped;
   }
 }

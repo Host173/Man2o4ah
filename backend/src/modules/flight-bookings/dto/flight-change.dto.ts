@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsMongoId } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsMongoId } from 'class-validator';
 import type {
   ChangedFlightBooking,
   FlightChangePreview,
@@ -27,8 +27,21 @@ export class FlightChangeQueryDto {
   flightId!: string;
 }
 
-/** `PATCH /api/flight-bookings/:id/change-flight` body: the same two fields as the preview (FLT-27). */
-export class FlightChangeRequestDto extends FlightChangeQueryDto {}
+/**
+ * `PATCH /api/flight-bookings/:id/change-flight` body (FLT-27): the preview's two
+ * fields, and the acceptance of the new flight's policies (PAY-02), which come
+ * with its snapshot. The acceptance time is the change's own time.
+ */
+export class FlightChangeRequestDto extends FlightChangeQueryDto {
+  @ApiProperty({
+    enum: [true],
+    example: true,
+    description: 'Accepts the new flight’s policies (shown by the preview)',
+  })
+  @IsBoolean()
+  @Equals(true, { message: 'acceptPolicies must be true' })
+  acceptPolicies!: true;
+}
 
 /** What a change would cost now (FLT-27). */
 export class FlightChangePreviewResponseDto implements FlightChangePreview {

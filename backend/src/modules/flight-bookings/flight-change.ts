@@ -1,3 +1,4 @@
+import { percentOfMinor } from '../../common/money/money.js';
 import { priceFlightBooking } from './flight-pricing.js';
 import type {
   FlightPrice,
@@ -43,5 +44,34 @@ export function quoteFlightChange(
   return {
     newPrice,
     differenceMinor: newPrice.totalMinor - currentTotalMinor,
+  };
+}
+
+/** How a cancellation refund is taken from a booking's payments (FLT-27). */
+export interface CancellationRefundSplit {
+  /** From the booking's first payment (no changeId). */
+  firstPaymentMinor: number;
+  /** From the paid change's own payment (its changeId); 0 without a paid change. */
+  changePaymentMinor: number;
+}
+
+/**
+ * Splits a cancellation refund between the booking's first payment and the
+ * payment of its paid change, if any (one change per booking). The change's
+ * payment is refunded by the same `percent` (rounded half up), and the first
+ * payment gives the rest, so the two parts always add up to `refundAmountMinor`.
+ */
+export function splitCancellationRefund(
+  refundAmountMinor: number,
+  percent: number,
+  paidChangeMinor: number,
+): CancellationRefundSplit {
+  const changePaymentMinor = Math.min(
+    percentOfMinor(paidChangeMinor, percent),
+    refundAmountMinor,
+  );
+  return {
+    firstPaymentMinor: refundAmountMinor - changePaymentMinor,
+    changePaymentMinor,
   };
 }

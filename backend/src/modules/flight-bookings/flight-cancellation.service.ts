@@ -18,6 +18,8 @@ import type {
   CancelledFlightBooking,
   FlightRefundPreview,
 } from './flight-bookings.types.js';
+import { splitCancellationRefund } from './flight-change.js';
+import { dropPendingChange } from './pending-change.js';
 import { refundFor } from './refund-tiers.js';
 import {
   FlightBooking,
@@ -76,6 +78,10 @@ export class FlightCancellationService {
     const session = await this.connection.startSession();
     let cancelled: Omit<CancelledFlightBooking, 'refund'> & {
       currency: string;
+      /** The booking's paid change (FLT-27): its payment is refunded too. */
+      paidChange: { changeId: string; amountMinor: number } | null;
+      /** A change that waited for payment and was dropped here (FLT-27). */
+      droppedChangeId: string | null;
     };
     try {
       // The booking is read again inside the transaction, so a cancellation
@@ -118,19 +124,52 @@ export class FlightCancellationService {
           })),
           { session },
         );
+        // FLT-27: a change waiting for payment goes too, with its held seats.
+        const dropped = await dropPendingChange(
+          this.bookings,
+          this.seatInventory,
+          booking,
+          session,
+        );
+        const paid = booking.changes?.find((c) => c.differenceMinor > 0);
         return {
           _id: booking._id.toHexString(),
           reference: booking.reference,
           status: FlightBookingStatus.CANCELLED,
           cancellation,
           currency: booking.pricing.currency,
+          paidChange: paid
+            ? {
+                changeId: paid._id.toHexString(),
+                amountMinor: paid.differenceMinor,
+              }
+            : null,
+          droppedChangeId:
+            dropped && booking.pendingChange
+              ? booking.pendingChange._id.toHexString()
+              : null,
         };
       });
     } finally {
       await session.endSession();
     }
 
-    const { currency, ...result } = cancelled;
+    const { currency, paidChange, droppedChangeId, ...result } = cancelled;
+    if (droppedChangeId) {
+      // Payments cancels the dropped change's PaymentIntent (or refunds it).
+      this.events.emit(Events.FlightBookingChangeExpired, {
+        bookingId: result._id,
+        userId,
+        changeId: droppedChangeId,
+      });
+    }
+    // FLT-27: after a paid change the refund comes from both payments, each by
+    // the same percent (one change per booking).
+    const split = splitCancellationRefund(
+      result.cancellation.refundAmountMinor,
+      result.cancellation.refundPercent,
+      paidChange?.amountMinor ?? 0,
+    );
     // Known gap, decided for FLT-26: a Stripe failure is recorded by PAY-03 as a
     // `failed` refund, but any other error thrown here (e.g. the database) leaves
     // a cancelled booking with no refund record. HTL-21 behaves the same, and the
@@ -139,16 +178,27 @@ export class FlightCancellationService {
     // ticket. Until then the error propagates and the user is still notified.
     try {
       const refund =
-        result.cancellation.refundAmountMinor > 0
+        split.firstPaymentMinor > 0
           ? await this.payments.refund({
               bookingType: BookingType.FLIGHT,
               bookingId: result._id,
               userId,
-              amountMinor: result.cancellation.refundAmountMinor,
+              amountMinor: split.firstPaymentMinor,
               currency,
               reason: 'user_cancellation',
             })
           : null;
+      if (paidChange && split.changePaymentMinor > 0) {
+        await this.payments.refund({
+          bookingType: BookingType.FLIGHT,
+          bookingId: result._id,
+          userId,
+          amountMinor: split.changePaymentMinor,
+          currency,
+          reason: 'user_cancellation',
+          changeId: paidChange.changeId,
+        });
+      }
       return { ...result, refund };
     } finally {
       // The cancellation is committed, so the user is told even if PAY-03 failed.

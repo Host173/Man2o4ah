@@ -376,6 +376,8 @@ describe('flight change endpoints (FLT-27)', () => {
       bookingId: booking.id,
       reference: 'FBCHG001',
       status: 'confirmed',
+      applied: true,
+      holdExpiresAt: null,
       direction: 'outbound',
       segment: { flightId: CHEAPER, cabinId: CHEAPER_CABIN, fareMinor: 15_000 },
       pricing: { totalMinor: 30_000, currency: 'USD' },
@@ -503,8 +505,7 @@ describe('flight change endpoints (FLT-27)', () => {
     expect(cancelled.body.code).toBe(ErrorCode.InvalidStatusTransition);
   });
 
-  it('does not take payment yet: a dearer change answers 409 and changes nothing', async () => {
-    // Paid changes (pendingChange + Stripe) come in the next FLT-27 step.
+  it('starts a dearer change: holds the new seats for 10 minutes and waits for payment', async () => {
     const user = await loginAs(t.connection, UserRole.USER);
     const booking = await seed(user.id);
 
@@ -513,10 +514,58 @@ describe('flight change endpoints (FLT-27)', () => {
       flightId: LATER,
     });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      bookingId: booking.id,
+      status: 'confirmed',
+      applied: false,
+      differenceMinor: 10_000,
+      holdExpiresAt: '2027-03-01T00:10:00.000Z',
+      segment: { flightId: LATER },
+      pricing: { totalMinor: 50_000 },
+      refund: null,
+    });
+
+    // The new seats are held; the old ones stay booked until payment.
+    expect(seats.counters(LATER, LATER_CABIN)).toMatchObject({
+      heldSeats: 2,
+      availableSeats: 48,
+    });
+    expect(seats.counters(FLIGHT, CABIN)?.bookedSeats).toBe(2);
+
+    // The booking itself is unchanged; the change waits in pendingChange.
     const stored = await bookings.findById(booking.id).lean();
+    expect(stored?.status).toBe('confirmed');
     expect(stored?.segments[0]?.flightId.toString()).toBe(FLIGHT);
-    expect(seats.counters(LATER, LATER_CABIN)?.heldSeats).toBe(0);
+    expect(stored?.pricing.totalMinor).toBe(40_000);
+    expect(stored?.changes).toBeUndefined();
+    expect(stored?.pendingChange?._id.toString()).toBe(res.body.changeId);
+    expect(stored?.pendingChange).toMatchObject({
+      direction: 'outbound',
+      differenceMinor: 10_000,
+      holdExpiresAt: new Date('2027-03-01T00:10:00.000Z'),
+      pricing: { totalMinor: 50_000 },
+    });
+    expect(stored?.pendingChange?.segment.flightId.toString()).toBe(LATER);
+    expect(payments.refunds).toHaveLength(0);
+  });
+
+  it('refuses a second change while one waits for payment (409)', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const booking = await seed(user.id);
+    await change(booking.id, user.cookie, {
+      direction: 'outbound',
+      flightId: LATER,
+    });
+
+    const res = await change(booking.id, user.cookie, {
+      direction: 'outbound',
+      flightId: CHEAPER,
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe(ErrorCode.InvalidStatusTransition);
+    expect(seats.counters(CHEAPER, CHEAPER_CABIN)?.bookedSeats).toBe(0);
   });
 
   it('validates the body', async () => {

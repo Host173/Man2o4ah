@@ -6,6 +6,7 @@
 export const Events = {
   PaymentSucceeded: 'payment.succeeded',
   FlightBookingExpired: 'flight-booking.expired',
+  FlightBookingChangeExpired: 'flight-booking.change-expired',
   HotelReservationExpired: 'hotel-reservation.expired',
   FlightBookingConfirmed: 'flight-booking.confirmed',
   FlightBookingCancelled: 'flight-booking.cancelled',

@@ -11,12 +11,21 @@ import type { EventName, Events } from './events.js';
 export interface PaymentSucceededEvent {
   bookingType: BookingType;
   bookingId: string;
+  /** Set when the payment was for a flight change (FLT-27), not the booking itself. */
+  changeId?: string;
 }
 
 /** Emitted by flight-bookings and hotel-bookings; handled by payments. */
 export interface BookingExpiredEvent {
   bookingId: string;
   userId: string;
+}
+
+/** Emitted by flight-bookings when an unpaid change is dropped (FLT-27); handled by payments. */
+export interface FlightBookingChangeExpiredEvent {
+  bookingId: string;
+  userId: string;
+  changeId: string;
 }
 
 /** Emitted by flight-bookings and hotel-bookings; handled by notifications. */
@@ -87,6 +96,7 @@ export interface AdminActionEvent {
 export interface EventPayloads {
   [Events.PaymentSucceeded]: PaymentSucceededEvent;
   [Events.FlightBookingExpired]: BookingExpiredEvent;
+  [Events.FlightBookingChangeExpired]: FlightBookingChangeExpiredEvent;
   [Events.HotelReservationExpired]: BookingExpiredEvent;
   [Events.FlightBookingConfirmed]: BookingStatusEvent;
   [Events.FlightBookingCancelled]: BookingStatusEvent;

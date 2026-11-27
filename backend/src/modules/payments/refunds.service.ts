@@ -106,7 +106,18 @@ export class RefundsService {
     const existing = await this.refunds.findOne(filter).lean<RefundRecord>();
     if (existing) return this.toView(existing);
 
-    const payment = await this.payments.findOne(booking).lean<PaymentRecord>();
+    // A refund comes from the change's own payment when it has one (a paid
+    // flight change, FLT-27), otherwise from the booking's first payment.
+    const ownPayment = changeId
+      ? await this.payments
+          .findOne({ ...booking, changeId })
+          .lean<PaymentRecord>()
+      : null;
+    const payment =
+      ownPayment ??
+      (await this.payments
+        .findOne({ ...booking, changeId: null })
+        .lean<PaymentRecord>());
     const paid = payment
       ? {
           status: payment.status,

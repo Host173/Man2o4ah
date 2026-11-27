@@ -37,6 +37,8 @@ interface PaymentRecord {
   amountMinor: number;
   currency: string;
   status: PaymentStatus;
+  /** Set on the payment of a flight change (FLT-27). */
+  changeId?: Types.ObjectId;
   createdAt: Date;
 }
 
@@ -55,12 +57,17 @@ function isDuplicateKey(error: unknown): boolean {
   );
 }
 
-/** The Stripe idempotency key of a booking's PaymentIntent: one per booking (PAY-01). */
+/**
+ * The Stripe idempotency key of a booking's PaymentIntent: one per booking
+ * (PAY-01), and one per flight change of that booking (FLT-27).
+ */
 export function idempotencyKey(
   bookingType: BookingType,
   bookingId: string,
+  changeId?: string,
 ): string {
-  return `pi-${bookingType}-${bookingId}`;
+  const key = `pi-${bookingType}-${bookingId}`;
+  return changeId ? `${key}-${changeId}` : key;
 }
 
 /**
@@ -89,22 +96,33 @@ export class PaymentIntentsService {
    * Creates the booking's PaymentIntent, or reuses it (one payment per booking),
    * and returns what the browser needs to pay. The client secret is never
    * stored: Stripe returns the same one for the same idempotency key.
+   * With `changeId` it pays that flight change instead (FLT-27): a payment of
+   * its own, for the price difference. The booking module took the policy
+   * acceptance with the change, so no `policy_acceptances` record is needed.
    */
   async start(
     userId: string,
     bookingType: BookingType,
     bookingId: string,
+    changeId?: string,
   ): Promise<PaymentSession> {
-    // 404 NOT_FOUND passes through: the booking doesn't exist or isn't the user's.
+    // 404 NOT_FOUND passes through: the booking (or change) doesn't exist or isn't the user's.
     const payable = await this.registry
       .get(bookingType)
-      .getPayable(bookingId, userId);
+      .getPayable(bookingId, userId, changeId);
     const bookingObjectId = new Types.ObjectId(bookingId);
+    const changeObjectId = changeId ? new Types.ObjectId(changeId) : undefined;
+    // `changeId: null` also matches payments without the field: the booking's own.
+    const paymentFilter = {
+      bookingType,
+      bookingId: bookingObjectId,
+      changeId: changeObjectId ?? null,
+    };
     const [accepted, existing] = await Promise.all([
-      this.acceptances.exists({ bookingType, bookingId: bookingObjectId }),
-      this.payments
-        .findOne({ bookingType, bookingId: bookingObjectId })
-        .lean<PaymentRecord>(),
+      changeId
+        ? Promise.resolve(true)
+        : this.acceptances.exists({ bookingType, bookingId: bookingObjectId }),
+      this.payments.findOne(paymentFilter).lean<PaymentRecord>(),
     ]);
 
     const decision = decidePaymentStart({
@@ -116,7 +134,12 @@ export class PaymentIntentsService {
         : null,
     });
 
-    const intent = await this.intentOf(bookingType, bookingId, payable);
+    const intent = await this.intentOf(
+      bookingType,
+      bookingId,
+      payable,
+      changeId,
+    );
     if (decision.action === 'reuse') {
       return this.session(decision.paymentId, intent, payable);
     }
@@ -126,6 +149,7 @@ export class PaymentIntentsService {
         {
           bookingType,
           bookingId: bookingObjectId,
+          ...(changeObjectId ? { changeId: changeObjectId } : {}),
           userId: new Types.ObjectId(userId),
           stripePaymentIntentId: intent.id,
           amountMinor: payable.amountMinor,
@@ -138,7 +162,7 @@ export class PaymentIntentsService {
       if (!isDuplicateKey(error)) throw error;
       // Another request for the same booking won the race: continue as a reuse.
       const winner = await this.payments
-        .findOne({ bookingType, bookingId: bookingObjectId }, { _id: 1 })
+        .findOne(paymentFilter, { _id: 1 })
         .lean<{ _id: Types.ObjectId }>();
       if (!winner) throw error;
       return this.session(winner._id.toString(), intent, payable);
@@ -153,13 +177,17 @@ export class PaymentIntentsService {
   async retry(userId: string, paymentId: string): Promise<PaymentSession> {
     const payment = await this.findOwn(userId, paymentId);
     const bookingId = payment.bookingId.toString();
+    const changeId = payment.changeId?.toString();
     const payable = await this.registry
       .get(payment.bookingType)
-      .getPayable(bookingId, userId);
-    const accepted = await this.acceptances.exists({
-      bookingType: payment.bookingType,
-      bookingId: payment.bookingId,
-    });
+      .getPayable(bookingId, userId, changeId);
+    // A change's policies were accepted with the change (FLT-27).
+    const accepted = changeId
+      ? true
+      : await this.acceptances.exists({
+          bookingType: payment.bookingType,
+          bookingId: payment.bookingId,
+        });
     // Checked before anything changes: 409 for a paid, cancelled or expired payment.
     decidePaymentStart({
       payable,
@@ -175,7 +203,12 @@ export class PaymentIntentsService {
       );
     }
 
-    const intent = await this.intentOf(payment.bookingType, bookingId, payable);
+    const intent = await this.intentOf(
+      payment.bookingType,
+      bookingId,
+      payable,
+      changeId,
+    );
     return this.session(paymentId, intent, payable);
   }
 
@@ -219,8 +252,11 @@ export class PaymentIntentsService {
       return;
     }
 
-    let confirmed: { bookingType: BookingType; bookingId: string } | null =
-      null;
+    let confirmed: {
+      bookingType: BookingType;
+      bookingId: string;
+      changeId?: string;
+    } | null = null;
     try {
       await this.connection.transaction(async (session) => {
         // The helper may run this function again after a write conflict.
@@ -251,6 +287,10 @@ export class PaymentIntentsService {
           confirmed = {
             bookingType: payment.bookingType,
             bookingId: payment.bookingId.toString(),
+            // A flight change's payment (FLT-27): the booking module applies the change.
+            ...(payment.changeId
+              ? { changeId: payment.changeId.toString() }
+              : {}),
           };
         }
       });
@@ -285,17 +325,20 @@ export class PaymentIntentsService {
     return payment;
   }
 
-  /** The booking's PaymentIntent: the same call with the same key returns the same one. */
+  /** The booking's (or change's) PaymentIntent: the same call with the same key returns the same one. */
   private async intentOf(
     bookingType: BookingType,
     bookingId: string,
     payable: Payable,
+    changeId?: string,
   ): Promise<Intent> {
     const intent = await this.gateway.createPaymentIntent({
       amountMinor: payable.amountMinor,
       currency: payable.currency,
-      metadata: { bookingType, bookingId },
-      idempotencyKey: idempotencyKey(bookingType, bookingId),
+      metadata: changeId
+        ? { bookingType, bookingId, changeId }
+        : { bookingType, bookingId },
+      idempotencyKey: idempotencyKey(bookingType, bookingId, changeId),
     });
     return { id: intent.id, clientSecret: intent.clientSecret };
   }

@@ -1992,3 +1992,27 @@ commit it when verify passes
 How the output was used:
 Committed part 1 after npm run verify passed (see the entry above)
 ================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Parts 2 and 3 of paid changes: payments changeId (schema, POST /api/payments, PayableBooking port, webhook event, change-expired listener, refund source), flight-change-payment.service.ts applies paid changes, one change per booking, acceptPolicies, cancellations and reschedules handle waiting changes, split cancellation refunds, docs and DECISIONS.md; committed test(payments): add flight change payment tests (FLT-27), test(flight-bookings): add paid change, one-change and cancellation tests (FLT-27), feat(payments): pay for flight changes (FLT-27), feat(flight-bookings): apply paid changes and handle them on cancellation (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+how much is left??
+
+How the output was used:
+Answer only, no files changed (status update)
+================================================

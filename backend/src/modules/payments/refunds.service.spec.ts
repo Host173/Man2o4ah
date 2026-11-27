@@ -223,6 +223,80 @@ describe('PaymentsService refunds (PAY-03)', () => {
     expect(updated).toHaveBeenCalledTimes(1);
   });
 
+  describe('booking change refunds (FLT-27)', () => {
+    const newChangeId = () => new Types.ObjectId().toString();
+
+    it('keeps a change refund apart from the cancellation refund, stored with its reason and change', async () => {
+      const p = await paid();
+      const changeId = newChangeId();
+
+      const change = await service.refund(
+        requestFor(p, {
+          amountMinor: 5_000,
+          reason: 'booking_change',
+          changeId,
+        }),
+      );
+      const cancellation = await service.refund(requestFor(p));
+
+      expect(change.refundId).not.toBe(cancellation.refundId);
+      expect(change).toMatchObject({
+        amountMinor: 5_000,
+        reason: 'booking_change',
+        status: 'pending',
+      });
+      const stored = await refunds.findById(change.refundId).lean();
+      expect(stored?.changeId?.toString()).toBe(changeId);
+      expect(refundCalls()).toHaveLength(2);
+    });
+
+    it('keeps one refund per change: the same change returns the first, another change gets its own', async () => {
+      const p = await paid();
+      const changeId = newChangeId();
+      const request = requestFor(p, {
+        amountMinor: 3_000,
+        reason: 'booking_change',
+        changeId,
+      });
+
+      const first = await service.refund(request);
+      const again = await service.refund({ ...request, amountMinor: 1_000 });
+      const other = await service.refund({
+        ...request,
+        changeId: newChangeId(),
+      });
+
+      expect(again).toEqual(first);
+      expect(other.refundId).not.toBe(first.refundId);
+      expect(await refunds.countDocuments()).toBe(2);
+    });
+
+    it('getRefund returns the cancellation refund, never a change refund', async () => {
+      const p = await paid();
+      await service.refund(
+        requestFor(p, { reason: 'booking_change', changeId: newChangeId() }),
+      );
+
+      await expect(
+        service.getRefund('flight', p.bookingId),
+      ).resolves.toBeNull();
+
+      const cancellation = await service.refund(requestFor(p));
+      await expect(service.getRefund('flight', p.bookingId)).resolves.toEqual(
+        cancellation,
+      );
+    });
+
+    it('400 for a malformed changeId, before reading anything', async () => {
+      const p = await paid();
+
+      await expect(
+        service.refund(requestFor(p, { changeId: 'not-an-id' })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(await refunds.countDocuments()).toBe(0);
+    });
+  });
+
   describe('refusals create nothing, never call Stripe and emit nothing', () => {
     async function expectRefusal(
       run: () => Promise<unknown>,

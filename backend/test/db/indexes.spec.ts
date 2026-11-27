@@ -64,6 +64,14 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
     { key: { status: 1, lastDepartureAt: 1 } },
     { key: { status: 1, createdAt: -1 } },
     { key: { createdAt: -1, _id: -1 } },
+    {
+      key: { 'pendingChange.holdExpiresAt': 1 },
+      partial: { 'pendingChange.holdExpiresAt': { $type: 'date' } },
+    },
+    {
+      key: { 'pendingChange.segment.flightId': 1 },
+      partial: { 'pendingChange.segment.flightId': { $type: 'objectId' } },
+    },
   ],
   // 3.5 hotels
   hotels: [
@@ -99,11 +107,11 @@ const EXPECTED: Record<string, ExpectedIndex[]> = {
   // 3.7 payments
   payments: [
     { key: { stripePaymentIntentId: 1 }, unique: true },
-    { key: { bookingType: 1, bookingId: 1 }, unique: true },
+    { key: { bookingType: 1, bookingId: 1, changeId: 1 }, unique: true },
     { key: { userId: 1 } },
   ],
   refunds: [
-    { key: { bookingType: 1, bookingId: 1 }, unique: true },
+    { key: { bookingType: 1, bookingId: 1, changeId: 1 }, unique: true },
     {
       key: { stripeRefundId: 1 },
       unique: true,

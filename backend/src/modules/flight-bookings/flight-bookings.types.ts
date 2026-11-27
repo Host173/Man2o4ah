@@ -122,6 +122,36 @@ export interface FlightHold extends FlightQuote {
   holdExpiresAt: Date;
 }
 
+/** FLT-27: what changing one direction to another flight would cost now. Nothing is saved. */
+export interface FlightChangePreview {
+  direction: SegmentDirection;
+  /** Snapshot of the new flight, as a hold would save it. */
+  segment: QuotedSegment;
+  /** The booking's pricing once the change is applied. */
+  pricing: FlightQuote['pricing'];
+  /** New total − paid total: > 0 the user pays, < 0 refunded in full, 0 nothing moves. */
+  differenceMinor: number;
+}
+
+/**
+ * FLT-27: a requested change. A same or lower fare is applied at once; a
+ * higher one waits for payment with the new seats held until `holdExpiresAt`.
+ */
+export interface ChangedFlightBooking extends FlightChangePreview {
+  bookingId: string;
+  reference: string;
+  /** A change never moves the booking out of `confirmed`. */
+  status: 'confirmed';
+  /** True when applied now; false when it waits for the payment of `differenceMinor`. */
+  applied: boolean;
+  /** When the held seats are released if unpaid; null when applied. */
+  holdExpiresAt: Date | null;
+  /** The change's `_id`: in the booking's `changes`, or of its `pendingChange`. */
+  changeId: string;
+  /** The lower fare refunded in full; null when the fare is the same. */
+  refund: RefundView | null;
+}
+
 /** FLT-26: what cancelling would refund right now. Nothing is saved. */
 export interface FlightRefundPreview {
   percent: number;

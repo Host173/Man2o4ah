@@ -32,15 +32,18 @@ export function assertRefundAmount(amountMinor: number): void {
 /** A 24-character hex id; anything else would make the driver throw a 500. */
 const OBJECT_ID = /^[0-9a-f]{24}$/i;
 
-/** Throws 400 when the booking or user id isn't a valid id (checked before anything is read). */
+/** Throws 400 when the booking, user or change id isn't a valid id (checked before anything is read). */
 export function assertRefundIds(
-  request: Pick<RefundRequest, 'bookingId' | 'userId'>,
+  request: Pick<RefundRequest, 'bookingId' | 'userId' | 'changeId'>,
 ): void {
   if (!OBJECT_ID.test(request.bookingId)) {
     throw invalidRefund('bookingId', 'must be a valid id');
   }
   if (!OBJECT_ID.test(request.userId)) {
     throw invalidRefund('userId', 'must be a valid id');
+  }
+  if (request.changeId !== undefined && !OBJECT_ID.test(request.changeId)) {
+    throw invalidRefund('changeId', 'must be a valid id');
   }
 }
 

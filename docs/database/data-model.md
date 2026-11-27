@@ -304,12 +304,14 @@ A **seat hold is a booking in `pending_payment`** (FLT-22). There is no separate
 | `segments` | `FlightSegment[]` | ✓ | 1 for one way, 2 for round trip (outbound first) |
 | `passengers` | `Passenger[]` | ✓ | ≥ 1 |
 | `seatCount` | int | ✓ | adults + children (infants take no seat); same on every segment |
-| `pricing` | `{ fareTotalMinor, baggageTotalMinor, totalMinor, currency }` | ✓ | computed once at hold time, never recomputed |
+| `pricing` | `{ fareTotalMinor, baggageTotalMinor, totalMinor, currency }` | ✓ | computed at hold time; recomputed only when a change completes (FLT-27) |
 | `holdExpiresAt` | Date | ✓ | `createdAt + 10 min` |
 | `firstDepartureAt` | Date | ✓ | = outbound `departureAt` (kept in sync) |
 | `lastDepartureAt` | Date | ✓ | = last segment `departureAt` (kept in sync) |
 | `confirmedAt` / `expiredAt` / `completedAt` | Date | | set on that transition |
 | `cancellation` | `Cancellation` | | set when cancelled |
+| `pendingChange` | `PendingFlightChange` | | a change that costs more, waiting for payment (FLT-27); at most one |
+| `changes` | `FlightChange[]` | | completed changes, oldest first; absent until the first (FLT-27) |
 
 `FlightSegment` (embedded, has `_id`)
 | Field | Type | Rules |
@@ -354,6 +356,28 @@ Pricing (computed at hold time, per segment, then summed):
 
 Refund for a user cancellation uses the **outbound segment's snapshot tiers** with days remaining until the outbound departure (FLT-12a, FLT-26). Provider cancellation is always 100 % (FLT-06).
 
+`PendingFlightChange` (embedded, has `_id` = the change ID payments uses)
+| Field | Type | Rules |
+|---|---|---|
+| `direction` | enum `outbound \| return` | the segment being replaced |
+| `segment` | `FlightSegment` | snapshot of the new flight, taken as a hold would |
+| `pricing` | as `pricing` | the booking's pricing once the change is applied |
+| `differenceMinor` | int | > 0: new total − old total, what the user pays |
+| `holdExpiresAt` | Date | `requestedAt + 10 min`; the new seats are held until then |
+| `requestedAt` | Date | |
+
+`FlightChange` (embedded, has `_id` = the change ID)
+| Field | Type | Rules |
+|---|---|---|
+| `direction` | enum `outbound \| return` | |
+| `previousSegment` | `FlightSegment` | the segment as it was before the change |
+| `newFlightId` | ObjectId → flights | |
+| `previousTotalMinor`, `newTotalMinor` | int | ≥ 0 |
+| `differenceMinor` | int | new − previous: > 0 paid, < 0 refunded, 0 nothing moved |
+| `changedAt` | Date | |
+
+Change (FLT-27): a `confirmed` booking that was never changed (**one change per booking**) changes one direction to another `scheduled` flight on the same route with the same cabin class, before that segment departs. The whole booking is repriced with the new segment (extra bags are charged once per airline). A change that costs the same or less is applied at once (a lower total is refunded in full, no tiers). One that costs more waits in `pendingChange`, with the new seats held, until its payment succeeds. Then `segments`, `pricing` and `first/lastDepartureAt` are updated in place, and the change is appended to `changes`. The booking stays `confirmed` throughout. The request accepts the new flight's policies (`acceptPolicies: true`, PAY-02); the acceptance time is `requestedAt`/`changedAt`. The difference is paid with `POST /api/payments` and the `changeId`; an unpaid change is dropped after 10 minutes, and so is a waiting change when the booking is cancelled or its new flight is cancelled. Cancelling after a paid change refunds both payments by the same percent.
+
 Indexes
 - `{ reference: 1 }` unique, partial `{ reference: { $type: 'string' } }`
 - `{ userId: 1, firstDepartureAt: -1 }` (FLT-25)
@@ -362,6 +386,8 @@ Indexes
 - `{ status: 1, lastDepartureAt: 1 }` (completion job)
 - `{ status: 1, createdAt: -1 }` (admin list, ACC-17)
 - `{ createdAt: -1, _id: -1 }` (unfiltered admin list, ACC-17)
+- `{ 'pendingChange.holdExpiresAt': 1 }` partial `{ 'pendingChange.holdExpiresAt': { $type: 'date' } }` (change expiry, FLT-27)
+- `{ 'pendingChange.segment.flightId': 1 }` partial `{ 'pendingChange.segment.flightId': { $type: 'objectId' } }` (provider cancel of a changed-to flight, FLT-27)
 
 ---
 
@@ -492,12 +518,15 @@ Stores only what PAY-01 allows: Stripe ID, amount, currency, status (+ links).
 | `bookingType` | enum `flight \| hotel` | ✓ | |
 | `bookingId` | ObjectId | ✓ | → `flight_bookings` or `hotel_reservations` |
 | `userId` | ObjectId → users | ✓ | |
+| `changeId` | ObjectId | | the `flight_bookings` change this pays (FLT-27); absent for the booking's own payment |
 | `stripePaymentIntentId` | string | ✓ | unique |
-| `amountMinor` | int | ✓ | = booking total |
+| `amountMinor` | int | ✓ | = booking total, or the change's `differenceMinor` |
 | `currency` | string | ✓ | |
 | `status` | enum `pending \| failed \| succeeded \| canceled` | ✓ | section 5.3 |
 
-Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 1 }` unique (one PaymentIntent per booking; retries reuse it) · `{ userId: 1 }`
+Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 1, changeId: 1 }` unique (one PaymentIntent per booking, since a missing `changeId` indexes as null, plus one per change; retries reuse it) · `{ userId: 1 }`
+
+A refund comes from the change's own payment when it has one, otherwise from the booking's first payment (FLT-27).
 
 #### `refunds`
 | Field | Type | Req | Rules |
@@ -509,10 +538,11 @@ Indexes: `{ stripePaymentIntentId: 1 }` unique · `{ bookingType: 1, bookingId: 
 | `stripeRefundId` | string | | set once Stripe accepts the request |
 | `amountMinor` | int | ✓ | > 0 (a 0 refund creates no document, PAY-03) |
 | `currency` | string | ✓ | |
-| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation |
+| `reason` | enum `user_cancellation \| provider_cancellation \| late_payment \| booking_change` | ✓ | `late_payment` = confirmation after hold expiry, including ACC-12 deactivation; `booking_change` = the lower fare of a flight change, refunded in full (FLT-27) |
+| `changeId` | ObjectId | | the `flight_bookings` change refunded (FLT-27); absent for a cancellation refund |
 | `status` | enum `pending \| refunded \| failed` | ✓ | PAY-03 |
 
-Indexes: `{ bookingType: 1, bookingId: 1 }` unique · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
+Indexes: `{ bookingType: 1, bookingId: 1, changeId: 1 }` unique (one cancellation refund per booking, since a missing `changeId` indexes as null, plus one per change, FLT-27) · `{ stripeRefundId: 1 }` unique, partial `{ stripeRefundId: { $type: 'string' } }` · `{ userId: 1 }`
 
 #### `policy_acceptances`
 | Field | Type | Req | Rules |
@@ -851,8 +881,9 @@ Repeatable notification changes carry a required, non-empty opaque `eventId`: ge
 
 | Event | Payload | Emitted by | Handled by |
 |---|---|---|---|
-| `payment.succeeded` | `{ bookingType, bookingId }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund) |
+| `payment.succeeded` | `{ bookingType, bookingId, changeId? }` | payments | flight-bookings / hotel-bookings → confirm (or late-payment refund); with `changeId`, flight-bookings applies that change (FLT-27) |
 | `flight-booking.expired` | `{ bookingId, userId }` | flight-bookings | payments → cancel the PaymentIntent |
+| `flight-booking.change-expired` | `{ bookingId, userId, changeId }` | flight-bookings | payments → cancel the change's PaymentIntent, or refund it in full if already paid (FLT-27) |
 | `hotel-reservation.expired` | `{ bookingId, userId }` | hotel-bookings | payments → cancel the PaymentIntent |
 | `flight-booking.confirmed` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
 | `flight-booking.cancelled` | `{ bookingId, userId, reference }` | flight-bookings | notifications |
@@ -882,6 +913,7 @@ Each job lives in the module that owns the data and uses conditional updates, so
 | Job | Module | Every | Does |
 |---|---|---|---|
 | Expire flight holds | flight-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `SeatInventory.release` |
+| Drop unpaid flight changes (FLT-27) | flight-bookings | 30 s | `pendingChange.holdExpiresAt ≤ now` → `$unset pendingChange` + `SeatInventory.release` of its seats; the booking keeps its flight |
 | Complete flight bookings | flight-bookings | 15 min | `confirmed` with `lastDepartureAt ≤ now` → `completed` |
 | Mark flights departed | flights | 1 min | `scheduled` with `departureAt ≤ now` → `departed` |
 | Expire hotel holds | hotel-bookings | 30 s | `pending_payment` with `holdExpiresAt ≤ now` → `expired` + `RoomNightInventory.release` |

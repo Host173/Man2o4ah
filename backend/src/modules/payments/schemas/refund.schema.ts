@@ -5,11 +5,15 @@ import { BookingType } from '../../../common/database/booking-type.js';
 import { integerValidator } from '../../../common/database/validators.js';
 import { getPlatformCurrency } from '../../../common/money/platform-currency.js';
 
-/** `late_payment` = confirmation after hold expiry, ACC-12 deactivation, the flight was cancelled (FLT-06), or a paid booking that expired unconfirmed. */
+/**
+ * `late_payment` = confirmation after hold expiry, ACC-12 deactivation, the flight was cancelled (FLT-06), or a paid booking that expired unconfirmed.
+ * `booking_change` = the lower fare of a flight change, refunded in full (FLT-27).
+ */
 export const RefundReason = {
   USER_CANCELLATION: 'user_cancellation',
   PROVIDER_CANCELLATION: 'provider_cancellation',
   LATE_PAYMENT: 'late_payment',
+  BOOKING_CHANGE: 'booking_change',
 } as const;
 export type RefundReason = (typeof RefundReason)[keyof typeof RefundReason];
 
@@ -21,7 +25,10 @@ export const RefundStatus = {
 } as const;
 export type RefundStatus = (typeof RefundStatus)[keyof typeof RefundStatus];
 
-/** One refund per booking (PAY-03). A 0 refund creates no document. */
+/**
+ * One refund per booking (PAY-03), plus one per change of that booking
+ * (FLT-27, `changeId` set). A 0 refund creates no document.
+ */
 @Schema({ collection: 'refunds', timestamps: true })
 export class Refund {
   /** → payments */
@@ -38,6 +45,10 @@ export class Refund {
   /** → users */
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
+
+  /** The booking change this refund is for (FLT-27); absent for a cancellation refund. */
+  @Prop({ type: MongooseSchema.Types.ObjectId })
+  changeId?: Types.ObjectId;
 
   /** Set once Stripe accepts the request; unique when present (partial index). */
   @Prop({ type: String })
@@ -59,7 +70,11 @@ export class Refund {
 
 export type RefundDocument = HydratedDocument<Refund>;
 export const RefundSchema = SchemaFactory.createForClass(Refund);
-RefundSchema.index({ bookingType: 1, bookingId: 1 }, { unique: true });
+// A missing changeId indexes as null: still one cancellation refund per booking.
+RefundSchema.index(
+  { bookingType: 1, bookingId: 1, changeId: 1 },
+  { unique: true },
+);
 RefundSchema.index(
   { stripeRefundId: 1 },
   {

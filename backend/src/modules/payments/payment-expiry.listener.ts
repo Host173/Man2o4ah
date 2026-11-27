@@ -17,7 +17,8 @@ import type { StripeGateway } from './stripe/stripe-gateway.js';
  * payment had already succeeded, the booking was never confirmed, so it is
  * refunded in full instead (S-07). A failure
  * is logged and never rethrown: an event handler must not break the booking
- * module's expiry job.
+ * module's expiry job. A dropped flight change (FLT-27) is handled the same
+ * way, for that change's own payment only.
  */
 @Injectable()
 export class PaymentExpiryListener {
@@ -36,6 +37,13 @@ export class PaymentExpiryListener {
     await this.cancel(BookingType.FLIGHT, event.bookingId);
   }
 
+  @OnEvent(Events.FlightBookingChangeExpired)
+  async onFlightBookingChangeExpired(
+    event: PayloadOf<typeof Events.FlightBookingChangeExpired>,
+  ): Promise<void> {
+    await this.cancel(BookingType.FLIGHT, event.bookingId, event.changeId);
+  }
+
   @OnEvent(Events.HotelReservationExpired)
   async onHotelReservationExpired(
     event: PayloadOf<typeof Events.HotelReservationExpired>,
@@ -43,13 +51,20 @@ export class PaymentExpiryListener {
     await this.cancel(BookingType.HOTEL, event.bookingId);
   }
 
+  /** The booking's own payment, or with `changeId` that change's payment (FLT-27). */
   private async cancel(
     bookingType: BookingType,
     bookingId: string,
+    changeId?: string,
   ): Promise<void> {
     try {
       const payment = await this.payments
-        .findOne({ bookingType, bookingId: new Types.ObjectId(bookingId) })
+        .findOne({
+          bookingType,
+          bookingId: new Types.ObjectId(bookingId),
+          // `null` also matches payments without the field: the booking's own.
+          changeId: changeId ? new Types.ObjectId(changeId) : null,
+        })
         .lean<{
           _id: Types.ObjectId;
           userId: Types.ObjectId;
@@ -70,6 +85,7 @@ export class PaymentExpiryListener {
           amountMinor: payment.amountMinor,
           currency: payment.currency,
           reason: 'late_payment',
+          ...(changeId ? { changeId } : {}),
         });
         return;
       }

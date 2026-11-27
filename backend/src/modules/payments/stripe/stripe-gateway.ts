@@ -7,8 +7,9 @@ export const STRIPE_GATEWAY = Symbol('STRIPE_GATEWAY');
 export interface CreatePaymentIntentInput {
   amountMinor: number;
   currency: string;
-  metadata: { bookingType: BookingType; bookingId: string };
-  /** pi-<type>-<bookingId> */
+  /** `changeId` only for a flight change (FLT-27). */
+  metadata: { bookingType: BookingType; bookingId: string; changeId?: string };
+  /** pi-<type>-<bookingId>, or pi-<type>-<bookingId>-<changeId> for a change */
   idempotencyKey: string;
 }
 

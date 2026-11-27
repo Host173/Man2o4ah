@@ -90,16 +90,34 @@ export class RefundsService {
     // Nothing is read before these checks.
     assertRefundAmount(request.amountMinor);
     assertRefundIds(request);
-    const filter = {
+    const booking = {
       bookingType: request.bookingType,
       bookingId: new Types.ObjectId(request.bookingId),
     };
+    const changeId =
+      request.changeId === undefined
+        ? undefined
+        : new Types.ObjectId(request.changeId);
+    // `changeId: null` also matches refunds without the field: the cancellation one.
+    const filter = { ...booking, changeId: changeId ?? null };
 
-    // One refund per booking: a second call returns the first, whatever its arguments.
+    // One refund per booking (and per change): a second call returns the first,
+    // whatever its arguments.
     const existing = await this.refunds.findOne(filter).lean<RefundRecord>();
     if (existing) return this.toView(existing);
 
-    const payment = await this.payments.findOne(filter).lean<PaymentRecord>();
+    // A refund comes from the change's own payment when it has one (a paid
+    // flight change, FLT-27), otherwise from the booking's first payment.
+    const ownPayment = changeId
+      ? await this.payments
+          .findOne({ ...booking, changeId })
+          .lean<PaymentRecord>()
+      : null;
+    const payment =
+      ownPayment ??
+      (await this.payments
+        .findOne({ ...booking, changeId: null })
+        .lean<PaymentRecord>());
     const paid = payment
       ? {
           status: payment.status,
@@ -117,7 +135,8 @@ export class RefundsService {
       [created] = await this.refunds.create([
         {
           paymentId: paid.id,
-          ...filter,
+          ...booking,
+          ...(changeId ? { changeId } : {}),
           userId: new Types.ObjectId(request.userId),
           amountMinor: request.amountMinor,
           currency: request.currency,
@@ -183,8 +202,13 @@ export class RefundsService {
     bookingType: BookingType,
     bookingId: string,
   ): Promise<RefundView | null> {
+    // The cancellation refund only; a change refund (FLT-27) has a changeId.
     const refund = await this.refunds
-      .findOne({ bookingType, bookingId: new Types.ObjectId(bookingId) })
+      .findOne({
+        bookingType,
+        bookingId: new Types.ObjectId(bookingId),
+        changeId: null,
+      })
       .lean<RefundRecord>();
     return refund ? this.toView(refund) : null;
   }

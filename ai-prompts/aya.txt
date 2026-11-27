@@ -1858,3 +1858,161 @@ Open questions: none do this fixxxxx
 How the output was used:
 Added the approved provider override in `backend/src/modules/admin/admin.api.spec.ts`; the focused admin API suite and `npm run verify` pass. Committed as `test(admin): isolate HTL-23 review registration in admin API test (HTL-23)`.
 ================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-23
+
+Prompt:
+We are now currently working throught milestone 3 , the frontend layer , and i need to implement this bonus can you make a 4 step plan for my review
+[Attached: 1.png]
+(Screenshot of GitHub issue #98 "FLT-27: Change a flight booking (bonus)": Expected output: Change date or flight on the same route and cabin, paying or refunding the difference. Requirements: FLT-27. Package: 5 · Bookings. Module(s): flight-bookings. Tests: Unit; integration; API. TDD required: Yes. Branch: feature/FLT-27-change-flight-booking. PR title: FLT-27: Change a flight booking (bonus). Depends on: #56 (FLT-26), #23 (PAY-03). Blocks: —. Labels: bonus, pkg-bookings, tdd. Milestone: Backlog.)
+
+How the output was used:
+Answer only, no files changed (plan drafted for review)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-23
+
+Prompt:
+ i dont need any pages done i only want the backend side of this, also what would you suggest as a store for the changed flight : new model or new field in the model
+
+How the output was used:
+Answer only, no files changed (plan revised to backend only; recommended new fields on flight_bookings)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: HTL-23
+
+Prompt:
+ the change for the data model is approved, and for the other points , scour the project skill for context and give me suggestions on what i could do, as i have free reign
+
+How the output was used:
+Answer only, no files changed (plan updated with payments, refund, expiry and ownership suggestions; plan approved)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+yes it is okay to add it in the payment module, continue
+
+How the output was used:
+Created branch feature/FLT-27-change-flight-booking from develop; added backend/src/modules/flight-bookings/flight-change.spec.ts (failing TDD test, not committed)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+do it and commit
+
+How the output was used:
+Added backend/src/modules/flight-bookings/flight-change.ts (quoteFlightChange); committed test(flight-bookings): add change quote tests (FLT-27), feat(flight-bookings): add flight change quote (FLT-27), chore(ai): log FLT-27 prompts (FLT-27)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+go ahead
+
+How the output was used:
+Added backend/src/modules/flight-bookings/flight-change-rules.spec.ts and flight-change-rules.ts (assertChangeable, checkNewFlight); committed test(flight-bookings): add change eligibility tests (FLT-27), feat(flight-bookings): add change eligibility rules (FLT-27)
+================================================
+================================================
+Date: 2026-11-27
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+can you stop now and continue when i tell you to go
+
+How the output was used:
+Answer only, no files changed (work paused)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Added the change-preview endpoint (flight-change.service.ts, dto/flight-change.dto.ts, controller route, module provider, FlightChangePreview type, exported QuotedSegmentResponseDto; fixed a type in flight-change.api.spec.ts); committed feat(flight-bookings): add change preview endpoint (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Added payments change refunds (refund changeId and booking_change reason, schema, fake, data model, diagrams, DECISIONS.md) and the PATCH /api/flight-bookings/:id/change-flight endpoint for same-or-lower fares; committed test(payments): add booking change refund tests (FLT-27), feat(payments): add refunds for booking changes (FLT-27), test(flight-bookings): add change-flight API tests (FLT-27), feat(flight-bookings): apply same or cheaper flight changes (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+can you do the rest of steps and finish the rest of the endpoint
+
+How the output was used:
+Part 1 of paid changes: a dearer change now holds the new seats in pendingChange and FlightChangeExpiryJob drops unpaid ones (flight-change.service.ts, flight-change-expiry.job.ts, types, DTO, controller, module, data-model jobs table); committed test(flight-bookings): add paid change hold and expiry tests (FLT-27), feat(flight-bookings): hold seats for paid changes and drop unpaid ones (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Committed part 1 after npm run verify passed (see the entry above)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+commit it when verify passes
+
+How the output was used:
+Parts 2 and 3 of paid changes: payments changeId (schema, POST /api/payments, PayableBooking port, webhook event, change-expired listener, refund source), flight-change-payment.service.ts applies paid changes, one change per booking, acceptPolicies, cancellations and reschedules handle waiting changes, split cancellation refunds, docs and DECISIONS.md; committed test(payments): add flight change payment tests (FLT-27), test(flight-bookings): add paid change, one-change and cancellation tests (FLT-27), feat(payments): pay for flight changes (FLT-27), feat(flight-bookings): apply paid changes and handle them on cancellation (FLT-27)
+================================================
+================================================
+Date: 2026-11-28
+Student: Aya
+Tool: Claude Code
+Related Requirement: FLT-27
+
+Prompt:
+how much is left??
+
+How the output was used:
+Answer only, no files changed (status update)
+================================================

@@ -12,6 +12,11 @@ export interface RefundRequest {
   amountMinor: number;
   currency: string;
   reason: RefundReason;
+  /**
+   * The booking change being refunded (FLT-27, with `reason: booking_change`).
+   * Omit it for a cancellation refund.
+   */
+  changeId?: string;
 }
 
 /** A refund as other modules see it (PAY-03). */

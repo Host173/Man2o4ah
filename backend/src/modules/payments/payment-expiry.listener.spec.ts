@@ -100,6 +100,75 @@ describe('PaymentExpiryListener (PAY-01)', () => {
     expect(await statusOf()).toBe('pending');
   });
 
+  describe('flight changes (FLT-27)', () => {
+    /** The booking's first payment (succeeded) and a change payment with `status`. */
+    async function withChangePayment(status: PaymentStatus) {
+      const ids = await payment('succeeded');
+      const changeId = new Types.ObjectId();
+      await payments.create({
+        bookingType: BookingType.FLIGHT,
+        bookingId: new Types.ObjectId(ids.bookingId),
+        changeId,
+        userId: new Types.ObjectId(ids.userId),
+        stripePaymentIntentId: 'pi_fake_change',
+        amountMinor: 10_000,
+        currency: 'USD',
+        status,
+      });
+      return { ...ids, changeId: changeId.toString() };
+    }
+    const changePayment = (changeId: string) =>
+      payments.findOne({ changeId: new Types.ObjectId(changeId) }).lean();
+
+    it('cancels only the change PaymentIntent when an unpaid change is dropped', async () => {
+      const ids = await withChangePayment('pending');
+
+      await emitter.emitAsync(Events.FlightBookingChangeExpired, ids);
+
+      expect(cancelCalls()).toEqual([
+        { method: 'cancelPaymentIntent', input: 'pi_fake_change' },
+      ]);
+      expect((await changePayment(ids.changeId))?.status).toBe('canceled');
+      expect(
+        (await payments.findOne({ changeId: { $exists: false } }).lean())
+          ?.status,
+      ).toBe('succeeded');
+    });
+
+    it('refunds a change paid after it was dropped, in full as a late payment', async () => {
+      const ids = await withChangePayment('succeeded');
+
+      await emitter.emitAsync(Events.FlightBookingChangeExpired, ids);
+
+      const stored = await refunds.find().lean();
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({
+        amountMinor: 10_000,
+        reason: 'late_payment',
+      });
+      expect(stored[0]?.changeId?.toString()).toBe(ids.changeId);
+      expect(cancelCalls()).toEqual([]);
+    });
+
+    it('a booking expiry never touches its change payments', async () => {
+      const ids = await withChangePayment('pending');
+      await payments.updateOne(
+        { changeId: { $exists: false } },
+        { $set: { status: 'pending' } },
+      );
+
+      await emitter.emitAsync(Events.FlightBookingExpired, {
+        bookingId: ids.bookingId,
+        userId: ids.userId,
+      });
+
+      expect(cancelCalls()).toEqual([
+        { method: 'cancelPaymentIntent', input: 'pi_fake_1' },
+      ]);
+      expect((await changePayment(ids.changeId))?.status).toBe('pending');
+    });
+  });
+
   it('leaves a canceled payment alone and does not call Stripe', async () => {
     const ids = await payment('canceled');
 

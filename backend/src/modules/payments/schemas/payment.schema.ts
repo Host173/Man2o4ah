@@ -14,7 +14,10 @@ export const PaymentStatus = {
 } as const;
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
 
-/** One Stripe PaymentIntent per booking; stores only what PAY-01 allows. */
+/**
+ * One Stripe PaymentIntent per booking, plus one per paid flight change
+ * (FLT-27, `changeId` set); stores only what PAY-01 allows.
+ */
 @Schema({ collection: 'payments', timestamps: true })
 export class Payment {
   @Prop({ type: String, required: true, enum: Object.values(BookingType) })
@@ -28,11 +31,15 @@ export class Payment {
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   userId!: Types.ObjectId;
 
+  /** The flight change this pays for (FLT-27); absent for the booking's own payment. */
+  @Prop({ type: MongooseSchema.Types.ObjectId })
+  changeId?: Types.ObjectId;
+
   /** Unique through the { stripePaymentIntentId } index. */
   @Prop({ type: String, required: true })
   stripePaymentIntentId!: string;
 
-  /** = booking total, checked by the service. */
+  /** = booking total (or the change's price difference), checked by the service. */
   @Prop({ type: Number, required: true, min: 0, validate: integerValidator })
   amountMinor!: number;
 
@@ -47,5 +54,9 @@ export class Payment {
 export type PaymentDocument = HydratedDocument<Payment>;
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
 PaymentSchema.index({ stripePaymentIntentId: 1 }, { unique: true });
-PaymentSchema.index({ bookingType: 1, bookingId: 1 }, { unique: true });
+// A missing changeId indexes as null: still one payment per booking, plus one per change.
+PaymentSchema.index(
+  { bookingType: 1, bookingId: 1, changeId: 1 },
+  { unique: true },
+);
 PaymentSchema.index({ userId: 1 });

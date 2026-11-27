@@ -64,7 +64,12 @@ export class PaymentsController {
     @Body() body: CreatePaymentDto,
     @CurrentUser() user: AuthUser,
   ): Promise<PaymentSession> {
-    return this.intents.start(user.id, body.bookingType, body.bookingId);
+    return this.intents.start(
+      user.id,
+      body.bookingType,
+      body.bookingId,
+      body.changeId,
+    );
   }
 
   // Declared before ':id/retry' so the path can never be read as an id.

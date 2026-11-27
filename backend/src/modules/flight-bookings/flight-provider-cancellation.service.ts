@@ -10,6 +10,9 @@ import { Events } from '../../common/events/events.js';
 import { SeatInventory } from '../flights/seat-inventory.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { isInvalidTransition, transitionStatus } from './booking-lifecycle.js';
+import { splitCancellationRefund } from './flight-change.js';
+import { dropPendingChange } from './pending-change.js';
+import type { BookingWithPendingChange } from './pending-change.js';
 import {
   FlightBooking,
   FlightBookingStatus,
@@ -26,6 +29,15 @@ interface ActiveBooking {
   seatCount: number;
   pricing: { totalMinor: number; currency: string };
   segments: { flightId: Types.ObjectId; cabinId: Types.ObjectId }[];
+  /** FLT-27: a change waiting for payment, dropped with the booking. */
+  pendingChange?: BookingWithPendingChange['pendingChange'];
+  /** FLT-27: applied changes; a paid one has its own payment to refund. */
+  changes?: { _id: Types.ObjectId; differenceMinor: number }[];
+}
+
+/** The fields needed to drop a change waiting on the cancelled flight (FLT-27). */
+interface WaitingChange extends BookingWithPendingChange {
+  userId: Types.ObjectId;
 }
 
 /** `done`: changed by this call. `skipped`: it moved on meanwhile (look again). `failed`: gave up after a retry. */
@@ -35,7 +47,9 @@ type Outcome = 'done' | 'skipped' | 'failed';
  * FLT-06, bookings side (GEN-11): when a moderator cancels a flight, every
  * `confirmed` booking containing it (round trips included) is cancelled at
  * 100% with `cancelledBy: 'provider'` and refunded, and every
- * `pending_payment` one expires. Each booking is handled in its own
+ * `pending_payment` one expires. A change waiting for payment on the
+ * cancelled flight is dropped (FLT-27), and so is any change waiting on a
+ * cancelled booking. Each booking is handled in its own
  * transaction, so one failure doesn't block the others (a failed booking is
  * retried once, as the event is never redelivered), and the handler is
  * idempotent: it only touches bookings still confirmed or pending.
@@ -68,9 +82,70 @@ export class FlightProviderCancellationService {
     }
   }
 
-  /** Cancels or expires every active booking of the flight; returns how many this call handled. */
+  /**
+   * Cancels or expires every active booking of the flight, then drops the
+   * changes waiting on it (FLT-27); returns how many bookings this call handled.
+   */
   async cancelBookingsOf(flightId: string, now: Date): Promise<number> {
     if (!Types.ObjectId.isValid(flightId)) return 0;
+    const handled = await this.cancelActiveBookings(flightId, now);
+    await this.dropChangesWaitingOn(flightId);
+    return handled;
+  }
+
+  /**
+   * FLT-27: a change that waits for payment on the cancelled flight can't
+   * happen any more. Each one is dropped (its held seats released) in its own
+   * transaction, then payments cancels or refunds its payment. The booking
+   * keeps its current flight. A failure is logged; the expiry job drops the
+   * change anyway within 10 minutes.
+   */
+  private async dropChangesWaitingOn(flightId: string): Promise<void> {
+    const waiting = await this.bookings
+      .find(
+        { 'pendingChange.segment.flightId': new Types.ObjectId(flightId) },
+        {
+          userId: 1,
+          seatCount: 1,
+          'pendingChange._id': 1,
+          'pendingChange.segment.flightId': 1,
+          'pendingChange.segment.cabinId': 1,
+        },
+      )
+      .lean<WaitingChange[]>();
+    for (const booking of waiting) {
+      const session = await this.connection.startSession();
+      try {
+        const dropped = await session.withTransaction(() =>
+          dropPendingChange(
+            this.bookings,
+            this.seatInventory,
+            booking,
+            session,
+          ),
+        );
+        if (dropped && booking.pendingChange) {
+          this.events.emit(Events.FlightBookingChangeExpired, {
+            bookingId: booking._id.toString(),
+            userId: booking.userId.toString(),
+            changeId: booking.pendingChange._id.toString(),
+          });
+        }
+      } catch (error) {
+        this.logger.error(
+          `Could not drop the waiting change of flight booking ${booking._id.toString()}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      } finally {
+        await session.endSession();
+      }
+    }
+  }
+
+  private async cancelActiveBookings(
+    flightId: string,
+    now: Date,
+  ): Promise<number> {
     let handled = 0;
     // Bookings that failed twice in this run: left out of the next batches.
     const failed: Types.ObjectId[] = [];
@@ -96,6 +171,11 @@ export class FlightProviderCancellationService {
             'pricing.currency': 1,
             'segments.flightId': 1,
             'segments.cabinId': 1,
+            'pendingChange._id': 1,
+            'pendingChange.segment.flightId': 1,
+            'pendingChange.segment.cabinId': 1,
+            'changes._id': 1,
+            'changes.differenceMinor': 1,
           },
         )
         .sort({ _id: 1 })
@@ -128,8 +208,10 @@ export class FlightProviderCancellationService {
       seats: booking.seatCount,
     }));
     const session = await this.connection.startSession();
+    let droppedChange = false;
     try {
       await session.withTransaction(async () => {
+        droppedChange = false; // the callback may run again after a transient error
         if (confirmed) {
           await transitionStatus(
             this.bookings,
@@ -147,6 +229,13 @@ export class FlightProviderCancellationService {
             { session },
           );
           await this.seatInventory.returnBooked(items, { session });
+          // FLT-27: a change waiting for payment goes too, with its held seats.
+          droppedChange = await dropPendingChange(
+            this.bookings,
+            this.seatInventory,
+            booking,
+            session,
+          );
         } else {
           await transitionStatus(
             this.bookings,
@@ -178,15 +267,40 @@ export class FlightProviderCancellationService {
       this.events.emit(Events.FlightBookingExpired, { bookingId, userId });
       return 'done';
     }
+    if (droppedChange && booking.pendingChange) {
+      this.events.emit(Events.FlightBookingChangeExpired, {
+        bookingId,
+        userId,
+        changeId: booking.pendingChange._id.toString(),
+      });
+    }
     try {
-      if (booking.pricing.totalMinor > 0) {
+      // FLT-27: after a paid change, each payment is refunded in full.
+      const paid = booking.changes?.find((c) => c.differenceMinor > 0);
+      const split = splitCancellationRefund(
+        booking.pricing.totalMinor,
+        100,
+        paid?.differenceMinor ?? 0,
+      );
+      if (split.firstPaymentMinor > 0) {
         await this.payments.refund({
           bookingType: BookingType.FLIGHT,
           bookingId,
           userId,
-          amountMinor: booking.pricing.totalMinor,
+          amountMinor: split.firstPaymentMinor,
           currency: booking.pricing.currency,
           reason: 'provider_cancellation',
+        });
+      }
+      if (paid && split.changePaymentMinor > 0) {
+        await this.payments.refund({
+          bookingType: BookingType.FLIGHT,
+          bookingId,
+          userId,
+          amountMinor: split.changePaymentMinor,
+          currency: booking.pricing.currency,
+          reason: 'provider_cancellation',
+          changeId: paid._id.toString(),
         });
       }
     } catch (error) {

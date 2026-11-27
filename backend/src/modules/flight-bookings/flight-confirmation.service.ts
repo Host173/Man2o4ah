@@ -67,8 +67,9 @@ export class FlightConfirmationService {
   async onPaymentSucceeded(
     payload: PayloadOf<typeof Events.PaymentSucceeded>,
   ): Promise<void> {
-    // Both booking modules listen to this event; hotels are not ours.
-    if (payload.bookingType !== BookingType.FLIGHT) return;
+    // Both booking modules listen to this event; hotels are not ours. A flight
+    // change's payment (FLT-27) is applied by FlightChangePaymentService.
+    if (payload.bookingType !== BookingType.FLIGHT || payload.changeId) return;
     try {
       await this.confirm(payload.bookingId, new Date());
     } catch (error) {

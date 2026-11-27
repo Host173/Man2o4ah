@@ -8,6 +8,7 @@ classDiagram
       bookingType : flight/hotel
       bookingId : ObjectId
       userId : ObjectId
+      changeId : ObjectId? FLT-27
       stripePaymentIntentId : string unique
       amountMinor : int
       currency : string
@@ -21,7 +22,8 @@ classDiagram
       stripeRefundId : string?
       amountMinor : int
       currency : string
-      reason : user_cancellation/provider_cancellation/late_payment
+      reason : user_cancellation/provider_cancellation/late_payment/booking_change
+      changeId : ObjectId? FLT-27
       status : pending/refunded/failed
     }
     class PolicyAcceptance {

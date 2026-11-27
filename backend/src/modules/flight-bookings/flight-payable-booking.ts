@@ -33,8 +33,29 @@ export class FlightPayableBooking implements PayableBooking, OnModuleInit {
     this.registry.register(this);
   }
 
-  async getPayable(bookingId: string, userId: string): Promise<Payable> {
+  async getPayable(
+    bookingId: string,
+    userId: string,
+    changeId?: string,
+  ): Promise<Payable> {
     const booking = await this.findOwned(bookingId, userId);
+    if (changeId !== undefined) {
+      // FLT-27: only the change waiting for payment on a confirmed booking.
+      const pending = booking.pendingChange;
+      if (
+        booking.status !== 'confirmed' ||
+        !pending ||
+        pending._id.toString() !== changeId
+      ) {
+        throw notFound();
+      }
+      return {
+        amountMinor: pending.differenceMinor,
+        currency: pending.pricing.currency,
+        status: 'pending_payment',
+        holdExpiresAt: pending.holdExpiresAt,
+      };
+    }
     return {
       amountMinor: booking.pricing.totalMinor,
       currency: booking.pricing.currency,

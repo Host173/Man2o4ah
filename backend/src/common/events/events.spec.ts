@@ -10,8 +10,8 @@ import type { EventName } from './events.js';
 describe('Events', () => {
   const values = Object.values(Events);
 
-  it('has exactly 18 events', () => {
-    expect(Object.keys(Events)).toHaveLength(18);
+  it('has exactly 19 events', () => {
+    expect(Object.keys(Events)).toHaveLength(19);
   });
 
   it('has unique values', () => {

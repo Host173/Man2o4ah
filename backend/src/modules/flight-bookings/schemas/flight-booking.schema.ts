@@ -178,7 +178,10 @@ export class Passenger {
 
 export const PassengerSchema = SchemaFactory.createForClass(Passenger);
 
-/** Computed once at hold time, never recomputed (totals not checked here). */
+/**
+ * Computed at hold time and recomputed only when a change completes (FLT-27);
+ * totals not checked here.
+ */
 @Schema({ _id: false })
 export class FlightBookingPricing {
   @Prop({ type: Number, required: true, min: 0, validate: integerValidator })
@@ -197,6 +200,81 @@ export class FlightBookingPricing {
 
 export const FlightBookingPricingSchema =
   SchemaFactory.createForClass(FlightBookingPricing);
+
+/**
+ * A change that costs more, waiting for its payment (FLT-27). Its `_id` is the
+ * change ID payments uses. The new seats are held until `holdExpiresAt`.
+ * A change that costs the same or less is applied at once and never waits here.
+ */
+@Schema()
+export class PendingFlightChange {
+  _id!: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    required: true,
+    enum: Object.values(SegmentDirection),
+  })
+  direction!: SegmentDirection;
+
+  /** Snapshot of the new flight, as a hold would take it. */
+  @Prop({ type: FlightSegmentSchema, required: true })
+  segment!: FlightSegment;
+
+  /** The booking's pricing once the change is applied. */
+  @Prop({ type: FlightBookingPricingSchema, required: true })
+  pricing!: FlightBookingPricing;
+
+  /** What the user pays: new total − old total, always > 0 here. */
+  @Prop({ type: Number, required: true, min: 1, validate: integerValidator })
+  differenceMinor!: number;
+
+  /** requestedAt + 10 min, like a seat hold. */
+  @Prop({ type: Date, required: true })
+  holdExpiresAt!: Date;
+
+  @Prop({ type: Date, required: true })
+  requestedAt!: Date;
+}
+
+export const PendingFlightChangeSchema =
+  SchemaFactory.createForClass(PendingFlightChange);
+
+/** One completed change, kept as history (FLT-27). Its `_id` is the change ID. */
+@Schema()
+export class FlightChange {
+  _id!: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    required: true,
+    enum: Object.values(SegmentDirection),
+  })
+  direction!: SegmentDirection;
+
+  /** The segment as it was before the change. */
+  @Prop({ type: FlightSegmentSchema, required: true })
+  previousSegment!: FlightSegment;
+
+  /** → flights */
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  newFlightId!: Types.ObjectId;
+
+  @Prop({ type: Number, required: true, min: 0, validate: integerValidator })
+  previousTotalMinor!: number;
+
+  @Prop({ type: Number, required: true, min: 0, validate: integerValidator })
+  newTotalMinor!: number;
+
+  /** newTotal − previousTotal: > 0 paid, < 0 refunded, 0 nothing moved. */
+  @Prop({ type: Number, required: true, validate: integerValidator })
+  differenceMinor!: number;
+
+  @Prop({ type: Date, required: true })
+  changedAt!: Date;
+}
+
+export const FlightChangeSchema = SchemaFactory.createForClass(FlightChange);
 
 function countByType(passengers: Passenger[], type: PassengerType): number {
   return passengers.filter((passenger) => passenger.type === type).length;
@@ -342,6 +420,14 @@ export class FlightBooking {
   /** Set when cancelled. */
   @Prop({ type: CancellationSchema })
   cancellation?: Cancellation;
+
+  /** A change waiting for its payment; at most one at a time (FLT-27). */
+  @Prop({ type: PendingFlightChangeSchema })
+  pendingChange?: PendingFlightChange;
+
+  /** Completed changes, oldest first; absent until the first one (FLT-27). */
+  @Prop({ type: [FlightChangeSchema], default: undefined })
+  changes?: FlightChange[];
 }
 
 export type FlightBookingDocument = HydratedDocument<FlightBooking>;
@@ -359,3 +445,21 @@ FlightBookingSchema.index({ status: 1, holdExpiresAt: 1 });
 FlightBookingSchema.index({ status: 1, lastDepartureAt: 1 });
 FlightBookingSchema.index({ status: 1, createdAt: -1 });
 FlightBookingSchema.index({ createdAt: -1, _id: -1 });
+// FLT-27: the expiry job finds unpaid changes; a provider cancellation finds
+// changes waiting on its flight. Partial, so unchanged bookings aren't indexed.
+FlightBookingSchema.index(
+  { 'pendingChange.holdExpiresAt': 1 },
+  {
+    partialFilterExpression: {
+      'pendingChange.holdExpiresAt': { $type: 'date' },
+    },
+  },
+);
+FlightBookingSchema.index(
+  { 'pendingChange.segment.flightId': 1 },
+  {
+    partialFilterExpression: {
+      'pendingChange.segment.flightId': { $type: 'objectId' },
+    },
+  },
+);

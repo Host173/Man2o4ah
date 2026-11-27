@@ -42,7 +42,7 @@ export class QuotedSegmentPolicyResponseDto implements QuotedSegmentPolicy {
   maxExtraBagsPerPassenger!: number;
 }
 
-class QuotedSegmentResponseDto implements QuotedSegment {
+export class QuotedSegmentResponseDto implements QuotedSegment {
   @ApiProperty({ enum: Object.values(SegmentDirection) })
   direction!: SegmentDirection;
 

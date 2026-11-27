@@ -130,7 +130,7 @@ describe('flight change preview (FLT-27)', () => {
     status: 'confirmed' | 'cancelled' = 'confirmed',
   ) {
     const passenger = (fullName: string, dateOfBirth: string) => ({
-      type: 'adult',
+      type: 'adult' as const,
       fullName,
       dateOfBirth: new Date(`${dateOfBirth}T00:00:00.000Z`),
       documentNumber: 'A1234567',

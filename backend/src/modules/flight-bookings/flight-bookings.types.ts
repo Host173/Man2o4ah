@@ -122,6 +122,17 @@ export interface FlightHold extends FlightQuote {
   holdExpiresAt: Date;
 }
 
+/** FLT-27: what changing one direction to another flight would cost now. Nothing is saved. */
+export interface FlightChangePreview {
+  direction: SegmentDirection;
+  /** Snapshot of the new flight, as a hold would save it. */
+  segment: QuotedSegment;
+  /** The booking's pricing once the change is applied. */
+  pricing: FlightQuote['pricing'];
+  /** New total − paid total: > 0 the user pays, < 0 refunded in full, 0 nothing moves. */
+  differenceMinor: number;
+}
+
 /** FLT-26: what cancelling would refund right now. Nothing is saved. */
 export interface FlightRefundPreview {
   percent: number;

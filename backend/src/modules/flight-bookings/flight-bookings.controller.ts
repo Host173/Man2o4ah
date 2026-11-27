@@ -37,11 +37,16 @@ import {
   CancelledFlightBookingResponseDto,
   FlightRefundPreviewResponseDto,
 } from './dto/flight-cancellation.response.dto.js';
+import {
+  FlightChangePreviewResponseDto,
+  FlightChangeQueryDto,
+} from './dto/flight-change.dto.js';
 import { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightQuoteResponseDto } from './dto/flight-quote.response.dto.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import type {
   CancelledFlightBooking,
+  FlightChangePreview,
   FlightHold,
   FlightQuote,
   FlightRefundPreview,
@@ -50,6 +55,7 @@ import type {
 } from './flight-bookings.types.js';
 import { FlightCancellationBodyPipe } from './flight-cancellation-body.pipe.js';
 import { FlightCancellationService } from './flight-cancellation.service.js';
+import { FlightChangeService } from './flight-change.service.js';
 import { FlightETicket } from './flight-e-ticket.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightQuoteService } from './flight-quote.service.js';
@@ -65,6 +71,7 @@ export class FlightBookingsController {
     private readonly eTickets: FlightETicket,
     private readonly mine: MyFlightBookingsService,
     private readonly cancellations: FlightCancellationService,
+    private readonly changes: FlightChangeService,
   ) {}
 
   /** A quote saves nothing, so it answers 200, not 201. */
@@ -212,6 +219,37 @@ export class FlightBookingsController {
     @CurrentUser() user: AuthUser,
   ): Promise<FlightRefundPreview> {
     return this.cancellations.refundPreview(id, user.id);
+  }
+
+  /** The owner's confirmed booking; anyone else's answers 404 (ACC-11). */
+  @Get(':id/change-preview')
+  @Roles(Role.USER)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'FLT-27 Preview changing one flight of my booking',
+    description:
+      'Prices the booking with the new flight (same route, same cabin class) against what was paid. A positive difference is paid by card, a negative one refunded in full. Nothing is changed.',
+  })
+  @ApiOkResponse({ type: FlightChangePreviewResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'VALIDATION_FAILED: malformed ID or query, no such direction, or a new flight that is unknown, the same, on another route, without the cabin class, not bookable, or out of order with the other flight',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'FORBIDDEN_ROLE: users only' })
+  @ApiNotFoundResponse({
+    description: 'NOT_FOUND: no such booking, or another user’s',
+  })
+  @ApiConflictResponse({
+    description:
+      'INVALID_STATUS_TRANSITION: not confirmed, a change already waits for payment, or that flight has departed. SEATS_UNAVAILABLE: not enough seats on the new flight',
+  })
+  changePreview(
+    @Param('id', IsObjectIdPipe) id: string,
+    @Query() query: FlightChangeQueryDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightChangePreview> {
+    return this.changes.preview(id, user.id, query);
   }
 
   /** Cancels the whole booking; the body is an empty object that confirms it. */

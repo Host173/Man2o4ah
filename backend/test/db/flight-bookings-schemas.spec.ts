@@ -518,6 +518,96 @@ describe('flight-bookings schemas', () => {
     ).resolves.toBeUndefined();
   });
 
+  describe('flight changes (FLT-27)', () => {
+    function pendingChangeDoc(overrides: Record<string, unknown> = {}) {
+      return {
+        direction: 'outbound',
+        segment: segmentDoc('outbound', { fareMinor: 18_000 }),
+        pricing: {
+          fareTotalMinor: 18_000,
+          baggageTotalMinor: 0,
+          totalMinor: 18_000,
+          currency: getPlatformCurrency(),
+        },
+        differenceMinor: 3_000,
+        holdExpiresAt: new Date(Date.now() + 10 * 60_000),
+        requestedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function changeDoc(overrides: Record<string, unknown> = {}) {
+      return {
+        direction: 'outbound',
+        previousSegment: segmentDoc('outbound'),
+        newFlightId: new Types.ObjectId(),
+        previousTotalMinor: 15_000,
+        newTotalMinor: 12_000,
+        differenceMinor: -3_000,
+        changedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    it('adds neither field to a booking that was never changed', async () => {
+      const booking = await bookings.create(bookingDoc());
+      const stored = await bookings.collection.findOne({ _id: booking._id });
+      expect(stored).not.toHaveProperty('pendingChange');
+      expect(stored).not.toHaveProperty('changes');
+    });
+
+    it('saves a pending change with its own _id as the change ID', async () => {
+      const booking = await bookings.create(
+        bookingDoc({ status: 'confirmed', pendingChange: pendingChangeDoc() }),
+      );
+      expect(booking.pendingChange?._id).toBeInstanceOf(Types.ObjectId);
+      expect(booking.pendingChange?.segment.fareMinor).toBe(18_000);
+    });
+
+    it('validates the pending change', async () => {
+      const invalid = [
+        pendingChangeDoc({ direction: 'sideways' }),
+        pendingChangeDoc({ differenceMinor: 0 }), // only a payment waits
+        pendingChangeDoc({ differenceMinor: 10.5 }),
+        pendingChangeDoc({ holdExpiresAt: undefined }),
+        pendingChangeDoc({ segment: undefined }),
+        pendingChangeDoc({ pricing: undefined }),
+      ];
+      for (const pendingChange of invalid) {
+        await expect(
+          new bookings(bookingDoc({ pendingChange })).validate(),
+        ).rejects.toThrow(/pendingChange/);
+      }
+    });
+
+    it('keeps a history of changes, each with its own _id', async () => {
+      const booking = await bookings.create(
+        bookingDoc({
+          status: 'confirmed',
+          changes: [changeDoc(), changeDoc({ differenceMinor: 0 })],
+        }),
+      );
+      expect(booking.changes).toHaveLength(2);
+      expect(booking.changes?.[0]?._id).toBeInstanceOf(Types.ObjectId);
+      expect(booking.changes?.[0]?.differenceMinor).toBe(-3_000); // a refund
+    });
+
+    it('validates a change history entry', async () => {
+      const invalid = [
+        changeDoc({ direction: 'sideways' }),
+        changeDoc({ newFlightId: undefined }),
+        changeDoc({ newTotalMinor: -1 }),
+        changeDoc({ differenceMinor: 1.5 }),
+        changeDoc({ changedAt: undefined }),
+      ];
+      for (const change of invalid) {
+        await expect(
+          new bookings(bookingDoc({ changes: [change] })).validate(),
+        ).rejects.toThrow(/changes/);
+      }
+    });
+  });
+
   it('has exactly the indexes from the data model', async () => {
     const indexes = await bookings.collection.indexes();
     expect(
@@ -564,8 +654,22 @@ describe('flight-bookings schemas', () => {
           unique: false,
           partialFilterExpression: undefined,
         },
+        {
+          key: { 'pendingChange.holdExpiresAt': 1 },
+          unique: false,
+          partialFilterExpression: {
+            'pendingChange.holdExpiresAt': { $type: 'date' },
+          },
+        },
+        {
+          key: { 'pendingChange.segment.flightId': 1 },
+          unique: false,
+          partialFilterExpression: {
+            'pendingChange.segment.flightId': { $type: 'objectId' },
+          },
+        },
       ]),
     );
-    expect(indexes).toHaveLength(8);
+    expect(indexes).toHaveLength(10);
   });
 });

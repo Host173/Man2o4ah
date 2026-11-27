@@ -491,6 +491,111 @@ describe('payments API (PAY-01)', () => {
     });
   });
 
+  describe('paying a flight change (FLT-27)', () => {
+    /** A paid flight booking of the user with a change of 10 000 waiting for payment. */
+    async function pendingChange() {
+      const bookingId = new Types.ObjectId().toHexString();
+      const changeId = new Types.ObjectId().toHexString();
+      await payments.create({
+        bookingType: 'flight',
+        bookingId: new Types.ObjectId(bookingId),
+        userId: new Types.ObjectId(user.id),
+        stripePaymentIntentId: 'pi_original',
+        amountMinor: 40_000,
+        currency: 'USD',
+        status: 'succeeded',
+      });
+      flights.setChange(bookingId, changeId, user.id, {
+        amountMinor: 10_000,
+        currency: 'USD',
+        status: 'pending_payment',
+        holdExpiresAt: new Date(Date.now() + 10 * MINUTE_MS),
+      });
+      return { bookingId, changeId };
+    }
+
+    const payChange = (bookingId: string, changeId: string) =>
+      t
+        .http()
+        .post(START)
+        .set('Cookie', user.cookie)
+        .send({ bookingType: 'flight', bookingId, changeId });
+
+    it('starts a separate payment for the change, with its own idempotency key and no policy record', async () => {
+      const { bookingId, changeId } = await pendingChange();
+
+      const res = await payChange(bookingId, changeId);
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ amountMinor: 10_000, currency: 'USD' });
+      const doc = await payments.findById(res.body.paymentId).lean();
+      expect(doc).toMatchObject({ amountMinor: 10_000, status: 'pending' });
+      expect(doc?.changeId?.toString()).toBe(changeId);
+      expect(await payments.countDocuments()).toBe(2);
+      expect(gateway.calls).toEqual([
+        {
+          method: 'createPaymentIntent',
+          input: {
+            amountMinor: 10_000,
+            currency: 'USD',
+            metadata: { bookingType: 'flight', bookingId, changeId },
+            idempotencyKey: `pi-flight-${bookingId}-${changeId}`,
+          },
+        },
+      ]);
+    });
+
+    it('reuses the change payment on a second call', async () => {
+      const { bookingId, changeId } = await pendingChange();
+
+      const first = await payChange(bookingId, changeId);
+      const second = await payChange(bookingId, changeId);
+
+      expect(second.status).toBe(201);
+      expect(second.body.paymentId).toBe(first.body.paymentId);
+      expect(await payments.countDocuments()).toBe(2);
+    });
+
+    it('emits payment.succeeded with the changeId when the change is paid', async () => {
+      const { bookingId, changeId } = await pendingChange();
+      const res = await payChange(bookingId, changeId);
+      const intentId = (await payments.findById(res.body.paymentId).lean())
+        ?.stripePaymentIntentId as string;
+
+      await webhook(
+        intentEvent('evt_c1', 'payment_intent.succeeded', intentId),
+      );
+
+      expect(succeeded).toHaveBeenCalledWith({
+        bookingType: 'flight',
+        bookingId,
+        changeId,
+      });
+    });
+
+    it('404 for a change the booking does not have, and writes nothing', async () => {
+      const { bookingId } = await pendingChange();
+
+      const res = await payChange(
+        bookingId,
+        new Types.ObjectId().toHexString(),
+      );
+
+      expect(res.status).toBe(404);
+      expect(await payments.countDocuments()).toBe(1);
+      expect(gateway.calls).toEqual([]);
+    });
+
+    it('400 for a malformed changeId', async () => {
+      const { bookingId } = await pendingChange();
+
+      const res = await payChange(bookingId, 'not-an-id');
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+    });
+  });
+
   describe('POST /api/payments/:id/retry', () => {
     it("404 for another user's payment", async () => {
       const { paymentId } = await started(await readyFlight());

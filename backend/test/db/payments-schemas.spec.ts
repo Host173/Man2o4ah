@@ -241,6 +241,22 @@ describe('payments schemas', () => {
       ).resolves.toBeDefined();
     });
 
+    it('allows one payment per change of a booking, apart from its first payment (FLT-27)', async () => {
+      const bookingId = new Types.ObjectId();
+      const changeId = new Types.ObjectId();
+      await payments.create(paymentDoc({ bookingType: 'flight', bookingId }));
+      await expect(
+        payments.create(
+          paymentDoc({ bookingType: 'flight', bookingId, changeId }),
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        payments.create(
+          paymentDoc({ bookingType: 'flight', bookingId, changeId }),
+        ),
+      ).rejects.toMatchObject({ code: 11000 });
+    });
+
     it('rejects a duplicate stripePaymentIntentId', async () => {
       await payments.create(paymentDoc({ stripePaymentIntentId: 'pi_123' }));
       await expect(
@@ -257,7 +273,7 @@ describe('payments schemas', () => {
         expect.arrayContaining([
           plain({ _id: 1 }),
           plain({ stripePaymentIntentId: 1 }, true),
-          plain({ bookingType: 1, bookingId: 1 }, true),
+          plain({ bookingType: 1, bookingId: 1, changeId: 1 }, true),
           plain({ userId: 1 }),
         ]),
       );

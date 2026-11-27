@@ -233,6 +233,8 @@ classDiagram
       firstDepartureAt : Date
       lastDepartureAt : Date
       cancellation : Cancellation?
+      pendingChange : PendingFlightChange?
+      changes : FlightChange[]?
     }
     class FlightSegment {
       <<embedded>>
@@ -261,6 +263,26 @@ classDiagram
       refundPercent : int
       refundAmountMinor : int
     }
+    class PendingFlightChange {
+      <<embedded>>
+      _id : ObjectId change ID
+      direction : outbound/return
+      segment : FlightSegment snapshot
+      pricing : Pricing after the change
+      differenceMinor : int > 0
+      holdExpiresAt : Date
+      requestedAt : Date
+    }
+    class FlightChange {
+      <<embedded>>
+      _id : ObjectId change ID
+      direction : outbound/return
+      previousSegment : FlightSegment snapshot
+      newFlightId : ObjectId
+      previousTotalMinor, newTotalMinor : int
+      differenceMinor : int
+      changedAt : Date
+    }
   }
   Airline *-- BaggagePolicy
   Airline *-- "0..*" CancellationTier
@@ -269,6 +291,8 @@ classDiagram
   FlightBooking *-- "1..2" FlightSegment
   FlightBooking *-- "1..*" Passenger
   FlightBooking *-- "0..1" Cancellation
+  FlightBooking *-- "0..1" PendingFlightChange
+  FlightBooking *-- "0..*" FlightChange
   FlightSegment ..> Flight : flightId + cabinId
 ```
 

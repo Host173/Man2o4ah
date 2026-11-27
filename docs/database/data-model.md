@@ -304,12 +304,14 @@ A **seat hold is a booking in `pending_payment`** (FLT-22). There is no separate
 | `segments` | `FlightSegment[]` | ✓ | 1 for one way, 2 for round trip (outbound first) |
 | `passengers` | `Passenger[]` | ✓ | ≥ 1 |
 | `seatCount` | int | ✓ | adults + children (infants take no seat); same on every segment |
-| `pricing` | `{ fareTotalMinor, baggageTotalMinor, totalMinor, currency }` | ✓ | computed once at hold time, never recomputed |
+| `pricing` | `{ fareTotalMinor, baggageTotalMinor, totalMinor, currency }` | ✓ | computed at hold time; recomputed only when a change completes (FLT-27) |
 | `holdExpiresAt` | Date | ✓ | `createdAt + 10 min` |
 | `firstDepartureAt` | Date | ✓ | = outbound `departureAt` (kept in sync) |
 | `lastDepartureAt` | Date | ✓ | = last segment `departureAt` (kept in sync) |
 | `confirmedAt` / `expiredAt` / `completedAt` | Date | | set on that transition |
 | `cancellation` | `Cancellation` | | set when cancelled |
+| `pendingChange` | `PendingFlightChange` | | a change that costs more, waiting for payment (FLT-27); at most one |
+| `changes` | `FlightChange[]` | | completed changes, oldest first; absent until the first (FLT-27) |
 
 `FlightSegment` (embedded, has `_id`)
 | Field | Type | Rules |
@@ -354,6 +356,28 @@ Pricing (computed at hold time, per segment, then summed):
 
 Refund for a user cancellation uses the **outbound segment's snapshot tiers** with days remaining until the outbound departure (FLT-12a, FLT-26). Provider cancellation is always 100 % (FLT-06).
 
+`PendingFlightChange` (embedded, has `_id` = the change ID payments uses)
+| Field | Type | Rules |
+|---|---|---|
+| `direction` | enum `outbound \| return` | the segment being replaced |
+| `segment` | `FlightSegment` | snapshot of the new flight, taken as a hold would |
+| `pricing` | as `pricing` | the booking's pricing once the change is applied |
+| `differenceMinor` | int | > 0: new total − old total, what the user pays |
+| `holdExpiresAt` | Date | `requestedAt + 10 min`; the new seats are held until then |
+| `requestedAt` | Date | |
+
+`FlightChange` (embedded, has `_id` = the change ID)
+| Field | Type | Rules |
+|---|---|---|
+| `direction` | enum `outbound \| return` | |
+| `previousSegment` | `FlightSegment` | the segment as it was before the change |
+| `newFlightId` | ObjectId → flights | |
+| `previousTotalMinor`, `newTotalMinor` | int | ≥ 0 |
+| `differenceMinor` | int | new − previous: > 0 paid, < 0 refunded, 0 nothing moved |
+| `changedAt` | Date | |
+
+Change (FLT-27): a `confirmed` booking changes one direction to another `scheduled` flight on the same route with the same cabin class, before that segment departs. The whole booking is repriced with the new segment (extra bags are charged once per airline). A change that costs the same or less is applied at once (a lower total is refunded in full, no tiers). One that costs more waits in `pendingChange`, with the new seats held, until its payment succeeds. Then `segments`, `pricing` and `first/lastDepartureAt` are updated in place, and the change is appended to `changes`. The booking stays `confirmed` throughout.
+
 Indexes
 - `{ reference: 1 }` unique, partial `{ reference: { $type: 'string' } }`
 - `{ userId: 1, firstDepartureAt: -1 }` (FLT-25)
@@ -362,6 +386,8 @@ Indexes
 - `{ status: 1, lastDepartureAt: 1 }` (completion job)
 - `{ status: 1, createdAt: -1 }` (admin list, ACC-17)
 - `{ createdAt: -1, _id: -1 }` (unfiltered admin list, ACC-17)
+- `{ 'pendingChange.holdExpiresAt': 1 }` partial `{ 'pendingChange.holdExpiresAt': { $type: 'date' } }` (change expiry, FLT-27)
+- `{ 'pendingChange.segment.flightId': 1 }` partial `{ 'pendingChange.segment.flightId': { $type: 'objectId' } }` (provider cancel of a changed-to flight, FLT-27)
 
 ---
 

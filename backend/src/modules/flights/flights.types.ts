@@ -118,6 +118,30 @@ export interface FlightListQuery {
   limit: number;
 }
 
+export type AirlineStatusFilter = 'active' | 'inactive';
+
+/** Internal list query for admin provider listing (BE-01). */
+export interface AirlineListQuery {
+  status?: AirlineStatusFilter;
+  q?: string;
+  skip: number;
+  limit: number;
+}
+
+/** Minimal airline projection for admin provider listing (BE-01). */
+export interface AirlineListItem {
+  id: string;
+  name: string;
+  code: string;
+  isActive: boolean;
+}
+
+/** Offset-based airline list result (BE-01). */
+export interface AirlineListResult {
+  items: AirlineListItem[];
+  total: number;
+}
+
 /** A flight together with its airline: everything a booking needs to price and snapshot a segment. */
 export interface FlightWithAirline {
   flight: FlightView;

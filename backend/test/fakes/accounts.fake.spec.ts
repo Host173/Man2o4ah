@@ -126,6 +126,65 @@ describe('FakeAccountsService', () => {
     });
   });
 
+  describe('countModeratorsByProviders (BE-01)', () => {
+    it('returns {} for an empty input', async () => {
+      const accounts = new FakeAccountsService(seed);
+      await expect(accounts.countModeratorsByProviders([])).resolves.toEqual(
+        {},
+      );
+    });
+
+    it('counts 0, 1 and 2 moderators including suspended, excluding other providers and mismatched types', async () => {
+      const accounts = new FakeAccountsService([
+        ...seed,
+        {
+          id: 'm-2',
+          name: 'Suspended Mod',
+          email: 'm2@nile.example',
+          role: 'hotel_moderator',
+          status: 'suspended',
+          moderatorOf: { providerType: 'hotel', providerId: 'h-1' },
+        },
+        {
+          id: 'm-3',
+          name: 'Air Mod',
+          email: 'm3@sky.example',
+          role: 'airline_moderator',
+          moderatorOf: { providerType: 'airline', providerId: 'a-10' },
+        },
+        {
+          id: 'm-other',
+          name: 'Other Hotel Mod',
+          email: 'other@hotel.example',
+          role: 'hotel_moderator',
+          moderatorOf: { providerType: 'hotel', providerId: 'h-other' },
+        },
+      ]);
+
+      await expect(
+        accounts.countModeratorsByProviders([
+          { providerType: 'airline', providerId: 'h-1' },
+          { providerType: 'hotel', providerId: 'h-none' },
+        ]),
+      ).resolves.toEqual({
+        'h-1': 0,
+        'h-none': 0,
+      });
+
+      await expect(
+        accounts.countModeratorsByProviders([
+          { providerType: 'hotel', providerId: 'h-1' },
+          { providerType: 'airline', providerId: 'a-10' },
+          { providerType: 'hotel', providerId: 'unknown-provider' },
+        ]),
+      ).resolves.toEqual({
+        'h-1': 2,
+        'a-10': 1,
+        'unknown-provider': 0,
+      });
+    });
+  });
+
   describe('listAccounts (ACC-14)', () => {
     const ids = (page: { items: { id: string }[] }) =>
       page.items.map((item) => item.id);

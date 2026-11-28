@@ -9,14 +9,14 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Model, QueryFilter } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { addDays, daysBetween } from '../../common/dates/date-only.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
-import { escapeRegex } from '../../common/text/escape-regex.js';
+import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
@@ -35,6 +35,9 @@ import type { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto.js'
 import type { UpdateHotelDto } from './dto/update-hotel.dto.js';
 import type {
   AvailableRoomView,
+  HotelListItem,
+  HotelListQuery,
+  HotelListResult,
   HotelSearchQuery,
   HotelSearchResult,
   HotelTransactionOptions,
@@ -228,6 +231,47 @@ export class HotelsService {
     const hotel = await this.getHotel(hotelId);
     if (!hotel) throw this.notFound();
     return hotel;
+  }
+
+  /** Offset-based hotel list ordered by name asc then `_id` asc (BE-01). */
+  async listHotels(query: HotelListQuery): Promise<HotelListResult> {
+    const filter: QueryFilter<StoredHotel> = {};
+    if (query.status === 'active') filter.isActive = true;
+    else if (query.status === 'inactive') filter.isActive = false;
+
+    const trimmed = query.q?.trim();
+    if (trimmed) {
+      filter.name = keywordRegex(trimmed);
+    }
+
+    if (query.limit <= 0) {
+      const total = await this.hotelModel.countDocuments(filter).exec();
+      return { items: [], total };
+    }
+
+    const [docs, total] = await Promise.all([
+      this.hotelModel
+        .find(filter, { name: 1, cityId: 1, countryCode: 1, isActive: 1 })
+        .sort({ name: 1, _id: 1 })
+        .skip(query.skip)
+        .limit(query.limit)
+        .lean<
+          (Pick<Hotel, 'name' | 'cityId' | 'countryCode' | 'isActive'> & {
+            _id: Types.ObjectId;
+          })[]
+        >()
+        .exec(),
+      this.hotelModel.countDocuments(filter).exec(),
+    ]);
+
+    const items: HotelListItem[] = docs.map((doc) => ({
+      id: doc._id.toHexString(),
+      name: doc.name,
+      cityId: doc.cityId,
+      countryCode: doc.countryCode,
+      isActive: doc.isActive,
+    }));
+    return { items, total };
   }
 
   /** HTL-15: all free rooms, paginated by ID. Inactive hotels have no bookable rooms. Does not hold inventory. */

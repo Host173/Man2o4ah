@@ -2170,4 +2170,75 @@ describe('HotelsService (HTL-01 / HTL-03 / HTL-06 integration)', () => {
       expect(await hotels.countDocuments()).toBe(0);
     },
   );
+
+  describe('listHotels (BE-01)', () => {
+    it('filters by status and q (literal regex), orders by name then _id, and applies skip/limit', async () => {
+      const alpha1 = await service.create({ ...profile, name: 'Alpha Inn' });
+      const alpha2 = await service.create({ ...profile, name: 'Alpha Inn' });
+      await service.setActive(alpha2.id, false);
+      const beta = await service.create({ ...profile, name: 'Beta Suites' });
+      const special = await service.create({
+        ...profile,
+        name: 'Grand.Hotel (X)[1]',
+      });
+
+      const all = await service.listHotels({ skip: 0, limit: 10 });
+      expect(all.total).toBe(4);
+      const expectedAlphaIds = [alpha1.id, alpha2.id].sort();
+      expect(all.items.map((i) => i.id)).toEqual([
+        ...expectedAlphaIds,
+        beta.id,
+        special.id,
+      ]);
+
+      expect(await service.listHotels({ skip: 0, limit: 0 })).toEqual({
+        items: [],
+        total: 4,
+      });
+
+      const inactive = await service.listHotels({
+        status: 'inactive',
+        skip: 0,
+        limit: 10,
+      });
+      expect(inactive).toEqual({
+        items: [
+          {
+            id: alpha2.id,
+            name: 'Alpha Inn',
+            cityId: 'cairo',
+            countryCode: 'EG',
+            isActive: false,
+          },
+        ],
+        total: 1,
+      });
+
+      const byName = await service.listHotels({
+        q: '  beta ',
+        skip: 0,
+        limit: 10,
+      });
+      expect(byName.items.map((i) => i.id)).toEqual([beta.id]);
+
+      expect(
+        await service.listHotels({ q: '.*([', skip: 0, limit: 10 }),
+      ).toEqual({ items: [], total: 0 });
+
+      const literalMatch = await service.listHotels({
+        q: '(x)[1]',
+        skip: 0,
+        limit: 10,
+      });
+      expect(literalMatch.items.map((i) => i.id)).toEqual([special.id]);
+
+      const paged = await service.listHotels({
+        q: '   ',
+        skip: 0,
+        limit: 2,
+      });
+      expect(paged.total).toBe(4);
+      expect(paged.items.map((i) => i.id)).toEqual(expectedAlphaIds);
+    });
+  });
 });

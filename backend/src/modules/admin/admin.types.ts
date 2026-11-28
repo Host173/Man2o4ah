@@ -17,3 +17,33 @@ export type AdminBookingStatus = (typeof ADMIN_BOOKING_STATUSES)[number];
 /** Read-only row returned by `GET /api/admin/bookings` (`ACC-17`, `CTR-04`). */
 export type AdminBookingView =
   FlightBookingAdminView | HotelReservationAdminView;
+
+export const ProviderStatus = {
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+} as const;
+export type ProviderStatus =
+  (typeof ProviderStatus)[keyof typeof ProviderStatus];
+
+export interface AdminAirlineProviderView {
+  _id: string;
+  type: 'airline';
+  name: string;
+  status: ProviderStatus;
+  moderatorCount: number;
+  code: string;
+}
+
+export interface AdminHotelProviderView {
+  _id: string;
+  type: 'hotel';
+  name: string;
+  status: ProviderStatus;
+  moderatorCount: number;
+  cityId: string;
+  countryCode: string;
+}
+
+/** Provider row returned by `GET /api/admin/providers` (`BE-01`). */
+export type AdminProviderView =
+  AdminAirlineProviderView | AdminHotelProviderView;

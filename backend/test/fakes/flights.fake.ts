@@ -8,6 +8,7 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { Events } from '../../src/common/events/events.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
+import { keywordRegex } from '../../src/common/text/escape-regex.js';
 import {
   convertFlightTimes,
   formatLocalDateTime,
@@ -17,6 +18,9 @@ import type { FlightsService } from '../../src/modules/flights/flights.service.j
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
   AddCabinInput,
+  AirlineListItem,
+  AirlineListQuery,
+  AirlineListResult,
   AirlineView,
   BookabilityResult,
   CabinView,
@@ -530,6 +534,51 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
   getAirline(airlineId: string): Promise<AirlineView | null> {
     const airline = this.data.airline(airlineId);
     return Promise.resolve(airline ? structuredClone(airline) : null);
+  }
+
+  listAirlines(query: AirlineListQuery): Promise<AirlineListResult> {
+    const trimmed = query.q?.trim();
+    const pattern = trimmed ? keywordRegex(trimmed) : undefined;
+    const matches = this.data
+      .airlines()
+      .filter((airline) => {
+        if (query.status === 'active' && !airline.isActive) return false;
+        if (query.status === 'inactive' && airline.isActive) return false;
+        if (
+          pattern &&
+          !pattern.test(airline.name) &&
+          !pattern.test(airline.code)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) =>
+        a.name < b.name
+          ? -1
+          : a.name > b.name
+            ? 1
+            : a.id < b.id
+              ? -1
+              : a.id > b.id
+                ? 1
+                : 0,
+      );
+
+    const total = matches.length;
+    if (query.limit <= 0) {
+      return Promise.resolve({ items: [], total });
+    }
+
+    const items: AirlineListItem[] = matches
+      .slice(query.skip, query.skip + query.limit)
+      .map((airline) => ({
+        id: airline.id,
+        name: airline.name,
+        code: airline.code,
+        isActive: airline.isActive,
+      }));
+    return Promise.resolve({ items, total });
   }
 
   setAirlineActive(airlineId: string, isActive: boolean): Promise<AirlineView> {

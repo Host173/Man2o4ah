@@ -9,7 +9,10 @@ import { ErrorCode } from '../../src/common/errors/error-codes.js';
 import { toPage } from '../../src/common/pagination/paginated.js';
 import type { Paginated } from '../../src/common/pagination/paginated.js';
 import type { PaginationQueryDto } from '../../src/common/pagination/pagination-query.dto.js';
-import { escapeRegex } from '../../src/common/text/escape-regex.js';
+import {
+  escapeRegex,
+  keywordRegex,
+} from '../../src/common/text/escape-regex.js';
 import type { HotelsService } from '../../src/modules/hotels/hotels.service.js';
 import type { CreateHotelDto } from '../../src/modules/hotels/dto/create-hotel.dto.js';
 import type { CreateRoomDto } from '../../src/modules/hotels/dto/create-room.dto.js';
@@ -28,6 +31,9 @@ import type { UpdateHotelDto } from '../../src/modules/hotels/dto/update-hotel.d
 import type { ReferenceDataService } from '../../src/modules/reference-data/reference-data.service.js';
 import type {
   AvailableRoomView,
+  HotelListItem,
+  HotelListQuery,
+  HotelListResult,
   HotelSearchQuery,
   HotelSearchResult,
   HotelTransactionOptions,
@@ -232,6 +238,43 @@ export class FakeHotelsService implements PublicApi<HotelsService> {
 
   async getHotelDetails(hotelId: string): Promise<HotelView> {
     return structuredClone(this.requireHotel(hotelId));
+  }
+
+  async listHotels(query: HotelListQuery): Promise<HotelListResult> {
+    const trimmed = query.q?.trim();
+    const pattern = trimmed ? keywordRegex(trimmed) : undefined;
+    const matches = this.data.hotels
+      .filter((hotel) => {
+        if (query.status === 'active' && !hotel.isActive) return false;
+        if (query.status === 'inactive' && hotel.isActive) return false;
+        if (pattern && !pattern.test(hotel.name)) return false;
+        return true;
+      })
+      .sort((a, b) =>
+        a.name < b.name
+          ? -1
+          : a.name > b.name
+            ? 1
+            : a.id < b.id
+              ? -1
+              : a.id > b.id
+                ? 1
+                : 0,
+      );
+
+    const total = matches.length;
+    if (query.limit <= 0) return { items: [], total };
+
+    const items: HotelListItem[] = matches
+      .slice(query.skip, query.skip + query.limit)
+      .map((hotel) => ({
+        id: hotel.id,
+        name: hotel.name,
+        cityId: hotel.cityId,
+        countryCode: hotel.countryCode,
+        isActive: hotel.isActive,
+      }));
+    return { items, total };
   }
 
   async getAvailableRooms(

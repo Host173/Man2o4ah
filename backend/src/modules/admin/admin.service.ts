@@ -32,13 +32,18 @@ import type { ResolveReportDto } from '../moderation/dto/resolve-report.dto.js';
 import { ModerationService } from '../moderation/moderation.service.js';
 import type { ReportView } from '../moderation/moderation.types.js';
 import type { ReportTargetType } from '../moderation/schemas/report.schema.js';
-import type { AdminBookingView } from './admin.types.js';
+import {
+  ProviderStatus,
+  type AdminBookingView,
+  type AdminProviderView,
+} from './admin.types.js';
 import type { CreateModeratorDto } from './dto/create-moderator.dto.js';
 import { ListAdminAccountsQueryDto } from './dto/list-admin-accounts-query.dto.js';
 import {
   ListAdminBookingsQueryDto,
   MAX_ADMIN_BOOKINGS_DEPTH,
 } from './dto/list-admin-bookings-query.dto.js';
+import { ListAdminProvidersQueryDto } from './dto/list-admin-providers-query.dto.js';
 import type { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
 
 const OBJECT_ID_HEX_RE = /^[0-9a-fA-F]{24}$/;
@@ -174,6 +179,169 @@ export class AdminService {
       ...pageResult,
       totalPages: Math.min(pageResult.totalPages, maxMergedPages),
     };
+  }
+
+  /**
+   * BE-01: returns a paginated list of airlines and hotels with status and
+   * batched moderator counts. When `type` is omitted, lists all airlines first
+   * then all hotels using arithmetic offset splitting without cross-service
+   * fetching or sorting.
+   */
+  async listProviders(
+    query: ListAdminProvidersQueryDto = new ListAdminProvidersQueryDto(),
+  ): Promise<Paginated<AdminProviderView>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+    const q = query.q?.trim() || undefined;
+    const status = query.status;
+
+    if (query.type === ProviderType.AIRLINE) {
+      const airlines = await this.flightsService.listAirlines({
+        status,
+        q,
+        skip,
+        limit,
+      });
+      return this.attachModeratorCounts(
+        airlines.items.map((a) => ({
+          kind: ProviderType.AIRLINE,
+          item: a,
+        })),
+        airlines.total,
+        page,
+        limit,
+      );
+    }
+
+    if (query.type === ProviderType.HOTEL) {
+      const hotels = await this.hotelsService.listHotels({
+        status,
+        q,
+        skip,
+        limit,
+      });
+      return this.attachModeratorCounts(
+        hotels.items.map((h) => ({
+          kind: ProviderType.HOTEL,
+          item: h,
+        })),
+        hotels.total,
+        page,
+        limit,
+      );
+    }
+
+    const [airlineCounts, hotelCounts] = await Promise.all([
+      this.flightsService.listAirlines({ status, q, skip: 0, limit: 0 }),
+      this.hotelsService.listHotels({ status, q, skip: 0, limit: 0 }),
+    ]);
+    const total = airlineCounts.total + hotelCounts.total;
+
+    const airlineSkip = Math.min(skip, airlineCounts.total);
+    const airlineLimit = Math.max(
+      0,
+      Math.min(limit, airlineCounts.total - skip),
+    );
+    const hotelSkip = Math.max(0, skip - airlineCounts.total);
+    const hotelLimit = Math.max(
+      0,
+      Math.min(limit - airlineLimit, hotelCounts.total - hotelSkip),
+    );
+
+    const [airlines, hotels] = await Promise.all([
+      airlineLimit > 0
+        ? this.flightsService.listAirlines({
+            status,
+            q,
+            skip: airlineSkip,
+            limit: airlineLimit,
+          })
+        : Promise.resolve({ items: [], total: airlineCounts.total }),
+      hotelLimit > 0
+        ? this.hotelsService.listHotels({
+            status,
+            q,
+            skip: hotelSkip,
+            limit: hotelLimit,
+          })
+        : Promise.resolve({ items: [], total: hotelCounts.total }),
+    ]);
+
+    const entries = [
+      ...airlines.items.map((item) => ({
+        kind: ProviderType.AIRLINE,
+        item,
+      })),
+      ...hotels.items.map((item) => ({
+        kind: ProviderType.HOTEL,
+        item,
+      })),
+    ];
+
+    return this.attachModeratorCounts(entries, total, page, limit);
+  }
+
+  private async attachModeratorCounts(
+    entries: (
+      | {
+          kind: typeof ProviderType.AIRLINE;
+          item: { id: string; name: string; code: string; isActive: boolean };
+        }
+      | {
+          kind: typeof ProviderType.HOTEL;
+          item: {
+            id: string;
+            name: string;
+            cityId: string;
+            countryCode: string;
+            isActive: boolean;
+          };
+        }
+    )[],
+    total: number,
+    page: number,
+    limit: number,
+  ): Promise<Paginated<AdminProviderView>> {
+    if (entries.length === 0) {
+      return toPage([], total, page, limit);
+    }
+
+    const counts = await this.accountsService.countModeratorsByProviders(
+      entries.map((entry) => ({
+        providerType: entry.kind,
+        providerId: entry.item.id,
+      })),
+    );
+
+    const items: AdminProviderView[] = entries.map((entry) => {
+      const status = entry.item.isActive
+        ? ProviderStatus.ACTIVE
+        : ProviderStatus.INACTIVE;
+      const moderatorCount = counts[entry.item.id] ?? 0;
+
+      if (entry.kind === ProviderType.AIRLINE) {
+        return {
+          _id: entry.item.id,
+          type: ProviderType.AIRLINE,
+          name: entry.item.name,
+          status,
+          moderatorCount,
+          code: entry.item.code,
+        };
+      }
+      return {
+        _id: entry.item.id,
+        type: ProviderType.HOTEL,
+        name: entry.item.name,
+        status,
+        moderatorCount,
+        cityId: entry.item.cityId,
+        countryCode: entry.item.countryCode,
+      };
+    });
+
+    return toPage(items, total, page, limit);
   }
 
   /** GEN-10: delegates paginated report listing to `ModerationService`. */

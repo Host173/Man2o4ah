@@ -221,6 +221,75 @@ describe('AccountsService (integration, ACC-07a, ACC-13, ACC-14, ACC-15, ACC-16)
     });
   });
 
+  describe('countModeratorsByProviders (BE-01)', () => {
+    it('returns {} for an empty input', async () => {
+      await expect(accounts.countModeratorsByProviders([])).resolves.toEqual(
+        {},
+      );
+    });
+
+    it('counts 0, 1 and 2 moderators including suspended, excluding other providers and unknown ids', async () => {
+      const hotel2ModsId = new Types.ObjectId();
+      const airline1ModId = new Types.ObjectId();
+      const hotel0ModsId = new Types.ObjectId();
+      const otherHotelId = new Types.ObjectId();
+
+      await createUser({
+        role: UserRole.HOTEL_MODERATOR,
+        status: UserStatus.ACTIVE,
+        moderatorOf: {
+          providerType: ProviderType.HOTEL,
+          providerId: hotel2ModsId,
+        },
+      });
+      await createUser({
+        role: UserRole.HOTEL_MODERATOR,
+        status: UserStatus.SUSPENDED,
+        moderatorOf: {
+          providerType: ProviderType.HOTEL,
+          providerId: hotel2ModsId,
+        },
+      });
+      await createUser({
+        role: UserRole.AIRLINE_MODERATOR,
+        status: UserStatus.ACTIVE,
+        moderatorOf: {
+          providerType: ProviderType.AIRLINE,
+          providerId: airline1ModId,
+        },
+      });
+      await createUser({
+        role: UserRole.HOTEL_MODERATOR,
+        status: UserStatus.ACTIVE,
+        moderatorOf: {
+          providerType: ProviderType.HOTEL,
+          providerId: otherHotelId,
+        },
+      });
+
+      const counts = await accounts.countModeratorsByProviders([
+        {
+          providerType: ProviderType.HOTEL,
+          providerId: hotel2ModsId.toHexString(),
+        },
+        {
+          providerType: ProviderType.AIRLINE,
+          providerId: airline1ModId.toHexString(),
+        },
+        {
+          providerType: ProviderType.HOTEL,
+          providerId: hotel0ModsId.toHexString(),
+        },
+      ]);
+
+      expect(counts).toEqual({
+        [hotel2ModsId.toHexString()]: 2,
+        [airline1ModId.toHexString()]: 1,
+        [hotel0ModsId.toHexString()]: 0,
+      });
+    });
+  });
+
   describe('listAccounts (ACC-14)', () => {
     async function seedList() {
       const base = Date.UTC(2026, 10, 1);

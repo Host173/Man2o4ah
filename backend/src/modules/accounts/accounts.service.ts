@@ -204,6 +204,68 @@ export class AccountsService {
   }
 
   /**
+   * BE-01: batched moderator counts for a page of providers, keyed by
+   * `providerId` string (0 for providers with no moderators). Counts every
+   * moderator account linked to each provider regardless of status.
+   */
+  async countModeratorsByProviders(
+    providers: { providerType: ProviderType; providerId: string }[],
+  ): Promise<Record<string, number>> {
+    if (providers.length === 0) return {};
+
+    const counts: Record<string, number> = {};
+    const uniquePairs = new Map<
+      string,
+      { providerType: ProviderType; providerId: string }
+    >();
+    for (const provider of providers) {
+      counts[provider.providerId] = 0;
+      if (OBJECT_ID_HEX.test(provider.providerId)) {
+        uniquePairs.set(
+          `${provider.providerType}:${provider.providerId}`,
+          provider,
+        );
+      }
+    }
+
+    if (uniquePairs.size === 0) return counts;
+
+    const validPairs = [...uniquePairs.values()];
+    const validObjectIds = [
+      ...new Set(validPairs.map((p) => p.providerId)),
+    ].map((id) => new Types.ObjectId(id));
+
+    const rows = await this.userModel.aggregate<{
+      _id: Types.ObjectId;
+      count: number;
+    }>([
+      {
+        $match: {
+          role: {
+            $in: [UserRole.AIRLINE_MODERATOR, UserRole.HOTEL_MODERATOR],
+          },
+          'moderatorOf.providerId': { $in: validObjectIds },
+          $or: validPairs.map((p) => ({
+            'moderatorOf.providerType': p.providerType,
+            'moderatorOf.providerId': new Types.ObjectId(p.providerId),
+          })),
+        },
+      },
+      {
+        $group: {
+          _id: '$moderatorOf.providerId',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    for (const row of rows) {
+      counts[row._id.toString()] = row.count;
+    }
+    return counts;
+  }
+
+  /**
    * ACC-14: paginated, newest first (ties by newest `_id`, so pages never
    * overlap); `q` matches name or email literally and case-insensitively;
    * `role` and `status` filter exactly. Admin has already validated the query.

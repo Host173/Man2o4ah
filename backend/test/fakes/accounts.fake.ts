@@ -138,6 +138,36 @@ export class FakeAccountsService implements PublicApi<AccountsService> {
       .map((account) => account.id);
   }
 
+  async countModeratorsByProviders(
+    providers: { providerType: ProviderType; providerId: string }[],
+  ): Promise<Record<string, number>> {
+    if (providers.length === 0) return {};
+
+    const counts: Record<string, number> = {};
+    const requested = new Set<string>();
+    for (const provider of providers) {
+      counts[provider.providerId] = 0;
+      requested.add(`${provider.providerType}:${provider.providerId}`);
+    }
+
+    for (const account of this.accounts.values()) {
+      if (
+        account.role !== UserRole.AIRLINE_MODERATOR &&
+        account.role !== UserRole.HOTEL_MODERATOR
+      ) {
+        continue;
+      }
+      if (!account.moderatorOf) continue;
+      const key = `${account.moderatorOf.providerType}:${account.moderatorOf.providerId}`;
+      if (requested.has(key)) {
+        counts[account.moderatorOf.providerId] =
+          (counts[account.moderatorOf.providerId] ?? 0) + 1;
+      }
+    }
+
+    return counts;
+  }
+
   async listAccounts(
     query: AccountListQuery,
   ): Promise<Paginated<AccountListItem>> {

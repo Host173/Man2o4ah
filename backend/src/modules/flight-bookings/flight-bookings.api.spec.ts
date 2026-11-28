@@ -4,6 +4,7 @@ import { FakeFlightsService } from '../../../test/fakes/flights.fake.js';
 import { loginAs } from '../../../test/support/auth.js';
 import { HOOK_TIMEOUT } from '../../../test/support/mongo-memory.js';
 import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
+import { MAX_PRICE_MINOR } from '../../common/money/money.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { UserRole } from '../accounts/schemas/user.schema.js';
 import { FlightsService } from '../flights/flights.service.js';
@@ -17,6 +18,12 @@ const FULL_FLIGHT = '6553a1f0c2b4e8a9d0f1a204';
 const FULL_CABIN = '6553a1f0c2b4e8a9d0f1a205';
 const RETURN_FLIGHT = '6553a1f0c2b4e8a9d0f1a206';
 const RETURN_CABIN = '6553a1f0c2b4e8a9d0f1a207';
+const HUGE_FLIGHT = '6553a1f0c2b4e8a9d0f1a208';
+const HUGE_CABIN = '6553a1f0c2b4e8a9d0f1a209';
+const DEAR_OUT_FLIGHT = '6553a1f0c2b4e8a9d0f1a20a';
+const DEAR_OUT_CABIN = '6553a1f0c2b4e8a9d0f1a20b';
+const DEAR_BACK_FLIGHT = '6553a1f0c2b4e8a9d0f1a20c';
+const DEAR_BACK_CABIN = '6553a1f0c2b4e8a9d0f1a20d';
 
 function seedFlights(): FakeFlightsData {
   const data = new FakeFlightsData();
@@ -67,6 +74,58 @@ function seedFlights(): FakeFlightsData {
       },
     ],
   });
+  // A cabin priced past the cap (as old data could be) and two at the cap.
+  const priced = (
+    id: string,
+    cabinId: string,
+    from: string,
+    to: string,
+    date: string,
+    priceMinor: number,
+  ) =>
+    data.addFlight({
+      id,
+      airlineId: AIRLINE,
+      flightNumber: 'MS200',
+      departureAirportId: from,
+      arrivalAirportId: to,
+      departureAt: new Date(`${date}T08:00:00.000Z`),
+      arrivalAt: new Date(`${date}T12:00:00.000Z`),
+      cabins: [
+        {
+          id: cabinId,
+          cabinClass: 'economy',
+          totalSeats: 50,
+          availableSeats: 50,
+          heldSeats: 0,
+          priceMinor,
+        },
+      ],
+    });
+  priced(
+    HUGE_FLIGHT,
+    HUGE_CABIN,
+    'CAI',
+    'DXB',
+    '2027-03-10',
+    Number.MAX_SAFE_INTEGER,
+  );
+  priced(
+    DEAR_OUT_FLIGHT,
+    DEAR_OUT_CABIN,
+    'CAI',
+    'DXB',
+    '2027-03-10',
+    MAX_PRICE_MINOR,
+  );
+  priced(
+    DEAR_BACK_FLIGHT,
+    DEAR_BACK_CABIN,
+    'DXB',
+    'CAI',
+    '2027-03-15',
+    MAX_PRICE_MINOR,
+  );
   return data;
 }
 
@@ -214,6 +273,42 @@ describe('POST /api/flight-bookings (FLT-19, FLT-21)', () => {
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe(ErrorCode.SeatsUnavailable);
+  });
+
+  it('answers 400, not 500, when the fare total overflows a safe integer', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const base = body(HUGE_FLIGHT, HUGE_CABIN);
+    const res = await t
+      .http()
+      .post('/api/flight-bookings')
+      .set('Cookie', user.cookie)
+      .send({
+        ...base,
+        passengers: [base.passengers[0], base.passengers[0]],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe(ErrorCode.ValidationFailed);
+  });
+
+  it('answers 400 on the passengers field when the total is more than one payment can be', async () => {
+    const user = await loginAs(t.connection, UserRole.USER);
+    const adults = Array.from({ length: 9 }, () => body().passengers[0]);
+    const res = await t
+      .http()
+      .post('/api/flight-bookings')
+      .set('Cookie', user.cookie)
+      .send({
+        tripType: 'round_trip',
+        segments: [
+          { flightId: DEAR_OUT_FLIGHT, cabinId: DEAR_OUT_CABIN },
+          { flightId: DEAR_BACK_FLIGHT, cabinId: DEAR_BACK_CABIN },
+        ],
+        passengers: adults,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([
+      expect.objectContaining({ field: 'passengers' }),
+    ]);
   });
 
   it('is documented in Swagger with its requirement ID', () => {

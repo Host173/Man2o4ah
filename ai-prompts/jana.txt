@@ -615,6 +615,34 @@ Scheduled flights become departed once departure passes; only scheduled flights 
 How the output was used:
 Added the FLT-30 scheduled departure job, boundary and idempotency tests, and the matching fake contract; verified the backend with 2453 passing tests and committed the implementation in c778f06.
 ================================================
+Date: 2026-11-20
+Student: Jana
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-05
+
+Prompt:
+**Expected output**
+Moderator edits times, prices and seat counts of scheduled flights; airports locked once booked; capacity never below held + booked; time changes emit flight.rescheduled.
+
+**Requirements:** FLT-05
+**Package:** 3 · Flights
+**Module(s):** flights
+
+**Tests:** Unit; integration; API
+**TDD required:** No
+
+**Branch:** `feature/FLT-05-edit-flights`
+**PR title:** `FLT-05: Edit flights`
+
+**Depends on:** [#36](https://github.com/Host173/Man2o4ah/issues/36) (FLT-04), [#37](https://github.com/Host173/Man2o4ah/issues/37) (INV-01), [#8](https://github.com/Host173/Man2o4ah/issues/8) (PLT-06)
+**Blocks:** —
+**Works end to end once these merge:** [#56](https://github.com/Host173/Man2o4ah/issues/56) (FLT-26)
+
+*How to build it is up to the owner; see the project skill (`docs/ai/skills/travel-platform/`).* implement this ticket since flt-04 isnt merged yet do a stacked pr from feature/FLT-04-cabins make sure to include all tests possible
+
+How the output was used:
+Implemented FLT-05 flight and cabin edit DTOs and service rules, added ownership/status/airport-lock/capacity/event tests and the matching fake contract, ran full backend verification with 2467 passing tests, and committed the implementation in 24c4d34.
+================================================
 ================================================
 Date: 2026-11-20
 Student: Jana

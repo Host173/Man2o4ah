@@ -1,7 +1,10 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { ValidationError } from 'class-validator';
-import { FlightQuoteRequestDto } from './flight-quote.dto.js';
+import {
+  FlightQuoteRequestDto,
+  MAX_PASSENGERS_PER_BOOKING,
+} from './flight-quote.dto.js';
 
 const passenger = {
   type: 'adult',
@@ -49,6 +52,27 @@ const withPassenger = (changes: Record<string, unknown>) => ({
 describe('FlightQuoteRequestDto (FLT-19)', () => {
   it('accepts a valid one-way body', async () => {
     expect((await check(valid)).failed).toEqual([]);
+  });
+
+  it('accepts the most passengers and rejects one more', async () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, () => ({ ...passenger }));
+    expect(
+      (
+        await check({
+          ...valid,
+          passengers: many(MAX_PASSENGERS_PER_BOOKING),
+        })
+      ).failed,
+    ).toEqual([]);
+    expect(
+      (
+        await check({
+          ...valid,
+          passengers: many(MAX_PASSENGERS_PER_BOOKING + 1),
+        })
+      ).failed,
+    ).toEqual(['passengers']);
   });
 
   it('accepts a round trip with two segments', async () => {

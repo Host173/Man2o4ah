@@ -619,5 +619,14 @@ describe('payments API (PAY-01)', () => {
       expect(operation?.summary).toContain('PAY-01');
       expect(operation?.tags).toEqual(['payments']);
     }
+    for (const operation of [operations[2], operations[3]]) {
+      expect(operation?.parameters).toContainEqual(
+        expect.objectContaining({
+          name: 'id',
+          in: 'path',
+          schema: { type: 'string' },
+        }),
+      );
+    }
   });
 });

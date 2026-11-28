@@ -28,6 +28,11 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema.js';
+import { Flight } from '../flights/schemas/flight.schema.js';
+import { Airline } from '../flights/schemas/airline.schema.js';
+import { Hotel } from '../hotels/schemas/hotel.schema.js';
+import { Room } from '../hotels/schemas/room.schema.js';
+import { RoomNight } from '../hotels/schemas/room-night.schema.js';
 import { ReportableContentRegistry } from '../moderation/ports/reportable-content.registry.js';
 import {
   Report,
@@ -75,6 +80,17 @@ describe('BlogService (skeleton)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Itinerary.name))
       .useValue({})
+      .overrideProvider(getModelToken(Flight.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Airline.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Hotel.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Room.name))
+      .useValue({})
+      .overrideProvider(getModelToken(RoomNight.name))
+      .useValue({})
+      // ItinerariesModule imports ModerationModule for ITN-20.
       .overrideProvider(getModelToken(Report.name))
       .useValue({})
       .overrideProvider(AppEvents)

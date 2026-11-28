@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { assertMinor } from '../../common/money/money.js';
+import {
+  AmountOverflowError,
+  assertMinor,
+  assertMinorFits,
+} from '../../common/money/money.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import type { Converter } from './fx.types.js';
 
@@ -35,7 +39,7 @@ export function convertMinor(
   minorUnitsFrom: number,
   minorUnitsTo: number,
 ): number {
-  assertMinor(amountMinor);
+  assertMinorFits(amountMinor);
   const from = toFraction(rateFrom);
   const to = toFraction(rateTo);
   // amount × (to.num / to.den) × 10^unitsTo / ((from.num / from.den) × 10^unitsFrom)
@@ -45,7 +49,7 @@ export function convertMinor(
   const rounded = (2n * numerator + denominator) / (2n * denominator);
   const result = Number(rounded);
   if (BigInt(result) !== rounded) {
-    throw new Error(`Not a valid amount in minor units: ${rounded}`);
+    throw new AmountOverflowError(`Amount too large: ${rounded}`);
   }
   assertMinor(result);
   return result;
@@ -71,7 +75,7 @@ export function buildConverter(input: ConverterInput): Converter {
   return {
     rateDate,
     convert(amountMinor, from, to) {
-      assertMinor(amountMinor);
+      assertMinorFits(amountMinor);
       assertSupported(from);
       assertSupported(to);
       if (from === to) return amountMinor;

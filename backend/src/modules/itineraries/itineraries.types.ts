@@ -183,6 +183,31 @@ export interface ItineraryDetailView extends ItinerarySummary {
 }
 
 /**
+ * ITN-21: the read-only public page of one itinerary. It is the same for every
+ * viewer (frontend.md: explore/[id] is cached), so the budget is in the
+ * platform currency and nothing moderation-related is exposed.
+ */
+export interface PublicItineraryDetailView {
+  _id: string;
+  ownerId: string;
+  /** The author's name; `null` when the account cannot be found. */
+  authorName: string | null;
+  title: string;
+  countryCodes: string[];
+  /** UTC calendar date, `YYYY-MM-DD` (ITN-01). */
+  startDate: string;
+  dayCount: number;
+  cityIds: string[];
+  updatedAt: Date;
+  days: ItineraryDayView[];
+  cityGroups: CityGroupView[];
+  transportCosts: TransportCostView[];
+  clonedFrom?: { itineraryId: string; authorId: string };
+  /** `null` when the amounts cannot be converted (rates unavailable). */
+  budget: BudgetSummaryView | null;
+}
+
+/**
  * A public itinerary as the author page (BLG-12) lists it. Days, activities,
  * budgets and transport costs are deliberately left out: open the itinerary
  * itself for those (ITN-21).
@@ -210,4 +235,14 @@ export interface PublicItineraryQuery {
   page?: number;
   /** 1-50 (GEN-05). */
   limit?: number;
+  /** Case-insensitive keyword on title, country and city names (ITN-21). */
+  q?: string;
+  /** Inclusive minimum day count (ITN-21). */
+  minDays?: number;
+  /** Inclusive maximum day count (ITN-21). */
+  maxDays?: number;
+  /** Filter by country code (ITN-21). */
+  countryCode?: string;
+  /** Filter by city id (ITN-21). */
+  cityId?: string;
 }

@@ -34,6 +34,9 @@ export class FlightSegmentRequestDto {
 }
 
 /** One traveller. Age-vs-type and baggage limits are checked by the service. */
+/** Most passengers (infants included) one booking may carry. */
+export const MAX_PASSENGERS_PER_BOOKING = 9;
+
 export class PassengerRequestDto {
   @ApiProperty({
     enum: Object.values(PassengerType),
@@ -97,9 +100,14 @@ export class FlightQuoteRequestDto {
   @Type(() => FlightSegmentRequestDto)
   segments!: FlightSegmentRequestDto[];
 
-  @ApiProperty({ type: [PassengerRequestDto], minItems: 1 })
+  @ApiProperty({
+    type: [PassengerRequestDto],
+    minItems: 1,
+    maxItems: MAX_PASSENGERS_PER_BOOKING,
+  })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_PASSENGERS_PER_BOOKING)
   @ValidateNested({ each: true })
   @Type(() => PassengerRequestDto)
   passengers!: PassengerRequestDto[];

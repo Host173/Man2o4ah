@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "",
   "author": "",
   "private": true,
@@ -23,9 +23,14 @@
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "test:stress": "vitest run --config ./vitest.config.stress.ts",
+    "test:audit": "vitest run --config ./vitest.config.audit.ts",
+    "openapi:export": "vitest run --config ./vitest.config.openapi.ts",
     "seed:reference": "nest build && node dist/seed/seed-reference-data.js",
+    "seed:admin": "nest build && node dist/seed/seed-admin.js",
+    "seed:demo": "nest build && node dist/seed/seed-demo-data.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test:cov && npm run build"
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test:cov && npm run test:e2e && npm run build"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

@@ -24,7 +24,13 @@ export class FakeFlightBookingsService implements PublicApi<FlightBookingsServic
       .filter((booking) => status === undefined || booking.status === status)
       .filter((booking) => from === undefined || booking.createdAt >= from)
       .filter((booking) => to === undefined || booking.createdAt <= to)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      // Same deterministic order as the real service: newest createdAt, then
+      // newest id (bookingId is the _id hex) so ties never depend on seed order.
+      .sort(
+        (a, b) =>
+          b.createdAt.getTime() - a.createdAt.getTime() ||
+          b.bookingId.localeCompare(a.bookingId),
+      );
     const items = matching.slice((page - 1) * limit, page * limit);
     return Promise.resolve(
       toPage(structuredClone(items), matching.length, page, limit),

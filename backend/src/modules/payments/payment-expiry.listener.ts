@@ -6,13 +6,16 @@ import type { Model } from 'mongoose';
 import { BookingType } from '../../common/database/booking-type.js';
 import type { PayloadOf } from '../../common/events/event-payloads.js';
 import { Events } from '../../common/events/events.js';
+import { RefundsService } from './refunds.service.js';
 import { Payment } from './schemas/payment.schema.js';
 import type { PaymentStatus } from './schemas/payment.schema.js';
 import { STRIPE_GATEWAY } from './stripe/stripe-gateway.js';
 import type { StripeGateway } from './stripe/stripe-gateway.js';
 
 /**
- * Cancels the PaymentIntent of a booking whose hold expired (PAY-01). A failure
+ * Cancels the PaymentIntent of a booking whose hold expired (PAY-01). If the
+ * payment had already succeeded, the booking was never confirmed, so it is
+ * refunded in full instead (S-07). A failure
  * is logged and never rethrown: an event handler must not break the booking
  * module's expiry job.
  */
@@ -23,6 +26,7 @@ export class PaymentExpiryListener {
   constructor(
     @InjectModel(Payment.name) private readonly payments: Model<Payment>,
     @Inject(STRIPE_GATEWAY) private readonly gateway: StripeGateway,
+    private readonly refunds: RefundsService,
   ) {}
 
   @OnEvent(Events.FlightBookingExpired)
@@ -48,10 +52,27 @@ export class PaymentExpiryListener {
         .findOne({ bookingType, bookingId: new Types.ObjectId(bookingId) })
         .lean<{
           _id: Types.ObjectId;
+          userId: Types.ObjectId;
+          amountMinor: number;
+          currency: string;
           stripePaymentIntentId: string;
           status: PaymentStatus;
         }>();
       if (!payment) return;
+      if (payment.status === 'succeeded') {
+        // S-07: expired is final and the booking was never confirmed, so the whole
+        // payment goes back. One refund per booking: if the booking module's
+        // late-payment path already asked, this returns that refund.
+        await this.refunds.refund({
+          bookingType,
+          bookingId,
+          userId: payment.userId.toString(),
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          reason: 'late_payment',
+        });
+        return;
+      }
       if (payment.status !== 'pending' && payment.status !== 'failed') return;
 
       try {

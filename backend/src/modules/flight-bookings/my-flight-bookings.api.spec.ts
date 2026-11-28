@@ -28,6 +28,7 @@ describe('my flight bookings (FLT-25)', () => {
   let model: Model<FlightBooking>;
   let owner: LoggedInUser;
   let references = 0;
+  const payments = new FakePaymentsService();
 
   beforeAll(async () => {
     t = await createTestApp({
@@ -39,7 +40,7 @@ describe('my flight bookings (FLT-25)', () => {
           .overrideProvider(SeatInventory)
           .useValue(new FakeSeatInventory())
           .overrideProvider(PaymentsService)
-          .useValue(new FakePaymentsService()),
+          .useValue(payments),
     });
     model = t.moduleRef.get<Model<FlightBooking>>(
       getModelToken(FlightBooking.name),
@@ -48,6 +49,7 @@ describe('my flight bookings (FLT-25)', () => {
 
   beforeEach(async () => {
     await clearCollections(t.connection);
+    payments.refunds.length = 0;
     owner = await loginAs(t.connection, UserRole.USER);
   }, HOOK_TIMEOUT);
 
@@ -324,12 +326,14 @@ describe('my flight bookings (FLT-25)', () => {
       expect(res.body.code).toBe(ErrorCode.NotFound);
     });
 
-    it.each([
-      ['an unknown id', () => new Types.ObjectId().toHexString()],
-      ['a malformed id', () => 'not-an-id'],
-    ])('answers 404 NOT_FOUND for %s', async (_label, id) => {
-      const res = await details(id()).expect(404);
+    it('answers 404 NOT_FOUND for an unknown id', async () => {
+      const res = await details(new Types.ObjectId().toHexString()).expect(404);
       expect(res.body.code).toBe(ErrorCode.NotFound);
+    });
+
+    it('answers 400 VALIDATION_FAILED for a malformed id', async () => {
+      const res = await details('not-an-id').expect(400);
+      expect(res.body.code).toBe(ErrorCode.ValidationFailed);
     });
 
     it('answers 401 NOT_AUTHENTICATED without a login', async () => {
@@ -337,6 +341,69 @@ describe('my flight bookings (FLT-25)', () => {
 
       const res = await t.http().get(`/api/flight-bookings/${id}`).expect(401);
       expect(res.body.code).toBe(ErrorCode.NotAuthenticated);
+    });
+  });
+
+  describe('the refund on the details (PAY-03)', () => {
+    it('shows a failed refund on a cancelled booking', async () => {
+      const id = await seed('cancelled', 30 * DAY);
+      const refund = await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 10_000,
+        currency: 'USD',
+        reason: 'user_cancellation',
+      });
+      payments.setStatus(refund.refundId, 'failed');
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toEqual({ ...refund, status: 'failed' });
+    });
+
+    it('shows a late-payment refund on an expired booking with no cancellation', async () => {
+      const id = await seed('expired', 30 * DAY);
+      await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 20_000,
+        currency: 'USD',
+        reason: 'late_payment',
+      });
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'late_payment',
+        status: 'pending',
+      });
+      expect(res.body.cancellation).toBeUndefined();
+    });
+
+    it('shows a refunded provider cancellation', async () => {
+      const id = await seed('cancelled', 30 * DAY);
+      const refund = await payments.refund({
+        userId: owner.id,
+        bookingType: 'flight',
+        bookingId: id,
+        amountMinor: 20_000,
+        currency: 'USD',
+        reason: 'provider_cancellation',
+      });
+      payments.setStatus(refund.refundId, 'refunded');
+
+      const res = await details(id).expect(200);
+      expect(res.body.refund).toMatchObject({
+        reason: 'provider_cancellation',
+        status: 'refunded',
+      });
+    });
+
+    it('answers refund null when none was issued', async () => {
+      const id = await seed('confirmed', 30 * DAY);
+
+      const res = await details(id).expect(200);
+      expect(res.body).toHaveProperty('refund', null);
     });
   });
 
@@ -351,5 +418,23 @@ describe('my flight bookings (FLT-25)', () => {
     expect(document.paths['/api/flight-bookings/{id}']?.get?.summary).toMatch(
       /^FLT-25 /,
     );
+    expect(
+      document.components?.schemas?.MyFlightBookingResponseDto,
+    ).toHaveProperty('properties.refund');
+  });
+
+  it('documents 400 for a malformed ID on every booking :id route', () => {
+    const document = SwaggerModule.createDocument(
+      t.app,
+      new DocumentBuilder().build(),
+    );
+    for (const [path, method] of [
+      ['/api/flight-bookings/{id}', 'get'],
+      ['/api/flight-bookings/{id}/e-ticket', 'get'],
+      ['/api/flight-bookings/{id}/refund-preview', 'get'],
+      ['/api/flight-bookings/{id}/cancel', 'post'],
+    ] as const) {
+      expect(document.paths[path]?.[method]?.responses).toHaveProperty('400');
+    }
   });
 });

@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { toDateOnly } from '../../common/dates/date-only.js';
 import { FakeHotelsService } from '../../../test/fakes/hotels.fake.js';
+import { FakePaymentsService } from '../../../test/fakes/payments.fake.js';
 import { FakeRoomNightInventory } from '../../../test/fakes/room-night-inventory.fake.js';
 import { clearCollections } from '../../../test/support/clear-collections.js';
 import { FakeEvents } from '../../../test/support/fake-events.js';
@@ -11,6 +12,7 @@ import { createTestApp, type TestApp } from '../../../test/support/test-app.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
 import { AppEvents } from '../../common/events/app-events.service.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { RoomNightInventory } from '../hotels/room-night-inventory.js';
 import { HotelBookingsModule } from './hotel-bookings.module.js';
 import { HotelHoldService } from './hotel-hold.service.js';
@@ -112,6 +114,7 @@ describe('HotelReservationsService (HTL-20)', () => {
   const hotels = new FakeHotelsService();
   const inventory = new FakeRoomNightInventory(hotels);
   const events = new FakeEvents();
+  const payments = new FakePaymentsService();
 
   beforeAll(async () => {
     t = await createTestApp({
@@ -123,7 +126,9 @@ describe('HotelReservationsService (HTL-20)', () => {
           .overrideProvider(RoomNightInventory)
           .useValue(inventory)
           .overrideProvider(AppEvents)
-          .useValue(events),
+          .useValue(events)
+          .overrideProvider(PaymentsService)
+          .useValue(payments),
     });
     holds = t.moduleRef.get(HotelHoldService);
     service = t.moduleRef.get(HotelReservationsService);
@@ -136,6 +141,7 @@ describe('HotelReservationsService (HTL-20)', () => {
   beforeEach(async () => {
     Object.assign(hotels, seededHotels());
     events.clear();
+    payments.refunds.length = 0;
     await clearCollections(t.connection);
   });
 
@@ -212,6 +218,41 @@ describe('HotelReservationsService (HTL-20)', () => {
       ...(options.cancellation ? { cancellation: options.cancellation } : {}),
     });
   }
+
+  it('returns the refund with its status on getMineById, and only for the owner (PAY-03)', async () => {
+    const cancelled = await seedReservation({
+      status: HotelReservationStatus.CANCELLED,
+      checkInDate: '2027-06-01',
+      checkOutDate: '2027-06-03',
+    });
+    const pending = await seedReservation({
+      status: HotelReservationStatus.PENDING_PAYMENT,
+      checkInDate: '2027-07-01',
+      checkOutDate: '2027-07-02',
+    });
+    const refund = await payments.refund({
+      userId: USER_A,
+      bookingType: 'hotel',
+      bookingId: cancelled._id.toHexString(),
+      amountMinor: 10_000,
+      currency: 'USD',
+      reason: 'user_cancellation',
+    });
+    payments.setStatus(refund.refundId, 'failed');
+
+    expect(
+      (await service.getMineById(cancelled._id.toHexString(), USER_A)).refund,
+    ).toEqual({ ...refund, status: 'failed' });
+    expect(
+      (await service.getMineById(pending._id.toHexString(), USER_A)).refund,
+    ).toBeNull();
+
+    const spy = vi.spyOn(payments, 'getRefund');
+    await expect(
+      service.getMineById(cancelled._id.toHexString(), USER_B),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(spy).not.toHaveBeenCalled();
+  });
 
   it('scopes listMine and getMineById strictly to the owning user', async () => {
     const now = new Date('2027-03-10T12:00:00.000Z');

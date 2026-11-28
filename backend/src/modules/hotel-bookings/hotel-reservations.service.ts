@@ -13,7 +13,10 @@ import { ErrorCode } from '../../common/errors/error-codes.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
+import { BookingType } from '../../common/database/booking-type.js';
 import { HotelsService } from '../hotels/hotels.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
+import type { RefundView } from '../payments/payments.types.js';
 import {
   HotelReservationGroup,
   type HotelReservationDetailView,
@@ -62,6 +65,7 @@ export class HotelReservationsService {
     @InjectModel(HotelReservation.name)
     private readonly reservationModel: Model<StoredHotelReservation>,
     private readonly hotels: HotelsService,
+    private readonly payments: PaymentsService,
   ) {}
 
   async listMine(
@@ -135,10 +139,13 @@ export class HotelReservationsService {
       .lean<StoredHotelReservation>();
     if (!reservation) throw notFound();
 
-    const hotel = await this.hotels.getHotel(reservation.hotelId.toHexString());
+    const [hotel, refund] = await Promise.all([
+      this.hotels.getHotel(reservation.hotelId.toHexString()),
+      this.payments.getRefund(BookingType.HOTEL, reservationId),
+    ]);
     if (!hotel) throw missingHotelMetadata();
 
-    return this.toDetail(reservation, hotel.name);
+    return this.toDetail(reservation, hotel.name, refund);
   }
 
   private validateListQuery(
@@ -272,6 +279,7 @@ export class HotelReservationsService {
   private toDetail(
     reservation: StoredHotelReservation,
     hotelName: string,
+    refund: RefundView | null,
   ): HotelReservationDetailView {
     return {
       ...this.toSummary(reservation, hotelName),
@@ -305,6 +313,7 @@ export class HotelReservationsService {
             },
           }
         : {}),
+      refund,
       createdAt: reservation.createdAt,
       updatedAt: reservation.updatedAt,
     };

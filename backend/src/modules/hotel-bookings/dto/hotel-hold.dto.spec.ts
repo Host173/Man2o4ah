@@ -1,7 +1,10 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import type { ValidationError } from 'class-validator';
-import { HotelHoldRequestDto } from './hotel-hold.dto.js';
+import {
+  HotelHoldRequestDto,
+  MAX_ROOMS_PER_RESERVATION,
+} from './hotel-hold.dto.js';
 
 const ROOM = '6553a1f0c2b4e8a9d0f1a301';
 
@@ -36,6 +39,17 @@ const withRoom = (changes: Record<string, unknown>) => ({
 describe('HotelHoldRequestDto (HTL-16)', () => {
   it('accepts a valid body', async () => {
     expect(await failed(valid)).toEqual([]);
+  });
+
+  it('accepts the most rooms and rejects one more', async () => {
+    const rooms = (n: number) =>
+      Array.from({ length: n }, () => ({ ...valid.rooms[0] }));
+    expect(
+      await failed({ ...valid, rooms: rooms(MAX_ROOMS_PER_RESERVATION) }),
+    ).toEqual([]);
+    expect(
+      await failed({ ...valid, rooms: rooms(MAX_ROOMS_PER_RESERVATION + 1) }),
+    ).toEqual(['rooms']);
   });
 
   it('accepts a room with no children', async () => {

@@ -1605,3 +1605,267 @@ Blocked (not bookable), with reason
 How the output was used:
 Documented and tested blocked_range, inactive_room and outside_availability reasons in the room status response DTO and service.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Pierre
+Tool: Copilot SDK in VS Code
+Related Requirement: TST-01
+
+Prompt:
+pull the last changes on devolop branch then execute this file and dont change anything in ci
+[Attached: TST01_EXECUTION.md]
+# Execution — TST-01: Backend E2E journeys
+
+Issue #90. Package 1, owner Kareem. Covers GEN-11 (booking lifecycle), PAY-01, PAY-03. TDD not required.
+Run it **after TST-03's CRITICAL and HIGH findings are fixed** (so these journeys lock in correct behaviour, not bugs), before TST-02 and PLT-07.
+
+## Goal
+
+E2E tests that walk the important user journeys **across the real modules**, end to end over HTTP, and then stay as regression tests on every PR (`testing.md` §7). Done means:
+1. One E2E file per journey under `backend/test/e2e/`, several scenarios each: flight booking, hotel booking, provider flight cancellation, account lifecycle, itinerary to public clone, blog post to report and moderation.
+2. Every scenario uses the **real modules together**; only external services are faked (Stripe, FXRatesAPI).
+3. The fixed TST-03 findings that touch a journey get a scenario here (they stay fixed).
+4. CI runs the E2E suite on every PR, and `npm run verify` runs it too.
+
+**Out of scope:** edge cases that belong in unit/integration/API tests (`testing.md` §7: "Keep E2E to the important journeys"), bonus features, load (TST-03), Swagger completeness (TST-02), product code changes.
+
+## Context you need
+
+- `docs/ai/skills/travel-platform/references/testing.md` §1, §4–§7 (levels, in-memory replica set, fakes, E2E rules), `bookings-payments.md` (the whole lifecycle: §2 flight hold, §3 hotel hold, §4 policies and payment, §5 expiry, §6 webhook and confirmation, §7 cancellations and refunds, §8 references/e-ticket/completion), `domain-rules.md`, `auth.md`, `endpoints.md`, `requirements.md` for each step's promise.
+- `backend/test/e2e/flight-cancellation.e2e-spec.ts`, `self-deactivation.e2e-spec.ts`: existing E2E files (written during the sprint with fakes for modules that weren't merged). **Keep them**; don't change them.
+- `backend/vitest.config.e2e.ts` (`*.e2e-spec.ts`), `npm run test:e2e`.
+- `backend/test/support/` (`createTestApp`, `loginAs`, `clearCollections`, `mongo-memory` with `HOOK_TIMEOUT`), `backend/test/fakes/` (`FakeStripeGateway` with `FAKE_STRIPE_SIGNATURE`, `nextRefundStatus`, `failNext`; the FX client fake).
+- PLT-08's `runDemoSeed` (`backend/src/seed/demo/`) and, if TST-03 is merged, `backend/test/stress/support/stress-app.ts` (a whole-app harness you should reuse, see Step 1).
+- The scheduled jobs: `flight-hold-expiry.job.ts`, `hotel-hold-expiry.job.ts`, `flight-completion.job.ts`, `hotel-stay-completion.job.ts`, `FlightsService.markFlightsDeparted(now)`. E2E calls their methods directly instead of waiting.
+- `docs/qa/stress-report.md` (TST-03): the findings and which are fixed (their reproduction specs under `backend/test/stress/findings/` pass).
+
+**Code rules:** ESM (`.js` imports), `import type`, no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments, Prettier. **No new package.**
+
+## Design (settled here)
+
+1. **One whole-app harness**, `backend/test/support/full-app.ts`: `createFullApp()` builds `createTestApp({ imports: [<every feature module app.module.ts imports that createTestApp doesn't add>], override })` with only `STRIPE_GATEWAY` → `FakeStripeGateway` and the FX client faked; seeds reference data and one `exchange_rates` document; creates the admin as ACC-18 does. It returns `{ t, gateway, world, as(...), jobs, webhook }`:
+   - `world`: the demo world from `runDemoSeed` against `t.app.listen(0)` (so journeys start from what graders see).
+   - `as(email | role)`: a logged-in Supertest agent (log in through `POST /api/auth/login` with the demo password; only the admin may use `loginAs`).
+   - `jobs`: the job methods, each callable with an explicit `now` when the method accepts one.
+   - `webhook.paymentSucceeded(piId)`, `webhook.paymentFailed(piId)`, `webhook.refund(refundStripeId, status, refundId)`: signed fake events posted to `/api/payments/webhook`.
+   If TST-03's `stress-app.ts` exists on `develop`, move its shared part into `full-app.ts` and make `stress-app.ts` use it (no change in behaviour; its specs must still give the same results). Otherwise just create `full-app.ts`.
+2. **Time:** never `sleep`. A hold expires by running the expiry job with `now = holdExpiresAt + 1 s` if the job method takes `now`; if it doesn't, set the booking's `holdExpiresAt` into the past **through the model, in the test only**, with a comment saying why. Completion likewise (`now` after the last departure/stay, or move the dates in the test).
+3. **Each scenario is independent:** fresh data per scenario (new user, new booking) on top of the shared demo world; `beforeAll` builds the app once per file. Clear only the collections a scenario must start empty, never the demo world.
+4. **Assertions per step:** the HTTP status and the key fields, and after each journey the global invariants: seat totals (`total = available + held + booked`), room nights, one payment and at most one refund per booking, statuses only along GEN-11's allowed moves. Put these checks in one helper `expectInvariants()` in `full-app.ts` (reuse TST-03's `invariants()` if it exists).
+5. **Notifications and audit are checked where a journey promises them** (GEN-01 booking confirmed/cancelled, refund updated, schedule changed, suspended; GEN-07 admin actions).
+
+## Step 1: the harness
+
+`backend/test/support/full-app.ts` (Design §1, §4) and a small `full-app.spec.ts` that builds it, checks the demo world exists, logs in as each demo role, and runs `expectInvariants()` on the fresh world.
+**Commit:** `test(e2e): add the whole-app journey harness (TST-01)`
+
+## Step 2: booking journeys
+
+`backend/test/e2e/flight-booking.e2e-spec.ts`:
+1. **Happy one-way:** search (FLT-11) → details (FLT-17) → quote (FLT-19/21) → hold (FLT-22) → policies + accept (PAY-02) → pay (PAY-01) → `payment_intent.succeeded` → booking `confirmed` with a reference (FLT-23), seats `held → booked`, "booking confirmed" notification, e-ticket PDF downloads (`application/pdf`) with times in local zones (GEN-06), the booking in "my bookings" (FLT-25).
+2. **Round trip** (FLT-12): both segments held, confirmed and cancelled together.
+3. **Failed payment then retry:** `payment_failed` → still `pending_payment`; retry → same client secret → succeeded → confirmed once.
+4. **Hold expiry:** no payment; run the expiry job → `expired`, seats released, PaymentIntent cancelled; paying afterwards → 409 `HOLD_EXPIRED`.
+5. **Late payment:** expire, then `payment_intent.succeeded` → not confirmed, full `late_payment` refund created, user notified.
+6. **Sold out:** a cabin with 1 seat left; a 2-seat hold → 409 `SEATS_UNAVAILABLE`, nothing held.
+7. **Cancel with refund** (FLT-26): refund preview → cancel → `cancelled`, seats returned, refund `pending` with the tier's amount; refund webhook `succeeded` → `refunded`; notifications for cancellation and refund.
+8. **Cancel after departure blocked:** run `markFlightsDeparted`/completion with a `now` after departure → `completed`; cancel → the documented 409.
+
+`backend/test/e2e/hotel-booking.e2e-spec.ts`:
+1. **Happy:** search (HTL-11/12) → hotel (HTL-02) → available rooms (HTL-15) → hold two rooms (HTL-16/18) → policies + accept → pay → confirmed with reference (HTL-17), nights stay reserved, notification, in "my reservations" (HTL-20).
+2. **All or nothing:** another user holds one of the two rooms for an overlapping night first → the two-room hold fails, nothing held (HTL-18).
+3. **Failed payment then retry**, **hold expiry** (nights released), **late payment** (refund), as for flights.
+4. **Cancel with refund** (HTL-21) before check-in: preview → cancel → nights released → refund → refund webhook → `refunded`.
+5. **Stay completed then review** (HTL-23/24): completion job → `completed` → review → it shows on the hotel's reviews and the rating summary changes; reviewing a non-completed reservation → the documented error.
+
+**Commit:** `test(e2e): walk the flight and hotel booking journeys end to end (TST-01)`
+
+## Step 3: provider and account journeys
+
+`backend/test/e2e/provider-flight-cancellation.e2e-spec.ts` (the full-module version of the existing FLT-06 file): three users on one flight (confirmed, confirmed round trip, pending hold) → the airline moderator cancels the flight → both confirmed bookings `cancelled` by provider with 100% refunds (round trip included), the pending one expired, seats consistent, everyone notified, the flight hidden from search (FLT-06).
+
+`backend/test/e2e/account-lifecycle.e2e-spec.ts`:
+1. Register (ACC-01) → login (ACC-04) → `me` → edit profile (ACC-09) → change password (ACC-08): old sessions revoked.
+2. Lockout (ACC-05): 5 wrong passwords → locked; correct password during the lock → locked; after the lock (move `lockedUntil` in the test or pass a `now`) → login works and the counter resets.
+3. Logout (ACC-06): cookies cleared, the old access cookie and refresh token rejected.
+4. Admin suspends (ACC-15/16) → login shows "account suspended", existing session stops working, the user's confirmed booking stays valid → reactivate → login works; audit log has both actions (GEN-07).
+5. Admin resets the password (ACC-07a) → login with the temporary password → every route except change-password blocked → change it → normal access.
+6. Admin creates a moderator (ACC-13) → forced change → the moderator manages only their own provider (403/404 on another's).
+7. Self-deactivation (ACC-12): blocked with an upcoming confirmed booking; after cancelling it, allowed → login fails, public itineraries and posts hidden, comments and reviews show "Deleted user".
+8. Booking access (ACC-11, ACC-17, FLT-29, HTL-22): another user → 404 on the booking; the admin sees it in `GET /api/admin/bookings` with filters; the airline/hotel moderator sees it in their provider's bookings, not another provider's.
+
+**Commit:** `test(e2e): walk provider cancellation and the account lifecycle (TST-01)`
+
+## Step 4: itinerary and community journeys
+
+`backend/test/e2e/itinerary-to-clone.e2e-spec.ts`: create an itinerary (ITN-01) → days and city groups (ITN-05, ITN-07/08: reorder and delete keep numbers and dates right) → activities (ITN-10) → images → budgets and transport costs with the total converted to the user's preferred currency and the rate date shown (ITN-14, ITN-18) → hotels and flights from the itinerary (ITN-25/26) → publish → found in public search (ITN-21) → another user clones it → the original is deleted with its images → the clone and its copied images still load; a private itinerary is never in public search and is 404 for others.
+
+`backend/test/e2e/blog-to-moderation.e2e-spec.ts`: post with images (BLG-01, BLG-10) → comment, like (BLG-05/06, like idempotent) → another user reports it (GEN-09) → admin lists reports, hides the post (GEN-10) → hidden from lists, still visible to its author per the docs → admin deletes a comment → audit log entries (GEN-07) → the reporter/author notifications if the docs promise them.
+
+**Commit:** `test(e2e): walk the itinerary-to-clone and blog-to-moderation journeys (TST-01)`
+
+## Step 5: regressions from TST-03
+
+For each finding in `docs/qa/stress-report.md` that is **fixed** (its reproduction spec under `backend/test/stress/findings/` now passes) and that belongs to one of the journeys above, add one scenario to that journey's file named `regression S-<id>: <one line>`. Findings that are only about load or bad input stay in the stress suite. List any finding that isn't fixed yet in the report (don't add a failing E2E test for it).
+**Commit:** `test(e2e): pin the fixed stress findings as journey regressions (TST-01)`
+
+## Step 6: run E2E in CI
+
+- `backend/package.json`: `verify` becomes `… && npm run test:cov && npm run test:e2e && npm run build` (same order as CI).
+- `.github/workflows/ci.yml`, Backend job: a step `E2E journeys` running `npm run test:e2e` right after "Tests and coverage". Don't change any other step or job.
+- `README.md` "Quality gates": add the E2E row (backend: all journeys pass).
+**Commit:** `ci: run the E2E journeys on every pull request (TST-01)`
+
+## Step 7: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Related Requirement: TST-01`; `Prompt` = Kareem's message copied exactly plus `[Attached: TST01_EXECUTION.md]` and its content). Never edit earlier entries.
+**Commit:** `chore(ai): log the TST-01 prompt (TST-01)`
+Related Requirement: ITN-28
+
+Prompt:
+excute this and make it in a new branch and pr
+[Attached: ITN28_FONT_SUBSET_EXECUTION.md]
+# Execution — ITN-28 follow-up: subset the CJK PDF font
+
+A small fix on the ITN-28 itinerary PDF (issue #181, closed; module **itineraries**, Mokhtar's package; Kareem approved this change). TDD order: the guard test is committed before the font swap.
+
+## Goal
+
+The repository's GitHub zip is **16.7 MB**; it must be **under 10 MB** (without `node_modules`). One file is 13 MB of it: `backend/src/modules/itineraries/fonts/NotoSansCJKsc.otf` (15.7 MB, the full Noto Sans CJK SC, ~65 000 glyphs). Everything else zips to 3.7 MB.
+
+Replace it with a **subset** that keeps the standard character sets of Chinese, Japanese and Korean (measured beforehand: 14 122 characters, 5.31 MB, 3.84 MB zipped → the repo zips to ≈ 7.5 MB). Same file name, same font family, so **no code changes**. Characters left out are already printed as `[U+XXXX]` by `pdf-text.ts` (existing behaviour), so nothing crashes.
+
+**Out of scope:** the other fonts (Latin, Arabic, Emoji), the PDF layout, rewriting git history (the zip only contains the current files; the old font stays in history, which is fine).
+
+## Context
+
+- `backend/src/modules/itineraries/pdf-text.ts`: loads the four fonts by file name from `./fonts/` (`['CJK', 'NotoSansCJKsc.otf', 'font/otf']`) and uses `font.hasGlyphForCodePoint` to decide whether a character is printable or becomes `[U+XXXX]`.
+- `backend/src/modules/itineraries/itinerary-pdf.api.spec.ts`: the test "preserves accented, CJK and emoji text and explicitly represents unsupported characters" uses `Café 東京 😀 ͸`. It must still pass unchanged.
+- `backend/src/modules/itineraries/fonts/SOURCES.txt` and `CJK-OFL.txt`: the font's source URL and its SIL Open Font License 1.1. The OFL allows modified versions (a subset is one) as long as the license stays with the font; the CJK license names no Reserved Font Name. `SOURCES.txt` currently says "Unmodified Noto fonts" and must be updated for the CJK file.
+- `backend/nest-cli.json` copies `modules/itineraries/fonts/**/*` into the build: nothing to change.
+
+## Before you start
+
+1. `git fetch origin`; `git worktree add ../man2o4ah-cjk-font -b fix/ITN-28-cjk-font-subset origin/develop`; work only there. If the branch exists, stop and report.
+2. `cd backend && npm ci`, then `npx vitest run src/modules/itineraries/itinerary-pdf.api.spec.ts` passes. If not, stop and report.
+3. Measure the starting size from the repo root: `git archive --format=zip -o ../repo-before.zip HEAD` and note its size (≈ 16.7 MB).
+4. Python 3 with fontTools (a one-off tool, **not** a project dependency): `python -m pip show fonttools` (Windows: `py -m pip show fonttools`); if missing, `python -m pip install fonttools`. If you can't install it, stop and report.
+
+## Step 1 (red): a guard test
+
+New `backend/src/modules/itineraries/pdf-fonts.spec.ts` (unit, no database):
+- The CJK font file (`fonts/NotoSansCJKsc.otf`) is **smaller than 6 MB** (`statSync(...).size`), so the full font can't come back unnoticed.
+- Through `pdfFonts` (from `pdf-text.ts`), the CJK font has a glyph for each of: `东京` (Simplified), `東京` and `ありがとう`, `カタカナ` (Japanese), `안녕하세요` (Korean), `、。「」` (CJK punctuation), `ＡＢＣ１２３` (full-width forms).
+- One rare character outside the standard sets is **not** covered and `pdfText` turns it into `[U+XXXX]`: use `𠀀` (U+20000, CJK Extension B) → `pdfText('𠀀')` equals `[U+20000]`.
+
+Run it: the size check fails (15.7 MB); the glyph checks pass on the full font.
+**Commit:** `test(itineraries): pin the CJK PDF font's coverage and size (ITN-28)`
+
+## Step 2 (green): build and swap the subset
+
+New `backend/scripts/fonts/subset-cjk-font.py` (commit it, so the font can be rebuilt):
+```python
+"""Builds the CJK subset used by the itinerary PDF (ITN-28).
+
+Keeps the standard character sets: GB2312 (simplified Chinese, 6 763 hanzi + symbols),
+JIS X 0208 (Japanese kanji, kana, symbols), KS X 1001 (2 350 common Hangul, hanja, symbols),
+plus CJK punctuation (U+3000-303F), kana (U+3040-30FF) and full-width forms (U+FF00-FFEF).
+
+Usage (from the repo root, with fontTools installed):
+  python backend/scripts/fonts/subset-cjk-font.py <path to the full NotoSansCJKsc-Regular.otf>
+Writes backend/src/modules/itineraries/fonts/NotoSansCJKsc.otf.
+"""
+import subprocess, sys, tempfile, pathlib
+
+def table(codec, rows, cols, chars):
+    for a in rows:
+        for b in cols:
+            try:
+                chars.add(bytes([a, b]).decode(codec))
+            except UnicodeDecodeError:
+                pass
+
+def main(source: str) -> None:
+    chars: set[str] = set()
+    table('gb2312', range(0xA1, 0xF8), range(0xA1, 0xFF), chars)
+    table('euc_jp', range(0xA1, 0xF5), range(0xA1, 0xFF), chars)
+    table('euc_kr', range(0xA1, 0xFE), range(0xA1, 0xFF), chars)
+    for start, end in [(0x3000, 0x303F), (0x3040, 0x30FF), (0xFF00, 0xFFEF)]:
+        chars.update(chr(c) for c in range(start, end + 1))
+    chars = {c for c in chars if len(c) == 1}
+    out = pathlib.Path('backend/src/modules/itineraries/fonts/NotoSansCJKsc.otf')
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.txt', delete=False) as f:
+        f.write(''.join(sorted(chars)))
+        text_file = f.name
+    subprocess.run([sys.executable, '-m', 'fontTools.subset', source,
+                    f'--text-file={text_file}', f'--output-file={out}',
+                    '--layout-features=*', '--no-hinting', '--desubroutinize'], check=True)
+    print(f'{len(chars)} characters -> {out} ({out.stat().st_size / 1048576:.2f} MB)')
+
+if __name__ == '__main__':
+    main(sys.argv[1])
+```
+Then:
+1. Copy the current full font out of the repo first (it is the source): `cp backend/src/modules/itineraries/fonts/NotoSansCJKsc.otf ../NotoSansCJKsc-full.otf`.
+2. From the repo root: `python backend/scripts/fonts/subset-cjk-font.py ../NotoSansCJKsc-full.otf`. Expect about `14122 characters -> … (5.3 MB)`. If it's above 6 MB, stop and report.
+3. `SOURCES.txt`: change the first line to say the fonts are Noto fonts under the OFL notices, unmodified **except** `NotoSansCJKsc.otf`; under the CJK entry add: "Subset (OFL Modified Version) of the file above, built with `backend/scripts/fonts/subset-cjk-font.py`: GB2312, JIS X 0208 and KS X 1001 characters, CJK punctuation, kana and full-width forms. Characters outside it print as [U+XXXX]." Keep `CJK-OFL.txt` unchanged next to it.
+4. Run step 1's spec (now green) and `npx vitest run src/modules/itineraries` (every itinerary test, including the PDF API spec, unchanged and green).
+**Commit:** `fix(itineraries): ship a CJK subset font so the repository zips under 10 MB (ITN-28)`
+
+## Step 3: prompt log
+
+Append one entry to the author's log (`ai-prompts/<your first name>.txt`; Kareem → `kareem.txt`) in the course format (`Related Requirement: ITN-28`; `Prompt` = the message copied exactly plus `[Attached: ITN28_FONT_SUBSET_EXECUTION.md]` and its content). Never edit earlier entries.
+**Commit:** `chore(ai): log the CJK font subset prompt (ITN-28)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 (now including E2E) |
+| G2 | `npm run test:e2e` | 0 failed; at least 6 new journey files, ≥ 35 scenarios in total; the two old files still pass |
+| G3 | `npm run test:e2e` three times in a row | the same result each time (no flaky scenario) |
+| G4 | `git grep -n "setTimeout\|sleep(" -- backend/test/e2e` | no waits for time (Design §2) |
+| G5 | `git grep -n "overrideProvider" -- backend/test/e2e backend/test/support/full-app.ts` | only `STRIPE_GATEWAY` and the FX client in the new files |
+| G6 | Negative gate: in the flight booking journey, skip the `accept-policies` call in scenario 1 | it fails with `POLICIES_NOT_ACCEPTED`; restore |
+| G7 | `git diff --name-only origin/develop...HEAD` | only `backend/test/e2e/**` (new files), `backend/test/support/full-app.ts` (+ spec), `backend/test/stress/support/stress-app.ts` (only if Design §1's refactor applied), `backend/package.json` (`verify`), `.github/workflows/ci.yml` (one step), `README.md`, `ai-prompts/kareem.txt` |
+| G8 | `git log --format=%s origin/develop..HEAD` | 7 commits, each ending in `(TST-01)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- **No product code changes.** If a journey fails because of a product bug, don't work around it: stop that scenario, write down the step, the expected and actual result, and the cause (`file:line`), and report it. Kareem decides whether to fix first or merge with the scenario marked in the report (never `it.skip` in committed code).
+- The existing E2E files stay unchanged. Never weaken an assertion to make a journey pass.
+- Never call Stripe, FXRatesAPI or Atlas. No new package. Stage files by name. Don't push. Don't open a PR.
+
+## Report
+
+- Branch, worktree, commits; each gate in one line (G2 with file and scenario counts, G3 with the three timings).
+- Any product bug found (step, expected, actual, cause, owner).
+- TST-03 findings still open, and which journey they'd affect.
+
+How the output was used:
+Added the TST-01 E2E journeys (whole-app harness and six journey files) on branch test/TST-01-e2e-journeys, created from the updated develop; the CI workflow was left unchanged as asked.
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `npx vitest run src/modules/itineraries` | 0 failed; `itinerary-pdf.api.spec.ts` unchanged (`git diff origin/develop...HEAD -- backend/src/modules/itineraries/itinerary-pdf.api.spec.ts` empty) |
+| G3 | Size: `git archive --format=zip -o ../repo-after.zip HEAD` | under 10 MB (expected ≈ 7.5 MB); report before and after |
+| G4 | The build still ships the fonts: `npm run build` then `ls dist/modules/itineraries/fonts/` | all four fonts and the OFL files present; the CJK one ≈ 5.3 MB |
+| G5 | TDD order: `git log --reverse --format=%s origin/develop..HEAD \| head -2` | the `test(…)` commit first, then the `fix(…)` commit |
+| G6 | `git diff --name-only origin/develop...HEAD` | only `backend/src/modules/itineraries/pdf-fonts.spec.ts`, `backend/src/modules/itineraries/fonts/NotoSansCJKsc.otf`, `backend/src/modules/itineraries/fonts/SOURCES.txt`, `backend/scripts/fonts/subset-cjk-font.py`, `ai-prompts/<name>.txt` |
+| G7 | `git status --porcelain` | empty; the full font copy and the zips are outside the repo |
+
+In G5, `\|` is a shell pipe; type it as `|`.
+
+## Constraints
+
+- No change to `pdf-text.ts`, `itinerary-pdf.ts`, the other fonts, or any test other than the new spec. No npm package (fontTools is a local tool, not a dependency).
+- Don't rewrite git history. Stage files by name. Don't push or open a PR unless the message says so.
+
+## Report
+
+- Branch, worktree, commits; each gate in one line.
+- The zip size before and after, the subset's character count and file size.
+- The PR text to use, ready to paste: title `ITN-28: Subset the CJK PDF font`, what changed and why (repo zip under 10 MB), what's kept (GB2312 / JIS X 0208 / KS X 1001), what happens to other characters (`[U+XXXX]`, existing behaviour), and a note for Mokhtar (owner of itineraries).
+
+How the output was used:
+Added pdf-fonts.spec.ts, scripts/fonts/subset-cjk-font.py, the subset NotoSansCJKsc.otf and updated fonts/SOURCES.txt in fix/ITN-28-cjk-font-subset; committed test afcaa08 and fix 5280850.
+================================================

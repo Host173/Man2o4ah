@@ -3760,3 +3760,841 @@ you will find my 4 pr (host173 prs) the last review found some errers, fix them 
 How the output was used:
 Fixed review points 1-4 on PR #170 (nested secret stripping and whole-word key matching in audit.listener.ts, ISO-only date bounds in audit.types.ts, id tie-break in test/fakes/audit.fake.ts) with tests committed first, pushed to feature/GEN-07-audit-log.
 ================================================
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-08
+
+Prompt:
+execute this
+[Attached: PLT08_EXECUTION.md]
+# Execution — PLT-08: Demo data seed
+
+Issue #89. Lane: integration (last). Package 1, owner Kareem. TDD not required.
+Run it **after every mandatory feature is merged** (it depends on FLT-04 #36, HTL-04 #47, ACC-18 #32, GEN-12 #16, and in practice on everything a grader will click).
+
+## Goal
+
+Graders evaluate Milestone 1 in Swagger UI. On an empty database every list is empty and every flow starts with ten setup calls. This ticket adds a **separate, re-runnable demo seed** that fills the database with a small, realistic world so a grader can log in and try any flow at once: airlines with moderators, future flights with cabins and policies, hotels with moderators, rooms, availability and policies, and a few regular users.
+
+Done means:
+1. `npm run seed:demo` (in `backend/`) creates the demo world, and running it again changes nothing (no duplicates, no errors).
+2. It **never touches reference data** (countries, cities, airports, attractions, currencies) and never creates the admin (ACC-18's `seed:admin` does that).
+3. It goes **through the public HTTP API**, so every rule, invariant and event of every module applies (see "Design §1").
+4. An integration test runs it twice against the in-memory app and proves the second run is a no-op.
+5. The README explains the order (`seed:reference` → `seed:admin` → `seed:demo`) and lists the demo accounts.
+
+**Out of scope:** bookings, payments, reviews, itineraries, posts (graders create those themselves while testing; creating them needs Stripe and would make the seed slow and fragile), bonus features, changing any module.
+
+## Context you need
+
+- `backend/src/seed/seed-reference-data.ts` and `seed.module.ts`: the existing standalone seed (reference data). `package.json` script `seed:reference`.
+- ACC-18 (`seed:admin`): creates the admin from environment variables if missing. Read its script and the variables it uses (`.env.example`); the demo seed logs in as that admin.
+- `docs/ai/skills/travel-platform/references/endpoints.md`: the routes used below (admin: `POST /api/airlines`, `POST /api/hotels`, `POST /api/admin/moderators`; airline moderator: `PUT /api/airlines/:id/baggage-policy`, `PUT /api/airlines/:id/cancellation-policy`, `POST /api/flights`, `POST /api/flights/:id/cabins`, `GET /api/airlines/:id/flights`; hotel moderator: `PUT /api/hotels/:id/policies`, `POST /api/hotels/:id/rooms`, `GET /api/hotels/:id/rooms`, `POST /api/hotels/:id/rooms/:roomId/availability`; everyone: `POST /api/auth/register`, `POST /api/auth/login`, `PATCH /api/auth/change-password`, `GET /api/airports`, `GET /api/cities`).
+- `references/auth.md`: cookies (`access_token`, `refresh_token`), the forced password change for new moderators (ACC-07a: a moderator created with a temporary password must change it at first login).
+- The DTOs of those routes (read the controllers): exact body shapes and validation rules.
+- `backend/seed-data/airports.csv` and `cities.csv`: the airports that exist (CAI, DXB, LHR, JFK, CDG, RUH, FRA, …) and their cities.
+- `backend/test/support/test-app.ts` (`createTestApp`), `backend/src/app.setup.ts` (`configureApp`).
+
+**Code rules:** ESM (relative imports end in `.js`), `import type` for type-only imports, no `any`, no `@ts-ignore`/`@ts-expect-error`, no lint-disable comments, Prettier style. **No new package** (Node 22's global `fetch` is enough). Never log a password, a cookie or a connection string.
+
+## Design (settled here; follow it exactly)
+
+1. **Through the HTTP API, not the models.** The seed boots the real app and calls its endpoints with `fetch`, exactly like a client. Why: the seed then can't break a module's invariants (seat inventory totals, room-night ranges, forced password change, events for notifications/audit), and it doesn't inject other modules' models (the ownership rule). It also proves the main setup flows work end to end.
+2. **Two layers:**
+   - `backend/src/seed/demo/demo-seed.ts`: `export async function runDemoSeed(api: DemoApi, plan: DemoPlan, log: (line: string) => void): Promise<DemoSeedResult>`. Pure orchestration over a tiny client; no Nest imports. `DemoSeedResult` counts `created` and `skipped` per kind (`airlines`, `airlineModerators`, `flights`, `cabins`, `hotels`, `hotelModerators`, `rooms`, `availabilityRanges`, `users`).
+   - `backend/src/seed/demo/demo-api.ts`: `DemoApi`, a small client over `fetch` with a cookie jar per actor: `login(email, password)`, `get/post/put/patch(path, body?)`, each returning `{ status, body }`. It reads `Set-Cookie` from login responses and sends `Cookie` on later calls. One `DemoApi` instance per actor (admin, each moderator, each user).
+   - `backend/src/seed/seed-demo-data.ts`: the script. Creates the app with `NestFactory.create(AppModule)`, applies `configureApp` exactly as `main.ts` does, `listen(0)` on `127.0.0.1`, builds `DemoApi`s for `http://127.0.0.1:<port>/api`, runs `runDemoSeed`, prints the counts, closes the app. Exit code 1 on failure with the failing step's method, path, status and error `code`/`message` (never the body of a login).
+3. **Idempotent by natural keys** (a re-run is a no-op):
+   | Kind | Key | How the seed checks before creating |
+   |---|---|---|
+   | airline | `code` (unique) | `POST /api/airlines`; a 409 duplicate → find it (the admin list or `GET /api/airlines/:id` via the moderator's `providerId`; pick whatever endpoint exists and note it) and reuse its id |
+   | moderator / user | `email` (unique) | try to log in with the demo password first; if that works, reuse; else create (moderator: `POST /api/admin/moderators`; user: `POST /api/auth/register`) |
+   | flight | airline + flight number + local departure date (FLT-03 rejects duplicates) | `GET /api/airlines/:id/flights` and skip numbers already on that date |
+   | cabin | flight + class (each class at most once per flight, FLT-04) | skip classes the flight already has (read them from the flight details) |
+   | hotel | name + city | admin creates with `POST /api/hotels`; to detect an existing one, log in as its moderator (email key) and read its `providerId` |
+   | room | hotel + room name | `GET /api/hotels/:id/rooms`, skip names that exist |
+   | availability range | room + range | skip when the room's ranges already cover it |
+   | policies | provider | `PUT` is already idempotent: always send it |
+4. **Dates are relative to the run day (UTC)**, so the seed stays useful whenever it's run: flights on each of the next 14 days; hotel availability from today to today + 90 days. A re-run on a later day adds only the new days' flights (and that's fine: idempotency is per date).
+5. **One shared demo password** from a new environment variable `DEMO_PASSWORD` (required by the demo seed only; validated with the project's password rule; the seed fails fast with a clear message if it's missing or too weak). Moderators are created with a temporary password and then the seed logs in and performs the forced change to `DEMO_PASSWORD` (ACC-07a), so their accounts are usable at once. Add `DEMO_PASSWORD=` (empty, with a comment) to `.env.example` under `# backend/.env`. Never commit a real value.
+6. **The plan** (`backend/src/seed/demo/demo-plan.ts`, a typed constant; emails on the reserved domain `example.com`):
+   - Airlines (3): `Nile Air` (`NA`), `Gulf Wings` (`GW`), `Euro Connect` (`EC`). One moderator each: `nile.mod@example.com`, `gulf.mod@example.com`, `euro.mod@example.com`.
+   - Each airline: baggage policy (1 free bag, 23 kg, extra bag price and max as the DTO allows) and cancellation policy (e.g. 30 days → 100%, 7 days → 50%, 1 day → 10%; unique `daysBefore`, FLT-09).
+   - Routes (both directions, so round trips work, FLT-12): CAI↔DXB (Nile Air, Gulf Wings), CAI↔LHR (Nile Air), DXB↔JFK (Gulf Wings), LHR↔CDG and CDG↔FRA (Euro Connect), RUH↔CAI (Gulf Wings). One flight per route per day for 14 days, departure at a fixed local time per route (e.g. 08:30, 14:00, 21:15), realistic durations. Use only airports that `GET /api/airports` returns; if an airport in this list is missing, skip its routes and log it.
+   - Each flight: cabins Economy (e.g. 120 seats) and Business (e.g. 20 seats); First on the long-haul DXB↔JFK only. Prices in minor units of the platform currency; Business ≈ 3× Economy.
+   - Hotels (4): `Nile View Hotel` (Cairo), `Marina Bay Suites` (Dubai), `Thames Court` (London), `Seine Garden` (Paris), using city ids from `GET /api/cities`. One moderator each: `nileview.mod@example.com`, `marina.mod@example.com`, `thames.mod@example.com`, `seine.mod@example.com`.
+   - Each hotel: policies (check-in `14:00`, check-out `12:00`, tiers like the airlines), rooms `Standard Double` (2 guests), `Deluxe King` (2), `Family Room` (4), `Suite` (3); each room available from today to today + 90 days.
+   - Users (3): `sara@example.com`, `omar@example.com`, `lina@example.com` (registered through ACC-01 with consent), one with preferred currency `EGP` if `PATCH /api/users/me` allows it.
+   Adjust field names and enums to the real DTOs; keep the shape of the world.
+7. **Logging:** one line per kind at the end (`flights: 196 created, 0 skipped`), and one line per skipped item only when `--verbose` is passed.
+
+## Before you start
+
+1. `git fetch origin`. Every issue without the `bonus` label is closed except PLT-08, TST-01, TST-02, TST-03, PLT-07 and PLT-02 (backlog): check with `gh issue list --state open --json number,title,labels`. If a dependency (#36, #47, #32, #16) is open, stop and report.
+2. `git worktree add ../man2o4ah-PLT-08 -b chore/PLT-08-demo-data-seed origin/develop`; work only there. If the branch exists, stop and report.
+3. `cd backend && npm ci && npm run verify` passes. If not, stop and report.
+4. Read the controllers and DTOs listed in "Context" and write down the exact body of each call before coding.
+
+## Step 1: the client and the plan
+
+`demo-api.ts` (with a unit spec `demo-api.spec.ts`: cookie capture from `Set-Cookie`, cookie sent on the next call, JSON body/headers, non-2xx returned not thrown, using a stubbed `fetch`) and `demo-plan.ts`.
+**Commit:** `chore(seed): add the demo API client and the demo world plan (PLT-08)`
+
+## Step 2: the seed
+
+`demo-seed.ts` (Design §2–§4, §7), `seed-demo-data.ts` (Design §2), `DEMO_PASSWORD` in `.env.example` and in `backend/src/config/validate.ts` as **optional** (the app doesn't need it; only the seed checks it), with a test per rule in `validate.spec.ts` if validate checks anything for it. `package.json`: `"seed:demo": "nest build && node dist/seed/seed-demo-data.js"`.
+Order of work inside `runDemoSeed`: admin login → airlines → airline moderators (+ forced change) → airline policies → flights → cabins → hotels → hotel moderators (+ forced change) → hotel policies → rooms → availability → users. A step that fails stops the seed with a clear error (don't continue with half a world).
+**Commit:** `chore(seed): seed a demo world through the API, re-runnable (PLT-08)`
+
+## Step 3: the test (runs twice)
+
+`backend/src/seed/demo/demo-seed.integration.spec.ts`:
+- Build the whole app on the in-memory database with `createTestApp({ imports: [<every feature module of app.module.ts that createTestApp doesn't add>], override })`, faking only external services (`STRIPE_GATEWAY` → `FakeStripeGateway`, the FX client → its fake). Seed reference data (`ReferenceDataSeedService.run()`) and create the admin as ACC-18's seed does (call its service, or `loginAs`-style insert if that's what ACC-18's own test does).
+- `await t.app.listen(0)` and point `DemoApi` at it.
+- **Run 1:** `runDemoSeed` → `created` counts equal the plan (e.g. 3 airlines, 3 + 4 moderators, the expected flight count for 14 days, …), `skipped` all 0.
+- **Run 2:** every `created` is 0; `skipped` equals run 1's `created`; the collection counts (`airlines`, `flights`, `hotels`, `rooms`, `users`, `room_nights`… whatever exists) are identical before and after.
+- **Reference data untouched:** the counts of `countries`, `cities`, `airports`, `attractions`, `currencies` are the same before run 1 and after run 2.
+- **Usable:** after run 1, logging in as `nile.mod@example.com` with `DEMO_PASSWORD` gives 200 and no forced change; `GET /api/flights/search` CAI→DXB for tomorrow returns ≥ 1 result; `GET /api/hotels/search` for Cairo returns `Nile View Hotel`.
+- **Fails clearly:** without `DEMO_PASSWORD` the seed throws a message naming the variable.
+Use a long hook timeout (the seed makes a few hundred calls).
+**Commit:** `test(seed): prove the demo seed is complete and re-runnable (PLT-08)`
+
+## Step 4: README
+
+In "Database" (or a new "Demo data" subsection): the three commands in order, what `seed:demo` creates, that it's re-runnable and never touches reference data, the `DEMO_PASSWORD` variable, and a table of demo accounts (email, role, provider). The password itself is **not** in the README; it says "the value of `DEMO_PASSWORD` in your `backend/.env`".
+**Commit:** `docs(readme): document the demo seed and the demo accounts (PLT-08)`
+
+## Step 5: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Related Requirement: PLT-08`; `Prompt` = Kareem's message copied exactly plus `[Attached: PLT08_EXECUTION.md]` and its full content). Never edit earlier entries.
+**Commit:** `chore(ai): log the PLT-08 prompt (PLT-08)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `npx vitest run src/seed` | 0 failed; the integration spec ran both runs |
+| G3 | `git diff --name-only origin/develop...HEAD` | only `backend/src/seed/**`, `backend/src/config/validate.ts` (+ spec, only if changed), `backend/package.json` (one script), `.env.example` (one block), `README.md`, `ai-prompts/kareem.txt` |
+| G4 | `git grep -n "getModelToken\|InjectModel" -- backend/src/seed/demo` | no output (the seed uses the API only) |
+| G5 | `git grep -nE "DEMO_PASSWORD=.+" -- . ':!*.md'` | no output (no real value committed) |
+| G6 | Negative gate: in `runDemoSeed`, remove the room-name check; run the integration spec | run 2 fails (rooms duplicated); restore |
+| G7 | `git log --format=%s origin/develop..HEAD` | 5 commits, each ending in `(PLT-08)` |
+| G8 | `git status --porcelain` | empty |
+
+## Optional manual check (Kareem, on your machine)
+
+With `MONGODB_URI` pointing at a **dev** database (never the one graders use, unless you mean to), `DEMO_PASSWORD` and the admin variables set: `npm run seed:reference && npm run seed:admin && npm run seed:demo`, then `npm run seed:demo` again → all "0 created". Open `/api/docs`, log in as a demo moderator, list your flights.
+
+## Constraints
+
+- Don't change any module under `backend/src/modules/`, `common/`, CI, or the fakes. If an endpoint the seed needs doesn't exist or doesn't behave as documented, **stop and report** (that's a bug for its owner), don't work around it with direct database writes.
+- Never write to Atlas from a test. The agent never runs the seed against a real database; that's Kareem's manual step.
+- No new package. Stage files by name. Don't push. Don't open a PR.
+
+## Report
+
+- Branch, worktree, commits; each gate in one line.
+- The created counts of run 1 and the time it took.
+- Every place the real API differed from this file's plan (field names, enums, an endpoint missing for idempotency) and what you did.
+
+How the output was used:
+Built the PLT-08 demo seed on chore/PLT-08-demo-data-seed: a fetch-based API client with a cookie jar, a typed demo world plan, an idempotent runDemoSeed over the public API, the seed:demo script and DEMO_PASSWORD in .env.example, an integration test that runs the seed twice, and a README section with the demo accounts; commits: chore(seed) x2, test(seed), docs(readme), chore(ai).
+================================================
+Date: 2026-11-20
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-08
+
+Prompt:
+Two checks, then push and open the PR for PLT-08.
+
+1. The reused worktree. You reset an existing worktree to origin/develop instead of creating
+   ../man2o4ah-PLT-08. Tell me which branch it held before the reset, and whether anything was
+   lost. Check with `git reflog` in that worktree: list any commits that existed before the reset
+   and are not on any remote branch (`git branch -r --contains <sha>` is empty), and say whether
+   there were uncommitted changes. Don't recover or change anything; just report. If something
+   unpushed was lost, stop here and wait for me.
+
+2. Line endings. Run `git ls-files --eol .env.example backend/src/seed README.md`. Every file must
+   be `i/lf`. If any file you touched shows `i/crlf`, convert it back to LF (keep the content
+   identical), run `npm run format:check` in backend/, and commit it as
+   `chore(seed): restore LF line endings (PLT-08)`. Don't touch files you didn't change.
+
+3. If both checks are clean: push `chore/PLT-08-demo-data-seed` and open a PR into develop titled
+   `PLT-08: Demo data seed`. Fill the PR template. The description must include:
+   - What it adds: `npm run seed:demo`, a re-runnable demo world created through the HTTP API (no
+     direct model writes), never touching reference data or the admin.
+   - Run 1 counts: 3 airlines, 4 hotels, 7 moderators, 196 flights, 420 cabins, 16 rooms,
+     16 availability ranges, 3 users; about 14 s; run 2 creates nothing (the integration spec
+     proves it).
+   - The new optional variable `DEMO_PASSWORD` (`.env.example`); the seed fails fast without it.
+     The README lists the demo accounts but never the password.
+   - Deviations from the plan, one line each: flights start tomorrow (no past departures);
+     availability uses PATCH `SET_RANGES` because POST rejects overlaps; existing providers are
+     found by logging in as their moderator (no list endpoint), so `DEMO_PASSWORD` must stay the
+     same between runs; city slugs used directly; `DemoApi.fork()` for one cookie jar per actor.
+   - Gates: all pass; verify 205 files / 3,341 tests. Note that `itinerary-pdf.api.spec.ts` can
+     time out under full-suite load and passes alone (known, not caused by this PR).
+   - Run order for setup: `seed:reference` → `seed:admin` → `seed:demo`.
+   Add a prompt-log entry for this message to ai-prompts/kareem.txt first (course format,
+   append only) and commit it as `chore(ai): log the PLT-08 push prompt (PLT-08)` before pushing.
+
+Report: the worktree findings, the eol result, the PR link, and CI status once it starts.
+
+How the output was used:
+Checked the reused worktree (no unpushed work lost: the branch it held, claude/execute-this-1a6c9e, sits on origin/main) and the line endings (all files i/lf in the index), then pushed chore/PLT-08-demo-data-seed and opened the PLT-08 PR into develop.
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+execute this . work from the latest develop!
+if there was any task take you can just leave it working and go next then let it work in the back ground  and continue untill the point you will need it  then wait again, if this isn't clear ask me to clarify it more.
+
+[Follow-up during the run]
+in the exec file you shuold report the problem only: i want you to check and report the problem to another opus agent to design how to solve it, then this agent pass it to anothe sonnet agent to execute it,( this proces should happen the moment you find a problem not after you finish  so we save tiem)
+and the final report should be the problem/bug and how did you fix it 
+ok?
+
+[Follow-up during the run]
+can you go faster, and i don't wan to over engineer this, try to finish as much as you can, the priority is all end points work as they should . if you can estemate that  the current flow will finish in 15 more mins then ignore . and care about the token usage also
+
+[Follow-up during the run]
+continue but try to optimize token usage , like shorter prompts , and fewer agents , i don't mind taking time but i want it to finish with the pro 5 hours session limit
+
+[Follow-up during the run]
+first thing the defualt branch that we should branch from is develop not main.
+and did you finish scaaning ?
+
+[Follow-up during the run]
+ok the faster comman, i'm  was on a rush so i asked you to be faster, now i have time so it's ok to take your time
+
+[Attached: TST03_EXECUTION.md]
+# Execution — TST-03: System stress and failure check
+
+A harsh, whole-system check run **after every mandatory feature is merged and PLT-08 (demo seed) is in**, before TST-01. It looks for what makes the system **fall**: oversold seats, double charges or refunds, stuck bookings, data leaking between users, 500s, crashes, unbounded queries. It isn't a hunt for exotic edge cases; each attack below is something real users, a busy day, or a careless client will do.
+
+**Report, don't fix.** Every finding becomes a **failing reproduction test** plus a row in the report with its cause in the code. It is fixed afterwards on its own branch, starting from that test (the team rule: every bug fix starts with a failing test). Probes that pass stay as stress regression tests.
+
+## Before you start
+
+1. Kareem has created the issue **TST-03: System stress and failure check** (package 1, module `test/stress`). If `gh issue list --search "TST-03 in:title"` finds nothing, stop and report.
+2. `git fetch origin`. All mandatory issues are closed (only TST-01, TST-02, TST-03, PLT-07 and bonus issues may be open), and PLT-08 is merged. If not, stop and report.
+3. `git worktree add ../man2o4ah-TST-03 -b test/TST-03-system-stress-check origin/develop`; work only there. If the branch exists, stop and report.
+4. `cd backend && npm ci && npm run verify` passes. Note `git rev-parse --short origin/develop` for the report.
+
+## What "correct" means (read before writing any probe)
+
+Every probe asserts the **documented** behaviour, never what the code happens to do:
+- `docs/ai/skills/travel-platform/references/requirements.md` (the workbook, authoritative), `domain-rules.md`, `bookings-payments.md` (lifecycle, holds, expiry, webhook, refunds, §10 "Proving concurrency"), `auth.md`, `endpoints.md`, `backend.md` (errors: every error is JSON `{ code, message, details? }`, never a raw Mongoose error, never 200 with an error), `docs/DECISIONS.md`, `docs/database/data-model.md` (invariants, e.g. seat totals, one refund per booking, unique indexes).
+- When the docs don't say what should happen, the probe asserts only "no 5xx, no corrupted data" and the report lists it under "Undocumented behaviour" for Kareem.
+
+## The harness
+
+New `backend/vitest.config.stress.ts` (copy `vitest.config.e2e.ts`; `include: ['**/*.stress-spec.ts']`; `testTimeout: 180_000`; `hookTimeout: 300_000`; `fileParallelism: false`) and the script `"test:stress": "vitest run --config ./vitest.config.stress.ts"`. Check that `vitest.config.ts` and `vitest.config.e2e.ts` don't pick up `*.stress-spec.ts` (CI never runs the stress suite: it's slow and some specs are red on purpose until fixed).
+
+New `backend/test/stress/support/stress-app.ts`:
+- The **whole app** on the in-memory replica set: `createTestApp({ imports: [<every feature module app.module.ts imports that createTestApp doesn't add>], override })`. Only external services are faked: `STRIPE_GATEWAY` → `FakeStripeGateway`, the FX client → its fake. Modules talk to each other for real.
+- Reference data seeded (`ReferenceDataSeedService.run()`), one `exchange_rates` document, the admin created as ACC-18 does, and the **demo world** created by running PLT-08's `runDemoSeed` against `t.app.listen(0)` (so the stress starts from the same world graders see).
+- Helpers: `as(role|email)` returning a logged-in Supertest agent; `world` ids; `parallel(n, fn)` (fires `n` calls at once with `Promise.allSettled` and returns the results); `jobs` handles to run each scheduled job's method directly (`flight-hold-expiry.job.ts`, `hotel-hold-expiry.job.ts`, `flight-completion.job.ts`, `hotel-stay-completion.job.ts`, `post-image-cleanup.job.ts`, `FlightsService.markFlightsDeparted(now)`, the FX refresh); `payWebhook(paymentIntentId, type)` and `refundWebhook(...)` posting signed fake events to `/api/payments/webhook`.
+- `invariants()`: one function that checks the global invariants after every attack and returns the broken ones:
+  - every cabin: `total = available + held + booked`, none negative (data model §4.1);
+  - every room night: at most one reservation or block per `{ roomId, date }` (§4.2), and every `pending_payment`/`confirmed` reservation has all its nights;
+  - every booking's status is one of the lifecycle states, and only allowed moves happened (GEN-11): no `confirmed` booking without a `succeeded` payment, no `pending_payment` booking past its hold after an expiry job run;
+  - payments: at most one per booking; refunds: at most one per booking, `amountMinor ≤` the paid amount;
+  - every amount uses the platform currency (PAY-04).
+
+Findings are collected, not thrown: each probe pushes `{ area, attack, expected, got, broken: string[] }` and the spec asserts at the end. Results also go to `backend/test/stress/out/<area>.json` (gitignored).
+
+## The attacks
+
+One spec file per area: `backend/test/stress/<area>.stress-spec.ts`. Each bullet is at least one probe. Use the demo world; create extra data through the API, or through models **only** to set up a state the API can't reach quickly (e.g. a hold already in the past), and say so in a comment.
+
+### A. Races on money and inventory (`races`)
+1. Last seats: a cabin with 3 seats left, 10 users hold 1 seat each in parallel → exactly 3 holds, 7 × 409 `SEATS_UNAVAILABLE`, invariants hold.
+2. Same with 2 seats each on a cabin with 5 left; and the outbound of a round trip sold out while its return isn't → the whole round-trip hold fails, nothing held.
+3. Overlapping stays: 8 parallel holds on the same room for overlapping dates → exactly one wins; adjacent stays (check-out = next check-in) both win.
+4. Payment start: one user fires 5 parallel `POST /api/payments` for one booking → one payment, one PaymentIntent.
+5. Webhook vs expiry: a pending booking at the end of its hold; run the expiry job and deliver `payment_intent.succeeded` at the same time, 20 rounds → each round ends either `confirmed` (job lost) or `expired` + a `late_payment` refund (job won), never both, never neither; seats/nights consistent.
+6. Double cancel: 5 parallel `POST …/cancel` on one confirmed booking → one cancellation, one refund, one notification.
+7. Cancel vs completion: cancel at the moment the completion job runs (departure just passed) → the documented rule (cancellation after departure blocked) holds; no refund on a completed booking.
+8. Provider cancels a flight (FLT-06) while users hold, pay and cancel on it in parallel → every confirmed booking cancelled with 100%, every pending one expired, no booking left confirmed on a cancelled flight.
+9. Register the same email 5 times in parallel → one account. Like a post 10 times in parallel → one like, `likeCount` 1. Report the same content 5 times in parallel → the documented rule (one report per user per item, if stated).
+10. Moderator edits a flight's cabin seats (FLT-05) while users hold seats → the documented rule (can't go below held + booked) holds; invariants hold.
+
+### B. Time and the lifecycle (`lifecycle`)
+1. Hold boundaries: pay at `holdExpiresAt − 1 s` → allowed; at `+1 s` → 409 `HOLD_EXPIRED`; run the job → booking `expired`, seats/nights released, PaymentIntent cancelled.
+2. Late payment: the hold expired, then `payment_intent.succeeded` arrives → not confirmed, full `late_payment` refund, user notified.
+3. Failed payment then retry inside the hold → confirmed once; failed payment and the hold expires → expired, nothing charged.
+4. Out-of-order webhooks: `payment_failed` after `succeeded` → stays succeeded; a refund `failed` after `refunded` → follows PAY-03's table; replayed old events → no change.
+5. Jobs run twice at once (two app instances): run each job method twice in parallel → every transition happens once, one event each (idempotent handlers).
+6. Time zones: a flight departing 23:30 local in one zone and arriving next day in another; search by the local departure date (FLT-11) finds it on the right day; DST change weekend in Europe/London (create flights across the last Sunday of March/October) → stored UTC correct, displayed local correct (GEN-06).
+7. Dates: `2026-02-29` (not a leap year), `2028-02-29`, check-in = check-out, check-out before check-in, a stay of 1 night, a stay at the documented maximum and maximum + 1.
+
+### C. Who can do what (`access`)
+1. Every route in `endpoints.md` (non-bonus): without a cookie → 401 (public ones excepted); with an expired access token → 401 then a refresh works (ACC-06/ACC-19); after logout → 401 with the old cookie; after the user is suspended → 403/401 per `auth.md`, and their existing session no longer works; after a password change → every old session revoked.
+2. Role escalation: a USER calls every admin and moderator route → 403. An airline moderator of airline A calls every airline-moderator route with airline B's ids → 403/404 per `endpoints.md`; same for hotel moderators.
+3. Someone else's data (ACC-11): user B calls every "Own" route with user A's booking/payment/refund/itinerary/notification ids → 404, never 200, never 403 that reveals existence. Private itineraries invisible in public search.
+4. Mass assignment: send `role`, `status`, `userId`, `providerId`, `totalMinor`, `price`, `isActive`, `mustChangePassword`, `createdAt` in every create/update body → 400 (`forbidNonWhitelisted`) and nothing changed.
+5. Injection: query params like `q[$ne]=x`, `status[$gt]=`, `page[$gt]=0`, `id={"$ne":null}`, JSON bodies with `{ "$where": … }` or `{ "email": { "$ne": null } }` on login → 400, never a match; regex-heavy search strings (`.*.*.*.*`, `(a+)+$`, 5 000 characters) on every search → answers fast (< 1 s) and safely (regex escaped).
+6. Lockout (ACC-05): 5 wrong passwords in parallel → locked once; the 6th correct password during the lock → locked message; a successful login after the lock resets the counter.
+
+### D. Bad input that crashes servers (`input`)
+1. Malformed JSON, an empty body with `Content-Type: application/json`, a 2 MB and a 20 MB JSON body, an array instead of an object, deeply nested JSON (depth 10 000) → 400/413 with our JSON error shape, never 500, and the app keeps answering.
+2. Every `:id` route with `abc`, `000000000000000000000000`, a 25-char hex string, `%00` → 400 or 404, never 500.
+3. Strings at max length and max + 1 for every documented limit; emoji and RTL text in names, posts, comments; `NaN`, `Infinity`, `-0`, `1e309`, `2^53` in every number field; numbers as strings.
+4. Pagination: `limit=0`, `limit=-1`, `limit=1000000`, `page=999999`, `page=1.5` → validation errors or the documented cap, never an unbounded query.
+5. Uploads (GEN-08, every upload route): a PNG renamed `.exe`, an `.exe` renamed `.png` (signature check), a 0-byte file, a file just over the size limit, a filename `../../etc/passwd`, many files at once beyond the documented count → rejected cleanly; nothing written outside the upload folder; no orphan files after a rejected upload.
+6. Unknown routes and wrong methods → 404/405 JSON, not HTML.
+
+### E. External failures (`externals`)
+1. Stripe down: `FakeStripeGateway.failNext` on `createPaymentIntent` → a clean 5xx/502 with our error shape per the docs (or what PAY-01 specifies), no payment document left half-made, retry later works.
+2. Stripe refund fails → the cancellation stays, the refund is `failed` and visible, the user is told (PAY-03).
+3. Stripe cancel fails at hold expiry → booking still expires; the late-payment path covers a last-second success.
+4. FX API down at the daily refresh → the last rates stay in use (ITN-18); with no rates at all → the documented 503 `RATES_UNAVAILABLE`, not a crash, on every endpoint that converts.
+5. Webhook with a bad signature, no signature, a huge body, an unknown event type, an event for an unknown PaymentIntent → 400 or 200 as documented, nothing changed.
+
+### F. Partial failures inside one operation (`atomicity`)
+For each multi-step write (flight hold, hotel hold, confirmation, cancellation with inventory release, flight cancellation by provider, itinerary clone with images, room delete/deactivate, provider deactivation, account deactivation): make the **second** internal step fail once (`vi.spyOn(t.moduleRef.get(<Service>), '<method>').mockRejectedValueOnce(new Error('boom'))`) and assert: the request fails cleanly, **nothing** from the first step remains (the transaction rolled back), invariants hold, and the same request succeeds afterwards. Also: after the failure, the process still serves requests (no unhandled rejection; listen for `unhandledRejection` during the spec and fail if one fires).
+
+### G. Data integrity across modules (`integrity`)
+1. Deactivate a provider (ACC-15) with confirmed and pending bookings → hidden from search, can't be booked, existing confirmed bookings stay valid, pending ones follow the docs.
+2. Deactivate a user (ACC-12) with an upcoming confirmed booking → blocked; without one → posts and public itineraries hidden, comments/reviews show "Deleted user".
+3. Delete/deactivate a room with future reservations → the documented rule (blocked or allowed with consequences) holds; no reservation points to a missing room.
+4. Edit a flight's times (FLT-05) after bookings → passengers notified, booking segments updated, e-ticket shows the new times.
+5. Clone a public itinerary (ITN-21), then delete the original and its images → the clone and its copied images still work.
+6. Each event delivered twice (notifications, audit, booking confirmation, refund updates) → one effect each.
+7. Reference data is read-only: no route creates, edits or deletes countries, cities, airports, attractions or currencies.
+
+### H. Load and query shape (`load`)
+Turn on the profiler on the in-memory database (`db.setProfilingLevel(2)`) for this spec. Create volume through models (test-only, documented in the spec): 5 000 flights over 60 days across the demo routes, 1 000 hotels with 4 rooms each and 90 days of availability, 2 000 users, 5 000 bookings in mixed states, 3 000 posts, 500 itineraries.
+1. 50 concurrent requests, 5 rounds, on: flight search (one-way and round trip), hotel search, hotel availability, public itinerary search, blog list/search, admin bookings list, notifications list → no errors; record p50/p95 per endpoint. Budget: p95 < 500 ms on the in-memory database (report anything above; it isn't a hard failure unless > 2 s).
+2. From the profiler: every query those endpoints ran on a collection with > 1 000 documents uses an index (`planSummary` not `COLLSCAN`), and no endpoint runs more than ~20 queries for one page (an N+1 sign). List each violation with the query shape and the index that would fix it.
+3. Every list endpoint caps `limit` (no endpoint returns 5 000 items).
+4. The hold-expiry jobs with 2 000 expired holds → finish in batches (§5: batches of 100) and leave nothing behind.
+
+### I. Restart safety (`restart`)
+1. Close the app in the middle of a flow (hold created, payment started) and create a fresh app on the same database → the hold expires on schedule, the webhook for that payment still confirms or refunds correctly, nothing is stuck.
+2. Indexes: on a fresh app, every unique index the data model lists exists (`indexes.spec.ts` covers declarations; this checks the live database after start).
+
+## Diagnose and report
+
+1. `cd backend && npm run test:stress`. Expected: some specs fail. That's the point.
+2. For every failure: reproduce it alone, read the code, and find the **cause** with `file:line`. Then decide:
+   - **Probe wrong** (bad setup, wrong expectation, the docs say otherwise) → fix the probe; list it under "Probe corrections".
+   - **Real finding** → keep the probe as a **focused failing reproduction**: move it into `backend/test/stress/findings/<id>-<short-name>.stress-spec.ts` with a header comment: finding id (`S-01`…), severity, the rule it breaks (quote it), the cause (`file:line`), and a one-line suggested fix. It must fail today and pass once the bug is fixed.
+3. Severity:
+   - **CRITICAL**: money or inventory wrong (oversell, double charge/refund, lost refund), another user's data readable or changeable, privilege escalation, data corruption.
+   - **HIGH**: a 500/crash/unhandled rejection, a booking or payment stuck in a state forever, partial writes after a failure, an unbounded query.
+   - **MEDIUM**: wrong status code or error code, a documented rule not enforced without data loss, p95 over budget, missing index on a large collection.
+   - **LOW**: inconsistencies (messages, field names) and undocumented behaviour.
+4. Write `docs/qa/stress-report.md`:
+```
+# System stress and failure check — <date>, develop <short sha>
+
+## Summary
+<n> probes in <areas> areas. Findings: CRITICAL <c>, HIGH <h>, MEDIUM <m>, LOW <l>. Invariants broken after any attack: <yes/no>.
+
+## Findings (most serious first: CRITICAL, HIGH, MEDIUM, LOW)
+| ID | Severity | Area | What breaks (one sentence) | Rule broken | Cause | Reproduction |
+| S-03 | CRITICAL | races | 10 parallel holds on 3 seats gave 4 holds | data model §4.1 total = available + held + booked | seat-inventory.ts:88 reads then writes | test/stress/findings/S-03-oversell.stress-spec.ts |
+
+## Load results
+| Endpoint | p50 | p95 | queries/page | COLLSCAN on |
+
+## Undocumented behaviour (Kareem decides)
+## Probe corrections
+## What held up (one line per area)
+```
+**Commit order:** the harness, then each area's specs, then the findings and the report, as below.
+
+## Commits
+
+1. `test(stress): add the whole-system stress harness and invariants (TST-03)`
+2. `test(stress): attack races, lifecycle and access (TST-03)` (areas A–C)
+3. `test(stress): attack input, externals, atomicity and integrity (TST-03)` (areas D–G)
+4. `test(stress): measure load and restart safety (TST-03)` (areas H–I)
+5. `test(stress): keep each finding as a failing reproduction (TST-03)`
+6. `docs(qa): add the system stress report (TST-03)`
+7. `chore(ai): log the TST-03 prompt (TST-03)` (course format, `Related Requirement: TST-03`, prompt copied exactly plus `[Attached: TST03_EXECUTION.md]` and its content)
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 (the stress suite isn't part of it) |
+| G2 | `npx vitest run --reporter=verbose 2>&1 \| grep -c "stress-spec"` and the same with `--config ./vitest.config.e2e.ts` | `0` and `0` |
+| G3 | `npm run test:stress` | runs to the end; the only failing specs are under `test/stress/findings/` |
+| G4 | each findings spec, run alone | fails, with a message naming the broken rule |
+| G5 | the report's counts match the findings folder and the JSON files | equal |
+| G6 | every finding row has severity, rule, cause `file:line`, reproduction path | no empty cell |
+| G7 | `git diff --name-only origin/develop...HEAD` | only `backend/test/stress/**`, `backend/vitest.config.stress.ts`, `backend/package.json` (one script), `.gitignore` (one line), `docs/qa/stress-report.md`, `ai-prompts/kareem.txt` |
+| G8 | `git log --format=%s origin/develop..HEAD` | 7 commits, each ending in `(TST-03)` |
+| G9 | `git status --porcelain` | empty |
+
+## Constraints
+
+- **No product code changes** (`backend/src/**`, other modules' tests, `common/`, the fakes, CI, docs except the report). The fixes come afterwards, starting from the reproduction tests.
+- Never call Stripe, FXRatesAPI or Atlas. Everything runs on the in-memory database with the fakes.
+- Never weaken an assertion to turn a real finding green. A probe changes only when it was wrong, and each change is listed.
+- No new package. Stage files by name. Don't push. Don't open a PR.
+
+## Report back (to Kareem, in chat)
+
+- Branch, worktree, commits; the audited `develop` commit; each gate in one line.
+- The summary block, the CRITICAL and HIGH findings in one line each, and the count per area.
+- What you couldn't attack and why.
+
+How the output was used:
+Built the whole-system stress harness and 58 probes in 9 areas on test/TST-03-system-stress-check (from develop), kept 11 findings (S-01 to S-11) as failing reproductions, and wrote docs/qa/stress-report.md. Following the follow-up instructions, each finding went to an Opus agent for a fix design and a Sonnet agent for a test-first implementation on its own fix/TST-03-* branch (5 branches); every reproduction passes on its fix branch. Nothing pushed, no PR.
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+Push and open PRs
+
+How the output was used:
+Pushed test/TST-03-system-stress-check and the five fix/TST-03-* branches and opened one PR per branch into develop (the stress check PR first; the fix PRs build on its harness commit).
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-03
+
+Prompt:
+ok i want you to close them and compine them into one pr and  give me the report here in chat , and finally is the so the stress-app.ts is like an e2e test ?
+
+[Follow-up]
+if the pr didn't pass the ci fix the problem
+
+How the output was used:
+Merged the five fix branches into test/TST-03-stress-check-and-fixes with the stress check, re-ran the stress suite (20/20 files) and npm run verify (3,439 tests), opened one PR into develop and closed PRs #226-#231 in its favour.
+
+================================================
+Date: 2026-11-21
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-02
+
+Prompt:
+@"C:\Users\karee\Downloads\TST02_EXECUTION.md" @"C:\Users\karee\Documents\.GIU\SE Archeticture\lectures\Final_ SP1_Reviewed_Requirements.xlsx - Mandatory.csv"
+execute this . work from the latest develop!
+if there was any task take you can just leave it working and go next then let it work in the back ground  and continue untill the point you will need it  then wait again, if this isn't clear ask me to clarify it more. at the same time try to optimize token usage so don't make the prompts big, and use fewer agents, there is already a stress test files and we do it, so focus on making all the endpoints work , i also gave you a csv with all the endpoint, that should be in swager
+
+[Attached: TST02_EXECUTION.md]
+# Execution — TST-02: Swagger completeness and smoke audit
+
+A one-off audit (re-runnable after fixes) run **after all mandatory endpoints are merged and the final check is done, before PLT-07 (Milestone 1 release)**. Bonus requirements (`[B]`) are out of scope.
+
+Graders open Swagger UI (`/api/docs`) and test **each requirement on its own**. This audit proves three things, and reports instead of fixing:
+1. **Present:** every mandatory requirement that a grader can test through the API has at least one Swagger operation that names it, and every non-bonus route in `endpoints.md` is in Swagger.
+2. **Works:** each of those operations answers correctly for a realistic request a grader would send, and fails cleanly (4xx with our error shape, never 5xx/501) for the obvious wrong ones.
+3. **Explained:** every gap or failure is reported with *what* fails, *why* (the cause found in the code), and the file and line, so it can be fixed straight away.
+
+**This run changes no product code.** It adds audit tooling under `backend/test/audit/`, one npm script, one Vitest config and the report. The problems are fixed afterwards, starting from the report.
+
+## Before you start
+
+1. Kareem has created the GitHub issue **TST-02: Swagger completeness and smoke audit** (package 1, module `test/audit`). If `gh issue list --search "TST-02 in:title"` finds nothing, stop and report.
+2. `git fetch origin`, then `git worktree add ../man2o4ah-TST-02 -b test/TST-02-swagger-audit origin/develop`; work only there. If the branch exists, stop and report.
+3. In `backend/`: `npm ci`, then `npm run verify` must pass on this fresh `develop`. If it doesn't, stop and report (the audit needs a green baseline).
+4. Note the `develop` commit (`git rev-parse --short origin/develop`): the report states which commit it audited.
+
+## Sources of truth (read these first, in this order)
+
+| What | Where | Use |
+|---|---|---|
+| The requirements (the course workbook, verbatim) | `docs/ai/skills/travel-platform/references/requirements.md` | The list to audit: every `[M]` line. Skip `[B]`. |
+| Requirement → ticket map, and which requirements are frontend-only | the chat skill `docs/ai/chat-skill/SKILL.md`, section "15.9 Requirement → ticket map" | Rows whose ticket column is `—` with a note "Frontend: …" are **frontend-only** (today: ACC-10, GEN-03, GEN-04, GEN-14, GEN-15, GEN-16, GEN-17). They're listed in the report as "not API-testable", not as failures. |
+| The routes graders test | `docs/ai/skills/travel-platform/references/endpoints.md` | Every row not marked `(B)` must exist in Swagger with the same method and path. |
+| Which module serves what | `docs/ai/skills/travel-platform/references/modules.md` | The module column of the catalog. |
+| Roles, cookies, error shape | `references/auth.md`, `references/backend.md`, `backend/src/common/errors/` | How to log in and what a correct error looks like. |
+| Domain rules | `references/domain-rules.md`, `references/bookings-payments.md`, `docs/database/data-model.md` | What "works" means for each requirement. |
+| Test support | `backend/test/support/` (`createTestApp`, `loginAs`, `clearCollections`, `mongo-memory`), `backend/test/fakes/` | Building the app and logging in. |
+
+If two sources disagree, follow: requirements.md > DECISIONS.md > data model > endpoints.md > code, and **record the disagreement in the report** (section "Doc conflicts"); don't resolve it.
+
+## Step 1: the catalog
+
+New `backend/test/audit/requirements-catalog.ts`: one typed entry per `[M]` requirement, built by reading the sources above **and the controllers** (`git grep -n "@ApiOperation" -- backend/src`).
+
+```ts
+export type AuditKind = 'api' | 'frontend-only';
+
+export interface CatalogOperation {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** OpenAPI path, e.g. '/api/flights/{id}' */
+  path: string;
+}
+
+export interface CatalogEntry {
+  id: string;                 // 'FLT-02'
+  kind: AuditKind;
+  /** Why it is frontend-only, from §15.9's note. Only for 'frontend-only'. */
+  note?: string;
+  /** The operation(s) a grader opens in Swagger to test this requirement. At least one for 'api'. */
+  operations: CatalogOperation[];
+  /** The module that serves the main operation (modules.md). */
+  module: string;
+}
+
+export const CATALOG: CatalogEntry[] = [ /* … */ ];
+```
+
+Rules for choosing `operations`:
+- A requirement that **is** an endpoint (e.g. ACC-08 → `PATCH /api/auth/change-password`) lists that endpoint.
+- A requirement that is a **rule inside other endpoints** (e.g. FLT-12 round trips, FLT-15 sorting, HTL-18 all-or-nothing hold, PAY-04 single currency, GEN-05 pagination, GEN-06 local times, ACC-11 ownership) lists the one to three operations where a grader would see the rule work. Take them from §15.9's ticket column and the controllers.
+- A requirement that is a **background job or event** with no endpoint of its own (e.g. hold expiry, booking completion, notifications on events) lists the operation where its **result** is visible (e.g. `GET /api/flight-bookings/{id}` shows `expired`; `GET /api/notifications` shows the notification).
+- If you can't find any operation for an `api` requirement, still add the entry with `operations: []`. That's a finding (step 4 reports it), not a reason to drop it.
+
+Also export `ENDPOINTS: CatalogOperation[]`: every non-`(B)` row of `endpoints.md`, path converted to OpenAPI form (`/api` prefix kept, `:id` → `{id}`).
+
+**Commit:** `test(audit): catalog every mandatory requirement and its Swagger operations (TST-02)`
+
+## Step 2: the Swagger completeness audit (static)
+
+New `backend/vitest.config.audit.ts` (copy `vitest.config.e2e.ts`; `include: ['**/*.audit-spec.ts']`; `testTimeout: 120_000`; `hookTimeout: 300_000`; `fileParallelism: false`), and in `backend/package.json` scripts: `"test:audit": "vitest run --config ./vitest.config.audit.ts"`. These two audit specs **never run in CI** (`vitest.config.ts` doesn't include `*.audit-spec.ts`; check it).
+
+New `backend/test/audit/support/audit-app.ts`: builds the **whole** app for the audit:
+- `createTestApp({ imports: [<every feature module that src/app.module.ts imports, except the ones createTestApp already adds>], override })`. Read `app.module.ts` and list them; don't import `AppModule` itself (it reads `.env` and Atlas).
+- `override`: only the **external** services are faked: `STRIPE_GATEWAY` → `FakeStripeGateway`, the FX rates client → its fake from `backend/test/fakes/` (or a stub `fetchLatest` as in `fx.parity.spec.ts`). Nothing else is faked: modules talk to each other for real.
+- After compile: run the reference-data seed (`ReferenceDataSeedService.run()`, as `fx.parity.spec.ts` does), and seed one `exchange_rates` document so FX works.
+- `openApi()` returns `SwaggerModule.createDocument(app, <the same DocumentBuilder as setupSwagger in src/app.setup.ts>)`. That document is exactly what Swagger UI shows.
+
+New `backend/test/audit/swagger-coverage.audit-spec.ts`. It **collects** results (never stops at the first failure) into an array of
+`{ check, subject, ok, detail }` and writes them to `backend/test/audit/out/coverage.json` (gitignored folder; add it to `.gitignore` under a TST-02 comment), then asserts at the very end that the array has no failures. Checks:
+
+| # | Check | Pass when |
+|---|---|---|
+| C1 | Every `ENDPOINTS` row is in the document | `doc.paths[path]?.[method.toLowerCase()]` exists |
+| C2 | Every document operation is in `ENDPOINTS` or is a known extra | Extras are allowed but listed (graders may not know them); `/api/health` and `/api/docs*` are ignored |
+| C3 | Every `api` catalog entry has ≥ 1 operation | `operations.length > 0` |
+| C4 | Every catalog operation exists in the document | as C1 |
+| C5 | **The requirement is visible where it's tested:** for each `api` entry, at least one of its operations names the ID in its `summary` or `description` | whole-word match, e.g. `/\bFLT-12\b/` |
+| C6 | Every operation has a `summary`, at least one `tags` entry, and a 2xx response with a schema (or 204, or a file response) | |
+| C7 | Every non-public operation documents 401 (and 403 when the route has `@Roles`) | public = the route works without a cookie (C9 in step 3 is the runtime proof; here read `security` / the documented responses) |
+| C8 | No leftover stubs | `git grep -n "implemented in [A-Z]\+-[0-9]" -- backend/src` (run it with `execSync`) is empty; each hit is a failure naming the ticket |
+
+**Commit:** `test(audit): check Swagger covers every mandatory requirement and route (TST-02)`
+
+## Step 3: the smoke audit (does each one work?)
+
+New `backend/test/audit/endpoint-smoke.audit-spec.ts`, same collect-then-assert style, writing `backend/test/audit/out/smoke.json`. One shared app (`audit-app.ts`), one world built **through the API** like a grader would, in this order (log in with `loginAs` only to create the first admin; everything else through the endpoints whenever an endpoint exists for it):
+
+1. Admin → airline + airline moderator, hotel + hotel moderator (the admin/ACC endpoints).
+2. Airline moderator → cabins/fares, baggage and cancellation policies, two flights (one direct route, one return route) in the future.
+3. Hotel moderator → hotel policies, rooms, availability, images if there's an upload route (use `backend/test/support/image-fixtures.ts`).
+4. Guest → register → log in as a user (cookies from the login response, as a browser would).
+5. User → search flights and hotels, quote, hold, read policies, accept, pay (`POST /api/payments`, then deliver `payment_intent.succeeded` to `/api/payments/webhook` signed with `FAKE_STRIPE_SIGNATURE`), see it confirmed, e-ticket, cancel with refund, refund webhook, notifications.
+6. User → itinerary (days, cities, activities, budget, transport, images, share, public search, clone), blog (post, image, comment, like), report → moderator/admin moderation.
+7. Admin → bookings list, audit log, account actions (suspend/reactivate, reset password, deactivate provider).
+
+Keep the ids each step returns in a `world` object; later probes use them.
+
+**Probes.** For every catalog entry of kind `api`, write one or more probes:
+```ts
+interface Probe {
+  requirement: string;               // 'FLT-22'
+  name: string;                      // 'hold 2 seats on the direct flight'
+  as: 'guest' | 'user' | 'otherUser' | 'admin' | 'airlineMod' | 'hotelMod';
+  method: CatalogOperation['method'];
+  path: string;                      // concrete, e.g. `/api/flight-bookings/${world.bookingId}`
+  body?: unknown;
+  expect: number | number[];         // the status a grader should see
+  check?: (res: Response) => string | null;  // null = fine; else what's wrong in one sentence
+}
+```
+- **Happy probe (required for every `api` entry):** the request the requirement describes, with valid data from `world`, expecting the documented 2xx, and a `check` that asserts the requirement's key promise in the body (e.g. FLT-02: every airport has `iataCode`, `name`, `cityId`, `countryCode`, `timeZone`; FLT-15: results sorted as the requirement says; PAY-04: every amount has the platform currency).
+- **Guard probes (automatic, for every operation in the document):**
+  - G-auth: a protected operation without a cookie → 401 with `code` set; a public one without a cookie → not 401.
+  - G-role: a role-restricted operation with a wrong role → 403 (or 404 where the docs say "Own" means 404).
+  - G-id: every `{id}` path param replaced with `abc` → 400 `VALIDATION_FAILED`.
+  - G-body: every operation with a JSON body, sent `{}` → 400 `VALIDATION_FAILED` (skip operations whose body is all optional; note them).
+  - **Never acceptable anywhere:** 500, 501, a non-JSON error body, a body without `code` on a 4xx.
+- **Rule probes** for the requirements the workbook states as rejections (e.g. ACC-05 lockout after 5 wrong passwords, FLT-03 departure in the past rejected, HTL-18 overlapping stay rejected, PAY-02 payment blocked before acceptance): one probe each, expecting the documented 4xx and `code`.
+
+Run every probe inside `try/catch`; a thrown error becomes a failed result with the message. Each result is
+`{ requirement, probe, method, path, as, expected, got, code, message, ok }`.
+
+**Commit:** `test(audit): smoke-test every mandatory requirement through its endpoints (TST-02)`
+
+## Step 4: run, diagnose, report
+
+1. `cd backend && npm run test:audit`. It will likely fail: that's expected, the JSON files hold the results. If the run itself crashes before writing them (the app doesn't build, the seed fails), fix **only the audit code**; if the crash is in product code, that's the first finding: report it and stop.
+2. **Diagnose every failure.** For each failed check or probe: reproduce it alone (a focused `it.only` or a one-off script), read the controller/service involved, and write the cause in one or two sentences with `file:line`. Classify it:
+   - `MISSING` — no operation for the requirement, or a route from `endpoints.md` absent.
+   - `HIDDEN` — it works, but no operation names the requirement (C5), so a grader can't find it.
+   - `BROKEN` — wrong status, wrong body, 5xx/501, or the requirement's promise not kept.
+   - `DOCS` — Swagger shape problems (C6/C7): missing summary, schema, or error responses.
+   - `AUDIT` — your probe was wrong (bad data, wrong expectation). Fix the probe and re-run; don't report these as product bugs. List them at the end so Kareem can see what you corrected.
+3. Re-run until the only failures left are real ones (`MISSING`, `HIDDEN`, `BROKEN`, `DOCS`).
+4. Write `docs/qa/swagger-audit-report.md`:
+
+```
+# Swagger audit — <date>, develop <short sha>
+
+## Summary
+<N> mandatory requirements: <a> API-testable, <f> frontend-only.
+✅ <x> pass · ❌ <y> fail (MISSING <m>, HIDDEN <h>, BROKEN <b>, DOCS <d>)
+Routes from endpoints.md in Swagger: <k>/<total>. Leftover stubs: <s>.
+
+## Failures (by area, most serious first: BROKEN, MISSING, HIDDEN, DOCS)
+### <area, e.g. Flights>
+| Req | Kind | Operation | What fails | Why (cause) | Where |
+|---|---|---|---|---|---|
+| FLT-12 | HIDDEN | GET /api/flights/search | round trips work, but no summary or description names FLT-12 | the summary names FLT-11 only | flights.controller.ts:57 |
+…
+
+## All requirements
+| Req | Status | Operations | Probes (passed/total) |
+| ACC-01 | ✅ | POST /api/auth/register | 4/4 |
+…
+
+## Frontend-only (not API-testable)
+| Req | Note (§15.9) |
+
+## Routes outside endpoints.md (extras)
+## Doc conflicts
+## Audit corrections (probes I fixed)
+```
+Plain sentences; one row per failure; the "Why" column always has a cause from the code, never just the status code.
+
+**Commit:** `docs(qa): add the Swagger audit report (TST-02)`
+
+## Step 5: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Date`, `Student: Kareem`, `Tool`, `Related Requirement: TST-02`, `Prompt` = Kareem's message copied exactly plus `[Attached: TST02_EXECUTION.md]` and its full content, `How the output was used` = one line). Never edit earlier entries.
+**Commit:** `chore(ai): log the TST-02 prompt (TST-02)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 (the audit specs are not part of it) |
+| G2 | `npx vitest run --config ./vitest.config.ts --reporter=verbose 2>&1 \| grep -c "audit-spec"` | `0` (CI never runs the audit) |
+| G3 | every `[M]` ID in requirements.md is in `CATALOG` exactly once | a small check script prints `0 missing, 0 duplicates` |
+| G4 | every non-`(B)` row of endpoints.md is in `ENDPOINTS` | same check prints `0 missing` |
+| G5 | `npm run test:audit` | runs to the end and writes both JSON files (pass or fail) |
+| G6 | the report's numbers match the JSON files | counts equal |
+| G7 | every ❌ row has a cause and a `file:line` (except MISSING, which names the expected module) | no empty "Why"/"Where" cells |
+| G8 | `git diff --name-only origin/develop...HEAD` | only `backend/test/audit/**`, `backend/vitest.config.audit.ts`, `backend/package.json` (one script line), `.gitignore` (one line), `docs/qa/swagger-audit-report.md`, `ai-prompts/kareem.txt` |
+| G9 | `git log --format=%s origin/develop..HEAD` | 5 commits, Conventional Commits, each ending in `(TST-02)` |
+| G10 | `git status --porcelain` | empty |
+
+## Constraints
+
+- **Report, don't fix.** No change under `backend/src/`, other modules' tests, `common/`, the fakes, CI or the docs (except the new report). A product bug goes in the report with its cause; it is fixed afterwards on its own branch, starting from the report.
+- No new package. Never call Stripe, FXRatesAPI or Atlas: the externals are faked, the database is in memory.
+- Never weaken a check to make the audit pass. A probe may change only when it was wrong (`AUDIT`), and each such change is listed in the report.
+- Stage files by name. Don't push. Don't open a PR. Kareem decides when the report is shared.
+
+## Report back (to Kareem, in chat)
+
+- The branch, worktree and commits; the audited `develop` commit.
+- The summary block of the report, and the failure count per area.
+- The three most serious findings in one line each.
+- Anything you couldn't probe through the API, and why.
+
+[Attached: Final_ SP1_Reviewed_Requirements.xlsx - Mandatory.csv] (the mandatory requirements of the course workbook, 104 rows)
+
+[Follow-up]
+TST-02 issue missing: Create the issue.
+Fix or report: you will work like i said , when you find a problem you will handle the problem to an opus agent to let it design and create and exection file that handle how exaclty the problem should be solved then it should pass it to sonnet agent to execute it, there should be one opus agent that design the execution files and its ok to have multiple ( not too much max 3) sonnet agents to execute. the design agent should have a queue so each now problem/bug should wait in it , because the opus agent will havve to desing it all , if any thing is not clear ask me about it , its better that assuming wrong
+Fix branches: local branch per fix but at the end and after fixing all errors you should merge all those branches together in on branch that we will open pr from
+Exec files: Scratch only
+Grouping: Cluster by area/root cause (Recommended)
+ITN-26 ids: Yes, switch to _id (Recommended)
+Bad id code: chose the right option then tell me in the report , when i said ask me if something isn't clear i meant the plan
+
+How the output was used:
+Created issue #233, built the TST-02 audit on test/TST-02-swagger-audit (catalog of the 104 mandatory requirements, Swagger coverage checks C1-C8, 539 smoke probes) and wrote docs/qa/swagger-audit-report.md (87/97 API-testable requirements pass, 130/130 routes in Swagger); each failure cluster got an Opus fix design and a Sonnet execution on its own fix branch, merged into one branch for the PR.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-02
+
+Prompt:
+push and open PR and tell me how can i open swagger
+
+How the output was used:
+Pushed test/TST-02-swagger-audit-and-fixes and opened PR #234 into develop; explained how to open Swagger UI locally.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: ITN-08
+Prompt:
+Keep new behaviour
+
+How the output was used:
+On test/ITN-08-e2e-reorder-partial-list (from develop 572c1a0): updated the itinerary-to-clone E2E journey to the reorder behaviour of 54f0a34 (a list omitting only trailing days is accepted and keeps them at the end; omitting a middle day is 400). npm run test:e2e: 48/48 pass. Not pushed.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-01
+Prompt:
+ok fix all this and add the e2e to the ci , and tell me how to start swager (because i don't know how
+
+How the output was used:
+On chore/TST-01-e2e-in-ci (on top of test/ITN-08-e2e-reorder-partial-list): added the E2E journeys step (npm run test:e2e) to the backend CI job and updated the README quality gates table. The Swagger ObjectId param fix went to fix/TST-02-swagger-objectid-params.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: TST-02
+Prompt:
+ok fix all this and add the e2e to the ci , and tell me how to start swager (because i don't know how
+
+How the output was used:
+On fix/TST-02-swagger-objectid-params (stacked on chore/TST-01-e2e-in-ci): added @ApiParam({ name: 'id', type: String }) to the 7 handlers whose ObjectId path param showed as a Function schema in the production Swagger UI, with assertions in the payments, refunds and hotel-reviews API specs (they fail without the fix). Found by PLT-07 R6.
+
+================================================
+Date: 2026-11-22
+Student: Kareem
+Tool: Claude Code
+Related Requirement: PLT-07
+Prompt:
+execute this . work from the latest develop!
+if there was any task take you can just leave it working and go next then let it work in the back ground  and continue untill the point you will need it  then wait again, if this isn't clear ask me to clarify it more. at the same time try to optimize token usage so don't make the prompts big, and use fewer agents
+[Attached: PLT07_EXECUTION.md]
+# Execution — PLT-07: Milestone 1 release
+
+Issue #91. Package 1, owner Kareem. TDD not required. **The last ticket before Milestone 1.**
+Run it after PLT-08, TST-03 (CRITICAL/HIGH findings fixed), TST-01 and TST-02 (report reviewed, its failures fixed or accepted by Kareem) are all merged into `develop`.
+
+## Goal
+
+Make `develop` releasable and hand Kareem a checked release. The course's Milestone 1 submission must contain (course §13.1): a fully implemented NestJS backend, MongoDB Atlas integration, a REST API documented with Swagger, a README with setup instructions, an updated `AI_PROMPTS.txt`, and git history showing team contributions; "the backend will be evaluated through Swagger UI".
+
+Done means:
+1. `docs/api/openapi.json` is exported from the app (`references/backend.md` §Swagger: "At each milestone, export `/api/docs-json` to `docs/api/openapi.json`"), by a repeatable command.
+2. The README's setup is complete and **every command in it was run and works**.
+3. `AI_PROMPTS.txt` (the root file the course names) points to every member's log and shows it is current.
+4. A release checklist report (`docs/qa/m1-release-check.md`) with every check's result.
+5. A PR `PLT-07: Milestone 1 release` into `develop`. Then **Kareem** merges `develop` → `main` and tags `m1` (git rule 11: releases are Kareem's; agents never touch `develop`/`main`).
+
+**Out of scope:** product code changes, fixing findings (they must be fixed before this ticket), the frontend, bonus features, deployment (PLT-09).
+
+## Before you start
+
+1. `git fetch origin`. Check, and **stop and report** if any fails:
+   - No open issue without the `bonus` label except PLT-07 itself and PLT-02 (backlog): `gh issue list --state open --json number,title,labels`.
+   - PLT-08 (#89), TST-01 (#90), TST-02, TST-03 are closed or their PRs merged.
+   - CI on the latest `develop` commit is green: `gh api repos/Host173/Man2o4ah/commits/$(git rev-parse origin/develop)/check-runs --jq '.check_runs[] | "\(.name): \(.conclusion)"'` (all success or skipped).
+   - `docs/qa/swagger-audit-report.md` (TST-02) and `docs/qa/stress-report.md` (TST-03) exist on `develop`.
+2. `git worktree add ../man2o4ah-PLT-07 -b chore/PLT-07-milestone-1-release origin/develop`; work only there. If the branch exists, stop and report.
+3. `cd backend && npm ci && npm run verify` (includes E2E since TST-01) passes.
+
+## Step 1: export the OpenAPI document
+
+- `backend/src/app.setup.ts`: extract the document building out of `setupSwagger` into `export function buildOpenApiDocument(app: INestApplication, version: string): OpenAPIObject` (same `DocumentBuilder`: title, version, cookie auth), and make `setupSwagger` call it. **No behaviour change**: Swagger UI shows exactly the same document.
+- `backend/test/openapi/export-openapi.openapi-spec.ts`: builds the whole app on the in-memory database (`backend/test/support/full-app.ts` from TST-01, or `createTestApp` with every feature module; data isn't needed), reads the version from `backend/package.json`, calls `buildOpenApiDocument`, and writes `docs/api/openapi.json` with `JSON.stringify(doc, null, 2) + '\n'`. Then asserts the written file parses, has `openapi`, `info.version`, and ≥ the number of non-bonus routes in `endpoints.md`.
+- `backend/vitest.config.openapi.ts` (`include: ['**/*.openapi-spec.ts']`, long hook timeout) and the script `"openapi:export": "vitest run --config ./vitest.config.openapi.ts"`. CI doesn't run it (check `vitest.config.ts` and the E2E config don't include it).
+- Run `npm run openapi:export`; commit the generated file.
+- Bump `backend/package.json` `version` to `1.0.0` **before** exporting, so the document and Swagger UI say `1.0.0` for M1. (If Kareem's message says another version, use that.)
+**Commit:** `chore(api): export the OpenAPI document for Milestone 1 (PLT-07)`
+
+## Step 2: README, complete and proven
+
+Rewrite only what is missing or wrong; keep the existing structure and the "Team rules" section untouched. The README must let a grader who has never seen the repo go from clone to testing in Swagger:
+1. **Prerequisites:** Node version (`.nvmrc`), npm, a MongoDB Atlas cluster (or any MongoDB 7+ replica set; transactions need a replica set), optional Stripe account in test mode and the Stripe CLI (for payments).
+2. **Environment:** a table of **every** variable in `.env.example` (`backend/.env` and `frontend/.env.local`): what it is, required or optional, how to get it (Atlas connection string and IP access list; `JWT_ACCESS_SECRET` generation; Stripe `sk_test_`/`whsec_`; `DEMO_PASSWORD`; admin seed variables from ACC-18). Values never appear in the README.
+3. **Install and seed, in order:** `npm ci`; `npm run seed:reference`; `npm run seed:admin`; `npm run seed:demo` (all re-runnable).
+4. **Run:** `npm run start:dev` (and `npm run dev:stripe` for payments, already documented), the URLs.
+5. **Testing in Swagger:** open `/api/docs`; log in with `POST /api/auth/login` (the browser keeps the cookie, so later calls are authenticated); the demo accounts table (from PLT-08); a short "try this first" path per area (book a flight: search → quote → hold → policies → accept → pay; with the note that confirming a payment needs `dev:stripe` and a test card `4242 4242 4242 4242`).
+6. **Tests:** `npm test`, `npm run test:e2e`, `npm run verify`, `npm run test:audit` / `npm run test:stress` (manual suites, not in CI), `npm run openapi:export`.
+7. **API reference:** `docs/api/openapi.json` and the Swagger URL.
+8. **Troubleshooting:** the 5 most likely setup errors (Atlas IP not allowed; missing env variable message from `validate.ts`; port 4000 busy; seeds run in the wrong order; Stripe CLI not logged in) with the fix.
+
+**Prove it:** in a **fresh clone** (`git clone` the worktree's branch into a temporary folder), follow the README literally on the in-memory/local setup you can run: every command that doesn't need Atlas or Stripe must run as written (`npm ci`, `npm run build`, `npm test`, `npm run test:e2e`, `npm run verify`, `npm run openapi:export`). Commands that need Atlas or Stripe are listed in the report for Kareem's manual check. Fix the README where a command or a path is wrong.
+**Commit:** `docs(readme): complete the setup and Swagger testing guide for Milestone 1 (PLT-07)`
+
+## Step 3: AI_PROMPTS.txt
+
+Keep the root file's explanation and add an index generated from the folder (a small script you run once; don't commit the script unless it's under `backend/test/openapi/` or similar and tiny): one line per member file in `ai-prompts/` with the member's name, the file path, the number of entries (count `Prompt:` lines), the first and last entry dates. Add the line "Milestone 1 (m1): index generated on <date>". Never edit anything inside `ai-prompts/`.
+Check, and report (don't fix other members' files): every member has a file with at least one entry; entries use the course fields (`Date`, `Student`, `Tool`, `Related Requirement`, `Prompt`, `How the output was used`).
+**Commit:** `docs(ai): index every member's prompt log for Milestone 1 (PLT-07)`
+
+## Step 4: the release check (report only)
+
+Write `docs/qa/m1-release-check.md` with one row per check (✅/❌ and the evidence):
+
+| # | Check | How |
+|---|---|---|
+| R1 | Every mandatory requirement is implemented and visible in Swagger | re-run `npm run test:audit` (TST-02); 0 failures, or each remaining one listed with Kareem's decision from the TST-02 report |
+| R2 | No stubs left | `git grep -n "implemented in [A-Z]\+-[0-9]" -- backend/src` empty |
+| R3 | No CRITICAL/HIGH stress finding open | `npm run test:stress`; the findings specs for CRITICAL/HIGH pass |
+| R4 | All tests pass | `npm run verify` (unit, integration, API, E2E, coverage ≥ 80% per service file, build) |
+| R5 | OpenAPI exported and current | `npm run openapi:export` produces no diff |
+| R6 | Swagger UI loads and cookie login works | start the app on the in-memory database (or `full-app.ts`), `GET /api/docs` 200, `GET /api/docs-json` equals `docs/api/openapi.json`, `POST /api/auth/login` then `GET /api/auth/me` with the cookie 200 |
+| R7 | Every endpoint has a REQ-ID summary and a tag | from the exported document: no operation without a summary starting with an ID or without a tag |
+| R8 | No secrets in the repository | `git grep -nE "mongodb(\+srv)?://[^<]+@|sk_(test\|live)_[A-Za-z0-9]{10,}\|whsec_[A-Za-z0-9]{10,}" -- . ':!*.md'` empty; no `.env` tracked (`git ls-files \| grep -E "(^\|/)\.env$"` empty) |
+| R9 | Dependencies | `npm audit --omit=dev --audit-level=high` clean in `backend/` |
+| R10 | Team contributions visible | `git shortlog -sne origin/develop` (or `--no-merges`): every member appears; list commits per member |
+| R11 | Every member's prompt log present and current | from step 3 |
+| R12 | Requirement traceability | `gh pr list --state merged --base develop --limit 300 --json title` : every merged PR title has a requirement ID (CI enforces it; list exceptions) |
+| R13 | README proven | step 2's fresh-clone run |
+| R14 | Atlas integration | **manual, Kareem:** with the real `backend/.env`, `npm run build && npm run start:prod`, `GET /api/health` 200, seeds run (see "Kareem's release steps") |
+
+**Commit:** `docs(qa): add the Milestone 1 release check (PLT-07)`
+
+## Step 5: prompt log
+
+Append one entry to `ai-prompts/kareem.txt` in the course format (`Related Requirement: PLT-07`; `Prompt` = Kareem's message copied exactly plus `[Attached: PLT07_EXECUTION.md]` and its content).
+**Commit:** `chore(ai): log the PLT-07 prompt (PLT-07)`
+
+## Gates
+
+| Gate | Check | Expect |
+|---|---|---|
+| G1 | `cd backend && npm run verify` | exit 0 |
+| G2 | `npm run openapi:export && git status --porcelain docs/api` | no diff after the commit |
+| G3 | the modules' existing Swagger tests (part of G1) and R6 | still pass: `/api/docs-json` equals the exported file (no Swagger behaviour change) |
+| G4 | the release check has no ❌ except R14 (manual) and items Kareem accepted in TST-02/TST-03 | stated per row |
+| G5 | `git diff --name-only origin/develop...HEAD` | only `backend/src/app.setup.ts`, `backend/test/openapi/**`, `backend/vitest.config.openapi.ts`, `backend/package.json` (script + version), `docs/api/openapi.json`, `README.md`, `AI_PROMPTS.txt`, `docs/qa/m1-release-check.md`, `ai-prompts/kareem.txt` |
+| G6 | `git log --format=%s origin/develop..HEAD` | 5 commits, each ending in `(PLT-07)` |
+| G7 | `git status --porcelain` | empty |
+
+In the tables, `\|` inside a command is a shell pipe or regex `|`; type it as `|`.
+
+## Kareem's release steps (after the PLT-07 PR is merged)
+
+The agent prepares these and prints them in its report; **Kareem runs them** (or explicitly asks the agent to).
+1. On your machine with the real `backend/.env`: `cd backend && npm ci && npm run build && npm run seed:reference && npm run seed:admin && npm run seed:demo`, then `npm run start:prod`; open `/api/docs`, log in as the admin and a demo user, try one booking. This is R14.
+2. Open the release PR: `gh pr create --base main --head develop --title "Release m1: Milestone 1 backend" --body "<the release check summary>"` (exempt from the branch/title rules). Wait for CI green.
+3. Merge it with a **merge commit** (git rule 7): `gh pr merge <n> --merge`.
+4. Tag the merge commit on `main`: `git fetch origin && git tag -a m1 origin/main -m "Milestone 1: backend and API" && git push origin m1`.
+5. Optional: `gh release create m1 --title "Milestone 1" --notes-file docs/qa/m1-release-check.md`.
+6. Close #91; keep `develop` as the default branch for Milestone 2.
+
+## Constraints
+
+- No product code changes beyond extracting `buildOpenApiDocument` (no behaviour change). If a release check fails, report it; don't fix it here.
+- Never edit lines inside `ai-prompts/`. Never write to Atlas. No new package.
+- Stage files by name. Don't push, don't open a PR, never touch `develop`/`main`, never create the tag (Kareem's steps).
+
+## Report
+
+- Branch, worktree, commits; each gate in one line.
+- The release check table's summary (✅ count, ❌ with one line each).
+- Kareem's release steps, ready to copy, with anything specific you found (e.g. a variable the README now requires).
+
+How the output was used:
+On chore/PLT-07-milestone-1-release (from develop 572c1a0): extracted buildOpenApiDocument and exported docs/api/openapi.json (v1.0.0, npm run openapi:export), completed the README (environment table, Swagger testing guide, tests, troubleshooting) and proved it in a fresh clone, indexed every prompt log in AI_PROMPTS.txt, and wrote docs/qa/m1-release-check.md (10 pass, 3 fail: the E2E reorder journey fails on develop, docs-json differs from the export and shows 7 ObjectId params as Function in the production build, README run blocked by the same E2E; R14 manual). Not pushed.

@@ -38,6 +38,7 @@ import {
 } from '../accounts/schemas/user.schema.js';
 import { AuditAction } from '../audit/schemas/audit-log.schema.js';
 import { BlogModule } from '../blog/blog.module.js';
+import { ItineraryReportableContent } from '../itineraries/itinerary-reportable-content.js';
 import {
   Comment,
   type CommentDocument,
@@ -52,6 +53,7 @@ import { FlightBookingsService } from '../flight-bookings/flight-bookings.servic
 import type { FlightBookingAdminView } from '../flight-bookings/flight-bookings.types.js';
 import { FlightsService } from '../flights/flights.service.js';
 import { HotelBookingsService } from '../hotel-bookings/hotel-bookings.service.js';
+import { HotelReviewReportableContent } from '../hotel-bookings/hotel-review-reportable-content.js';
 import type { HotelReservationAdminView } from '../hotel-bookings/hotel-bookings.types.js';
 import { HotelsService } from '../hotels/hotels.service.js';
 import { ItinerariesService } from '../itineraries/itineraries.service.js';
@@ -1089,7 +1091,14 @@ describe('Admin Moderation API (GEN-10)', () => {
           .overrideProvider(StorageService)
           .useValue(fakeStorage)
           .overrideProvider(AppEvents)
-          .useValue(fakeEvents),
+          .useValue(fakeEvents)
+          // This suite seeds its own in-memory itinerary provider below; keep
+          // the real ITN-20 provider from registering a second one.
+          .overrideProvider(ItineraryReportableContent)
+          .useValue({ onModuleInit: () => {} })
+          // This suite registers its own fake review provider below.
+          .overrideProvider(HotelReviewReportableContent)
+          .useValue({ onModuleInit: () => {} }),
     });
 
     const registry = modApp.moduleRef.get(ReportableContentRegistry);

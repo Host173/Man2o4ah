@@ -46,7 +46,11 @@ export class AuthController {
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'ACC-01 Register a guest account' })
+  @ApiOperation({
+    summary: 'ACC-01 Register a guest account',
+    description:
+      'Always creates a registered user: admins are seeded and moderators are created by an admin, never self-registered (ACC-18). The backend validates every field and answers 400 VALIDATION_FAILED with one message per invalid field in details (GEN-02, GEN-13). Passwords are stored only as salted hashes (GEN-13).',
+  })
   @ApiCreatedResponse({
     type: AuthUserResponseDto,
     description: 'Account created. The user is not logged in.',
@@ -66,7 +70,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'ACC-04, ACC-05 Log in',
     description:
-      'Sets the httpOnly access_token and refresh_token cookies (ACC-19); tokens are never in the body. Swagger UI keeps the cookie for later calls. Five wrong passwords in a row lock the account for 15 minutes (ACC-05); a successful login resets the count.',
+      'Sets the httpOnly access_token and refresh_token cookies (ACC-19); tokens are never in the body. Swagger UI keeps the cookie for later calls. Five wrong passwords in a row lock the account for 15 minutes (ACC-05); a successful login resets the count. Admin accounts are seeded, not self-registered (ACC-18).',
   })
   @ApiOkResponse({ type: AuthUserResponseDto })
   @ApiBadRequestResponse({

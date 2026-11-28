@@ -1,21 +1,34 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
+import { OnEvent } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import type { Model, PipelineStage } from 'mongoose';
-import { toDateOnly } from '../../common/dates/date-only.js';
+import { addDays, toDateOnly } from '../../common/dates/date-only.js';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { getPlatformCurrency } from '../../common/money/platform-currency.js';
+import { escapeRegex } from '../../common/text/escape-regex.js';
+import type { PayloadOf } from '../../common/events/event-payloads.js';
+import { Events } from '../../common/events/events.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
 import type { ImageRef } from '../../common/database/image-ref.schema.js';
+import { FlightsService } from '../flights/flights.service.js';
+import type {
+  FlightSearchItem,
+  RoundTripSearchResult,
+} from '../flights/flights.types.js';
+import { HotelSearchQuery, HotelSearchResult } from '../hotels/hotels.types.js';
+import { HotelsService } from '../hotels/hotels.service.js';
+import { AccountsService } from '../accounts/accounts.service.js';
 import { ProfileService } from '../accounts/users/profile.service.js';
 import { FxService } from '../fx/fx.service.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
@@ -26,7 +39,13 @@ import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
 import { cityGroups, dayDate, dayNumber, orderDaysById } from './days.js';
 import type { CreateDayDto } from './dto/create-day.dto.js';
+import type { ItineraryFlightsQueryDto } from './dto/itinerary-flights-query.dto.js';
+import type {
+  OneWaySearchQuery,
+  RoundTripSearchQuery,
+} from '../flights/flights.types.js';
 import type { CreateItineraryDto } from './dto/create-itinerary.dto.js';
+import type { ItineraryHotelsQueryDto } from './dto/itinerary-hotels-query.dto.js';
 import type { ReorderDaysDto } from './dto/reorder-days.dto.js';
 import type { UpdateDayDto } from './dto/update-day.dto.js';
 import type { UpdateItineraryDto } from './dto/update-itinerary.dto.js';
@@ -46,12 +65,14 @@ import type {
   ItineraryDayView,
   ItineraryDetailView,
   ItinerarySummary,
+  PublicItineraryDetailView,
   PublicItineraryQuery,
   PublicItinerarySummary,
   TransportCostView,
 } from './itineraries.types.js';
 import {
   Itinerary,
+  ItineraryVisibility,
   MAX_DAYS,
   MAX_NOTES_LENGTH,
   type Activity,
@@ -87,8 +108,9 @@ const MAX_TITLE_LENGTH = 100;
 
 /**
  * Itinerary workflows (ITN-01, ITN-03, ITN-16): create, edit, delete, list the owner's
- * itineraries and open one. Every read and write is scoped by `ownerId`, so
- * another user's itinerary is a 404, never a 403 (ACC-11).
+ * itineraries and open one. Owner-scoped reads and writes filter by `ownerId`,
+ * so another user's itinerary is a 404 (ACC-11). Public summaries separately
+ * filter visibility, moderation and author-deactivation flags (ITN-20).
  */
 @Injectable()
 export class ItinerariesService {
@@ -97,10 +119,13 @@ export class ItinerariesService {
   constructor(
     @InjectModel(Itinerary.name)
     private readonly itineraryModel: Model<StoredItinerary>,
+    private readonly flights: FlightsService,
     private readonly referenceData: ReferenceDataService,
     private readonly storage: StorageService,
     private readonly moduleRef: ModuleRef,
     private readonly profile: ProfileService,
+    private readonly hotels: HotelsService,
+    private readonly accounts: AccountsService,
   ) {}
 
   /**
@@ -166,7 +191,260 @@ export class ItinerariesService {
     return this.toDetailView(itinerary as ItineraryRecord);
   }
 
-  /** ITN-01: edits the owner's title, countries or start date; other fields stay. */
+  /**
+   * ITN-21: one public itinerary, read-only, for guests and users alike. The
+   * filter is the one `clone` uses, so a private, hidden or deactivated-author
+   * itinerary is a 404 for everyone, the owner and admins included (ACC-11,
+   * GEN-10); the owner opens it through `getById`.
+   */
+  async getPublicById(itineraryId: string): Promise<PublicItineraryDetailView> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const itinerary = await this.itineraryModel
+      .findOne({
+        _id: id,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const ownerId = record.ownerId.toHexString();
+    const [profiles, budget] = await Promise.all([
+      this.accounts.getProfiles([ownerId]),
+      this.publicBudget(record),
+    ]);
+    const detail = this.toDetailView(record);
+    return {
+      _id: detail._id,
+      ownerId,
+      authorName: profiles[0]?.name ?? null,
+      title: detail.title,
+      countryCodes: detail.countryCodes,
+      startDate: detail.startDate,
+      dayCount: detail.dayCount,
+      cityIds: [...record.cityIds],
+      updatedAt: detail.updatedAt,
+      days: detail.days,
+      cityGroups: detail.cityGroups,
+      transportCosts: detail.transportCosts,
+      ...(detail.clonedFrom ? { clonedFrom: detail.clonedFrom } : {}),
+      budget,
+    };
+  }
+
+  /** ITN-21: deep-clones a visible public itinerary into a private copy. */
+  async clone(sourceId: string, userId: string): Promise<ItineraryDetailView> {
+    const sourceObjectId = this.parseId(sourceId, 'sourceId');
+    const ownerObjectId = this.parseId(userId, 'userId');
+
+    const source = await this.itineraryModel
+      .findOne({
+        _id: sourceObjectId,
+        visibility: ItineraryVisibility.PUBLIC,
+        isHidden: false,
+        authorDeactivated: false,
+      })
+      .lean()
+      .exec();
+    if (!source) throw this.notFound();
+
+    const src = source as ItineraryRecord;
+    const newItineraryId = new Types.ObjectId();
+    const newDayIds = src.days.map(() => new Types.ObjectId());
+    const copiedKeys: string[] = [];
+
+    try {
+      const clonedDays = await Promise.all(
+        (src.days ?? []).map(async (day, dayIndex) => {
+          const clonedActivities = await Promise.all(
+            (day.activities ?? []).map(async (activity) => {
+              const clonedImages = await Promise.all(
+                (activity.images ?? []).map(async (image) => {
+                  const copied = await this.storage.copy(image.key);
+                  copiedKeys.push(copied.key);
+                  return { _id: copied._id, key: copied.key };
+                }),
+              );
+              return {
+                _id: new Types.ObjectId(),
+                name: activity.name,
+                description: activity.description,
+                time: activity.time,
+                cost: activity.cost
+                  ? {
+                      amountMinor: activity.cost.amountMinor,
+                      currency: activity.cost.currency,
+                    }
+                  : undefined,
+                images: clonedImages,
+                attractionId: activity.attractionId,
+              };
+            }),
+          );
+          return {
+            _id: newDayIds[dayIndex],
+            cityId: day.cityId,
+            notes: day.notes,
+            activities: clonedActivities,
+            budgetEntries: (day.budgetEntries ?? []).map((entry) => ({
+              _id: new Types.ObjectId(),
+              category: entry.category,
+              amountMinor: entry.amountMinor,
+              currency: entry.currency,
+              note: entry.note,
+            })),
+          };
+        }),
+      );
+
+      const clonedTransportCosts = (src.transportCosts ?? []).map((cost) => {
+        const oldDayIndex = src.days.findIndex(
+          (day) => day._id.toHexString() === cost.dayId.toHexString(),
+        );
+        const newDayId = oldDayIndex >= 0 ? newDayIds[oldDayIndex] : cost.dayId;
+        return {
+          _id: new Types.ObjectId(),
+          dayId: newDayId,
+          mode: cost.mode,
+          fromCityId: cost.fromCityId,
+          toCityId: cost.toCityId,
+          amountMinor: cost.amountMinor,
+          currency: cost.currency,
+        };
+      });
+
+      const created = await this.itineraryModel.create({
+        _id: newItineraryId,
+        ownerId: ownerObjectId,
+        title: src.title,
+        countryCodes: [...src.countryCodes],
+        startDate: src.startDate,
+        visibility: ItineraryVisibility.PRIVATE,
+        isHidden: false,
+        authorDeactivated: false,
+        clonedFrom: { itineraryId: src._id, authorId: src.ownerId },
+        days: clonedDays,
+        transportCosts: clonedTransportCosts,
+        dayCount: clonedDays.length,
+        cityIds: [...new Set(clonedDays.map((day) => day.cityId))].sort(),
+      });
+
+      return this.toDetailView(created.toObject() as ItineraryRecord);
+    } catch (error) {
+      await Promise.all(copiedKeys.map((key) => this.storage.delete(key)));
+      throw error;
+    }
+  }
+
+  /** ITN-26: one-way or round-trip flights from an origin to the first day's city. */
+  async getFlightsForItinerary(
+    itineraryId: string,
+    query: ItineraryFlightsQueryDto,
+    userId: string,
+  ): Promise<Paginated<FlightSearchItem> | RoundTripSearchResult> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const days = record.days ?? [];
+    if (days.length === 0) {
+      throw this.invalidField('days', 'itinerary has no days');
+    }
+
+    const origin = (query.origin ?? '').trim().toUpperCase();
+    if (!origin) {
+      throw this.invalidField('origin', 'origin is required');
+    }
+
+    const airports = await this.referenceData.getAirportsByCity(days[0].cityId);
+    if (airports.length === 0) {
+      throw this.invalidField(
+        'destination',
+        `no airport found for city ${days[0].cityId}`,
+      );
+    }
+    const destination = airports[0].code;
+
+    const departureDate = record.startDate.toISOString().slice(0, 10);
+    const base = {
+      from: origin,
+      to: destination,
+      date: departureDate,
+      adults: query.adults ?? 1,
+      children: query.children ?? 0,
+      infants: query.infants ?? 0,
+      cabinClass: query.cabinClass,
+      sortBy: 'departure' as const,
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
+    };
+
+    if (query.tripType === 'round_trip') {
+      const returnDate = addDays(record.startDate, days.length - 1)
+        .toISOString()
+        .slice(0, 10);
+      return this.flights.search({
+        ...base,
+        returnDate,
+      } as RoundTripSearchQuery);
+    }
+    return this.flights.search(base as OneWaySearchQuery);
+  }
+
+  /** ITN-25: hotels available for the chosen city group's derived dates. */
+  async getHotelsForCityGroup(
+    itineraryId: string,
+    query: ItineraryHotelsQueryDto,
+    userId: string,
+  ): Promise<Paginated<HotelSearchResult>> {
+    const id = this.parseId(itineraryId, 'itineraryId');
+    const ownerId = this.parseId(userId, 'userId');
+
+    const itinerary = await this.itineraryModel
+      .findOne({ _id: id, ownerId })
+      .lean()
+      .exec();
+    if (!itinerary) throw this.notFound();
+
+    const record = itinerary as ItineraryRecord;
+    const groups = cityGroups(record.days ?? [], record.startDate);
+    if (
+      !Number.isInteger(query.groupIndex) ||
+      query.groupIndex < 0 ||
+      query.groupIndex >= groups.length
+    ) {
+      throw this.notFound();
+    }
+    const group = groups[query.groupIndex];
+
+    const hotelQuery: HotelSearchQuery = {
+      cityId: group.cityId,
+      checkIn: toDateOnly(group.checkIn),
+      checkOut: toDateOnly(group.checkOut),
+      guests: query.guests,
+      rooms: query.rooms ?? 1,
+      minPriceMinor: query.minPrice,
+      maxPriceMinor: query.maxPrice,
+      minRating: query.minRating,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+      page: query.page,
+      limit: query.limit,
+    };
+
+    return this.hotels.search(hotelQuery);
+  }
+
+  /** ITN-01/20: edits the owner's title, countries, start date or visibility. */
   async update(
     itineraryId: string,
     dto: UpdateItineraryDto,
@@ -179,6 +457,7 @@ export class ItinerariesService {
       title?: string;
       countryCodes?: string[];
       startDate?: Date;
+      visibility?: ItineraryVisibility;
     } = {};
     if (dto.title !== undefined) {
       updates.title = this.normalizeTitle(dto.title);
@@ -188,6 +467,9 @@ export class ItinerariesService {
     }
     if (dto.startDate !== undefined) {
       updates.startDate = this.parseStartDate(dto.startDate);
+    }
+    if (dto.visibility !== undefined) {
+      updates.visibility = this.parseVisibility(dto.visibility);
     }
 
     if (Object.keys(updates).length === 0) {
@@ -1105,8 +1387,51 @@ export class ItinerariesService {
       });
     }
     const converter = await this.fx().getConverter();
+    return buildBudgetSummary(
+      this.toBudgetInput(itinerary as ItineraryRecord),
+      converter,
+      displayCurrency,
+    );
+  }
 
-    const input: BudgetSummaryInput = {
+  /**
+   * ITN-21: the budget of a public itinerary, in the platform currency. It is
+   * the same for every viewer (the public page is cached), so a viewer's
+   * preferred currency is not used. Raw amounts stay visible in the days and
+   * transport costs. `null` when the amounts cannot be converted: the rest of
+   * the page is still worth showing.
+   */
+  private async publicBudget(
+    itinerary: ItineraryRecord,
+  ): Promise<BudgetSummaryView | null> {
+    try {
+      const converter = await this.fx().getConverter();
+      return buildBudgetSummary(
+        this.toBudgetInput(itinerary),
+        converter,
+        getPlatformCurrency(),
+      );
+    } catch (error) {
+      const code =
+        error instanceof HttpException
+          ? (error.getResponse() as { code?: string }).code
+          : undefined;
+      if (
+        code === ErrorCode.RatesUnavailable ||
+        code === ErrorCode.UnsupportedCurrency
+      ) {
+        this.logger.warn(
+          `ITN-21 public budget unavailable for ${itinerary._id.toHexString()}: ${code}`,
+        );
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** The plain input the budget calculator takes (ITN-14). */
+  private toBudgetInput(itinerary: ItineraryRecord): BudgetSummaryInput {
+    return {
       startDate: itinerary.startDate,
       days: (itinerary.days ?? []).map((day) => ({
         _id: day._id.toHexString(),
@@ -1120,7 +1445,6 @@ export class ItinerariesService {
         currency: cost.currency,
       })),
     };
-    return buildBudgetSummary(input, converter, displayCurrency);
   }
 
   /** Keeps the derived `dayCount` and `cityIds` in sync with a rewritten `days` array. */
@@ -1250,9 +1574,10 @@ export class ItinerariesService {
     const days = itinerary.days ?? [];
     const order = this.parseDayOrder(dto?.dayIds, days);
     const ordered = orderDaysById(days, order, (day) => day._id.toHexString());
-    const unchanged = days.every(
-      (day, index) =>
-        day._id.toHexString() === ordered[index]._id.toHexString(),
+    // `ordered` may be shorter than `days` when the client's list predates an
+    // overlapping add: the omitted days are a tail that stays where it is.
+    const unchanged = ordered.every(
+      (day, index) => day._id.toHexString() === days[index]._id.toHexString(),
     );
     if (unchanged) return this.toDetailView(itinerary as ItineraryRecord);
 
@@ -1307,7 +1632,10 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-08: `dayIds` must be a permutation of the itinerary's current day IDs.
+   * ITN-08: `dayIds` must list every current day ID once, in the new order.
+   * Days added after the client read the itinerary are appended, so a list
+   * that predates an overlapping add may leave out a trailing run of `days`;
+   * those keep their place at the end. Leaving out any other day is rejected.
    * Checked here as well as in the DTO because the service is used directly by
    * other modules and by tests, and only it knows the current IDs.
    */
@@ -1319,12 +1647,6 @@ export class ItinerariesService {
       throw this.invalidField('dayIds', 'dayIds must contain day IDs');
     }
     const ids = (value as string[]).map((id) => id.toLowerCase());
-    if (ids.length !== days.length) {
-      throw this.invalidField(
-        'dayIds',
-        `dayIds must list all ${days.length} days`,
-      );
-    }
     const known = new Set(days.map((day) => day._id.toHexString()));
     if (ids.some((id) => !OBJECT_ID_HEX_RE.test(id) || !known.has(id))) {
       throw this.invalidField('dayIds', 'dayIds must be current day IDs');
@@ -1332,7 +1654,45 @@ export class ItinerariesService {
     if (new Set(ids).size !== ids.length) {
       throw this.invalidField('dayIds', 'dayIds must not contain duplicates');
     }
+    // Every ID is known and distinct, so the list is complete up to a tail
+    // exactly when it names the first `ids.length` days.
+    const listed = new Set(ids);
+    if (
+      (ids.length === 0 && days.length > 0) ||
+      days
+        .slice(0, ids.length)
+        .some((day) => !listed.has(day._id.toHexString()))
+    ) {
+      throw this.invalidField(
+        'dayIds',
+        `dayIds must list all ${days.length} days`,
+      );
+    }
     return ids;
+  }
+
+  /**
+   * ITN-20: the shared public search. ITN-21 adds keyword and filters; this
+   * level already exposes every visible public itinerary, newest first. It is
+   * read-only: no route here lets another user modify what they can see.
+   */
+  async searchPublic(
+    query: PublicItineraryQuery = {},
+  ): Promise<Paginated<PublicItinerarySummary>> {
+    const { page, limit } = this.parsePublicQuery(query);
+    const filter = await this.buildPublicFilter(query);
+    const result = await paginate(
+      this.itineraryModel,
+      filter,
+      { page, limit },
+      { sort: { updatedAt: -1, _id: -1 } },
+    );
+    return {
+      ...result,
+      items: result.items.map((itinerary) =>
+        this.toPublicSummary(itinerary as ItineraryRecord),
+      ),
+    };
   }
 
   /**
@@ -1340,17 +1700,166 @@ export class ItinerariesService {
    * `updatedAt` first. Only `visibility: public` itineraries are included, and
    * hidden ones or those of a deactivated author are left out (ITN-20).
    * Returns the shared paginated shape; `page` defaults to 1 and `limit` to 10.
-   * Implemented in ITN-20.
    */
-  listPublicByAuthor(
+  async listPublicByAuthor(
     ownerId: string,
     query: PublicItineraryQuery = {},
   ): Promise<Paginated<PublicItinerarySummary>> {
-    void ownerId;
-    void query;
-    throw new NotImplementedException(
-      'listPublicByAuthor: implemented in ITN-20',
+    const owner = this.parseId(ownerId, 'ownerId');
+    const { page, limit } = this.parsePublicQuery(query);
+    const filter = await this.buildPublicFilter(query, owner);
+    const result = await paginate(
+      this.itineraryModel,
+      filter,
+      { page, limit },
+      { sort: { updatedAt: -1, _id: -1 } },
     );
+    return {
+      ...result,
+      items: result.items.map((itinerary) =>
+        this.toPublicSummary(itinerary as ItineraryRecord),
+      ),
+    };
+  }
+
+  private async buildPublicFilter(
+    query: PublicItineraryQuery,
+    ownerId?: Types.ObjectId,
+  ): Promise<Record<string, unknown>> {
+    const filter: Record<string, unknown> = {
+      visibility: ItineraryVisibility.PUBLIC,
+      isHidden: false,
+      authorDeactivated: false,
+    };
+    if (ownerId) filter.ownerId = ownerId;
+
+    if (query.minDays !== undefined) {
+      if (!Number.isInteger(query.minDays) || query.minDays < 1) {
+        throw this.invalidField(
+          'minDays',
+          'minDays must be an integer of at least 1',
+        );
+      }
+      filter.dayCount = { ...(filter.dayCount as object), $gte: query.minDays };
+    }
+    if (query.maxDays !== undefined) {
+      if (!Number.isInteger(query.maxDays) || query.maxDays < 1) {
+        throw this.invalidField(
+          'maxDays',
+          'maxDays must be an integer of at least 1',
+        );
+      }
+      filter.dayCount = { ...(filter.dayCount as object), $lte: query.maxDays };
+    }
+    if (
+      query.minDays !== undefined &&
+      query.maxDays !== undefined &&
+      query.minDays > query.maxDays
+    ) {
+      throw this.invalidField(
+        'maxDays',
+        'maxDays must not be less than minDays',
+      );
+    }
+
+    if (query.countryCode) {
+      if (!/^[A-Z]{2}$/.test(query.countryCode)) {
+        throw this.invalidField(
+          'countryCode',
+          'countryCode must be a 2-letter code',
+        );
+      }
+      filter.countryCodes = query.countryCode;
+    }
+    if (query.cityId) {
+      if (typeof query.cityId !== 'string' || query.cityId.trim() === '') {
+        throw this.invalidField('cityId', 'cityId must not be blank');
+      }
+      filter.cityIds = query.cityId.trim();
+    }
+
+    const keyword = query.q?.trim();
+    if (keyword) {
+      const regex = new RegExp(escapeRegex(keyword), 'i');
+      const countryCodes = await this.referenceData.findCountryCodes(keyword);
+      const cityIds = await this.referenceData.findCityIds(keyword);
+      filter.$or = [
+        { title: regex },
+        { countryCodes: { $in: countryCodes } },
+        { cityIds: { $in: cityIds } },
+      ];
+    }
+
+    return filter;
+  }
+
+  /**
+   * ACC-12: hides every itinerary of a deactivated author from shared lists on
+   * future reads. Idempotent: the conditional update only touches rows whose
+   * flag still differs, so delivering the event twice changes nothing.
+   */
+  @OnEvent(Events.UserDeactivated)
+  async onUserDeactivated(
+    payload: PayloadOf<typeof Events.UserDeactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, true);
+  }
+
+  /** ACC-12: restores the itineraries of a reactivated author (idempotent). */
+  @OnEvent(Events.UserReactivated)
+  async onUserReactivated(
+    payload: PayloadOf<typeof Events.UserReactivated>,
+  ): Promise<void> {
+    await this.setAuthorDeactivated(payload.userId, false);
+  }
+
+  private async setAuthorDeactivated(
+    userId: string,
+    authorDeactivated: boolean,
+  ): Promise<void> {
+    if (typeof userId !== 'string' || !OBJECT_ID_HEX_RE.test(userId)) return;
+    await this.itineraryModel
+      .updateMany(
+        {
+          ownerId: new Types.ObjectId(userId),
+          authorDeactivated: !authorDeactivated,
+        },
+        { $set: { authorDeactivated } },
+      )
+      .exec();
+  }
+
+  /** ITN-20: `public` or `private`; anything else is a 400 VALIDATION_FAILED. */
+  private parseVisibility(value: unknown): ItineraryVisibility {
+    if (
+      value === ItineraryVisibility.PUBLIC ||
+      value === ItineraryVisibility.PRIVATE
+    ) {
+      return value;
+    }
+    throw this.invalidField(
+      'visibility',
+      'visibility must be public or private',
+    );
+  }
+
+  /** BLG-12/ITN-20: the shared page defaults, with GEN-05's 1-50 limit. */
+  private parsePublicQuery(query: PublicItineraryQuery): {
+    page: number;
+    limit: number;
+  } {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    if (!Number.isInteger(page) || page < 1) {
+      throw this.invalidField('page', 'page must be an integer of at least 1');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw this.invalidField(
+        'limit',
+        'limit must be an integer between 1 and 50',
+      );
+    }
+    return { page, limit };
   }
 
   private async resolveCountryCodes(codes: string[]): Promise<string[]> {
@@ -1490,6 +1999,24 @@ export class ItinerariesService {
       dayCount: itinerary.dayCount,
       visibility: itinerary.visibility,
       createdAt: itinerary.createdAt,
+      updatedAt: itinerary.updatedAt,
+    };
+  }
+
+  /**
+   * BLG-12: the public view of an itinerary. It intentionally exposes only the
+   * fields the author page needs, with `id` (not `_id`) per the blog contract,
+   * and leaves days, budgets and transport costs to the public detail view.
+   */
+  private toPublicSummary(itinerary: ItineraryRecord): PublicItinerarySummary {
+    return {
+      id: itinerary._id.toHexString(),
+      ownerId: itinerary.ownerId.toHexString(),
+      title: itinerary.title,
+      countryCodes: [...itinerary.countryCodes],
+      startDate: itinerary.startDate,
+      dayCount: itinerary.dayCount,
+      cityIds: [...itinerary.cityIds],
       updatedAt: itinerary.updatedAt,
     };
   }

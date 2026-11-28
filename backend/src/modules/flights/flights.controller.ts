@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Patch,
   Param,
   Post,
   Query,
@@ -18,11 +19,13 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiNoContentResponse,
+  ApiExtraModels,
   ApiOperation,
   ApiOkResponse,
   ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
@@ -33,6 +36,12 @@ import { CurrentUser, Public, Roles } from '../accounts/auth/decorators.js';
 import { AddFlightCabinDto } from './dto/add-flight-cabin.dto.js';
 import { CreateFlightDto } from './dto/create-flight.dto.js';
 import { FlightDetailsResponseDto } from './dto/flight-details.response.dto.js';
+import { UpdateFlightDto } from './dto/update-flight.dto.js';
+import { UpdateFlightCabinDto } from './dto/update-flight-cabin.dto.js';
+import {
+  PaginatedFlightSearchResponseDto,
+  RoundTripFlightSearchResponseDto,
+} from './dto/flight-search.response.dto.js';
 import { SearchFlightsDto } from './dto/search-flights.dto.js';
 import {
   FlightResponseDto,
@@ -52,16 +61,44 @@ export class FlightsController {
 
   @Get('flights/search')
   @Public()
-  @ApiOperation({ summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights' })
-  @ApiOkResponse({ description: 'Paginated flight search results' })
+  @ApiOperation({
+    summary: 'FLT-11, FLT-12, FLT-15 Search bookable flights',
+    description:
+      'Only scheduled flights are returned; cancelled and departed flights are never searchable or bookable (FLT-30).',
+  })
+  @ApiExtraModels(
+    PaginatedFlightSearchResponseDto,
+    RoundTripFlightSearchResponseDto,
+  )
+  @ApiOkResponse({
+    description:
+      'One-way: a page of flights. Round trip (returnDate given): { outbound, inbound } pages',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(PaginatedFlightSearchResponseDto) },
+        { $ref: getSchemaPath(RoundTripFlightSearchResponseDto) },
+      ],
+    },
+  })
   @ApiBadRequestResponse({ description: 'Invalid search criteria' })
-  async search(@Query() query: SearchFlightsDto) {
-    return this.flights.search(query);
+  async search(
+    @Query() query: SearchFlightsDto,
+  ): Promise<
+    PaginatedFlightSearchResponseDto | RoundTripFlightSearchResponseDto
+  > {
+    const result = await this.flights.search(query);
+    return 'outbound' in result
+      ? RoundTripFlightSearchResponseDto.fromView(result)
+      : PaginatedFlightSearchResponseDto.fromView(result);
   }
 
   @Get('flights/:id')
   @Public()
-  @ApiOperation({ summary: 'FLT-17 Get flight details' })
+  @ApiOperation({
+    summary: 'FLT-17 Get flight details',
+    description:
+      'Includes the flight status: scheduled, cancelled or departed (FLT-30). Only a scheduled flight can be booked.',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: FlightDetailsResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid flight ID' })
@@ -115,6 +152,57 @@ export class FlightsController {
   ): Promise<FlightResponseDto> {
     return FlightResponseDto.fromView(
       await this.flights.addCabin(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Patch('flights/:id')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-05 Edit a scheduled flight' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid airport or local time' })
+  @ApiConflictResponse({
+    description: 'Flight is not scheduled or airports are already locked',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight not found or not assigned to this moderator',
+  })
+  async updateFlight(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() input: UpdateFlightDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightResponseDto> {
+    return FlightResponseDto.fromView(
+      await this.flights.updateFlight(id.toHexString(), input, user.providerId),
+    );
+  }
+
+  @Patch('flights/:id/cabins/:cabinId')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({ summary: 'FLT-05 Edit cabin price and seat capacity' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'cabinId', type: String })
+  @ApiOkResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid cabin edit' })
+  @ApiConflictResponse({
+    description: 'Flight or capacity cannot be changed',
+  })
+  @ApiNotFoundResponse({
+    description: 'Flight or cabin not found or not assigned to this moderator',
+  })
+  async updateCabin(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Param('cabinId', ParseObjectIdPipe) cabinId: Types.ObjectId,
+    @Body() input: UpdateFlightCabinDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<FlightResponseDto> {
+    return FlightResponseDto.fromView(
+      await this.flights.updateCabin(
+        id.toHexString(),
+        cabinId.toHexString(),
+        input,
+        user.providerId,
+      ),
     );
   }
 

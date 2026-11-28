@@ -3,9 +3,9 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { mongo, Types } from 'mongoose';
@@ -43,7 +43,11 @@ import type {
   RoomNightView,
   RoomView,
 } from './hotels.types.js';
-import { assertStayDates, parseAvailabilityRange } from './room-date-ranges.js';
+import {
+  assertDateRange,
+  assertStayDates,
+  parseAvailabilityRange,
+} from './room-date-ranges.js';
 import { RoomNightInventory } from './room-night-inventory.js';
 import { Hotel } from './schemas/hotel.schema.js';
 import type { RatingSummary } from './schemas/hotel.schema.js';
@@ -479,18 +483,31 @@ export class HotelsService {
     );
   }
 
-  /** Taken nights in the inclusive date range, for HTL-08's room status view. */
-  getRoomNights(
+  /**
+   * HTL-08: the hotel's taken nights (reserved or blocked) from fromDate to toDate,
+   * both inclusive, by date then room. Missing valid hotel IDs return [];
+   * malformed IDs throw 400 VALIDATION_FAILED. Reads use the caller's session.
+   */
+  async getRoomNights(
     hotelId: string,
     fromDate: Date,
     toDate: Date,
     options?: HotelTransactionOptions,
   ): Promise<RoomNightView[]> {
-    void hotelId;
-    void fromDate;
-    void toDate;
-    void options;
-    throw new NotImplementedException('getRoomNights: implemented in INV-02');
+    assertDateRange(fromDate, toDate);
+    const nights = await this.roomNightModel
+      .find(
+        {
+          hotelId: this.parseId(hotelId),
+          date: { $gte: fromDate, $lte: toDate },
+        },
+        undefined,
+        options,
+      )
+      .sort({ date: 1, roomId: 1 })
+      .lean()
+      .exec();
+    return nights.map((night) => this.toRoomNightView(night));
   }
 
   /** HTL-11/12: reads inventory without holding it; reusable by ITN-25. */
@@ -506,6 +523,7 @@ export class HotelsService {
           ? { countryCode: query.countryCode }
           : {}),
       })
+      .select({ _id: 1, ratingSummary: 1 })
       .lean()
       .exec();
     if (!hotels.length) return toPage([], 0, page, limit);
@@ -515,6 +533,7 @@ export class HotelsService {
       hotelIds,
       query.checkIn,
       query.checkOut,
+      { hotelId: 1, maxOccupancy: 1, pricePerNightMinor: 1 },
     );
     const freeByHotel = new Map<string, typeof candidates>();
     for (const room of candidates) {
@@ -524,7 +543,12 @@ export class HotelsService {
       freeByHotel.set(hotelId, free);
     }
 
-    const matches: HotelSearchResult[] = [];
+    // Light records only: the full hotels are loaded for the requested page below.
+    const matches: {
+      id: string;
+      pricePerNightMinor: number;
+      average: number | null;
+    }[] = [];
     for (const hotel of hotels) {
       const free = freeByHotel.get(hotel._id.toHexString()) ?? [];
       const pricePerNightMinor = cheapestQualifyingRoomPrice(
@@ -543,20 +567,20 @@ export class HotelsService {
             hotel.ratingSummary.average < query.minRating))
       )
         continue;
-      matches.push({ ...this.toView(hotel), pricePerNightMinor });
+      matches.push({
+        id: hotel._id.toHexString(),
+        pricePerNightMinor,
+        average: hotel.ratingSummary.average,
+      });
     }
 
     const direction = query.sortOrder === 'desc' ? -1 : 1;
     matches.sort((a, b) => {
       if (query.sortBy) {
         const left =
-          query.sortBy === 'price'
-            ? a.pricePerNightMinor
-            : a.ratingSummary.average;
+          query.sortBy === 'price' ? a.pricePerNightMinor : a.average;
         const right =
-          query.sortBy === 'price'
-            ? b.pricePerNightMinor
-            : b.ratingSummary.average;
+          query.sortBy === 'price' ? b.pricePerNightMinor : b.average;
         if (left === null && right !== null) return 1;
         if (right === null && left !== null) return -1;
         if (left !== null && right !== null && left !== right)
@@ -564,18 +588,31 @@ export class HotelsService {
       }
       return a.id.localeCompare(b.id);
     });
-    return toPage(
-      matches.slice((page - 1) * limit, page * limit),
-      matches.length,
-      page,
-      limit,
+    const pageMatches = matches.slice((page - 1) * limit, page * limit);
+    const pageHotels = await this.hotelModel
+      .find({ _id: { $in: pageMatches.map((match) => match.id) } })
+      .lean()
+      .exec();
+    const byId = new Map(
+      pageHotels.map((hotel) => [hotel._id.toHexString(), hotel]),
     );
+    const items: HotelSearchResult[] = [];
+    for (const match of pageMatches) {
+      const hotel = byId.get(match.id);
+      if (hotel)
+        items.push({
+          ...this.toView(hotel),
+          pricePerNightMinor: match.pricePerNightMinor,
+        });
+    }
+    return toPage(items, matches.length, page, limit);
   }
 
   private async freeRooms(
     hotelIds: Types.ObjectId[],
     checkIn: Date,
     checkOut: Date,
+    projection?: Record<string, 1>,
   ) {
     const [candidates, busyIds] = await Promise.all([
       this.roomModel
@@ -589,6 +626,7 @@ export class HotelsService {
             },
           },
         })
+        .select(projection ?? {})
         .lean()
         .exec(),
       this.roomNightModel
@@ -843,6 +881,28 @@ export class HotelsService {
       );
     }
     throw failure;
+  }
+
+  private toRoomNightView(night: RoomNight): RoomNightView {
+    const base = {
+      roomId: night.roomId.toHexString(),
+      hotelId: night.hotelId.toHexString(),
+      date: night.date,
+    };
+    if (night.kind === RoomNightKind.RESERVATION && night.reservationId) {
+      return {
+        ...base,
+        kind: 'reservation',
+        reservationId: night.reservationId.toHexString(),
+      };
+    }
+    if (night.kind === RoomNightKind.BLOCKED && night.blockId) {
+      return { ...base, kind: 'blocked', blockId: night.blockId.toHexString() };
+    }
+    throw new InternalServerErrorException({
+      code: ErrorCode.InventoryCorrupted,
+      message: 'Room night has no reservation or block',
+    });
   }
 
   private parseId(value: string, field = 'hotelId'): Types.ObjectId {

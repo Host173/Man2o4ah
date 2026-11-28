@@ -45,6 +45,14 @@ describe('paginate', () => {
     expect(result.totalPages).toBe(3);
   });
 
+  it('counts an unfiltered list from the stored count, not a scan', async () => {
+    const scan = vi.spyOn(model, 'countDocuments');
+    const result = await paginate(model, {}, { page: 1, limit: 10 });
+    expect(result.total).toBe(25);
+    expect(scan).not.toHaveBeenCalled();
+    scan.mockRestore();
+  });
+
   it('returns the rest on the last page', async () => {
     const result = await paginate(model, {}, { page: 3, limit: 10 });
     expect(result.items).toHaveLength(5);

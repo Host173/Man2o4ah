@@ -3,6 +3,7 @@ dist/
 .next/
 coverage/
 uploads/
+backend/test/stress/out/
 *.tsbuildinfo
 .env
 .env.*
@@ -26,3 +27,6 @@ uploads/
 
 # Swagger/API screenshots
 docs/api/screenshots/
+
+# TST-02: Swagger audit results
+backend/test/audit/out/

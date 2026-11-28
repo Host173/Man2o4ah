@@ -186,6 +186,124 @@ describe('FlightsService cancellation integration (FLT-06)', () => {
     ).toEqual(saved?.cabins);
   });
 
+  describe('seat confirmation racing the cancellation', () => {
+    async function seedHeldFlight() {
+      const { airline, flight } = await seedFlight();
+      const cabinId = new Types.ObjectId();
+      await flightModel
+        .updateOne(
+          { _id: flight._id },
+          {
+            $set: {
+              cabins: [
+                {
+                  _id: cabinId,
+                  cabinClass: 'economy',
+                  totalSeats: 2,
+                  availableSeats: 1,
+                  heldSeats: 1,
+                  bookedSeats: 0,
+                  priceMinor: 100,
+                  freeBags: 0,
+                  maxBagWeightKg: 23,
+                },
+              ],
+            },
+          },
+          { runValidators: true },
+        )
+        .exec();
+      const items = [
+        {
+          flightId: flight._id.toString(),
+          cabinId: cabinId.toString(),
+          seats: 1,
+        },
+      ];
+      return { airline, flight, items };
+    }
+
+    it('refuses a confirmation whose snapshot predates a committed cancellation', async () => {
+      const { airline, flight, items } = await seedHeldFlight();
+      const inventory = testApp.moduleRef.get(SeatInventory);
+      const session = await testApp.connection.startSession();
+      let attempts = 0;
+      try {
+        await expect(
+          session.withTransaction(async () => {
+            attempts += 1;
+            // Pins the transaction snapshot before the cancellation commits.
+            await flightModel
+              .findById(flight._id)
+              .session(session)
+              .lean()
+              .exec();
+            if (attempts === 1) {
+              await flights.cancelFlight(
+                flight._id.toString(),
+                airline._id.toString(),
+              );
+            }
+            await inventory.confirm(items, { session });
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: ErrorCode.SeatsUnavailable },
+        });
+      } finally {
+        await session.endSession();
+      }
+
+      const saved = await flightModel.findById(flight._id).lean().exec();
+      expect(saved?.status).toBe(FlightStatus.CANCELLED);
+      expect(saved?.cabins[0]).toMatchObject({
+        availableSeats: 1,
+        heldSeats: 1,
+        bookedSeats: 0,
+      });
+    });
+
+    it('never books seats on a flight whose cancellation committed first', async () => {
+      const inventory = testApp.moduleRef.get(SeatInventory);
+      for (let round = 0; round < 10; round += 1) {
+        await clearCollections(testApp.connection);
+        airlineSequence = 0;
+        const { airline, flight, items } = await seedHeldFlight();
+        const confirm = async () => {
+          const session = await testApp.connection.startSession();
+          try {
+            await session.withTransaction(() =>
+              inventory.confirm(items, { session }),
+            );
+          } finally {
+            await session.endSession();
+          }
+        };
+
+        const [cancelled, confirmed] = await Promise.allSettled([
+          flights.cancelFlight(flight._id.toString(), airline._id.toString()),
+          confirm(),
+        ]);
+
+        expect(cancelled.status).toBe('fulfilled');
+        const saved = await flightModel.findById(flight._id).lean().exec();
+        const cabin = saved!.cabins[0];
+        expect(cabin.totalSeats).toBe(
+          cabin.availableSeats + cabin.heldSeats + cabin.bookedSeats,
+        );
+        if (confirmed.status === 'fulfilled') {
+          expect(cabin).toMatchObject({ heldSeats: 0, bookedSeats: 1 });
+        } else {
+          expect(confirmed.reason).toMatchObject({
+            status: 409,
+            response: { code: ErrorCode.SeatsUnavailable },
+          });
+          expect(cabin).toMatchObject({ heldSeats: 1, bookedSeats: 0 });
+        }
+      }
+    });
+  });
+
   it('returns 404 for an unknown or unowned flight and 409 for a non-scheduled flight', async () => {
     const { airline, flight } = await seedFlight();
     const otherAirline = await airlineModel.create({

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -10,6 +11,9 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+
+/** Most rooms one reservation may hold. */
+export const MAX_ROOMS_PER_RESERVATION = 9;
 
 const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -58,9 +62,14 @@ export class HotelHoldRequestDto {
   @Matches(YYYY_MM_DD, { message: 'checkOutDate must be a date as YYYY-MM-DD' })
   checkOutDate!: string;
 
-  @ApiProperty({ type: [RoomRequestDto], minItems: 1 })
+  @ApiProperty({
+    type: [RoomRequestDto],
+    minItems: 1,
+    maxItems: MAX_ROOMS_PER_RESERVATION,
+  })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_ROOMS_PER_RESERVATION)
   @ValidateNested({ each: true })
   @Type(() => RoomRequestDto)
   rooms!: RoomRequestDto[];

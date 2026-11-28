@@ -19,6 +19,7 @@ import type { FlightQuoteRequestDto } from './dto/flight-quote.dto.js';
 import { FlightBookingsModule } from './flight-bookings.module.js';
 import { BOOKING_REFERENCE } from './flight-confirmation.service.js';
 import { FlightHoldExpiryJob } from './flight-hold-expiry.job.js';
+import { FlightProviderCancellationService } from './flight-provider-cancellation.service.js';
 import { FlightHoldService } from './flight-hold.service.js';
 import { FlightBooking } from './schemas/flight-booking.schema.js';
 
@@ -324,6 +325,97 @@ describe('FlightConfirmationService: payment.succeeded (FLT-23)', () => {
         expect(counters).toMatchObject({ availableSeats: 50, bookedSeats: 0 });
         expect(payments.refunds).toHaveLength(1);
       }
+    });
+  });
+
+  // FLT-06: a flight cancelled while the booking was awaiting payment must not
+  // be confirmed; the booking expires and the payment is refunded in full.
+  describe('flight cancelled before the payment (FLT-06)', () => {
+    const cancel = (flightId: string) => {
+      seats.data.flight(flightId)!.status = 'cancelled';
+    };
+
+    it('expires the booking, releases the seats and refunds in full instead of confirming', async () => {
+      const hold = await holds.hold(oneWay, USER);
+      cancel(OUT);
+
+      await paymentSucceeded(hold.bookingId);
+
+      const after = await saved(hold.bookingId);
+      expect(after?.status).toBe('expired');
+      expect(after?.expiredAt).toBeInstanceOf(Date);
+      expect(after?.reference).toBeUndefined();
+      expect(seats.counters(OUT, OUT_ECO)).toMatchObject({
+        availableSeats: 50,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(payments.refunds).toEqual([
+        expect.objectContaining({
+          bookingType: 'flight',
+          bookingId: hold.bookingId,
+          amountMinor: hold.pricing.totalMinor,
+          currency: 'USD',
+          reason: 'late_payment',
+        }),
+      ]);
+      expect(events.payloadsOf(Events.FlightBookingExpired)).toEqual([
+        { bookingId: hold.bookingId, userId: USER },
+      ]);
+      expect(events.payloadsOf(Events.FlightBookingConfirmed)).toEqual([]);
+    });
+
+    it('books nothing on the other flight of a round trip when only the return is cancelled', async () => {
+      const hold = await holds.hold(roundTrip, USER);
+      cancel(BACK);
+
+      await paymentSucceeded(hold.bookingId);
+
+      expect((await saved(hold.bookingId))?.status).toBe('expired');
+      expect(seats.counters(OUT, OUT_ECO)).toMatchObject({
+        availableSeats: 50,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(seats.counters(BACK, BACK_ECO)).toMatchObject({
+        availableSeats: 50,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(payments.refunds).toHaveLength(1);
+    });
+
+    it('refunds and announces once when the event arrives twice', async () => {
+      const hold = await holds.hold(oneWay, USER);
+      cancel(OUT);
+
+      await paymentSucceeded(hold.bookingId);
+      await paymentSucceeded(hold.bookingId);
+
+      expect(payments.refunds).toHaveLength(1);
+      expect(events.payloadsOf(Events.FlightBookingExpired)).toHaveLength(1);
+    });
+
+    it('ends expired with one refund and the seats back when the provider handler races the payment', async () => {
+      const hold = await holds.hold(oneWay, USER);
+      cancel(OUT);
+
+      await Promise.allSettled([
+        paymentSucceeded(hold.bookingId),
+        t.moduleRef
+          .get(FlightProviderCancellationService)
+          .cancelBookingsOf(OUT, new Date()),
+      ]);
+
+      expect((await saved(hold.bookingId))?.status).toBe('expired');
+      expect(seats.counters(OUT, OUT_ECO)).toMatchObject({
+        availableSeats: 50,
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(payments.refunds).toHaveLength(1);
+      expect(payments.refunds[0]).toMatchObject({ reason: 'late_payment' });
+      expect(events.payloadsOf(Events.FlightBookingConfirmed)).toEqual([]);
     });
   });
 });

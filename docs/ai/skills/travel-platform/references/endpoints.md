@@ -33,6 +33,7 @@ Auth & accounts · Admin · Reference & supporting · Airlines & flights · Flig
 | GET | /api/admin/accounts | ACC-14 | admin |
 | PATCH | /api/admin/accounts/:id/suspend · /reactivate | ACC-15, ACC-16 | admin |
 | POST | /api/admin/users/:id/reset-password | ACC-07a | admin |
+| GET | /api/admin/providers **added** | BE-01 (ACC-13, ACC-15) | admin |
 | PATCH | /api/admin/providers/:type/:id/deactivate · /reactivate **added** (type = airline\|hotel) | ACC-15 | admin |
 | GET | /api/admin/bookings | ACC-17 | admin |
 | GET | /api/admin/reports | GEN-10 | admin |

@@ -42,12 +42,13 @@ import { ResolveReportDto } from '../moderation/dto/resolve-report.dto.js';
 import type { ReportView } from '../moderation/moderation.types.js';
 import { ReportTargetType } from '../moderation/schemas/report.schema.js';
 import { AdminService } from './admin.service.js';
-import type { AdminBookingView } from './admin.types.js';
+import type { AdminBookingView, AdminProviderView } from './admin.types.js';
 import {
   AdminAccountResponseDto,
   PaginatedAdminAccountsResponseDto,
 } from './dto/admin-account.response.dto.js';
 import { PaginatedAdminBookingsResponseDto } from './dto/admin-booking.response.dto.js';
+import { PaginatedAdminProvidersResponseDto } from './dto/admin-provider.response.dto.js';
 import {
   AuditLogResponseDto,
   PaginatedAuditLogsResponseDto,
@@ -56,6 +57,7 @@ import { AdminProviderParamsDto } from './dto/admin-provider-params.dto.js';
 import { CreateModeratorDto } from './dto/create-moderator.dto.js';
 import { ListAdminAccountsQueryDto } from './dto/list-admin-accounts-query.dto.js';
 import { ListAdminBookingsQueryDto } from './dto/list-admin-bookings-query.dto.js';
+import { ListAdminProvidersQueryDto } from './dto/list-admin-providers-query.dto.js';
 import { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
 
 @ApiTags('admin')
@@ -193,6 +195,20 @@ export class AdminController {
     @Query() query: ListAdminAccountsQueryDto,
   ): Promise<Paginated<AccountListItem>> {
     return this.adminService.listAccounts(query);
+  }
+
+  @Get('providers')
+  @ApiOperation({
+    summary: 'BE-01 List airlines and hotels with status and moderator counts',
+  })
+  @ApiOkResponse({ type: PaginatedAdminProvidersResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid filter or pagination query' })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'Admin role required' })
+  listProviders(
+    @Query() query: ListAdminProvidersQueryDto,
+  ): Promise<Paginated<AdminProviderView>> {
+    return this.adminService.listProviders(query);
   }
 
   @Post('moderators')

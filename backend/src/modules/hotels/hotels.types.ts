@@ -88,3 +88,28 @@ export interface HotelSearchResult extends HotelView {
   /** Cheapest room that can join a capacity-valid selection of the requested room count; not the total stay price. */
   pricePerNightMinor: number;
 }
+
+export type HotelStatusFilter = 'active' | 'inactive';
+
+/** Internal list query for admin provider listing (BE-01). */
+export interface HotelListQuery {
+  status?: HotelStatusFilter;
+  q?: string;
+  skip: number;
+  limit: number;
+}
+
+/** Minimal hotel projection for admin provider listing (BE-01). */
+export interface HotelListItem {
+  id: string;
+  name: string;
+  cityId: string;
+  countryCode: string;
+  isActive: boolean;
+}
+
+/** Offset-based hotel list result (BE-01). */
+export interface HotelListResult {
+  items: HotelListItem[];
+  total: number;
+}

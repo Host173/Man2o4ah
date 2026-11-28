@@ -1555,3 +1555,64 @@ describe('FakeRoomNightInventory', () => {
     }
   });
 });
+
+describe('FakeHotelsService listHotels (BE-01)', () => {
+  it('filters by status and q (literal regex), orders by name then id, and slices with skip/limit', async () => {
+    const fake = new FakeHotelsService({
+      hotels: [
+        hotel('h-beta', { name: 'Beta Suites', isActive: true }),
+        hotel('h-a2', { name: 'Alpha Inn', isActive: false }),
+        hotel('h-a1', { name: 'Alpha Inn', isActive: true }),
+        hotel('h-dot', { name: 'Grand.Hotel (X)[1]', isActive: true }),
+      ],
+    });
+
+    const all = await fake.listHotels({ skip: 0, limit: 10 });
+    expect(all.total).toBe(4);
+    expect(all.items.map((i) => i.id)).toEqual([
+      'h-a1',
+      'h-a2',
+      'h-beta',
+      'h-dot',
+    ]);
+
+    expect(await fake.listHotels({ skip: 0, limit: 0 })).toEqual({
+      items: [],
+      total: 4,
+    });
+
+    expect(
+      await fake.listHotels({ status: 'inactive', skip: 0, limit: 10 }),
+    ).toEqual({
+      items: [
+        {
+          id: 'h-a2',
+          name: 'Alpha Inn',
+          cityId: 'cairo',
+          countryCode: 'EG',
+          isActive: false,
+        },
+      ],
+      total: 1,
+    });
+
+    const byName = await fake.listHotels({ q: '  beta ', skip: 0, limit: 10 });
+    expect(byName.items.map((i) => i.id)).toEqual(['h-beta']);
+
+    expect(await fake.listHotels({ q: '.*([', skip: 0, limit: 10 })).toEqual({
+      items: [],
+      total: 0,
+    });
+
+    const literalMatch = await fake.listHotels({
+      q: '(x)[1]',
+      skip: 0,
+      limit: 10,
+    });
+    expect(literalMatch.items.map((i) => i.id)).toEqual(['h-dot']);
+
+    const paged = await fake.listHotels({ q: '   ', skip: 0, limit: 2 });
+    expect(paged.total).toBe(4);
+    expect(paged.items.map((i) => i.id)).toEqual(['h-a1', 'h-a2']);
+  });
+});

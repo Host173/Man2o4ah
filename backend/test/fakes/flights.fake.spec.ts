@@ -657,6 +657,90 @@ describe('FakeFlightsService', () => {
       });
     });
 
+    describe('listAirlines (BE-01)', () => {
+      it('filters by status and q (name/code, literal regex), orders by name then id, and slices with skip/limit', async () => {
+        const data = new FakeFlightsData();
+        data.addAirline({
+          id: 'a-b',
+          code: 'B1',
+          name: 'Beta Air',
+          isActive: true,
+        });
+        data.addAirline({
+          id: 'a-a2',
+          code: 'A2',
+          name: 'Alpha Air',
+          isActive: false,
+        });
+        data.addAirline({
+          id: 'a-a1',
+          code: 'A1',
+          name: 'Alpha Air',
+          isActive: true,
+        });
+        data.addAirline({
+          id: 'a-dot',
+          code: 'DT',
+          name: 'Air.Line (X)[1]',
+          isActive: true,
+        });
+        const flights = new FakeFlightsService(data);
+
+        const all = await flights.listAirlines({ skip: 0, limit: 10 });
+        expect(all.total).toBe(4);
+        expect(all.items.map((i) => i.id)).toEqual([
+          'a-dot',
+          'a-a1',
+          'a-a2',
+          'a-b',
+        ]);
+
+        const countOnly = await flights.listAirlines({ skip: 0, limit: 0 });
+        expect(countOnly).toEqual({ items: [], total: 4 });
+
+        const inactive = await flights.listAirlines({
+          status: 'inactive',
+          skip: 0,
+          limit: 10,
+        });
+        expect(inactive).toEqual({
+          items: [
+            { id: 'a-a2', name: 'Alpha Air', code: 'A2', isActive: false },
+          ],
+          total: 1,
+        });
+
+        const byCode = await flights.listAirlines({
+          q: '  b1 ',
+          skip: 0,
+          limit: 10,
+        });
+        expect(byCode.items.map((i) => i.id)).toEqual(['a-b']);
+
+        const literal = await flights.listAirlines({
+          q: '.*([',
+          skip: 0,
+          limit: 10,
+        });
+        expect(literal).toEqual({ items: [], total: 0 });
+
+        const literalMatch = await flights.listAirlines({
+          q: '(x)[1]',
+          skip: 0,
+          limit: 10,
+        });
+        expect(literalMatch.items.map((i) => i.id)).toEqual(['a-dot']);
+
+        const paged = await flights.listAirlines({
+          q: '   ',
+          skip: 1,
+          limit: 2,
+        });
+        expect(paged.total).toBe(4);
+        expect(paged.items.map((i) => i.id)).toEqual(['a-a1', 'a-a2']);
+      });
+    });
+
     describe('flight management', () => {
       const input = {
         flightNumber: 'ms 123',

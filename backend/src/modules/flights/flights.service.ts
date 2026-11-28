@@ -23,6 +23,8 @@ import { validateCabinInput } from './cabin-input.js';
 import { SeatInventory } from './seat-inventory.js';
 import type {
   AddCabinInput,
+  AirlineListQuery,
+  AirlineListResult,
   AirlineView,
   BookabilityResult,
   CreateFlightInput,
@@ -927,6 +929,13 @@ export class FlightsService {
   /** One airline by ID, or `null` (FLT-01, ACC-13). */
   getAirline(airlineId: string): Promise<AirlineView | null> {
     return this.airlines.getAirline(airlineId);
+  }
+
+  /**
+   * Offset-based airline list ordered by name asc then `_id` asc (BE-01).
+   */
+  listAirlines(query: AirlineListQuery): Promise<AirlineListResult> {
+    return this.airlines.listAirlines(query);
   }
 
   /**

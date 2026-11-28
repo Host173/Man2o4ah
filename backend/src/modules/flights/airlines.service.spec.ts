@@ -187,4 +187,74 @@ describe('AirlinesService integration (FLT-01, ACC-15)', () => {
     expect(storage.has(firstKey)).toBe(false);
     expect(await airlineModel.countDocuments()).toBe(1);
   });
+
+  describe('listAirlines (BE-01)', () => {
+    it('filters by status and q (name/code, literal regex), orders by name then _id, and applies skip/limit', async () => {
+      const alpha1 = await airlines.create({ name: 'Alpha Air', code: 'A1' });
+      const alpha2 = await airlines.create({ name: 'Alpha Air', code: 'A2' });
+      await flights.setAirlineActive(alpha2.id, false);
+      const beta = await airlines.create({ name: 'Beta Air', code: 'B1' });
+      const special = await airlines.create({
+        name: 'Air.Line (X)[1]',
+        code: 'DT',
+      });
+
+      const all = await flights.listAirlines({ skip: 0, limit: 10 });
+      expect(all.total).toBe(4);
+      const expectedAlphaIds = [alpha1.id, alpha2.id].sort();
+      expect(all.items.map((i) => i.id)).toEqual([
+        special.id,
+        ...expectedAlphaIds,
+        beta.id,
+      ]);
+
+      expect(await flights.listAirlines({ skip: 0, limit: 0 })).toEqual({
+        items: [],
+        total: 4,
+      });
+
+      const inactive = await flights.listAirlines({
+        status: 'inactive',
+        skip: 0,
+        limit: 10,
+      });
+      expect(inactive).toEqual({
+        items: [
+          {
+            id: alpha2.id,
+            name: 'Alpha Air',
+            code: 'A2',
+            isActive: false,
+          },
+        ],
+        total: 1,
+      });
+
+      const byCode = await flights.listAirlines({
+        q: '  b1 ',
+        skip: 0,
+        limit: 10,
+      });
+      expect(byCode.items.map((i) => i.id)).toEqual([beta.id]);
+
+      expect(
+        await flights.listAirlines({ q: '.*([', skip: 0, limit: 10 }),
+      ).toEqual({ items: [], total: 0 });
+
+      const literalMatch = await flights.listAirlines({
+        q: '(x)[1]',
+        skip: 0,
+        limit: 10,
+      });
+      expect(literalMatch.items.map((i) => i.id)).toEqual([special.id]);
+
+      const paged = await flights.listAirlines({
+        q: '   ',
+        skip: 1,
+        limit: 2,
+      });
+      expect(paged.total).toBe(4);
+      expect(paged.items.map((i) => i.id)).toEqual(expectedAlphaIds);
+    });
+  });
 });

@@ -137,6 +137,10 @@ export class FakeFlightsData {
     return this.airlineMap.get(id);
   }
 
+  airlines(): AirlineView[] {
+    return [...this.airlineMap.values()];
+  }
+
   flight(id: string): FlightView | undefined {
     return this.flightMap.get(id);
   }

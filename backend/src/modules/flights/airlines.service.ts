@@ -5,8 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import type { Model } from 'mongoose';
+import type { Model, QueryFilter } from 'mongoose';
 import { ErrorCode } from '../../common/errors/error-codes.js';
+import { keywordRegex } from '../../common/text/escape-regex.js';
 import type { AuthUser } from '../accounts/auth/auth.types.js';
 import type { UploadedImage } from '../storage/image-rules.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -14,7 +15,13 @@ import type { CreateAirlineDto } from './dto/create-airline.dto.js';
 import type { UpdateAirlineBaggagePolicyDto } from './dto/update-airline-baggage-policy.dto.js';
 import type { UpdateAirlineCancellationPolicyDto } from './dto/update-airline-cancellation-policy.dto.js';
 import type { UpdateAirlineDto } from './dto/update-airline.dto.js';
-import type { AirlineView, CancellationTierView } from './flights.types.js';
+import type {
+  AirlineListItem,
+  AirlineListQuery,
+  AirlineListResult,
+  AirlineView,
+  CancellationTierView,
+} from './flights.types.js';
 import { Airline } from './schemas/airline.schema.js';
 
 type AirlineRecord = Airline & {
@@ -42,6 +49,45 @@ export class AirlinesService {
     if (!Types.ObjectId.isValid(airlineId)) return null;
     const airline = await this.airlineModel.findById(airlineId).lean().exec();
     return airline ? this.toView(airline as AirlineRecord) : null;
+  }
+
+  /** Offset-based airline list for admin provider listing (BE-01). */
+  async listAirlines(query: AirlineListQuery): Promise<AirlineListResult> {
+    const filter: QueryFilter<Airline> = {};
+    if (query.status === 'active') filter.isActive = true;
+    else if (query.status === 'inactive') filter.isActive = false;
+
+    const trimmed = query.q?.trim();
+    if (trimmed) {
+      const pattern = keywordRegex(trimmed);
+      filter.$or = [{ name: pattern }, { code: pattern }];
+    }
+
+    if (query.limit <= 0) {
+      const total = await this.airlineModel.countDocuments(filter).exec();
+      return { items: [], total };
+    }
+
+    const [docs, total] = await Promise.all([
+      this.airlineModel
+        .find(filter, { name: 1, code: 1, isActive: 1 })
+        .sort({ name: 1, _id: 1 })
+        .skip(query.skip)
+        .limit(query.limit)
+        .lean<(Pick<Airline, 'name' | 'code' | 'isActive'> & {
+          _id: Types.ObjectId;
+        })[]>()
+        .exec(),
+      this.airlineModel.countDocuments(filter).exec(),
+    ]);
+
+    const items: AirlineListItem[] = docs.map((doc) => ({
+      id: doc._id.toString(),
+      name: doc.name,
+      code: doc.code,
+      isActive: doc.isActive,
+    }));
+    return { items, total };
   }
 
   async update(

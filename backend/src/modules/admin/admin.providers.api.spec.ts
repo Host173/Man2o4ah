@@ -357,9 +357,7 @@ describe('Admin Providers API (BE-01)', () => {
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(3);
       expect(
-        res.body.items.every(
-          (i: { type: string }) => i.type === 'airline',
-        ),
+        res.body.items.every((i: { type: string }) => i.type === 'airline'),
       ).toBe(true);
       expect(hotelsSpy).not.toHaveBeenCalled();
       expect(countSpy).toHaveBeenCalledTimes(1);
@@ -408,10 +406,9 @@ describe('Admin Providers API (BE-01)', () => {
         .set('Cookie', cookie);
       expect(inactiveRes.status).toBe(200);
       expect(inactiveRes.body.total).toBe(2);
-      expect(inactiveRes.body.items.map((i: { _id: string }) => i._id)).toEqual([
-        IDS.a2,
-        IDS.h2,
-      ]);
+      expect(inactiveRes.body.items.map((i: { _id: string }) => i._id)).toEqual(
+        [IDS.a2, IDS.h2],
+      );
     });
 
     it('combines type, status and q', async () => {
@@ -604,9 +601,7 @@ describe('Admin Providers API (BE-01)', () => {
             .query({ page, limit })
             .set('Cookie', cookie);
           expect(res.status).toBe(200);
-          collected.push(
-            ...res.body.items.map((i: { _id: string }) => i._id),
-          );
+          collected.push(...res.body.items.map((i: { _id: string }) => i._id));
         }
         expect(collected).toEqual(expectedIds);
         expect(new Set(collected).size).toBe(expectedIds.length);

@@ -74,9 +74,11 @@ export class AirlinesService {
         .sort({ name: 1, _id: 1 })
         .skip(query.skip)
         .limit(query.limit)
-        .lean<(Pick<Airline, 'name' | 'code' | 'isActive'> & {
-          _id: Types.ObjectId;
-        })[]>()
+        .lean<
+          (Pick<Airline, 'name' | 'code' | 'isActive'> & {
+            _id: Types.ObjectId;
+          })[]
+        >()
         .exec(),
       this.airlineModel.countDocuments(filter).exec(),
     ]);

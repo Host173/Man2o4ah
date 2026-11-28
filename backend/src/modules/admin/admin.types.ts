@@ -46,5 +46,4 @@ export interface AdminHotelProviderView {
 
 /** Provider row returned by `GET /api/admin/providers` (`BE-01`). */
 export type AdminProviderView =
-  | AdminAirlineProviderView
-  | AdminHotelProviderView;
+  AdminAirlineProviderView | AdminHotelProviderView;

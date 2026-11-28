@@ -544,7 +544,11 @@ export class FakeFlightsService implements PublicApi<FlightsService> {
       .filter((airline) => {
         if (query.status === 'active' && !airline.isActive) return false;
         if (query.status === 'inactive' && airline.isActive) return false;
-        if (pattern && !pattern.test(airline.name) && !pattern.test(airline.code)) {
+        if (
+          pattern &&
+          !pattern.test(airline.name) &&
+          !pattern.test(airline.code)
+        ) {
           return false;
         }
         return true;

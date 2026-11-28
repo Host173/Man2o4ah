@@ -67,7 +67,7 @@ export class AdminService {
     private readonly flightsService: FlightsService,
     private readonly hotelsService: HotelsService,
     private readonly events: AppEvents,
-  ) { }
+  ) {}
 
   /**
    * ACC-17: returns a read-only, paginated list of all flight and hotel
@@ -252,19 +252,19 @@ export class AdminService {
     const [airlines, hotels] = await Promise.all([
       airlineLimit > 0
         ? this.flightsService.listAirlines({
-          status,
-          q,
-          skip: airlineSkip,
-          limit: airlineLimit,
-        })
+            status,
+            q,
+            skip: airlineSkip,
+            limit: airlineLimit,
+          })
         : Promise.resolve({ items: [], total: airlineCounts.total }),
       hotelLimit > 0
         ? this.hotelsService.listHotels({
-          status,
-          q,
-          skip: hotelSkip,
-          limit: hotelLimit,
-        })
+            status,
+            q,
+            skip: hotelSkip,
+            limit: hotelLimit,
+          })
         : Promise.resolve({ items: [], total: hotelCounts.total }),
     ]);
 
@@ -285,19 +285,19 @@ export class AdminService {
   private async attachModeratorCounts(
     entries: (
       | {
-        kind: typeof ProviderType.AIRLINE;
-        item: { id: string; name: string; code: string; isActive: boolean };
-      }
+          kind: typeof ProviderType.AIRLINE;
+          item: { id: string; name: string; code: string; isActive: boolean };
+        }
       | {
-        kind: typeof ProviderType.HOTEL;
-        item: {
-          id: string;
-          name: string;
-          cityId: string;
-          countryCode: string;
-          isActive: boolean;
-        };
-      }
+          kind: typeof ProviderType.HOTEL;
+          item: {
+            id: string;
+            name: string;
+            cityId: string;
+            countryCode: string;
+            isActive: boolean;
+          };
+        }
     )[],
     total: number,
     page: number,
@@ -653,11 +653,11 @@ export class AdminService {
       status: item.status,
       ...(item.moderatorOf !== undefined
         ? {
-          moderatorOf: {
-            providerType: item.moderatorOf.providerType,
-            providerId: item.moderatorOf.providerId,
-          },
-        }
+            moderatorOf: {
+              providerType: item.moderatorOf.providerType,
+              providerId: item.moderatorOf.providerId,
+            },
+          }
         : {}),
       createdAt: item.createdAt,
     };

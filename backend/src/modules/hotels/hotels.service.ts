@@ -16,10 +16,7 @@ import { toPage } from '../../common/pagination/paginated.js';
 import type { Paginated } from '../../common/pagination/paginated.js';
 import { paginate } from '../../common/pagination/paginate.js';
 import type { PaginationQueryDto } from '../../common/pagination/pagination-query.dto.js';
-import {
-  escapeRegex,
-  keywordRegex,
-} from '../../common/text/escape-regex.js';
+import { escapeRegex, keywordRegex } from '../../common/text/escape-regex.js';
 import { ReferenceDataService } from '../reference-data/reference-data.service.js';
 import { MAX_IMAGES_PER_ITEM } from '../storage/image-rules.js';
 import type { UploadedImage } from '../storage/image-rules.js';
